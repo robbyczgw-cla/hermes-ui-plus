@@ -1,0 +1,65 @@
+// Minimal JWT signing with node:crypto (no dependencies): ES256 (VAPID, APNs) and RS256 (Google OAuth2).
+// Canonical copy: push/src (vendored into bridge/src/push by scripts/sync-push.sh).
+import crypto from 'node:crypto';
+
+export const b64url = (buf) => Buffer.from(buf).toString('base64url');
+export function fromB64url(s) {
+  if (typeof s !== 'string') throw new TypeError('base64url string expected');
+  // accept standard base64 too (some clients send +/ and padding)
+  return Buffer.from(s.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''), 'base64url');
+}
+
+const enc = (obj) => b64url(Buffer.from(JSON.stringify(obj), 'utf8'));
+
+/**
+ * Sign a compact JWT.
+ * @param {object} header  must contain alg ES256 | RS256
+ * @param {object} claims
+ * @param {crypto.KeyObject} key private key
+ */
+export function signJwt(header, claims, key) {
+  const input = `${enc(header)}.${enc(claims)}`;
+  let sig;
+  if (header.alg === 'ES256') sig = crypto.sign('sha256', Buffer.from(input), { key, dsaEncoding: 'ieee-p1363' });
+  else if (header.alg === 'RS256') sig = crypto.sign('sha256', Buffer.from(input), key);
+  else throw new Error(`unsupported alg ${header.alg}`);
+  return `${input}.${b64url(sig)}`;
+}
+
+/** Verify a compact JWT (tests and self-checks). Returns the claims or null. */
+export function verifyJwt(token, publicKey) {
+  const parts = String(token).split('.');
+  if (parts.length !== 3) return null;
+  const header = JSON.parse(fromB64url(parts[0]).toString('utf8'));
+  const data = Buffer.from(`${parts[0]}.${parts[1]}`);
+  const sig = fromB64url(parts[2]);
+  let ok = false;
+  if (header.alg === 'ES256') ok = crypto.verify('sha256', data, { key: publicKey, dsaEncoding: 'ieee-p1363' }, sig);
+  else if (header.alg === 'RS256') ok = crypto.verify('sha256', data, publicKey, sig);
+  return ok ? JSON.parse(fromB64url(parts[1]).toString('utf8')) : null;
+}
+
+/** P-256 private KeyObject from a raw 32-byte scalar (+ optional 65-byte uncompressed public key). */
+export function p256PrivateKeyFromRaw(d, pub) {
+  let dBuf = Buffer.isBuffer(d) ? d : fromB64url(d);
+  // keys generated without zero-padding (older installs) can be 31 bytes: left-pad instead of refusing
+  if (dBuf.length > 0 && dBuf.length < 32) dBuf = Buffer.concat([Buffer.alloc(32 - dBuf.length), dBuf]);
+  if (dBuf.length !== 32) throw new Error('P-256 private key must be 32 bytes');
+  let pubBuf = pub ? (Buffer.isBuffer(pub) ? pub : fromB64url(pub)) : null;
+  if (!pubBuf) {
+    const ecdh = crypto.createECDH('prime256v1');
+    ecdh.setPrivateKey(dBuf);
+    pubBuf = ecdh.getPublicKey();
+  }
+  if (pubBuf.length !== 65 || pubBuf[0] !== 4) throw new Error('P-256 public key must be 65 bytes uncompressed');
+  return crypto.createPrivateKey({
+    key: { kty: 'EC', crv: 'P-256', d: b64url(dBuf), x: b64url(pubBuf.subarray(1, 33)), y: b64url(pubBuf.subarray(33, 65)) },
+    format: 'jwk',
+  });
+}
+
+/** Raw 65-byte uncompressed public key of a P-256 KeyObject (private or public). */
+export function p256RawPublic(key) {
+  const jwk = (key.type === 'private' ? crypto.createPublicKey(key) : key).export({ format: 'jwk' });
+  return Buffer.concat([Buffer.from([4]), fromB64url(jwk.x), fromB64url(jwk.y)]);
+}

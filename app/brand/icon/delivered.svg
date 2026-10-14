@@ -1,0 +1,17 @@
+<!-- Round 2 concept "delivered": a check mark whose long stroke is a messenger wing.
+     Hand-written, 1024 grid; sections are composed by scripts/brand-icons.mjs (see monogram.svg).
+     The wing is the shared round-2 wing: one smooth leading edge, three feather scallops, root at (0,0), tip at about (-375,-262).
+     Cut-outs are masks (not background-coloured shapes), so the Android themed monochrome icon keeps them. -->
+<!--meta {"round":2,"title":"Delivered","palette":"ink + mint","rationale":"Check plus wing: the task is done and the answer has flown in. Boldest silhouette of the set."}-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<!--defs--><defs>
+  <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2E2C86"/><stop offset="1" stop-color="#111134"/></linearGradient>
+  <radialGradient id="bgGlow" cx="0.28" cy="0.2" r="0.8"><stop offset="0" stop-color="#6C68E8" stop-opacity="0.35"/><stop offset="1" stop-color="#6C68E8" stop-opacity="0"/></radialGradient>
+</defs><!--/defs-->
+<!--bg--><g id="bg"><rect width="1024" height="1024" fill="url(#bgGrad)"/><rect width="1024" height="1024" fill="url(#bgGlow)"/></g><!--/bg-->
+<!--mark--><g id="mark" transform="translate(512 512) scale(1.1) translate(-512 -512) translate(-6 -50)">
+  <path d="M250 520 L420 680" stroke="#F4F2FF" stroke-width="124" stroke-linecap="round"/>
+  <path fill="#5EF0C8" transform="translate(440 690) rotate(-14) scale(-1.2 1.2)" d="M0 -60 C -60 -130 -160 -220 -300 -262 C -352 -277 -380 -222 -342 -194 C -310 -170 -282 -154 -258 -142 C -312 -136 -328 -84 -290 -64 C -262 -50 -232 -40 -205 -34 C -248 -22 -250 34 -206 44 C -140 60 -70 64 0 56 Z"/>
+  <circle cx="440" cy="688" r="70" fill="#5EF0C8"/>
+</g><!--/mark-->
+</svg>

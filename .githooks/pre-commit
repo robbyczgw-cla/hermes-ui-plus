@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Blocks commits that contain secrets (gitleaks) or private names/hosts/IPs (leak-guard). See docs/LEAK-GUARD.md.
+set -euo pipefail
+. "$(dirname "$0")/_common.sh"
+hui_check_env
+cd "$ROOT"
+gitleaks git --staged --pre-commit --config "$GITLEAKS_CFG" --redact --no-banner --verbose \
+  || { echo "pre-commit: gitleaks found secrets (or failed). Commit blocked." >&2; exit 1; }
+"${LEAK_GUARD[@]}" --staged --quiet \
+  || { echo "pre-commit: leak-guard blocked the commit (exit $?)." >&2; exit 1; }

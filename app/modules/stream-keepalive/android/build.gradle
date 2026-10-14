@@ -1,0 +1,21 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'ai.hermes'
+version = '1.0.0'
+
+android {
+  namespace "ai.hermes.streamkeepalive"
+  defaultConfig {
+    versionCode 1
+    versionName "1.0.0"
+  }
+}
+
+dependencies {
+  // HeadlessJsTaskService / Arguments (version aligned by the React Native gradle plugin, like other RN libraries)
+  implementation 'com.facebook.react:react-android'
+  implementation 'androidx.core:core:1.17.0'
+}

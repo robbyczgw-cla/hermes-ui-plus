@@ -1,0 +1,337 @@
+{
+ "batchcomplete": true,
+ "continue": {
+  "gsroffset": 6,
+  "continue": "gsroffset||"
+ },
+ "query": {
+  "pages": [
+   {
+    "pageid": 4906520,
+    "ns": 6,
+    "title": "File:Armadillo Aerospace Pixel Hover.jpg",
+    "index": 2,
+    "imagerepository": "local",
+    "imageinfo": [
+     {
+      "size": 386632,
+      "width": 1514,
+      "height": 1082,
+      "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/ec/Armadillo_Aerospace_Pixel_Hover.jpg/960px-Armadillo_Aerospace_Pixel_Hover.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "thumbwidth": 960,
+      "thumbheight": 686,
+      "responsiveUrls": {
+       "2": "https://upload.wikimedia.org/wikipedia/commons/e/ec/Armadillo_Aerospace_Pixel_Hover.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled"
+      },
+      "thumbattribs": {
+       "src": "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/ec/Armadillo_Aerospace_Pixel_Hover.jpg/960px-Armadillo_Aerospace_Pixel_Hover.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+       "decoding": "async",
+       "loading": "lazy",
+       "width": 960,
+       "height": 686,
+       "srcset": "https://upload.wikimedia.org/wikipedia/commons/e/ec/Armadillo_Aerospace_Pixel_Hover.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled 2x"
+      },
+      "url": "https://upload.wikimedia.org/wikipedia/commons/e/ec/Armadillo_Aerospace_Pixel_Hover.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "descriptionurl": "https://commons.wikimedia.org/wiki/File:Armadillo_Aerospace_Pixel_Hover.jpg",
+      "descriptionshorturl": "https://commons.wikimedia.org/w/index.php?curid=4906520",
+      "extmetadata": {
+       "ObjectName": {
+        "value": "Armadillo Aerospace Pixel Hover",
+        "source": "mediawiki-metadata"
+       },
+       "Credit": {
+        "value": "<a rel=\"nofollow\" class=\"external free\" href=\"http://www.armadilloaerospace.com/n.x/Armadillo/Home/News?news_id=337\">http://www.armadilloaerospace.com/n.x/Armadillo/Home/News?news_id=337</a>",
+        "source": "commons-desc-page"
+       },
+       "Artist": {
+        "value": "Armadillo Aerospace/Matthew C. Ross",
+        "source": "commons-desc-page"
+       },
+       "LicenseShortName": {
+        "value": "CC BY 3.0 us",
+        "source": "commons-desc-page",
+        "hidden": ""
+       },
+       "LicenseUrl": {
+        "value": "https://creativecommons.org/licenses/by/3.0/us/deed.en",
+        "source": "commons-desc-page"
+       }
+      },
+      "mime": "image/jpeg"
+     }
+    ]
+   },
+   {
+    "pageid": 139061784,
+    "ns": 6,
+    "title": "File:Google Pixel Fold, shown in Shibuya Stream 10.jpg",
+    "index": 3,
+    "imagerepository": "local",
+    "imageinfo": [
+     {
+      "size": 2695505,
+      "width": 3072,
+      "height": 4080,
+      "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/ab/Google_Pixel_Fold%2C_shown_in_Shibuya_Stream_10.jpg/960px-Google_Pixel_Fold%2C_shown_in_Shibuya_Stream_10.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "thumbwidth": 960,
+      "thumbheight": 1275,
+      "responsiveUrls": {
+       "2": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/ab/Google_Pixel_Fold%2C_shown_in_Shibuya_Stream_10.jpg/1920px-Google_Pixel_Fold%2C_shown_in_Shibuya_Stream_10.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+      },
+      "thumbattribs": {
+       "src": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/ab/Google_Pixel_Fold%2C_shown_in_Shibuya_Stream_10.jpg/960px-Google_Pixel_Fold%2C_shown_in_Shibuya_Stream_10.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+       "decoding": "async",
+       "loading": "lazy",
+       "width": 960,
+       "height": 1275,
+       "srcset": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/ab/Google_Pixel_Fold%2C_shown_in_Shibuya_Stream_10.jpg/1920px-Google_Pixel_Fold%2C_shown_in_Shibuya_Stream_10.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail 2x"
+      },
+      "url": "https://upload.wikimedia.org/wikipedia/commons/a/ab/Google_Pixel_Fold%2C_shown_in_Shibuya_Stream_10.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "descriptionurl": "https://commons.wikimedia.org/wiki/File:Google_Pixel_Fold,_shown_in_Shibuya_Stream_10.jpg",
+      "descriptionshorturl": "https://commons.wikimedia.org/w/index.php?curid=139061784",
+      "extmetadata": {
+       "ObjectName": {
+        "value": "Google Pixel Fold, shown in Shibuya Stream 10",
+        "source": "mediawiki-metadata"
+       },
+       "Credit": {
+        "value": "<span class=\"int-own-work\" lang=\"de\">Eigenes Werk</span>",
+        "source": "commons-desc-page"
+       },
+       "Artist": {
+        "value": "<a href=\"//commons.wikimedia.org/wiki/User:Syced\" title=\"User:Syced\">Syced</a>",
+        "source": "commons-desc-page"
+       },
+       "LicenseShortName": {
+        "value": "CC0",
+        "source": "commons-desc-page",
+        "hidden": ""
+       },
+       "LicenseUrl": {
+        "value": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+        "source": "commons-desc-page"
+       }
+      },
+      "mime": "image/jpeg"
+     }
+    ]
+   },
+   {
+    "pageid": 145417538,
+    "ns": 6,
+    "title": "File:Google Pixel 8 Pro and Google Pixel 7 Pro.jpg",
+    "index": 4,
+    "imagerepository": "local",
+    "imageinfo": [
+     {
+      "size": 3454230,
+      "width": 7200,
+      "height": 4790,
+      "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/ae/Google_Pixel_8_Pro_and_Google_Pixel_7_Pro.jpg/960px-Google_Pixel_8_Pro_and_Google_Pixel_7_Pro.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "thumbwidth": 960,
+      "thumbheight": 639,
+      "responsiveUrls": {
+       "2": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/ae/Google_Pixel_8_Pro_and_Google_Pixel_7_Pro.jpg/1920px-Google_Pixel_8_Pro_and_Google_Pixel_7_Pro.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+      },
+      "thumbattribs": {
+       "src": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/ae/Google_Pixel_8_Pro_and_Google_Pixel_7_Pro.jpg/960px-Google_Pixel_8_Pro_and_Google_Pixel_7_Pro.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+       "decoding": "async",
+       "loading": "lazy",
+       "width": 960,
+       "height": 639,
+       "srcset": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/ae/Google_Pixel_8_Pro_and_Google_Pixel_7_Pro.jpg/1920px-Google_Pixel_8_Pro_and_Google_Pixel_7_Pro.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail 2x"
+      },
+      "url": "https://upload.wikimedia.org/wikipedia/commons/a/ae/Google_Pixel_8_Pro_and_Google_Pixel_7_Pro.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "descriptionurl": "https://commons.wikimedia.org/wiki/File:Google_Pixel_8_Pro_and_Google_Pixel_7_Pro.jpg",
+      "descriptionshorturl": "https://commons.wikimedia.org/w/index.php?curid=145417538",
+      "extmetadata": {
+       "ObjectName": {
+        "value": "Google Pixel 8 Pro and Google Pixel 7 Pro",
+        "source": "mediawiki-metadata"
+       },
+       "Credit": {
+        "value": "<span class=\"int-own-work\" lang=\"de\">Eigenes Werk</span>",
+        "source": "commons-desc-page"
+       },
+       "Artist": {
+        "value": "<a href=\"//commons.wikimedia.org/wiki/User:SimonWaldherr\" title=\"User:SimonWaldherr\">SimonWaldherr</a>",
+        "source": "commons-desc-page"
+       },
+       "LicenseShortName": {
+        "value": "CC BY-SA 4.0",
+        "source": "commons-desc-page",
+        "hidden": ""
+       },
+       "LicenseUrl": {
+        "value": "https://creativecommons.org/licenses/by-sa/4.0",
+        "source": "commons-desc-page"
+       }
+      },
+      "mime": "image/jpeg"
+     }
+    ]
+   },
+   {
+    "pageid": 175908734,
+    "ns": 6,
+    "title": "File:Arrière du Google Pixel 10 Pro pierre de lune de 256 Go.jpg",
+    "index": 6,
+    "imagerepository": "local",
+    "imageinfo": [
+     {
+      "size": 1947971,
+      "width": 3072,
+      "height": 4080,
+      "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/81/Arri%C3%A8re_du_Google_Pixel_10_Pro_pierre_de_lune_de_256_Go.jpg/960px-Arri%C3%A8re_du_Google_Pixel_10_Pro_pierre_de_lune_de_256_Go.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "thumbwidth": 960,
+      "thumbheight": 1275,
+      "responsiveUrls": {
+       "2": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/81/Arri%C3%A8re_du_Google_Pixel_10_Pro_pierre_de_lune_de_256_Go.jpg/1920px-Arri%C3%A8re_du_Google_Pixel_10_Pro_pierre_de_lune_de_256_Go.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+      },
+      "thumbattribs": {
+       "src": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/81/Arri%C3%A8re_du_Google_Pixel_10_Pro_pierre_de_lune_de_256_Go.jpg/960px-Arri%C3%A8re_du_Google_Pixel_10_Pro_pierre_de_lune_de_256_Go.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+       "decoding": "async",
+       "loading": "lazy",
+       "width": 960,
+       "height": 1275,
+       "srcset": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/81/Arri%C3%A8re_du_Google_Pixel_10_Pro_pierre_de_lune_de_256_Go.jpg/1920px-Arri%C3%A8re_du_Google_Pixel_10_Pro_pierre_de_lune_de_256_Go.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail 2x"
+      },
+      "url": "https://upload.wikimedia.org/wikipedia/commons/8/81/Arri%C3%A8re_du_Google_Pixel_10_Pro_pierre_de_lune_de_256_Go.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "descriptionurl": "https://commons.wikimedia.org/wiki/File:Arri%C3%A8re_du_Google_Pixel_10_Pro_pierre_de_lune_de_256_Go.jpg",
+      "descriptionshorturl": "https://commons.wikimedia.org/w/index.php?curid=175908734",
+      "extmetadata": {
+       "ObjectName": {
+        "value": "Arrière du Google Pixel 10 Pro pierre de lune de 256 Go",
+        "source": "mediawiki-metadata"
+       },
+       "Credit": {
+        "value": "<span class=\"int-own-work\" lang=\"de\">Eigenes Werk</span>",
+        "source": "commons-desc-page"
+       },
+       "Artist": {
+        "value": "<a href=\"//commons.wikimedia.org/wiki/User:Fabe56\" title=\"User:Fabe56\">Fabe56</a>",
+        "source": "commons-desc-page"
+       },
+       "LicenseShortName": {
+        "value": "CC BY-SA 4.0",
+        "source": "commons-desc-page",
+        "hidden": ""
+       },
+       "LicenseUrl": {
+        "value": "https://creativecommons.org/licenses/by-sa/4.0",
+        "source": "commons-desc-page"
+       }
+      },
+      "mime": "image/jpeg"
+     }
+    ]
+   },
+   {
+    "pageid": 175908739,
+    "ns": 6,
+    "title": "File:Avant du Google Pixel 10 Pro pierre de lune de 256 Go.jpg",
+    "index": 5,
+    "imagerepository": "local",
+    "imageinfo": [
+     {
+      "size": 1889279,
+      "width": 3072,
+      "height": 4080,
+      "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/fd/Avant_du_Google_Pixel_10_Pro_pierre_de_lune_de_256_Go.jpg/960px-Avant_du_Google_Pixel_10_Pro_pierre_de_lune_de_256_Go.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "thumbwidth": 960,
+      "thumbheight": 1275,
+      "responsiveUrls": {
+       "2": "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/fd/Avant_du_Google_Pixel_10_Pro_pierre_de_lune_de_256_Go.jpg/1920px-Avant_du_Google_Pixel_10_Pro_pierre_de_lune_de_256_Go.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+      },
+      "thumbattribs": {
+       "src": "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/fd/Avant_du_Google_Pixel_10_Pro_pierre_de_lune_de_256_Go.jpg/960px-Avant_du_Google_Pixel_10_Pro_pierre_de_lune_de_256_Go.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+       "decoding": "async",
+       "loading": "lazy",
+       "width": 960,
+       "height": 1275,
+       "srcset": "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/fd/Avant_du_Google_Pixel_10_Pro_pierre_de_lune_de_256_Go.jpg/1920px-Avant_du_Google_Pixel_10_Pro_pierre_de_lune_de_256_Go.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail 2x"
+      },
+      "url": "https://upload.wikimedia.org/wikipedia/commons/f/fd/Avant_du_Google_Pixel_10_Pro_pierre_de_lune_de_256_Go.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "descriptionurl": "https://commons.wikimedia.org/wiki/File:Avant_du_Google_Pixel_10_Pro_pierre_de_lune_de_256_Go.jpg",
+      "descriptionshorturl": "https://commons.wikimedia.org/w/index.php?curid=175908739",
+      "extmetadata": {
+       "ObjectName": {
+        "value": "Avant du Google Pixel 10 Pro pierre de lune de 256 Go",
+        "source": "mediawiki-metadata"
+       },
+       "Credit": {
+        "value": "<span class=\"int-own-work\" lang=\"de\">Eigenes Werk</span>",
+        "source": "commons-desc-page"
+       },
+       "Artist": {
+        "value": "<a href=\"//commons.wikimedia.org/wiki/User:Fabe56\" title=\"User:Fabe56\">Fabe56</a>",
+        "source": "commons-desc-page"
+       },
+       "LicenseShortName": {
+        "value": "CC BY-SA 4.0",
+        "source": "commons-desc-page",
+        "hidden": ""
+       },
+       "LicenseUrl": {
+        "value": "https://creativecommons.org/licenses/by-sa/4.0",
+        "source": "commons-desc-page"
+       }
+      },
+      "mime": "image/jpeg"
+     }
+    ]
+   },
+   {
+    "pageid": 194456635,
+    "ns": 6,
+    "title": "File:Landsat 10 Pixel Comparison Graphic.png",
+    "index": 1,
+    "imagerepository": "local",
+    "imageinfo": [
+     {
+      "size": 17003985,
+      "width": 3840,
+      "height": 2160,
+      "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/fa/Landsat_10_Pixel_Comparison_Graphic.png/960px-Landsat_10_Pixel_Comparison_Graphic.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "thumbwidth": 960,
+      "thumbheight": 540,
+      "responsiveUrls": {
+       "2": "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/fa/Landsat_10_Pixel_Comparison_Graphic.png/1920px-Landsat_10_Pixel_Comparison_Graphic.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+      },
+      "thumbattribs": {
+       "src": "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/fa/Landsat_10_Pixel_Comparison_Graphic.png/960px-Landsat_10_Pixel_Comparison_Graphic.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+       "decoding": "async",
+       "loading": "lazy",
+       "width": 960,
+       "height": 540,
+       "srcset": "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/fa/Landsat_10_Pixel_Comparison_Graphic.png/1920px-Landsat_10_Pixel_Comparison_Graphic.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail 2x"
+      },
+      "url": "https://upload.wikimedia.org/wikipedia/commons/f/fa/Landsat_10_Pixel_Comparison_Graphic.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "descriptionurl": "https://commons.wikimedia.org/wiki/File:Landsat_10_Pixel_Comparison_Graphic.png",
+      "descriptionshorturl": "https://commons.wikimedia.org/w/index.php?curid=194456635",
+      "extmetadata": {
+       "ObjectName": {
+        "value": "Landsat 10 Pixel Comparison Graphic",
+        "source": "mediawiki-metadata"
+       },
+       "Credit": {
+        "value": "<a rel=\"nofollow\" class=\"external text\" href=\"https://science.nasa.gov/image-detail/amf-c448efa5-4314-4c43-983f-0742d38e55e2/\">Landsat 10 Pixel Comparison Graphic</a>",
+        "source": "commons-desc-page"
+       },
+       "Artist": {
+        "value": "NASA/Ross Walter",
+        "source": "commons-desc-page"
+       },
+       "LicenseShortName": {
+        "value": "Public domain",
+        "source": "commons-desc-page",
+        "hidden": ""
+       }
+      },
+      "mime": "image/png"
+     }
+    ]
+   }
+  ]
+ }
+}

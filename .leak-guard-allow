@@ -1,0 +1,11 @@
+# documentation examples in onboarding hints / validation samples (not real hosts or people)
+192\.168\.1\.20
+\ba@b\.de\b
+# third-party library strings and random byte runs in compiled APK binaries (not addresses of real people)
+android@android\.com
+@com\.google\.
+firebase-ml-android-sdk-releaser@
+^[-\w]{1,3}@\w{1,2}\.\w{2,3}$
+# the project's public contact address (app/brand/identity.json supportEmail, PRIVACY.md, SECURITY.md, docs/STORE.md):
+# the maintainer's own published contact (homepage, GitHub), chosen deliberately as support address
+span:\brobby@robbyczesany\.com\b

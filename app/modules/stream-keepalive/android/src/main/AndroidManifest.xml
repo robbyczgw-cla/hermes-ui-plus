@@ -1,0 +1,13 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <!-- Android 14+: a foreground service needs its type + the type permission (dataSync = "fetch data"). -->
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+  <!-- HeadlessJsTaskService holds a partial wake lock while the turn runs (screen off). -->
+  <uses-permission android:name="android.permission.WAKE_LOCK" />
+  <application>
+    <service
+      android:name="ai.hermes.streamkeepalive.StreamKeepAliveService"
+      android:exported="false"
+      android:foregroundServiceType="dataSync" />
+  </application>
+</manifest>

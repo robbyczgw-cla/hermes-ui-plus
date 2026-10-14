@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="%LANG_ISO_CODE%">
+  <head>
+    <!--
+      Web app (PWA) shell for `expo export -p web` (web.output = single → Expo uses public/index.html as template,
+      see docs.expo.dev/guides/progressive-web-apps). Expo fills the lang attribute and the title placeholder
+      (first occurrence only – do not repeat the placeholders in comments).
+      scripts/build-web.sh rewrites the data-pwa="…" tags (app name, theme colour) from EXPO_PUBLIC_APP_NAME /
+      EXPO_PUBLIC_APP_SHORT_NAME / EXPO_PUBLIC_THEME_COLOR and adds the service-worker registration.
+    -->
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <!-- viewport-fit=cover: draw under notch / home indicator; the app pads with env(safe-area-inset-*) -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>%WEB_TITLE%</title>
+    <meta name="application-name" content="Hermes" data-pwa="name" />
+    <meta name="apple-mobile-web-app-title" content="Hermes" data-pwa="short-name" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <!-- default: opaque status bar, content starts below it (readable in light and dark themes) -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" data-pwa="theme-light" />
+    <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" data-pwa="theme-dark" />
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="referrer" content="no-referrer" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+    <style id="boot-css">
+      /* Inline boot splash (shown until the React app has mounted, see #boot below and src/app/_layout.tsx) */
+      #boot {
+        position: fixed;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        z-index: 2147483647;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: env(safe-area-inset-top) 24px env(safe-area-inset-bottom);
+        box-sizing: border-box;
+        text-align: center;
+        background: #ffffff;
+        color: #111111;
+        font: 500 17px/1.35 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      @media (prefers-color-scheme: dark) {
+        #boot {
+          background: #000000;
+          color: #f2f2f2;
+        }
+      }
+      #boot img {
+        width: 96px;
+        height: 96px;
+        border-radius: 22%;
+        box-shadow: 0 6px 24px rgba(0, 0, 0, 0.22);
+        animation: boot-in 0.5s ease-out both;
+      }
+      #boot-name {
+        margin-top: 18px;
+        font-size: 20px;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+      }
+      #boot-bar {
+        position: relative;
+        width: 120px;
+        height: 3px;
+        margin-top: 26px;
+        overflow: hidden;
+        border-radius: 3px;
+        background: rgba(128, 128, 128, 0.25);
+      }
+      #boot-bar i {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: 40%;
+        border-radius: 3px;
+        background: currentColor;
+        opacity: 0.7;
+        animation: boot-bar 1.4s ease-in-out infinite;
+      }
+      #boot-msg {
+        display: none;
+        max-width: 320px;
+        margin-top: 22px;
+        font-size: 15px;
+        font-weight: 400;
+        opacity: 0.85;
+        overflow-wrap: anywhere;
+      }
+      #boot-btn {
+        display: none;
+        margin-top: 18px;
+        padding: 10px 22px;
+        border: 1.5px solid currentColor;
+        border-radius: 999px;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        font-size: 16px;
+        cursor: pointer;
+      }
+      #boot.err #boot-bar {
+        display: none;
+      }
+      #boot.err #boot-msg,
+      #boot.slow #boot-msg,
+      #boot.err #boot-btn,
+      #boot.slow #boot-btn {
+        display: block;
+      }
+      @keyframes boot-bar {
+        0% {
+          transform: translateX(-100%);
+        }
+        100% {
+          transform: translateX(250%);
+        }
+      }
+      @keyframes boot-in {
+        from {
+          opacity: 0;
+          transform: scale(0.94);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #boot img {
+          animation: none;
+        }
+        #boot-bar i {
+          animation: none;
+          width: 100%;
+          opacity: 0.35;
+        }
+      }
+    </style>
+    <style id="expo-reset">
+      /* react-native-web root reset (as in Expo's default template) */
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        overflow: hidden;
+        margin: 0;
+        /* no rubber-band bounce of the whole page / pull-to-refresh in the installed app */
+        overscroll-behavior: none;
+        -webkit-text-size-adjust: 100%;
+        text-size-adjust: 100%;
+        -webkit-tap-highlight-color: transparent;
+        background-color: #ffffff;
+      }
+      @media (prefers-color-scheme: dark) {
+        body {
+          background-color: #000000;
+        }
+      }
+      #root {
+        display: flex;
+        height: 100%;
+        flex: 1;
+      }
+      /* iOS Safari zooms into inputs with a font size below 16px on focus – keep them at >= 16px. */
+      @supports (-webkit-touch-callout: none) {
+        input,
+        textarea,
+        select {
+          font-size: 16px !important;
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <!-- Boot splash: removed by the root layout once React has mounted (document.getElementById('boot')?.remove()),
+         with a MutationObserver fallback below. Texts: de/es/en by navigator.language. No external resources. -->
+    <div id="boot" role="status" aria-live="polite">
+      <img src="/icons/icon-192.png" width="96" height="96" alt="" />
+      <div id="boot-name"></div>
+      <div id="boot-bar"><i></i></div>
+      <div id="boot-msg"></div>
+      <button id="boot-btn" type="button"></button>
+    </div>
+    <script>
+      (function () {
+        var boot = document.getElementById('boot');
+        if (!boot) return;
+        var L = {
+          de: ['Konnte nicht starten: ', 'L\u00e4dt noch \u2026 Verbindung pr\u00fcfen (Tailscale?)', 'Neu laden'],
+          es: ['No se pudo iniciar: ', 'Sigue cargando \u2026 revisa la conexi\u00f3n (\u00bfTailscale?)', 'Recargar'],
+          en: ['Could not start: ', 'Still loading \u2026 check your connection (Tailscale?)', 'Reload'],
+        };
+        var lang = String(navigator.language || 'en').slice(0, 2).toLowerCase();
+        var T = L[lang] || L.en;
+        var $ = function (id) {
+          return document.getElementById(id);
+        };
+        var alive = function () {
+          return !!document.getElementById('boot');
+        };
+        // colours: the theme-color meta that matches the colour scheme (same one the browser picks), text by contrast
+        try {
+          var dark = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+          var m = document.querySelector('meta[data-pwa="theme-' + (dark ? 'dark' : 'light') + '"]');
+          var c = m && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(m.content) ? m.content.slice(1) : null;
+          if (c) {
+            if (c.length === 3) c = c.replace(/./g, '$&$&');
+            var ch = function (i) {
+              var v = parseInt(c.substr(i, 2), 16) / 255;
+              return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+            };
+            var lum = 0.2126 * ch(0) + 0.7152 * ch(2) + 0.0722 * ch(4);
+            boot.style.background = '#' + c;
+            boot.style.color = 1.05 / (lum + 0.05) > (lum + 0.05) / 0.05 ? '#ffffff' : '#111111'; // higher contrast wins
+          }
+        } catch (e) {}
+        var meta = document.querySelector('meta[data-pwa="name"]');
+        $('boot-name').textContent = (meta && meta.content) || document.title || '';
+        var btn = $('boot-btn');
+        btn.textContent = T[2];
+        btn.onclick = function () {
+          btn.disabled = true;
+          var done = function () {
+            location.reload();
+          };
+          var work = [];
+          try {
+            // only Hermes's own worker (scope '/', script /sw.js) and caches (hui-shell-*): other apps / push
+            // workers on a shared origin keep theirs
+            if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+              work.push(
+                navigator.serviceWorker.getRegistrations().then(function (rs) {
+                  return Promise.all(
+                    rs
+                      .filter(function (r) {
+                        var w = r.active || r.waiting || r.installing;
+                        return r.scope === location.origin + '/' && w && new URL(w.scriptURL).pathname === '/sw.js';
+                      })
+                      .map(function (r) { return r.unregister(); }),
+                  );
+                }),
+              );
+            }
+            if (window.caches && caches.keys) {
+              work.push(
+                caches.keys().then(function (ks) {
+                  return Promise.all(
+                    ks
+                      .filter(function (k) { return k.indexOf('hui-shell-') === 0; })
+                      .map(function (k) { return caches.delete(k); }),
+                  );
+                }),
+              );
+            }
+          } catch (e) {}
+          setTimeout(done, 3000); // never hang on a stuck service worker
+          Promise.all(work).then(done, done);
+        };
+        var failed = false;
+        var fail = function (msg) {
+          if (!alive()) return; // app is up: not a boot error any more
+          msg = String(msg || '').replace(/\s+/g, ' ').slice(0, 200);
+          if (/ResizeObserver loop/i.test(msg)) return;
+          failed = true;
+          boot.className = 'err';
+          $('boot-msg').textContent = T[0] + (msg || '?');
+        };
+        // capture phase: also catches failed <script src> loads (those do not bubble to window)
+        addEventListener(
+          'error',
+          function (e) {
+            var t = e.target;
+            if (t && t !== window && t.tagName) {
+              if (t.tagName === 'SCRIPT') fail('Script ' + String(t.getAttribute('src') || '').split('?')[0]);
+              return;
+            }
+            fail((e.error && e.error.message) || e.message);
+          },
+          true,
+        );
+        addEventListener('unhandledrejection', function (e) {
+          var r = e.reason;
+          fail((r && r.message) || r);
+        });
+        setTimeout(function () {
+          if (alive() && !failed) {
+            boot.className = 'slow';
+            $('boot-msg').textContent = T[1];
+          }
+        }, 30000);
+        // fallback if the layout hook never fires: remove shortly after React rendered something into #root.
+        // #root comes AFTER this script in the document, so it is looked up once the parser has reached it.
+        var watchRoot = function () {
+          var root = $('root');
+          if (!root || !window.MutationObserver) return;
+          var gone = function () {
+            setTimeout(function () {
+              var b = document.getElementById('boot');
+              if (b) b.remove();
+            }, 3000);
+          };
+          if (root.childElementCount) return gone();
+          var mo = new MutationObserver(function () {
+            if (!root.childElementCount) return;
+            mo.disconnect();
+            gone();
+          });
+          mo.observe(root, { childList: true });
+        };
+        if ($('root')) watchRoot();
+        else document.addEventListener('DOMContentLoaded', watchRoot);
+      })();
+    </script>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
+  </body>
+</html>

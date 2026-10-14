@@ -1,0 +1,85 @@
+name: ci
+
+# Tests and publish-safety checks on every push and pull request. Needs no repository secrets (GITHUB_TOKEN is the
+# automatic one; GITLEAKS_LICENSE is only needed for organisation-owned repositories and may stay unset).
+# - app:      tsc (app + tests), app unit tests, scripts/*.test.mjs  (scripts/check.sh in plain mode: CI=true)
+# - services: bridge tests, push tests
+# - leak-guard / gitleaks: secrets and publishable-safe patterns. The private denylist ($HUI_PRIVATE_DIR) is
+#   intentionally NOT available here; it runs in the local git hooks and in scripts/scan-artifact.sh
+#   (docs/LEAK-GUARD.md).
+# Actions are pinned to commit SHAs; update the SHA together with the version comment.
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: npm ci (app)
+        working-directory: app
+        run: npm ci --no-audit --no-fund
+      - name: tsc, app unit tests, scripts tests
+        run: scripts/check.sh all
+
+  services:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: bridge/package-lock.json
+      - name: bridge tests
+        working-directory: bridge
+        run: |
+          npm ci --no-audit --no-fund
+          npm test
+      - name: push tests
+        working-directory: push
+        run: npm test
+
+  leak-guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: leak-guard unit tests
+        run: node --test scripts/leak-guard.test.mjs
+      - name: leak-guard generic patterns over the tracked tree
+        run: node scripts/leak-guard.mjs --tree --generic-only
+
+  gitleaks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+          GITLEAKS_VERSION: 8.30.1
+          # Needed only for organisation-owned repos (https://gitleaks.io); personal accounts need none.
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}

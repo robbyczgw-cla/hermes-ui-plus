@@ -1,0 +1,21 @@
+<!-- Round 2 concept "talaria": a UI toggle switched on, with a gold heel wing like Hermes' winged sandal,
+     on a midnight field (alternative palette: midnight + gold).
+     Hand-written, 1024 grid; sections are composed by scripts/brand-icons.mjs (see monogram.svg).
+     The wing is the shared round-2 wing: one smooth leading edge, three feather scallops, root at (0,0), tip at about (-375,-262).
+     Cut-outs are masks (not background-coloured shapes), so the Android themed monochrome icon keeps them. -->
+<!--meta {"round":2,"title":"Talaria","palette":"midnight + gold","rationale":"Hermes' winged sandal rebuilt from a toggle pill: switched on, ready to run."}-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<!--defs--><defs>
+  <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1E2A5E"/><stop offset="1" stop-color="#0A0F26"/></linearGradient>
+  <radialGradient id="bgGlow" cx="0.3" cy="0.2" r="0.8"><stop offset="0" stop-color="#4A62C8" stop-opacity="0.35"/><stop offset="1" stop-color="#4A62C8" stop-opacity="0"/></radialGradient>
+  <rect id="taTrack" x="300" y="520" width="520" height="236" rx="118"/>
+  <mask id="taGap" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024"><rect width="1024" height="1024" fill="#fff"/><use href="#taTrack" fill="#000" stroke="#000" stroke-width="60"/></mask>
+  <mask id="taKnob" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024"><rect width="1024" height="1024" fill="#fff"/><circle cx="702" cy="638" r="118" fill="#000"/></mask>
+</defs><!--/defs-->
+<!--bg--><g id="bg"><rect width="1024" height="1024" fill="url(#bgGrad)"/><rect width="1024" height="1024" fill="url(#bgGlow)"/></g><!--/bg-->
+<!--mark--><g id="mark" transform="translate(34 -60)">
+  <g mask="url(#taGap)"><path fill="#F5C451" transform="translate(520 580) rotate(-6) scale(0.95)" d="M0 -60 C -60 -130 -160 -220 -300 -262 C -352 -277 -380 -222 -342 -194 C -310 -170 -282 -154 -258 -142 C -312 -136 -328 -84 -290 -64 C -262 -50 -232 -40 -205 -34 C -248 -22 -250 34 -206 44 C -140 60 -70 64 0 56 Z"/></g>
+  <use href="#taTrack" fill="#F4F2FF" mask="url(#taKnob)"/>
+  <circle cx="702" cy="638" r="84" fill="#F5C451"/>
+</g><!--/mark-->
+</svg>

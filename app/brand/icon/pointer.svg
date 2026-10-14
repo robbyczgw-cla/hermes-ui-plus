@@ -1,0 +1,19 @@
+<!-- Round 2 concept "pointer": a bold UI pointer with a messenger wing on its back, ink on a mint field
+     (alternative palette: inverted, so it pops on dark and light home screens alike).
+     Hand-written, 1024 grid; sections are composed by scripts/brand-icons.mjs (see monogram.svg).
+     The wing is the shared round-2 wing: one smooth leading edge, three feather scallops, root at (0,0), tip at about (-375,-262).
+     Cut-outs are masks (not background-coloured shapes), so the Android themed monochrome icon keeps them. -->
+<!--meta {"round":2,"title":"Swift Pointer","palette":"mint field + ink (inverted house palette)","rationale":"A winged cursor: every answer is something you can point at, tap and act on, delivered fast."}-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<!--defs--><defs>
+  <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8AF8DA"/><stop offset="1" stop-color="#2FD4A8"/></linearGradient>
+  <radialGradient id="bgGlow" cx="0.3" cy="0.2" r="0.8"><stop offset="0" stop-color="#FFFFFF" stop-opacity="0.35"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/></radialGradient>
+  <path id="poArrow" d="M330 240 L330 720 L445 615 L520 785 L605 748 L530 582 L690 582 Z"/>
+  <mask id="poGap" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024"><rect width="1024" height="1024" fill="#fff"/><use href="#poArrow" fill="#000" stroke="#000" stroke-width="130" stroke-linejoin="round"/></mask>
+</defs><!--/defs-->
+<!--bg--><g id="bg"><rect width="1024" height="1024" fill="url(#bgGrad)"/><rect width="1024" height="1024" fill="url(#bgGlow)"/></g><!--/bg-->
+<!--mark--><g id="mark" transform="translate(-32 4)">
+  <g mask="url(#poGap)"><path fill="#2E2C86" transform="translate(556 476) scale(-0.9 0.9)" d="M0 -60 C -60 -130 -160 -220 -300 -262 C -352 -277 -380 -222 -342 -194 C -310 -170 -282 -154 -258 -142 C -312 -136 -328 -84 -290 -64 C -262 -50 -232 -40 -205 -34 C -248 -22 -250 34 -206 44 C -140 60 -70 64 0 56 Z"/></g>
+  <use href="#poArrow" fill="#14143A" stroke="#14143A" stroke-width="56" stroke-linejoin="round"/>
+</g><!--/mark-->
+</svg>

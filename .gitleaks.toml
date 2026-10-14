@@ -1,0 +1,206 @@
+# gitleaks config for Hermes Interactive UI+. Extends the built-in ruleset with our own token shapes.
+# Hooks/CI/scan-artifact.sh all pass this file explicitly (--config). See docs/LEAK-GUARD.md.
+title = "Hermes Interactive UI+"
+
+[extend]
+useDefault = true
+
+# Test-fixture allow-listing is per rule ([[rules.allowlists]], condition AND): the file must be a test/fixture
+# path AND the matched secret text must look fake (test/fake/dummy/wrong/... or a run of one repeated char).
+# (A global [[allowlists]] block with condition=AND is silently treated as OR by gitleaks 8.30 when extending
+# the default ruleset, so it is deliberately not used.) PEM keys are never allow-listed.
+
+# --- Hermes UI+ own token formats --------------------------------------------------------------
+
+[[rules]]
+id = "hui-bridge-device-token"
+description = "Hermes bridge device token (hbd_ + 32 random bytes, base64url)"
+regex = '''\bhbd_[A-Za-z0-9_-]{32,}'''
+entropy = 3.2
+keywords = ["hbd_"]
+[[rules.allowlists]]
+description = "Clearly fake test fixture (test path AND fake-looking secret text)"
+condition = "AND"
+paths = [
+  '''(?:^|/)(?:test|tests|__tests__|__fixtures__|fixtures)/''',
+  '''\.(?:test|spec)\.[cm]?[jt]sx?$''',
+]
+regexes = [
+  '''(?i)(?:test|fake|dummy|example|sample|placeholder|wrong|not_a_real|invalid|bogus|mock)''',
+  '''(?:0{8,}|1{8,}|2{8,}|3{8,}|4{8,}|5{8,}|6{8,}|7{8,}|8{8,}|9{8,}|(?i:x{8,}|z{8,}|a{8,}))''',
+]
+
+[[rules]]
+id = "hui-adapter-token"
+description = "Agent adapter token (nca_ + 32 random bytes, base64url)"
+regex = '''\bnca_[A-Za-z0-9_-]{32,}'''
+entropy = 3.2
+keywords = ["nca_"]
+
+[[rules.allowlists]]
+description = "Clearly fake test fixture (test path AND fake-looking secret text)"
+condition = "AND"
+paths = [
+  '''(?:^|/)(?:test|tests|__tests__|__fixtures__|fixtures)/''',
+  '''\.(?:test|spec)\.[cm]?[jt]sx?$''',
+]
+regexes = [
+  '''(?i)(?:test|fake|dummy|example|sample|placeholder|wrong|not_a_real|invalid|bogus|mock)''',
+  '''(?:0{8,}|1{8,}|2{8,}|3{8,}|4{8,}|5{8,}|6{8,}|7{8,}|8{8,}|9{8,}|(?i:x{8,}|z{8,}|a{8,}))''',
+]
+
+# --- Third-party provider keys -------------------------------------------------------------------
+[[rules]]
+id = "hui-anthropic-key"
+description = "Anthropic API / OAuth key"
+regex = '''\bsk-ant-[A-Za-z0-9_-]{20,}'''
+keywords = ["sk-ant-"]
+[[rules.allowlists]]
+description = "Clearly fake test fixture (test path AND fake-looking secret text)"
+condition = "AND"
+paths = [
+  '''(?:^|/)(?:test|tests|__tests__|__fixtures__|fixtures)/''',
+  '''\.(?:test|spec)\.[cm]?[jt]sx?$''',
+]
+regexes = [
+  '''(?i)(?:test|fake|dummy|example|sample|placeholder|wrong|not_a_real|invalid|bogus|mock)''',
+  '''(?:0{8,}|1{8,}|2{8,}|3{8,}|4{8,}|5{8,}|6{8,}|7{8,}|8{8,}|9{8,}|(?i:x{8,}|z{8,}|a{8,}))''',
+]
+
+[[rules]]
+id = "hui-xai-key"
+description = "xAI API key"
+regex = '''\bxai-[A-Za-z0-9_-]{40,}'''
+keywords = ["xai-"]
+[[rules.allowlists]]
+description = "Clearly fake test fixture (test path AND fake-looking secret text)"
+condition = "AND"
+paths = [
+  '''(?:^|/)(?:test|tests|__tests__|__fixtures__|fixtures)/''',
+  '''\.(?:test|spec)\.[cm]?[jt]sx?$''',
+]
+regexes = [
+  '''(?i)(?:test|fake|dummy|example|sample|placeholder|wrong|not_a_real|invalid|bogus|mock)''',
+  '''(?:0{8,}|1{8,}|2{8,}|3{8,}|4{8,}|5{8,}|6{8,}|7{8,}|8{8,}|9{8,}|(?i:x{8,}|z{8,}|a{8,}))''',
+]
+
+[[rules]]
+id = "hui-groq-key"
+description = "Groq API key"
+regex = '''\bgsk_[A-Za-z0-9_-]{40,}'''
+keywords = ["gsk_"]
+[[rules.allowlists]]
+description = "Clearly fake test fixture (test path AND fake-looking secret text)"
+condition = "AND"
+paths = [
+  '''(?:^|/)(?:test|tests|__tests__|__fixtures__|fixtures)/''',
+  '''\.(?:test|spec)\.[cm]?[jt]sx?$''',
+]
+regexes = [
+  '''(?i)(?:test|fake|dummy|example|sample|placeholder|wrong|not_a_real|invalid|bogus|mock)''',
+  '''(?:0{8,}|1{8,}|2{8,}|3{8,}|4{8,}|5{8,}|6{8,}|7{8,}|8{8,}|9{8,}|(?i:x{8,}|z{8,}|a{8,}))''',
+]
+
+[[rules]]
+id = "hui-deepgram-key"
+description = "Deepgram API key (40 hex chars, no fixed prefix: needs keyword context)"
+regex = '''(?i)deepgram[\w .-]{0,30}?(?:key|token|secret)?[\w .-]{0,10}["'`:= ]{1,4}["'`]?([a-f0-9]{40})\b'''
+keywords = ["deepgram"]
+entropy = 3.0
+[[rules.allowlists]]
+description = "Clearly fake test fixture (test path AND fake-looking secret text)"
+condition = "AND"
+paths = [
+  '''(?:^|/)(?:test|tests|__tests__|__fixtures__|fixtures)/''',
+  '''\.(?:test|spec)\.[cm]?[jt]sx?$''',
+]
+regexes = [
+  '''(?i)(?:test|fake|dummy|example|sample|placeholder|wrong|not_a_real|invalid|bogus|mock)''',
+  '''(?:0{8,}|1{8,}|2{8,}|3{8,}|4{8,}|5{8,}|6{8,}|7{8,}|8{8,}|9{8,}|(?i:x{8,}|z{8,}|a{8,}))''',
+]
+
+[[rules]]
+id = "hui-serper-key"
+description = "Serper.dev API key (40 hex chars, needs keyword context)"
+regex = '''(?i)serper[\w .-]{0,30}?(?:key|token|secret)?[\w .-]{0,10}["'`:= ]{1,4}["'`]?([a-f0-9]{40})\b'''
+keywords = ["serper"]
+entropy = 3.0
+[[rules.allowlists]]
+description = "Clearly fake test fixture (test path AND fake-looking secret text)"
+condition = "AND"
+paths = [
+  '''(?:^|/)(?:test|tests|__tests__|__fixtures__|fixtures)/''',
+  '''\.(?:test|spec)\.[cm]?[jt]sx?$''',
+]
+regexes = [
+  '''(?i)(?:test|fake|dummy|example|sample|placeholder|wrong|not_a_real|invalid|bogus|mock)''',
+  '''(?:0{8,}|1{8,}|2{8,}|3{8,}|4{8,}|5{8,}|6{8,}|7{8,}|8{8,}|9{8,}|(?i:x{8,}|z{8,}|a{8,}))''',
+]
+
+[[rules]]
+id = "hui-brave-key"
+description = "Brave Search API key (BSA prefix)"
+regex = '''\bBSA[A-Za-z0-9_-]{25,}'''
+keywords = ["bsa"]
+entropy = 3.5
+[[rules.allowlists]]
+description = "Clearly fake test fixture (test path AND fake-looking secret text)"
+condition = "AND"
+paths = [
+  '''(?:^|/)(?:test|tests|__tests__|__fixtures__|fixtures)/''',
+  '''\.(?:test|spec)\.[cm]?[jt]sx?$''',
+]
+regexes = [
+  '''(?i)(?:test|fake|dummy|example|sample|placeholder|wrong|not_a_real|invalid|bogus|mock)''',
+  '''(?:0{8,}|1{8,}|2{8,}|3{8,}|4{8,}|5{8,}|6{8,}|7{8,}|8{8,}|9{8,}|(?i:x{8,}|z{8,}|a{8,}))''',
+]
+
+[[rules]]
+id = "hui-vapid-private-key"
+description = "VAPID private key (32 bytes, base64url) next to a vapid/private keyword"
+regex = '''(?i)vapid[\w .-]{0,30}?priv[\w .-]{0,20}["'`:= ]{1,4}["'`]?([A-Za-z0-9_-]{43})\b'''
+keywords = ["vapid"]
+entropy = 3.5
+[[rules.allowlists]]
+description = "Clearly fake test fixture (test path AND fake-looking secret text)"
+condition = "AND"
+paths = [
+  '''(?:^|/)(?:test|tests|__tests__|__fixtures__|fixtures)/''',
+  '''\.(?:test|spec)\.[cm]?[jt]sx?$''',
+]
+regexes = [
+  '''(?i)(?:test|fake|dummy|example|sample|placeholder|wrong|not_a_real|invalid|bogus|mock)''',
+  '''(?:0{8,}|1{8,}|2{8,}|3{8,}|4{8,}|5{8,}|6{8,}|7{8,}|8{8,}|9{8,}|(?i:x{8,}|z{8,}|a{8,}))''',
+]
+
+[[rules]]
+id = "hui-pem-private-key"
+description = "PEM private key block (RSA/EC/OpenSSH/PKCS8/APNs .p8/Android keystore export)"
+regex = '''-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----'''
+keywords = ["private key"]
+
+[[rules]]
+id = "hui-tailscale-key"
+description = "Tailscale auth/API key"
+regex = '''\btskey-(?:auth|api|client)-[A-Za-z0-9]{6,}-[A-Za-z0-9]{20,}'''
+keywords = ["tskey-"]
+[[rules.allowlists]]
+description = "Clearly fake test fixture (test path AND fake-looking secret text)"
+condition = "AND"
+paths = [
+  '''(?:^|/)(?:test|tests|__tests__|__fixtures__|fixtures)/''',
+  '''\.(?:test|spec)\.[cm]?[jt]sx?$''',
+]
+regexes = [
+  '''(?i)(?:test|fake|dummy|example|sample|placeholder|wrong|not_a_real|invalid|bogus|mock)''',
+  '''(?:0{8,}|1{8,}|2{8,}|3{8,}|4{8,}|5{8,}|6{8,}|7{8,}|8{8,}|9{8,}|(?i:x{8,}|z{8,}|a{8,}))''',
+]
+
+# --- Global allow-list for default-rule false positives (keep tiny, target = the matched text only) --------
+# i18n key *names* ("a11yKey:'chat.approve.label'") trip the generic-api-key rule in the minified web bundle.
+[allowlist]
+description = "i18n translation-key properties"
+regexTarget = "match"
+regexes = [
+  '''(?i)\b(?:a11yKey|labelKey|titleKey|descKey|hintKey|placeholderKey|i18nKey)\b\s*['"]?\s*[:=]''',
+]

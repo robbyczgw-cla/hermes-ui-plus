@@ -1,0 +1,52 @@
+import type { push as de } from './push.de.ts';
+
+// Namespace 'push' (Spanish). Must have exactly the keys of push.de.ts.
+export const push = {
+  title: 'Notificaciones',
+  profile: 'Perfil: {name}',
+  enable: 'Notificaciones para este perfil',
+  enableSub: 'Los mensajes que {name} envía por iniciativa propia (recordatorios, informes, resultados tardíos) llegan como notificación, incluso con la app cerrada.',
+  preview: 'Vista previa del texto',
+  previewAuto: 'Automática',
+  previewOn: 'Sí',
+  previewOff: 'No',
+  previewHint: 'Automática = lo que decide el servidor (algunos agentes sin vista previa). «No» solo muestra «Nuevo mensaje».',
+  quiet: 'Horas de silencio',
+  quietSub: 'Durante este horario las notificaciones llegan sin sonido.',
+  quietFrom: 'Desde',
+  quietTo: 'Hasta',
+  quietInvalid: 'Introduce la hora como HH:MM.',
+  test: 'Enviar notificación de prueba',
+  testOk: 'Prueba enviada: debería aparecer enseguida.',
+  testFailed: 'La prueba falló: {error}',
+  status: {
+    checking: 'Comprobando el servidor…',
+    unsupportedBridge: 'Este perfil no admite notificaciones. Necesita el {bridge}.',
+    notConfigured: 'El servidor aún no tiene credenciales para {platform}. Los mensajes nuevos llegan en directo mientras la app esté abierta.',
+    registered: 'Activas en este dispositivo ({platform}).',
+    denied: 'Las notificaciones están bloqueadas en los ajustes del sistema.',
+    webUnsupported: 'Este navegador no admite notificaciones web push. iPhone/iPad: añade la página a la pantalla de inicio (iOS 16.4 o posterior) y ábrela desde allí.',
+    noToken: 'No se pudo registrar este dispositivo: {error}',
+    error: 'Error: {error}',
+    live: 'Mientras la app esté abierta, los mensajes nuevos aparecen en el chat al instante.',
+  },
+  platform: {
+    fcm: 'Android',
+    apns: 'iOS',
+    webpush: 'Web Push',
+  },
+  channel: {
+    name: 'Mensajes de agentes',
+    description: 'Mensajes de Hermes y de tus agentes',
+    quietName: 'Mensajes de agentes (horas de silencio)',
+  },
+  approval: {
+    banner: 'Aprobación necesaria',
+    bannerFor: 'Aprobación necesaria: {command}',
+    open: 'Abrir',
+    dismiss: 'Cerrar',
+    notifyTitle: 'Hermes espera tu aprobación',
+    notifyBody: 'Un comando espera tu decisión.',
+  },
+  newMessage: 'Nuevo mensaje',
+} satisfies typeof de;

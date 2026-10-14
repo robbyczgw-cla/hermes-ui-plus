@@ -1,0 +1,41 @@
+# Copy to docker-compose.yml and an .env next to it (see README.md). Build locally: `npm run bundle-skill` (copies the
+# hermes-ui skill + bootstrap message into ./skill, the image needs them), then `docker compose build`.
+services:
+  bridge:
+    build: .
+    image: hermes-ui-plus-bridge:local
+    restart: unless-stopped
+    environment:
+      # Where the Hermes API server is reachable FROM THE CONTAINER. If Hermes runs on the Docker host:
+      #   http://host.docker.internal:8642  (the extra_hosts entry below makes that work on Linux)
+      HERMES_BASE_URL: ${HERMES_BASE_URL:?set HERMES_BASE_URL in .env}
+      HERMES_API_KEY: ${HERMES_API_KEY:-}
+      # Optional. Empty = a token is generated on first start and kept in the volume.
+      BRIDGE_TOKEN: ${BRIDGE_TOKEN:-}
+      # The URL your phone uses to reach the bridge (https://... via your reverse proxy / tunnel).
+      BRIDGE_PUBLIC_URL: ${BRIDGE_PUBLIC_URL:-}
+      BRIDGE_NAME: ${BRIDGE_NAME:-Hermes}
+      # Set to 1 to pair from another machine: the one-time code appears in `docker compose logs bridge`.
+      BRIDGE_PAIRING: ${BRIDGE_PAIRING:-}
+      # Optional features (leave empty to keep them off)
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    # Uncomment to print the pairing QR code into the container log on start:
+    # command: ["--pair"]
+    ports:
+      - "127.0.0.1:8790:8790"   # publish to loopback only; put TLS in front (reverse proxy, tailscale serve, ...)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - bridge-data:/var/lib/hermes-ui-bridge
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+volumes:
+  bridge-data:

@@ -1,0 +1,9 @@
+{
+  "name": "speech-analyzer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local Expo module: iOS 26+ on-device dictation with Apple's SpeechAnalyzer / SpeechTranscriber (model download via AssetInventory), plus exact AVSpeechSynthesisVoice quality for the voice picker.",
+  "license": "MIT",
+  "author": "Hermes UI+",
+  "homepage": "https://github.com/robbyczgw-cla/hermes-ui-plus"
+}

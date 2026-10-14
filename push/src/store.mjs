@@ -1,0 +1,207 @@
+// Device registrations: one JSON file in the service's state dir (mode 0600, atomic replace).
+// Stores device tokens / Web Push subscriptions + per-registration settings. NEVER message content.
+// Canonical copy: push/src (see scripts/sync-push.sh).
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+
+export const PLATFORMS = ['fcm', 'apns', 'webpush'];
+export const LOCALES = ['de', 'en', 'es'];
+export const PREVIEW_MODES = ['auto', 'on', 'off'];
+const PROFILE_RE = /^[A-Za-z0-9._:-]{1,80}$/;
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+const FILE_VERSION = 1;
+
+const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
+
+/** Stable id per (user, device, app profile). */
+export function registrationId(user, platform, deviceKey, profileId) {
+  return 'r_' + sha(`${user}\n${platform}\n${deviceKey}\n${profileId}`).slice(0, 20);
+}
+
+/** The value that identifies the device (token, or the Web Push endpoint). */
+export const deviceKeyOf = (r) => (r.platform === 'webpush' ? r.subscription?.endpoint : r.token) ?? '';
+
+export function validTimeZone(tz) {
+  if (typeof tz !== 'string' || !tz || tz.length > 64) return false;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Normalize the settings part of a register request (shared by every platform).
+ * Returns {ok:true, value} or {ok:false, message}.
+ */
+export function parseSettings(body) {
+  const profileId = String(body?.profileId ?? '');
+  if (!PROFILE_RE.test(profileId)) return { ok: false, message: 'profileId must match [A-Za-z0-9._:-]{1,80}' };
+  const preview = body.preview === undefined ? 'auto' : body.preview === true ? 'on' : body.preview === false ? 'off' : body.preview;
+  if (!PREVIEW_MODES.includes(preview)) return { ok: false, message: "preview must be 'auto'|'on'|'off'" };
+  const locale = LOCALES.includes(body.locale) ? body.locale : 'de';
+  let quiet = null;
+  if (body.quiet != null) {
+    if (!HHMM.test(body.quiet?.from ?? '') || !HHMM.test(body.quiet?.to ?? '') || body.quiet.from === body.quiet.to) {
+      return { ok: false, message: 'quiet must be {from:"HH:MM", to:"HH:MM"} with from != to' };
+    }
+    quiet = { from: body.quiet.from, to: body.quiet.to };
+  }
+  const tz = body.tz === undefined || body.tz === null ? 'UTC' : body.tz;
+  if (!validTimeZone(tz)) return { ok: false, message: 'tz must be an IANA time zone' };
+  const scope = {};
+  if (body.scope !== undefined && body.scope !== null) {
+    if (typeof body.scope !== 'object' || Array.isArray(body.scope)) return { ok: false, message: 'scope must be an object' };
+    for (const k of ['agents', 'sources']) {
+      const v = body.scope[k];
+      if (v === undefined) continue;
+      if (!Array.isArray(v) || v.length > 32 || v.some((x) => typeof x !== 'string' || !/^[A-Za-z0-9._:-]{1,64}$/.test(x))) {
+        return { ok: false, message: `scope.${k} must be a list of ids` };
+      }
+      scope[k] = [...new Set(v)];
+    }
+  }
+  return { ok: true, value: { profileId, preview, locale, quiet, tz, scope, label: typeof body.label === 'string' ? body.label.slice(0, 60) : undefined } };
+}
+
+/**
+ * @param {{file?: string|null, maxPerUser?: number, now?: () => number}} o  file null = memory only (tests)
+ */
+export function createRegistrationStore(o = {}) {
+  const file = o.file ?? null;
+  const maxPerUser = o.maxPerUser ?? 20;
+  const now = o.now ?? Date.now;
+  /** @type {Map<string, any>} */
+  let regs = new Map();
+
+  if (file && fs.existsSync(file)) {
+    try {
+      const doc = JSON.parse(fs.readFileSync(file, 'utf8'));
+      for (const r of Array.isArray(doc?.registrations) ? doc.registrations : []) if (r?.id) regs.set(r.id, r);
+    } catch {
+      // corrupt file: keep it for inspection, start empty
+      try {
+        fs.renameSync(file, `${file}.corrupt-${Date.now()}`);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  function persist() {
+    if (!file) return;
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    // random suffix + O_EXCL: the temp name cannot be predicted / pre-created (planted file or symlink)
+    const tmp = `${file}.${crypto.randomBytes(6).toString('hex')}.tmp`;
+    try {
+      fs.writeFileSync(tmp, JSON.stringify({ v: FILE_VERSION, registrations: [...regs.values()] }, null, 1), { mode: 0o600, flag: 'wx' });
+      fs.renameSync(tmp, file);
+    } catch (e) {
+      try { fs.unlinkSync(tmp); } catch { /* not created */ }
+      throw e;
+    }
+  }
+
+  return {
+    get size() {
+      return regs.size;
+    },
+    all: () => [...regs.values()],
+    forUser: (user) => [...regs.values()].filter((r) => r.user === user),
+    get: (id) => regs.get(id),
+
+    /** Insert or update (same user+device+profile = same id). Oldest registration of the user is evicted at the cap. */
+    upsert(rec) {
+      const key = deviceKeyOf(rec);
+      if (!key) throw new Error('registration without device key');
+      const id = registrationId(rec.user, rec.platform, key, rec.profileId);
+      const prev = regs.get(id);
+      const t = now();
+      const next = { ...prev, ...rec, id, createdAt: prev?.createdAt ?? t, updatedAt: t, failures: 0 };
+      regs.set(id, next);
+      const mine = [...regs.values()].filter((r) => r.user === rec.user).sort((a, b) => a.updatedAt - b.updatedAt);
+      while (mine.length > maxPerUser) regs.delete(mine.shift().id);
+      persist();
+      return next;
+    },
+
+    /** Remove by id (only the owner's) or by device (all profiles of that device for the user). */
+    remove({ user, id, platform, deviceKey, profileId }) {
+      let n = 0;
+      for (const r of [...regs.values()]) {
+        if (r.user !== user) continue;
+        const hit = id ? r.id === id : r.platform === platform && deviceKeyOf(r) === deviceKey && (!profileId || r.profileId === profileId);
+        if (hit) {
+          regs.delete(r.id);
+          n++;
+        }
+      }
+      if (n) persist();
+      return n;
+    },
+
+    /** The push service said the token is dead: drop every registration of that device. */
+    dropDevice(platform, deviceKey) {
+      let n = 0;
+      for (const r of [...regs.values()]) {
+        if (r.platform === platform && deviceKeyOf(r) === deviceKey) {
+          regs.delete(r.id);
+          n++;
+        }
+      }
+      if (n) persist();
+      return n;
+    },
+
+    /** Record a delivery result (no content). */
+    mark(id, result) {
+      const r = regs.get(id);
+      if (!r) return;
+      if (result.ok) {
+        r.lastOkAt = now();
+        r.failures = 0;
+        if (result.environment && r.platform === 'apns') r.apnsEnv = result.environment;
+      } else {
+        r.failures = (r.failures ?? 0) + 1;
+        r.lastError = String(result.error ?? '').slice(0, 80);
+      }
+      persist();
+    },
+
+    /** Drop registrations of users that no longer exist (adapter: users.json revocation). */
+    retainUsers(isValid) {
+      let n = 0;
+      for (const r of [...regs.values()]) {
+        if (!isValid(r.user)) {
+          regs.delete(r.id);
+          n++;
+        }
+      }
+      if (n) persist();
+      return n;
+    },
+  };
+}
+
+/** Public view of a registration (never the token / endpoint secrets). */
+export function publicRegistration(r) {
+  const key = deviceKeyOf(r);
+  return {
+    id: r.id,
+    platform: r.platform,
+    profileId: r.profileId,
+    label: r.label,
+    scope: r.scope,
+    preview: r.preview,
+    quiet: r.quiet,
+    tz: r.tz,
+    locale: r.locale,
+    device: r.platform === 'webpush' ? new URL(key).host : `…${key.slice(-6)}`,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+    lastOkAt: r.lastOkAt,
+    failures: r.failures ?? 0,
+  };
+}

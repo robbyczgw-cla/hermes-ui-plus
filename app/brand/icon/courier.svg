@@ -1,0 +1,19 @@
+<!-- Round 2 concept "courier": white chat bubble with a check cut out, carried by a single mint messenger wing.
+     Hand-written, 1024 grid; sections are composed by scripts/brand-icons.mjs (see monogram.svg).
+     The wing is the shared round-2 wing: one smooth leading edge, three feather scallops, root at (0,0), tip at about (-375,-262).
+     Cut-outs are masks (not background-coloured shapes), so the Android themed monochrome icon keeps them. -->
+<!--meta {"round":2,"title":"Courier","palette":"ink + mint","rationale":"The messenger's wing delivers a chat bubble that already holds an answer you can tick off."}-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<!--defs--><defs>
+  <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2E2C86"/><stop offset="1" stop-color="#111134"/></linearGradient>
+  <radialGradient id="bgGlow" cx="0.28" cy="0.2" r="0.8"><stop offset="0" stop-color="#6C68E8" stop-opacity="0.35"/><stop offset="1" stop-color="#6C68E8" stop-opacity="0"/></radialGradient>
+  <path id="coBubble" d="M640 400 H670 A160 160 0 0 1 670 720 H600 C565 756 520 784 455 800 C484 766 498 734 502 704 A160 160 0 0 1 640 400 Z"/>
+  <mask id="coGap" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024"><rect width="1024" height="1024" fill="#fff"/><use href="#coBubble" fill="#000" stroke="#000" stroke-width="60" stroke-linejoin="round"/></mask>
+  <mask id="coCheck" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024"><rect width="1024" height="1024" fill="#fff"/><polyline points="580,566 640,626 752,512" fill="none" stroke="#000" stroke-width="64" stroke-linecap="round" stroke-linejoin="round"/></mask>
+</defs><!--/defs-->
+<!--bg--><g id="bg"><rect width="1024" height="1024" fill="url(#bgGrad)"/><rect width="1024" height="1024" fill="url(#bgGlow)"/></g><!--/bg-->
+<!--mark--><g id="mark" transform="translate(-24 -20)">
+  <g mask="url(#coGap)"><path fill="#5EF0C8" transform="translate(610 560) rotate(4) scale(1.1)" d="M0 -60 C -60 -130 -160 -220 -300 -262 C -352 -277 -380 -222 -342 -194 C -310 -170 -282 -154 -258 -142 C -312 -136 -328 -84 -290 -64 C -262 -50 -232 -40 -205 -34 C -248 -22 -250 34 -206 44 C -140 60 -70 64 0 56 Z"/></g>
+  <use href="#coBubble" fill="#F4F2FF" mask="url(#coCheck)"/>
+</g><!--/mark-->
+</svg>

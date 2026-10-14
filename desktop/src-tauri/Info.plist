@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Hermes braucht das Mikrofon, damit du Nachrichten diktieren kannst. Die Aufnahme wird nur für die Spracherkennung verwendet.</string>
+  <key>NSCameraUsageDescription</key>
+  <string>Hermes braucht die Kamera, um Fotos für deine Nachrichten aufzunehmen und Kopplungscodes (QR) zu scannen.</string>
+  <!-- files dropped on the dock icon (or "Open With") become attachments of the open chat; rank Alternate:
+       offered in "Open With", never the default app for a type -->
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Attachment</string>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+      <key>LSHandlerRank</key>
+      <string>Alternate</string>
+      <key>LSItemContentTypes</key>
+      <array>
+        <string>public.image</string>
+        <string>public.text</string>
+        <string>com.adobe.pdf</string>
+        <string>public.data</string>
+      </array>
+    </dict>
+  </array>
+</dict>
+</plist>

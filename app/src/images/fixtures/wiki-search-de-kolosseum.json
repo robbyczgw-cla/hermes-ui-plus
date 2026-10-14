@@ -1,0 +1,96 @@
+{
+ "batchcomplete": true,
+ "continue": {
+  "gsroffset": 5,
+  "continue": "gsroffset||"
+ },
+ "query": {
+  "pages": [
+   {
+    "pageid": 4265,
+    "ns": 0,
+    "title": "Rom",
+    "index": 3,
+    "thumbnail": {
+     "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c0/Rome_Montage_2017.png/960px-Rome_Montage_2017.png?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+     "width": 960,
+     "height": 1344
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/c/c0/Rome_Montage_2017.png?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 1000,
+     "height": 1400
+    },
+    "pageimage": "Rome_Montage_2017.png"
+   },
+   {
+    "pageid": 42209,
+    "ns": 0,
+    "title": "Kolosseum",
+    "index": 1,
+    "thumbnail": {
+     "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/d/de/Colosseo_2020.jpg/960px-Colosseo_2020.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+     "width": 960,
+     "height": 673
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/d/de/Colosseo_2020.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 12051,
+     "height": 8442
+    },
+    "pageimage": "Colosseo_2020.jpg"
+   },
+   {
+    "pageid": 188102,
+    "ns": 0,
+    "title": "Kreuzweg",
+    "index": 5,
+    "thumbnail": {
+     "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/5/5e/Twelfth_station_of_the_cross_Josef_Moroder_Lusenberg_in_Laghel_Arco.jpg/960px-Twelfth_station_of_the_cross_Josef_Moroder_Lusenberg_in_Laghel_Arco.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+     "width": 960,
+     "height": 1438
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/5/5e/Twelfth_station_of_the_cross_Josef_Moroder_Lusenberg_in_Laghel_Arco.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 4912,
+     "height": 7360
+    },
+    "pageimage": "Twelfth_station_of_the_cross_Josef_Moroder_Lusenberg_in_Laghel_Arco.jpg"
+   },
+   {
+    "pageid": 8814097,
+    "ns": 0,
+    "title": "Kolosseum (Kino)",
+    "index": 4,
+    "thumbnail": {
+     "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/a0/Wiener_Colosseum_AK1.jpg/960px-Wiener_Colosseum_AK1.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+     "width": 960,
+     "height": 615
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/a/a0/Wiener_Colosseum_AK1.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 1503,
+     "height": 963
+    },
+    "pageimage": "Wiener_Colosseum_AK1.jpg"
+   },
+   {
+    "pageid": 12035282,
+    "ns": 0,
+    "title": "Kongresshalle (Nürnberg)",
+    "index": 2,
+    "thumbnail": {
+     "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/3/31/Kongresshalle_Reichsparteitagsgelaende.jpg/960px-Kongresshalle_Reichsparteitagsgelaende.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+     "width": 960,
+     "height": 384
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/3/31/Kongresshalle_Reichsparteitagsgelaende.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 3263,
+     "height": 1306
+    },
+    "pageimage": "Kongresshalle_Reichsparteitagsgelaende.jpg"
+   }
+  ]
+ }
+}

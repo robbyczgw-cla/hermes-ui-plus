@@ -1,0 +1,6 @@
+{
+  "name": "stream-keepalive",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local Expo module: Android dataSync foreground service that keeps a running chat stream alive while the app is in the background."
+}

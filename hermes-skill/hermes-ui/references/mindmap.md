@@ -1,0 +1,5 @@
+# mindmap (pan/zoom concept map; tapping a node can send `[mindmap] Erkläre „<label>“ genauer`)
+{id?, title?, root:{id?, label, note?, children?:[node]}}  depth <= 4 (root = 0), <= 60 nodes, `label` <= 4 words, `note` 1-2 sentences (shown on tap).
+- For concepts, topics, brainstorming, learning overviews ("Übersicht der Zusammenhänge"): 3-7 main branches, 2-5 children each. Process/flow/architecture with arrows: `hui-html` diagram instead. Always add 1-2 sentences of text outside.
+{"type":"mindmap","id":"photosynthese","title":"Photosynthese","root":{"label":"Photosynthese","children":[{"label":"Ausgangsstoffe","children":[{"label":"Wasser","note":"Wird über die Wurzeln aufgenommen."},{"label":"CO2","note":"Gelangt durch die Spaltöffnungen ins Blatt."},{"label":"Licht"}]},{"label":"Produkte","children":[{"label":"Glukose"},{"label":"Sauerstoff"}]},{"label":"Ort","children":[{"label":"Chloroplasten","note":"Enthalten das Chlorophyll."}]}]}}
+Reply after "Vertiefen": explain that node in text (and a sub-`mindmap` only if asked).

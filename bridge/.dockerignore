@@ -1,0 +1,13 @@
+node_modules
+npm-debug.log
+.env
+.env.*
+*.env
+eval
+test
+.git
+Dockerfile
+docker-compose*.yml
+*.md
+# the generated skill folder (npm run bundle-skill) incl. its .md files must reach the image
+!skill/**

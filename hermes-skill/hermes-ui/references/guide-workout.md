@@ -1,0 +1,27 @@
+# guide, workout, recipe, timer (hands-on and doing)
+
+## guide (interactive step-by-step; replies `[guide:<id>] Schritt 3 („…“): Ich hänge fest – <detail>` and `[guide:<id>] Fertig`)
+{id, title, intro?, stuckLabel?, steps:[{id?, title (<=200), body (markdown, <=2000), imageQuery?, tip?, warning?, seconds? (inline timer 1-86400)}] (<=20)}
+- For hands-on procedures the user performs while reading: repairs, assembly, device setup, cooking technique, first steps in a tool. 4-12 steps, ONE action per step, `title` = the imperative ("Rad abnehmen"), `body` = 1-3 sentences with the how.
+- `warning` for safety/irreversible risks, `tip` for a shortcut, `seconds` when a step waits (glue dries, rest the dough), `imageQuery` only where a photo really helps. Reference-style or tech install lists: `steps`; cooking with ingredients: `recipe`.
+- "Ich hänge fest": answer exactly for that step (cause + fix, ask one question if needed), don't re-show the guide. "Fertig": congratulate briefly, offer a next step.
+{"type":"guide","id":"reifen","title":"Fahrradschlauch wechseln","intro":"Du brauchst: Reifenheber, neuen Schlauch, Pumpe. Dauer ca. 20 Minuten.","steps":[{"title":"Rad ausbauen","body":"Bremse öffnen, Schnellspanner lösen oder Muttern mit dem Schlüssel lockern und das Rad herausnehmen.","warning":"Bei Scheibenbremsen den Hebel nicht ziehen, solange das Rad draußen ist."},{"title":"Mantel abziehen","body":"Luft ablassen, einen Reifenheber unter die Mantelkante setzen und rundum aushebeln.","imageQuery":"Reifenheber Fahrradmantel"},{"title":"Schlauch einsetzen","body":"Neuen Schlauch leicht anpumpen, ins Ventilloch stecken und gleichmäßig in den Mantel legen.","tip":"Mantel innen nach Dornen absuchen, sonst ist der neue Schlauch gleich wieder platt."},{"title":"Kleber trocknen lassen","body":"Nur bei Flickversuch: Kleber antrocknen lassen, bevor der Flicken aufgedrückt wird.","seconds":300}],"stuckLabel":"Ich hänge fest"}
+
+## workout (strength/cardio/mobility session; reply `[workout:<id>] 18/20 Sätze · 42 min · Kniebeuge 3×10 @ 60 kg …`)
+{id, title, kind?:"strength"|"cardio"|"mobility"|"mixed", warmup?, cooldown?, exercises:[{id?, name, sets? (1-50), reps? (1-1000 or "8-12"/"AMRAP"), seconds? (per set, holds), weight? ("60 kg", "Körpergewicht", <=30 chars), restSeconds? (0-3600), note?, imageQuery?}] (<=20)}
+- 4-8 exercises, order warm to hard; `weight` only as a starting suggestion, label as such in text ("Startgewicht anpassen"); no medical claims, hint at limits/pain in text. Nothing invented about the user's fitness: ask (`choice`/`form`) if level/equipment/time are unknown and the plan depends on them.
+- Reaction to the reply: short feedback on volume, one suggestion for next time (progression, rest day).
+{"type":"workout","id":"push-a","title":"Push-Tag (Brust, Schulter, Trizeps)","kind":"strength","warmup":"5 Min Rudergerät locker, Schulterkreisen","exercises":[{"name":"Bankdrücken","sets":4,"reps":"6-8","weight":"Startgewicht wählen","restSeconds":120,"imageQuery":"Bankdrücken Übung"},{"name":"Schulterdrücken","sets":3,"reps":10,"restSeconds":90},{"name":"Trizeps-Dips","sets":3,"reps":"8-12","weight":"Körpergewicht","restSeconds":75},{"name":"Plank","sets":3,"seconds":45,"restSeconds":45}],"cooldown":"Brust und Schultern je 30 s dehnen"}
+
+## recipe (cooking with ingredients)
+{id, title, imageQuery?, servings, time?:{prep?, cook?, total?}(min), ingredients:[{qty?:number, unit?, item, plural?, group?}], steps:[{text, timerSeconds?}], tips?:string[]}
+{"type":"recipe","id":"carbonara","title":"Spaghetti Carbonara","imageQuery":"Spaghetti alla carbonara","servings":2,"time":{"prep":10,"cook":15,"total":25},"ingredients":[{"qty":200,"unit":"g","item":"Spaghetti"},{"qty":100,"unit":"g","item":"Guanciale oder Speck"},{"qty":2,"item":"Eier"},{"qty":40,"unit":"g","item":"Pecorino, gerieben"},{"item":"Pfeffer, Salz"}],"steps":[{"text":"Nudeln in reichlich Salzwasser al dente kochen.","timerSeconds":600},{"text":"Guanciale knusprig braten."},{"text":"Eier mit Pecorino und Pfeffer verrühren."},{"text":"Nudeln mit etwas Kochwasser zum Guanciale geben, Pfanne vom Herd, Eiermasse unterrühren."}],"tips":["Keine Sahne verwenden.","Pfanne vom Herd nehmen, sonst gerinnt das Ei."]}
+Numeric `qty`, `unit` separate; the servings stepper scales it. Unit-less single items (`qty` 1, "Zwiebel") get `plural` ("Zwiebeln") so scaled amounts read right. `timerSeconds` only for real waiting steps.
+
+## timer (reply: none; the app notifies when it ends)
+{id, label, seconds (1-86400; 0 or omit with until/stopwatch/timers), until?: ISO datetime, mode?:"countdown"|"stopwatch", timers?:[{id?, label, seconds}] (<=6), autostart?}
+- Single: `seconds`. Countdown to a date/time ("bis zum Anpfiff um 20:45"): `until` (ISO local, e.g. "2026-10-17T20:45"), only with a date you know. Stopwatch: `mode:"stopwatch"`. Several at once (menu, intervals): `timers` of 2-6 with a short `label`. Never `autostart:true` (the user taps start).
+- "Erinnere mich in 10 Minuten" is a reminder/timer request: if the user wants a countdown, use `timer`; a reminder at a clock time stays text + `reminder` action button.
+{"type":"timer","id":"nudeln","label":"Nudeln al dente","seconds":540}
+{"type":"timer","id":"menue","label":"Sonntagsbraten","seconds":0,"timers":[{"label":"Braten","seconds":5400},{"label":"Kartoffeln","seconds":1500},{"label":"Gemüse","seconds":420}]}
+{"type":"timer","id":"anpfiff","label":"Bis zum Anpfiff","seconds":0,"until":"2026-10-17T20:45"}

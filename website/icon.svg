@@ -1,0 +1,22 @@
+<!-- Round 2 concept "petasos": a front-facing chat bubble wearing the two wings of Hermes' winged hat,
+     typing dots cut out. Brand palette (identity.json colors): ink field, ivory bubble, brass wings = the Standard theme. Hand-written, 1024 grid; sections are composed by scripts/brand-icons.mjs (see monogram.svg).
+     The wing is the shared round-2 wing: one smooth leading edge, three feather scallops, root at (0,0), tip at about (-375,-262).
+     Cut-outs are masks (not background-coloured shapes), so the Android themed monochrome icon keeps them. -->
+<!--meta {"round":2,"title":"Petasos","palette":"ink + ivory + brass","rationale":"The chat bubble wears the messenger's winged hat: a friendly character that is still one bold shape."}-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<!--defs--><defs>
+  <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1D2431"/><stop offset="1" stop-color="#0F131A"/></linearGradient>
+  <radialGradient id="bgGlow" cx="0.5" cy="0.36" r="0.6"><stop offset="0" stop-color="#D4A85C" stop-opacity="0.10"/><stop offset="1" stop-color="#D4A85C" stop-opacity="0"/></radialGradient>
+  <path id="ptBubble" d="M432 390 H592 A140 140 0 0 1 732 530 V600 A140 140 0 0 1 592 740 H470 L386 800 Q370 811 373 792 L380 736 A140 140 0 0 1 292 600 V530 A140 140 0 0 1 432 390 Z"/>
+  <mask id="ptGap" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024"><rect width="1024" height="1024" fill="#fff"/><use href="#ptBubble" fill="#000" stroke="#000" stroke-width="60" stroke-linejoin="round"/></mask>
+  <mask id="ptDots" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024"><rect width="1024" height="1024" fill="#fff"/><g fill="#000"><circle cx="420" cy="565" r="38"/><circle cx="512" cy="565" r="38"/><circle cx="604" cy="565" r="38"/></g></mask>
+</defs><!--/defs-->
+<!--bg--><g id="bg"><rect width="1024" height="1024" fill="url(#bgGrad)"/><rect width="1024" height="1024" fill="url(#bgGlow)"/></g><!--/bg-->
+<!--mark--><g id="mark" transform="translate(0 -30)">
+  <g mask="url(#ptGap)" fill="#D4A85C">
+    <path transform="translate(410 500) scale(0.72)" d="M0 -60 C -60 -130 -160 -220 -300 -262 C -352 -277 -380 -222 -342 -194 C -310 -170 -282 -154 -258 -142 C -312 -136 -328 -84 -290 -64 C -262 -50 -232 -40 -205 -34 C -248 -22 -250 34 -206 44 C -140 60 -70 64 0 56 Z"/>
+    <path transform="translate(614 500) scale(-0.72 0.72)" d="M0 -60 C -60 -130 -160 -220 -300 -262 C -352 -277 -380 -222 -342 -194 C -310 -170 -282 -154 -258 -142 C -312 -136 -328 -84 -290 -64 C -262 -50 -232 -40 -205 -34 C -248 -22 -250 34 -206 44 C -140 60 -70 64 0 56 Z"/>
+  </g>
+  <use href="#ptBubble" fill="#F3EEE3" mask="url(#ptDots)"/>
+</g><!--/mark-->
+</svg>

@@ -1,0 +1,23 @@
+<!-- Concept C "stroke": an H drawn as two flowing ribbons joined by a wave (a nod to a messenger's staff,
+     deliberately not a caduceus), with a mint plus. Hand-written, 1024 grid; see monogram.svg. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<!--defs--><defs>
+  <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#34319A"/>
+    <stop offset="1" stop-color="#14143A"/>
+  </linearGradient>
+  <linearGradient id="ribbon" gradientUnits="userSpaceOnUse" x1="300" y1="220" x2="700" y2="800">
+    <stop offset="0" stop-color="#FFFFFF"/>
+    <stop offset="1" stop-color="#C9C3FF"/>
+  </linearGradient>
+</defs><!--/defs-->
+<!--bg--><g id="bg">
+  <rect width="1024" height="1024" fill="url(#bgGrad)"/>
+</g><!--/bg-->
+<!--mark--><g id="mark" transform="translate(-30 24)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M356 268 C326 372 386 444 356 512 C326 580 386 660 356 756" stroke="url(#ribbon)" stroke-width="88"/>
+  <path d="M636 268 C606 372 666 444 636 512 C606 580 666 660 636 756" stroke="url(#ribbon)" stroke-width="88"/>
+  <path d="M376 520 C450 476 542 560 616 512" stroke="url(#ribbon)" stroke-width="64"/>
+  <path d="M790 206 V390 M698 298 H882" stroke="#5EF0C8" stroke-width="58"/>
+</g><!--/mark-->
+</svg>

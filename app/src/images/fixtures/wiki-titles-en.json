@@ -1,0 +1,68 @@
+{
+ "batchcomplete": true,
+ "query": {
+  "normalized": [
+   {
+    "fromencoded": false,
+    "from": "iPhone 17",
+    "to": "IPhone 17"
+   }
+  ],
+  "redirects": [
+   {
+    "from": "Galaxy S25",
+    "to": "Samsung Galaxy S25"
+   }
+  ],
+  "pages": [
+   {
+    "pageid": 74918885,
+    "ns": 0,
+    "title": "Samsung Galaxy S25",
+    "thumbnail": {
+     "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/f9/%E7%AC%AC%E4%B8%80%E6%89%8B%EF%BC%81Samsung_Galaxy_S25%E7%B3%BB%E5%88%97%E6%8B%BF%E5%88%B0%E4%BA%86%EF%BC%9A5%E4%B8%AA%E5%8D%87%E7%BA%A7%EF%BC%81S_Pen%E4%B8%8D%E6%94%AF%E6%8C%81%E8%93%9D%E7%89%99%E4%BA%86%EF%BC%9F_%282160p_50fps_VP9-96kbit_AAC%29-00.00.07.100.png/960px-%E7%AC%AC%E4%B8%80%E6%89%8B%EF%BC%81Samsung_Galaxy_S25%E7%B3%BB%E5%88%97%E6%8B%BF%E5%88%B0%E4%BA%86%EF%BC%9A5%E4%B8%AA%E5%8D%87%E7%BA%A7%EF%BC%81S_Pen%E4%B8%8D%E6%94%AF%E6%8C%81%E8%93%9D%E7%89%99%E4%BA%86%EF%BC%9F_%282160p_50fps_VP9-96kbit_AAC%29-00.00.07.100.png?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+     "width": 960,
+     "height": 540
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/f/f9/%E7%AC%AC%E4%B8%80%E6%89%8B%EF%BC%81Samsung_Galaxy_S25%E7%B3%BB%E5%88%97%E6%8B%BF%E5%88%B0%E4%BA%86%EF%BC%9A5%E4%B8%AA%E5%8D%87%E7%BA%A7%EF%BC%81S_Pen%E4%B8%8D%E6%94%AF%E6%8C%81%E8%93%9D%E7%89%99%E4%BA%86%EF%BC%9F_%282160p_50fps_VP9-96kbit_AAC%29-00.00.07.100.png?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 3840,
+     "height": 2160
+    },
+    "pageimage": "第一手！Samsung_Galaxy_S25系列拿到了：5个升级！S_Pen不支持蓝牙了？_(2160p_50fps_VP9-96kbit_AAC)-00.00.07.100.png"
+   },
+   {
+    "pageid": 80696304,
+    "ns": 0,
+    "title": "IPhone 17",
+    "thumbnail": {
+     "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/e6/IPhone_17_Vector.svg/960px-IPhone_17_Vector.svg.png?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+     "width": 960,
+     "height": 1987
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/e/e6/IPhone_17_Vector.svg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 274,
+     "height": 567
+    },
+    "pageimage": "IPhone_17_Vector.svg"
+   },
+   {
+    "pageid": 80795843,
+    "ns": 0,
+    "title": "Pixel 10",
+    "thumbnail": {
+     "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/ec/Pixel_10_front_%28Indigo%29.svg/960px-Pixel_10_front_%28Indigo%29.svg.png?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+     "width": 960,
+     "height": 2025
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/e/ec/Pixel_10_front_%28Indigo%29.svg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 723,
+     "height": 1525
+    },
+    "pageimage": "Pixel_10_front_(Indigo).svg"
+   }
+  ]
+ }
+}

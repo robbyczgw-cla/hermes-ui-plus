@@ -1,0 +1,85 @@
+{
+ "batchcomplete": true,
+ "continue": {
+  "gsroffset": 5,
+  "continue": "gsroffset||"
+ },
+ "query": {
+  "pages": [
+   {
+    "pageid": 8883397,
+    "ns": 0,
+    "title": "Pixels",
+    "index": 5
+   },
+   {
+    "pageid": 9612329,
+    "ns": 0,
+    "title": "Google Pixel",
+    "index": 2,
+    "thumbnail": {
+     "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/b/be/Google_Pixel_and_Pixel_XL_smartphones_%2830155272575%29.jpg/960px-Google_Pixel_and_Pixel_XL_smartphones_%2830155272575%29.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+     "width": 960,
+     "height": 539
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/b/be/Google_Pixel_and_Pixel_XL_smartphones_%2830155272575%29.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 5184,
+     "height": 2912
+    },
+    "pageimage": "Google_Pixel_and_Pixel_XL_smartphones_(30155272575).jpg"
+   },
+   {
+    "pageid": 11158234,
+    "ns": 0,
+    "title": "GrapheneOS",
+    "index": 3,
+    "thumbnail": {
+     "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/1/19/GrapheneOS_Logo.svg/960px-GrapheneOS_Logo.svg.png?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+     "width": 960,
+     "height": 1093
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/1/19/GrapheneOS_Logo.svg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 209,
+     "height": 238
+    },
+    "pageimage": "GrapheneOS_Logo.svg"
+   },
+   {
+    "pageid": 12569540,
+    "ns": 0,
+    "title": "Google Tensor",
+    "index": 4,
+    "thumbnail": {
+     "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/b/bd/Google_Tensor_GS101.svg/960px-Google_Tensor_GS101.svg.png?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+     "width": 960,
+     "height": 960
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/b/bd/Google_Tensor_GS101.svg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 180,
+     "height": 180
+    },
+    "pageimage": "Google_Tensor_GS101.svg"
+   },
+   {
+    "pageid": 13593742,
+    "ns": 0,
+    "title": "Pixel 10",
+    "index": 1,
+    "thumbnail": {
+     "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/88/Pixel_wordmark.svg/960px-Pixel_wordmark.svg.png?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+     "width": 960,
+     "height": 385
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/8/88/Pixel_wordmark.svg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 167,
+     "height": 67
+    },
+    "pageimage": "Pixel_wordmark.svg"
+   }
+  ]
+ }
+}

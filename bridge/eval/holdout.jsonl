@@ -1,0 +1,129 @@
+{"id":"h01","messages":[{"role":"user","content":"Moin, alles fit bei dir?"}],"expected":"text","tags":["de","chitchat"]}
+{"id":"h02","messages":[{"role":"user","content":"Wie lange muss ein Ei kochen, damit es wachsweich ist?"}],"expected":"text","tags":["de","fact"]}
+{"id":"h03","messages":[{"role":"user","content":"Meine Oma liegt im Krankenhaus und ich weiß nicht, wie ich damit umgehen soll."}],"expected":"text","tags":["de","emotional"]}
+{"id":"h04","messages":[{"role":"user","content":"Kannst du mein Bash-Skript debuggen? Es bricht bei der for-Schleife ab."}],"expected":"text","tags":["de","code"]}
+{"id":"h05","messages":[{"role":"user","content":"Schick Lisa eine Nachricht, dass ich 10 Minuten später komme."}],"expected":"text","tags":["de","action"]}
+{"id":"h06","messages":[{"role":"user","content":"Was bedeutet \"Serendipität\"?"}],"expected":"text","tags":["de","fact"]}
+{"id":"h07","messages":[{"role":"user","content":"Write a SQL query that returns the top 5 customers by revenue."}],"expected":"text","tags":["en","code","counterexample"]}
+{"id":"h08","messages":[{"role":"user","content":"Gib mir eine kurze Zusammenfassung von \"Der Prozess\" von Kafka."}],"expected":"text","tags":["de","writing"]}
+{"id":"h09","messages":[{"role":"user","content":"Wie heißt der aktuelle Bundeskanzler?"}],"expected":"text","tags":["de","fact"]}
+{"id":"h10","messages":[{"role":"user","content":"Was soll ich heute Abend kochen? Ich hab Lust auf was Asiatisches."}],"expected":"text","accept":["steps","recipe","choice"],"tags":["de","advice","ambiguous"]}
+{"id":"h11","messages":[{"role":"user","content":"Stell die Preise der Netflix-, Disney+- und Prime-Abos in einer Übersichtstabelle gegenüber."}],"expected":"table","accept":["compare"],"tags":["de","explicit"]}
+{"id":"h12","messages":[{"role":"user","content":"Welche Akkus haben die aktuellen E-Bikes von Bosch, Shimano und Yamaha – Kapazität, Gewicht, Preis?"}],"expected":"table","accept":["compare"],"tags":["de"]}
+{"id":"h13","messages":[{"role":"user","content":"List the planets of the solar system with their number of moons."}],"expected":"table","accept":["chart"],"tags":["en"]}
+{"id":"h14","messages":[{"role":"user","content":"Wie haben sich die Mietpreise in Ulm in den letzten 10 Jahren entwickelt?"}],"expected":"chart","component":"line","tags":["de"]}
+{"id":"h15","messages":[{"role":"user","content":"Wie setzt sich der Bundeshaushalt 2026 zusammen?"}],"expected":"chart","component":"pie","accept":["table"],"tags":["de"]}
+{"id":"h16","messages":[{"role":"user","content":"Show me a chart of Tesla deliveries per quarter in 2025."}],"expected":"chart","component":"bar","accept":["chart"],"tags":["en","explicit"]}
+{"id":"h17","messages":[{"role":"user","content":"Wie viele Tore hat Kane in den letzten 5 Saisons geschossen?"},{"role":"assistant","content":"2021/22: 17, 2022/23: 30, 2023/24: 36, 2024/25: 26, 2025/26: 31 (Liga)."},{"role":"user","content":"Kannst du das visualisieren?"}],"expected":"chart","tags":["de","followup"]}
+{"id":"h18","messages":[{"role":"user","content":"Was ist gerade mit meinem Homeserver los? Last, Temperatur, freier Speicher."}],"expected":"stats","tags":["de"]}
+{"id":"h19","messages":[{"role":"user","content":"Die wichtigsten Zahlen zur Bundestagswahl 2025 auf einen Blick"}],"expected":"stats","accept":["table","chart"],"tags":["de","explicit"]}
+{"id":"h20","messages":[{"role":"user","content":"MacBook Air oder ThinkPad X1 fürs Studium?"}],"expected":"compare","accept":["text"],"tags":["de"]}
+{"id":"h21","messages":[{"role":"user","content":"Pros and cons of renting vs buying a flat in Munich?"}],"expected":"compare","tags":["en","explicit"]}
+{"id":"h22","messages":[{"role":"user","content":"Wie richte ich eine Fritzbox als Mesh-Repeater ein?"}],"expected":"steps","tags":["de"]}
+{"id":"h23","messages":[{"role":"user","content":"Give me a step by step guide to change a car tire."}],"expected":"guide","accept":["steps"],"tags":["en","explicit","v4"]}
+{"id":"h24","messages":[{"role":"user","content":"Wie backe ich ein Sauerteigbrot?"}],"expected":"recipe","accept":["steps"],"tags":["de"]}
+{"id":"h25","messages":[{"role":"user","content":"Was ist in der Geschichte der Berliner Mauer passiert? Bitte chronologisch."}],"expected":"timeline","tags":["de","explicit"]}
+{"id":"h26","messages":[{"role":"user","content":"Mach mir einen Zeitplan für Samstag: Brunch um 10, Wandern ab 12, Kino um 20 Uhr."}],"expected":"agenda","accept":["timeline"],"tags":["de","explicit","v3"]}
+{"id":"h27","messages":[{"role":"user","content":"Ich will ein Abo für mein Fitnessstudio kündigen – stell mir die nötigen Fragen und füll dann das Schreiben aus."}],"expected":"form","accept":["text"],"tags":["de"]}
+{"id":"h28","messages":[{"role":"user","content":"Zeichne ein Ablaufdiagramm, wie eine Pull Request bei uns reviewed wird."}],"expected":"diagram","component":"flowchart","tags":["de","explicit"]}
+{"id":"h29","messages":[{"role":"user","content":"Wie hängen DNS, Reverse Proxy und meine Docker-Container zusammen? Bitte als Skizze."}],"expected":"diagram","component":"architecture","accept":["text"],"tags":["de"]}
+{"id":"h30","messages":[{"role":"user","content":"Explain photosynthesis."}],"expected":"text","accept":["diagram"],"tags":["en","explain"]}
+{"id":"h31","messages":[{"role":"user","content":"Bau mir einen Rechner für meine Stromkosten: Verbrauch, Preis pro kWh, Grundgebühr."}],"expected":"calc","tags":["de","explicit"]}
+{"id":"h32","messages":[{"role":"user","content":"Wie hoch wäre meine monatliche Rate bei 30.000 € Autokredit über 5 Jahre?"}],"expected":"calc","component":"loan","accept":["text"],"tags":["de"]}
+{"id":"h33","messages":[{"role":"user","content":"Wo sind die nächsten Ladesäulen in der Nähe vom Ulmer Münster?"}],"expected":"map","component":"markers","accept":["table"],"tags":["de"]}
+{"id":"h34","messages":[{"role":"user","content":"Plan a 5-day trip through Tuscany and show the route on a map."}],"expected":"map","component":"route","accept":["timeline"],"tags":["en","explicit"]}
+{"id":"h35","messages":[{"role":"user","content":"Mach ein interaktives Modell vom Sonnensystem, in dem ich die Zeit vorspulen kann."}],"expected":"interactive","component":"simulation","tags":["de","explicit"]}
+{"id":"h36","messages":[{"role":"user","content":"Teste mich mit 10 Vokabeln Englisch-Deutsch."}],"expected":"vocab","accept":["quiz","text"],"tags":["de","v4"]}
+{"id":"h37","messages":[{"role":"user","content":"Generiere ein Bild von einem Roboter, der Kaffee kocht."}],"expected":"image","component":"generate","tags":["de","explicit"]}
+{"id":"h38","messages":[{"role":"user","content":"Wie sieht die neue Elbphilharmonie von innen aus?"}],"expected":"image","component":"photo","accept":["text"],"tags":["de"]}
+{"id":"h39","messages":[{"role":"user","content":"Wie lief der Umsatz meines Shops im 3. Quartal?"},{"role":"assistant","content":"Juli 12.400 €, August 9.800 €, September 14.100 €."},{"role":"user","content":"super, danke dir!"}],"expected":"text","tags":["de","followup","chitchat"]}
+{"id":"h40","messages":[{"role":"user","content":"Vergleiche Hetzner und Netcup für einen kleinen VPS."},{"role":"assistant","content":"Hetzner CX22: 2 vCPU, 4 GB, 4,51 €; Netcup VPS 1000: 2 vCPU, 8 GB, 5,99 €."},{"role":"user","content":"und was ist mit Strato?"}],"expected":"compare","accept":["table","text"],"tags":["de","followup"]}
+{"id":"h41","messages":[{"role":"user","content":"Zeig mir die Bevölkerung der 5 größten Städte Bayerns."},{"role":"assistant","content":"München 1,51 Mio., Nürnberg 0,53 Mio., Augsburg 0,30 Mio., Regensburg 0,16 Mio., Ingolstadt 0,14 Mio."},{"role":"user","content":"als Tortendiagramm bitte"}],"expected":"chart","component":"pie","tags":["de","followup","explicit"]}
+{"id":"h42","messages":[{"role":"user","content":"Wie funktioniert ein Git-Rebase?"},{"role":"assistant","content":"Beim Rebase werden deine Commits nacheinander auf einen neuen Basis-Commit neu angewendet ..."},{"role":"user","content":"Kannst du mir das aufzeichnen?"}],"expected":"diagram","accept":["text"],"tags":["de","followup","ambiguous"]}
+{"id":"hv01","messages":[{"role":"user","content":"Wir fahren am Wochenende zum Campen. Schreib auf, was auf die Liste muss."}],"expected":"checklist","component":"packing","accept":["text"],"tags":["de","v2"]}
+{"id":"hv02","messages":[{"role":"user","content":"Setz mir Milch, Eier, Brot und Bananen auf eine Einkaufsliste."}],"expected":"checklist","component":"shopping","tags":["de","explicit","v2"]}
+{"id":"hv03","messages":[{"role":"user","content":"Gib mir bitte eine Aufgabenliste für meine Steuererklärung."}],"expected":"checklist","component":"todo","accept":["text","steps"],"tags":["de","v2"]}
+{"id":"hv04","messages":[{"role":"user","content":"Wie mache ich Spaghetti Bolognese? Ich koche für 5 Leute."}],"expected":"recipe","accept":["steps"],"tags":["de","v2"]}
+{"id":"hv05","messages":[{"role":"user","content":"Hast du ein gutes Rezept für Zwiebelkuchen?"}],"expected":"recipe","tags":["de","explicit","v2"]}
+{"id":"hv06","messages":[{"role":"user","content":"Ich bin hin- und hergerissen, ob ich den Job wechseln soll. Kannst du mir helfen, mich zu entscheiden?"}],"expected":"choice","accept":["text"],"tags":["de","v2"]}
+{"id":"hv07","messages":[{"role":"user","content":"Mach mir drei Vorschläge für Zeiten für ein Meeting am Dienstag."}],"expected":"choice","component":"slots","accept":["text"],"tags":["de","v2"]}
+{"id":"hv08","messages":[{"role":"user","content":"Plane ein Wochenende in Wien für mich, mit Stationen auf der Karte."}],"expected":"map","component":"route","tags":["de","explicit","v2"]}
+{"id":"hv09","messages":[{"role":"user","content":"Zeig mir eine Radtour-Route entlang der Donau von Passau nach Wien."}],"expected":"map","component":"route","accept":["timeline","text"],"tags":["de","v2"]}
+{"id":"hv10","messages":[{"role":"user","content":"Zeig mir die Museen in Amsterdam auf einer Karte."}],"expected":"map","component":"markers","tags":["de","explicit","v2"]}
+{"id":"hv11","messages":[{"role":"user","content":"Bereite mich auf meine Biologie-Klausur vor und frag mich Fragen zur Zellbiologie."}],"expected":"quiz","accept":["text"],"tags":["de","v2"]}
+{"id":"hv12","messages":[{"role":"user","content":"Lerne mit mir englische unregelmäßige Verben, am besten als Lernkarten."}],"expected":"quiz","component":"flashcards","tags":["de","explicit","v2"]}
+{"id":"hv13","messages":[{"role":"user","content":"Kannst du mir ein kurzes Multiple-Choice-Quiz über die Planeten machen?"}],"expected":"quiz","tags":["de","explicit","v2"]}
+{"id":"hv14","messages":[{"role":"user","content":"Berechne, wie viel ich bei 3.800 € brutto in etwa netto behalte, mit Reglern zum Ausprobieren."}],"expected":"calc","accept":["text","form"],"tags":["de","v2"]}
+{"id":"hv15","messages":[{"role":"user","content":"Ich will wissen, was 12 % Rabatt auf 249 € ausmachen, und gleich noch andere Prozentwerte probieren."}],"expected":"calc","accept":["text"],"tags":["de","v2"]}
+{"id":"hv16","messages":[{"role":"user","content":"Savings plan: 200 euros a month at 5% for 15 years. Let me adjust the numbers."}],"expected":"calc","component":"savings","tags":["en","v2"]}
+{"id":"hv17","messages":[{"role":"user","content":"Stell einen Küchentimer auf 12 Minuten."}],"expected":"timer","tags":["de","explicit","v2"]}
+{"id":"hv18","messages":[{"role":"user","content":"Start a 3 minute countdown."}],"expected":"timer","tags":["en","explicit","v2"]}
+{"id":"hv19","messages":[{"role":"user","content":"Wecker auf 7 Uhr bitte"}],"expected":"text","tags":["de","action","v2"]}
+{"id":"hv20","messages":[{"role":"user","content":"Erinnere mich in 20 Minuten an den Kuchen im Ofen."}],"expected":"text","accept":["timer"],"tags":["de","action","v2"]}
+{"id":"hv21","messages":[{"role":"user","content":"Ich plane eine Reise nach Rom."},{"role":"assistant","content":"Schön! Wie viele Tage hast du Zeit?"},{"role":"user","content":"4 Tage, ich will vor allem Sehenswürdigkeiten und gutes Essen."}],"expected":"map","component":"route","accept":["timeline","text"],"tags":["de","followup","ambiguous","v2"]}
+{"id":"hv22","messages":[{"role":"user","content":"Rezept für Gulasch"},{"role":"assistant","content":"Für 4 Personen: 600 g Rindfleisch, 3 Zwiebeln, 2 Paprika, Tomatenmark, Paprikapulver, Brühe. Zwiebeln anbraten, Fleisch zugeben, 90 Minuten schmoren."},{"role":"user","content":"Mach mir daraus eine Einkaufsliste."}],"expected":"checklist","component":"shopping","tags":["de","followup","v2"]}
+{"id":"hv23","messages":[{"role":"user","content":"Wie hoch wäre die Rate für 10.000 € über 36 Monate bei 5 %?"},{"role":"assistant","content":"Rund 300 € pro Monat."},{"role":"user","content":"Kannst du mir das als Rechner bauen, damit ich die Werte ändern kann?"}],"expected":"calc","component":"loan","tags":["de","followup","explicit","v2"]}
+{"id":"hv24","messages":[{"role":"user","content":"Soll ich heute joggen gehen oder ins Fitnessstudio? Ich weiß selbst nicht, worauf ich Lust habe."}],"expected":"choice","accept":["compare","text"],"tags":["de","ambiguous","v2"]}
+{"id":"hv25","messages":[{"role":"user","content":"Wie viel Zucker steckt in einer Dose Cola?"}],"expected":"text","tags":["de","fact","counterexample","v2"]}
+{"id":"hv26","messages":[{"role":"user","content":"Welches Gewürz passt gut zu Linsensuppe?"}],"expected":"text","tags":["de","fact","counterexample","v2"]}
+{"id":"hv27","messages":[{"role":"user","content":"Wie viele Tage braucht man ungefähr für Rom?"}],"expected":"text","accept":["map"],"tags":["de","fact","ambiguous","v2"]}
+{"id":"hv28","messages":[{"role":"user","content":"Rechne bitte 15 % von 80 aus."},{"role":"assistant","content":"12."},{"role":"user","content":"Danke!"}],"expected":"text","tags":["de","followup","chitchat","counterexample","v2"]}
+{"id":"hv301","messages":[{"role":"user","content":"Wie lautet \"Gute Besserung\" auf Türkisch?"}],"expected":"translation","tags":["de","v3","translation"]}
+{"id":"hv302","messages":[{"role":"user","content":"Übersetz mir mal kurz \"Ich habe mich verlaufen\" ins Englische"}],"expected":"translation","tags":["de","v3","translation"]}
+{"id":"hv303","messages":[{"role":"user","content":"¿Me puedes traducir \"Ich vermisse dich\" al español?"}],"expected":"translation","tags":["es","v3","translation"]}
+{"id":"hv304","messages":[{"role":"user","content":"Translate \"see you tomorrow\" into German"}],"expected":"translation","tags":["en","v3","translation"]}
+{"id":"hv305","messages":[{"role":"user","content":"Kannst du mir sagen, wie man \"Prost\" auf Polnisch sagt?"}],"expected":"translation","tags":["de","v3","translation"]}
+{"id":"hv306","messages":[{"role":"user","content":"Schreib mir einen Brief an meine Vermieterin wegen der kaputten Heizung."}],"expected":"text","tags":["de","v3","writing","counterexample"]}
+{"id":"hv307","messages":[{"role":"user","content":"Was heißt \"ubiquitär\"?"}],"expected":"text","tags":["de","v3","fact","counterexample"]}
+{"id":"hv308","messages":[{"role":"user","content":"Poll: pizza or tacos tonight? The whole family decides."}],"expected":"poll","tags":["en","v3","poll"]}
+{"id":"hv309","messages":[{"role":"user","content":"Wir sind zu fünft und wollen abstimmen, welches Brettspiel wir heute spielen."}],"expected":"poll","tags":["de","v3","poll"]}
+{"id":"hv310","messages":[{"role":"user","content":"¿Podemos hacer una encuesta para decidir adónde vamos de excursión el domingo?"}],"expected":"poll","tags":["es","v3","poll"]}
+{"id":"hv311","messages":[{"role":"user","content":"Die Umfrage von Forsa: Wie viele wählen die Grünen?"}],"expected":"text","accept":["chart","stats"],"tags":["de","v3","poll","counterexample"]}
+{"id":"hv312","messages":[{"role":"user","content":"Plane meinen Dienstag: Zahnarzt 8:30, Meeting 11 Uhr, dann Büro bis 17 Uhr."}],"expected":"agenda","tags":["de","v3","agenda"]}
+{"id":"hv313","messages":[{"role":"user","content":"Wie sieht ein guter Tagesablauf für einen Lerntag aus?"}],"expected":"agenda","accept":["text","steps","timeline"],"tags":["de","v3","agenda","ambiguous"]}
+{"id":"hv314","messages":[{"role":"user","content":"Block my morning for deep work and emails, please."}],"expected":"agenda","accept":["text"],"tags":["en","v3","agenda"]}
+{"id":"hv315","messages":[{"role":"user","content":"Wie ist das Wetter gerade in Freiburg?"}],"expected":"weather","tags":["de","v3","weather"]}
+{"id":"hv316","messages":[{"role":"user","content":"Gibt es am Samstag Regen in München?"}],"expected":"weather","tags":["de","v3","weather"]}
+{"id":"hv317","messages":[{"role":"user","content":"Is it going to snow in Innsbruck this weekend?"}],"expected":"weather","tags":["en","v3","weather"]}
+{"id":"hv318","messages":[{"role":"user","content":"Wie entsteht eigentlich ein Gewitter?"}],"expected":"text","tags":["de","v3","weather","counterexample"]}
+{"id":"hv319","messages":[{"role":"user","content":"Bewerte Berlin, Hamburg und München als Wohnort nach Miete, Jobs und Freizeit, mit Gewichtung."}],"expected":"decision","tags":["de","v3","decision"]}
+{"id":"hv320","messages":[{"role":"user","content":"Hilf mir, zwischen drei Handyverträgen zu wählen: Preis ist mir wichtiger als Datenvolumen."}],"expected":"decision","accept":["compare","choice"],"tags":["de","v3","decision","ambiguous"]}
+{"id":"hv321","messages":[{"role":"user","content":"Bring bitte meine Lieblingsfilme in eine Reihenfolge: Alien, Matrix, Heat, Casablanca."}],"expected":"rank","tags":["de","v3","rank"]}
+{"id":"hv322","messages":[{"role":"user","content":"Priorisiere meine Aufgaben für diese Woche nach Dringlichkeit."}],"expected":"rank","accept":["checklist"],"tags":["de","v3","rank"]}
+{"id":"hv323","messages":[{"role":"user","content":"Frag mich nach meiner Stimmung, 1 bis 10."}],"expected":"scale","tags":["de","v3","scale"]}
+{"id":"hv324","messages":[{"role":"user","content":"Ich möchte meinen Schlaf der letzten Nacht bewerten, 1 bis 5 Sterne."}],"expected":"scale","tags":["de","v3","scale"]}
+{"id":"hv325","messages":[{"role":"user","content":"Zeig die Verteilung meiner Ausgaben je Kategorie und Monat gestapelt."}],"expected":"chart","component":"stacked","tags":["de","v3","chart"]}
+{"id":"hv326","messages":[{"role":"user","content":"Stell die zehn höchsten Berge der Welt als horizontale Balken dar."}],"expected":"chart","component":"hbar","tags":["de","v3","chart"]}
+{"id":"hv327","messages":[{"role":"user","content":"Scatter plot of age vs income for these people: 25/32k, 31/41k, 38/55k, 45/62k."}],"expected":"chart","component":"scatter","tags":["en","v3","chart"]}
+{"id":"hv328","messages":[{"role":"user","content":"Mein Lauf-Jahresziel sind 1000 km, bisher habe ich 640. Wie weit bin ich?"}],"expected":"chart","component":"gauge","accept":["text","stats"],"tags":["de","v3","chart","ambiguous"]}
+{"id":"hv329","messages":[{"role":"user","content":"Hier meine Commits pro Tag diese Woche. Stell sie als Kalender-Heatmap dar."}],"expected":"chart","component":"heatmap","tags":["de","v3","chart"]}
+{"id":"hv330","messages":[{"role":"user","content":"Gewinnbrücke von Umsatz zu Gewinn 2025: Umsatz 500k, Material -200k, Personal -150k."}],"expected":"chart","component":"waterfall","accept":["table"],"tags":["de","v3","chart"]}
+{"id":"hv331","messages":[{"role":"user","content":"Radar chart comparing three phones on camera, battery, price and display."}],"expected":"chart","component":"radar","tags":["en","v3","chart"]}
+{"id":"hv332","messages":[{"role":"user","content":"Wie wird das Wetter morgen in Bonn?"},{"role":"assistant","content":"Morgen 12 °C, bewölkt.\n```hui\n{\"type\":\"weather\",\"location\":\"Bonn\",\"daily\":[{\"date\":\"2026-10-12\",\"min\":6,\"max\":12,\"condition\":\"cloudy\"}],\"source\":\"Open-Meteo\",\"basis\":\"sourced\"}\n```"},{"role":"user","content":"Und am Sonntag?"}],"expected":"weather","accept":["text"],"tags":["de","v3","weather","followup"]}
+{"id":"hv333","messages":[{"role":"user","content":"Abstimmung bitte: Kino oder Bowling?"},{"role":"assistant","content":"Los.\n```hui\n{\"type\":\"poll\",\"id\":\"abend\",\"question\":\"Kino oder Bowling?\",\"options\":[{\"label\":\"Kino\"},{\"label\":\"Bowling\"}]}\n```"},{"role":"user","content":"[poll:abend] Kino 1 · Bowling 3 (4 Stimmen)"}],"expected":"text","tags":["de","v3","reply"]}
+{"id":"hv401","messages":[{"role":"user","content":"Wo kann ich in Innsbruck heute Abend gut vegetarisch essen? Restaurant mit Terrasse wäre toll."}],"expected":"places","tags":["de","v4","places"]}
+{"id":"hv402","messages":[{"role":"user","content":"Is there an open pharmacy nearby right now?"}],"expected":"places","tags":["en","v4","places"]}
+{"id":"hv403","messages":[{"role":"user","content":"Hay alguna panadería buena por aquí?"}],"expected":"places","tags":["es","v4","places"]}
+{"id":"hv404","messages":[{"role":"user","content":"Warum sind Restaurants in Deutschland sonntags oft geschlossen?"}],"expected":"text","tags":["de","v4","places","counterexample"]}
+{"id":"hv405","messages":[{"role":"user","content":"Ich brauche neue Laufschuhe. Was empfiehlst du bis 150 €?"}],"expected":"products","tags":["de","v4","products"]}
+{"id":"hv406","messages":[{"role":"user","content":"Which robot vacuum should I buy? Budget is around 400 euros."}],"expected":"products","tags":["en","v4","products"]}
+{"id":"hv407","messages":[{"role":"user","content":"Mejores auriculares inalámbricos por menos de 100 €"}],"expected":"products","tags":["es","v4","products"]}
+{"id":"hv408","messages":[{"role":"user","content":"Wie funktioniert ein Akkuschrauber technisch?"}],"expected":"text","tags":["de","v4","products","counterexample"]}
+{"id":"hv409","messages":[{"role":"user","content":"Erkläre mir bitte Schritt für Schritt, wie ich einen Fahrradplatten flicke."}],"expected":"guide","tags":["de","v4","guide"]}
+{"id":"hv410","messages":[{"role":"user","content":"How do I change a flat tire? Walk me through it."}],"expected":"guide","accept":["steps"],"tags":["en","v4","guide"]}
+{"id":"hv411","messages":[{"role":"user","content":"Cómo cambio la bombilla de un coche?"}],"expected":"guide","accept":["steps"],"tags":["es","v4","guide"]}
+{"id":"hv412","messages":[{"role":"user","content":"Wie melde ich mich beim Finanzamt online an?"}],"expected":"steps","accept":["text","guide"],"tags":["de","v4","guide","counterexample"]}
+{"id":"hv413","messages":[{"role":"user","content":"Ich möchte Muskeln aufbauen. Gib mir ein Ganzkörper-Workout für das Fitnessstudio."}],"expected":"workout","tags":["de","v4","workout"]}
+{"id":"hv414","messages":[{"role":"user","content":"Give me a 4 week training plan for running a 10k."}],"expected":"workout","accept":["studyplan"],"tags":["en","v4","workout"]}
+{"id":"hv415","messages":[{"role":"user","content":"Welche Muskeln werden beim Bankdrücken trainiert?"}],"expected":"text","tags":["de","v4","workout","counterexample"]}
+{"id":"hv416","messages":[{"role":"user","content":"Ich habe in 6 Wochen meine Bio-Prüfung. Mach mir einen Lernplan, ich kann 1 Stunde am Tag."}],"expected":"studyplan","tags":["de","v4","studyplan"]}
+{"id":"hv417","messages":[{"role":"user","content":"Quiero aprender alemán en 8 semanas, ¿me haces un plan de estudio?"}],"expected":"studyplan","tags":["es","v4","studyplan"]}
+{"id":"hv418","messages":[{"role":"user","content":"Ich möchte Vokabeln für Englisch Business trainieren."}],"expected":"vocab","tags":["de","v4","vocab"]}
+{"id":"hv419","messages":[{"role":"user","content":"Help me learn Italian vocabulary about food."}],"expected":"vocab","tags":["en","v4","vocab"]}
+{"id":"hv420","messages":[{"role":"user","content":"Wie sagt man \"Entschuldigung\" auf Italienisch?"}],"expected":"translation","tags":["de","v4","vocab","counterexample"]}
+{"id":"hv421","messages":[{"role":"user","content":"Bitte eine Mindmap zu den Ursachen des Ersten Weltkriegs."}],"expected":"mindmap","tags":["de","v4","mindmap"]}
+{"id":"hv422","messages":[{"role":"user","content":"Visualize how the different parts of the immune system relate, as a mind map."}],"expected":"mindmap","tags":["en","v4","mindmap"]}
+{"id":"hv423","messages":[{"role":"user","content":"Zeig den Ablauf eines Git-Merge als Diagramm."}],"expected":"diagram","accept":["text"],"tags":["de","v4","mindmap","counterexample"]}
+{"id":"hv424","messages":[{"role":"user","content":"Stell mir einen 3-Minuten-Timer, ich mache Zähneputzen."}],"expected":"timer","tags":["de","v4","timer"]}
+{"id":"hv425","messages":[{"role":"user","content":"Avísame en 5 minutos para sacar el pan del horno."}],"expected":"timer","accept":["text"],"tags":["es","v4","timer"]}
+{"id":"hv426","messages":[{"role":"user","content":"Erinnere mich heute Abend um 20 Uhr an das Telefonat mit Mama."}],"expected":"text","tags":["de","v4","timer","counterexample"]}

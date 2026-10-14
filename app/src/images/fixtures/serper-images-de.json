@@ -1,0 +1,98 @@
+{
+ "searchParameters": {
+  "q": "Eiffelturm",
+  "type": "images",
+  "engine": "google"
+ },
+ "images": [
+  {
+   "title": "Eiffelturm bei Nacht",
+   "imageUrl": "https://upload.example.org/eiffel1.jpg",
+   "imageWidth": 1600,
+   "imageHeight": 1067,
+   "thumbnailUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:1",
+   "source": "Reisemagazin",
+   "domain": "www.reisemagazin.example",
+   "link": "https://www.reisemagazin.example/eiffel",
+   "position": 1
+  },
+  {
+   "title": "dup",
+   "imageUrl": "https://upload.example.org/eiffel1.jpg?x=2",
+   "imageWidth": 1600,
+   "imageHeight": 1067,
+   "thumbnailUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:1b",
+   "source": "X",
+   "domain": "other.example",
+   "link": "https://other.example/a",
+   "position": 2
+  },
+  {
+   "title": "insecure",
+   "imageUrl": "http://plain.example/e.jpg",
+   "imageWidth": 1200,
+   "imageHeight": 800,
+   "thumbnailUrl": "https://t.example/1",
+   "link": "https://plain.example/e",
+   "position": 3
+  },
+  {
+   "title": "logo",
+   "imageUrl": "https://svg.example/logo.svg",
+   "imageWidth": 800,
+   "imageHeight": 800,
+   "link": "https://svg.example/",
+   "position": 4
+  },
+  {
+   "title": "animated",
+   "imageUrl": "https://gif.example/a.gif?x=1",
+   "imageWidth": 800,
+   "imageHeight": 800,
+   "link": "https://gif.example/",
+   "position": 5
+  },
+  {
+   "title": "tiny",
+   "imageUrl": "https://tiny.example/t.jpg",
+   "imageWidth": 200,
+   "imageHeight": 900,
+   "link": "https://tiny.example/",
+   "position": 6
+  },
+  {
+   "title": "A",
+   "imageUrl": "https://cdn.same.example/1.jpg",
+   "imageWidth": 900,
+   "imageHeight": 600,
+   "link": "https://www.same.example/p1",
+   "position": 7
+  },
+  {
+   "title": "B",
+   "imageUrl": "https://cdn.same.example/2.jpg",
+   "imageWidth": 900,
+   "imageHeight": 600,
+   "link": "https://same.example/p2",
+   "position": 8
+  },
+  {
+   "title": "C",
+   "imageUrl": "https://cdn.same.example/3.jpg",
+   "imageWidth": 900,
+   "imageHeight": 600,
+   "link": "https://same.example/p3",
+   "position": 9
+  },
+  {
+   "title": "unknown size",
+   "imageUrl": "https://nosize.example/n.png",
+   "link": "not a url",
+   "position": 10
+  },
+  {
+   "imageUrl": null,
+   "position": 11
+  }
+ ]
+}

@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "Main window only. App commands (desktop_*) need no entry. core:default = Tauri's event/window plumbing; notification:default because the notification plugin injects a window.Notification polyfill that queries the permission on load; allow-start-dragging for the header rows under the overlay title bar (app/src/desktop/chrome.ts).",
+  "windows": ["main"],
+  "permissions": ["core:default", "notification:default", "core:window:allow-start-dragging"]
+}

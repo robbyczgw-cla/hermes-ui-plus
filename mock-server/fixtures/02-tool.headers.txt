@@ -1,0 +1,10 @@
+HTTP/1.1 200 OK
+Content-Type: text/event-stream
+Cache-Control: no-cache
+X-Accel-Buffering: no
+X-Hermes-Session-Id: hermes-ui-dev-1791659144
+X-Hermes-Session-Key: hermes-ui-dev
+Transfer-Encoding: chunked
+Date: Sat, 10 Oct 2026 19:05:52 GMT
+Server: Python/3.14 aiohttp/3.14.3
+

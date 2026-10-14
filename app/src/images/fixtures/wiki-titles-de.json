@@ -1,0 +1,322 @@
+{
+ "batchcomplete": true,
+ "query": {
+  "normalized": [
+   {
+    "fromencoded": false,
+    "from": "spanische Treppe",
+    "to": "Spanische Treppe"
+   },
+   {
+    "fromencoded": false,
+    "from": "iPhone 17",
+    "to": "IPhone 17"
+   }
+  ],
+  "redirects": [
+   {
+    "from": "Spaghetti carbonara",
+    "to": "Carbonara"
+   },
+   {
+    "from": "Hund",
+    "to": "Haushund"
+   }
+  ],
+  "pages": [
+   {
+    "ns": 0,
+    "title": "Galaxy S25",
+    "missing": true
+   },
+   {
+    "pageid": 1329,
+    "ns": 0,
+    "title": "Eiffelturm",
+    "thumbnail": {
+     "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/a8/Tour_Eiffel_Wikimedia_Commons.jpg/960px-Tour_Eiffel_Wikimedia_Commons.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+     "width": 960,
+     "height": 1777
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/a/a8/Tour_Eiffel_Wikimedia_Commons.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 2900,
+     "height": 5367
+    },
+    "pageimage": "Tour_Eiffel_Wikimedia_Commons.jpg"
+   },
+   {
+    "pageid": 4265,
+    "ns": 0,
+    "title": "Rom",
+    "thumbnail": {
+     "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c0/Rome_Montage_2017.png/960px-Rome_Montage_2017.png?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+     "width": 960,
+     "height": 1344
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/c/c0/Rome_Montage_2017.png?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 1000,
+     "height": 1400
+    },
+    "pageimage": "Rome_Montage_2017.png"
+   },
+   {
+    "pageid": 12752,
+    "ns": 0,
+    "title": "Wärmepumpe",
+    "thumbnail": {
+     "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/5/51/WP-%C3%9Cbersicht.png/960px-WP-%C3%9Cbersicht.png?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+     "width": 960,
+     "height": 704
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/5/51/WP-%C3%9Cbersicht.png?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 1913,
+     "height": 1403
+    },
+    "pageimage": "WP-Übersicht.png"
+   },
+   {
+    "pageid": 40597,
+    "ns": 0,
+    "title": "Pantheon (Rom)",
+    "thumbnail": {
+     "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/ef/Pantheon_Rom_1_cropped.jpg/960px-Pantheon_Rom_1_cropped.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+     "width": 960,
+     "height": 709
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/e/ef/Pantheon_Rom_1_cropped.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 4109,
+     "height": 3034
+    },
+    "pageimage": "Pantheon_Rom_1_cropped.jpg"
+   },
+   {
+    "pageid": 42209,
+    "ns": 0,
+    "title": "Kolosseum",
+    "thumbnail": {
+     "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/d/de/Colosseo_2020.jpg/960px-Colosseo_2020.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+     "width": 960,
+     "height": 673
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/d/de/Colosseo_2020.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 12051,
+     "height": 8442
+    },
+    "pageimage": "Colosseo_2020.jpg"
+   },
+   {
+    "pageid": 49413,
+    "ns": 0,
+    "title": "Mona Lisa",
+    "thumbnail": {
+     "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/ec/Mona_Lisa%2C_by_Leonardo_da_Vinci%2C_from_C2RMF_retouched.jpg/960px-Mona_Lisa%2C_by_Leonardo_da_Vinci%2C_from_C2RMF_retouched.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+     "width": 960,
+     "height": 1431
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/e/ec/Mona_Lisa%2C_by_Leonardo_da_Vinci%2C_from_C2RMF_retouched.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 7479,
+     "height": 11146
+    },
+    "pageimage": "Mona_Lisa,_by_Leonardo_da_Vinci,_from_C2RMF_retouched.jpg"
+   },
+   {
+    "pageid": 50302,
+    "ns": 0,
+    "title": "Petersdom",
+    "thumbnail": {
+     "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/1/11/St._Peter%27s_Basilica_Rome_-_20140808_2350.jpg/960px-St._Peter%27s_Basilica_Rome_-_20140808_2350.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+     "width": 960,
+     "height": 1396
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/1/11/St._Peter%27s_Basilica_Rome_-_20140808_2350.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 1983,
+     "height": 2884
+    },
+    "pageimage": "St._Peter's_Basilica_Rome_-_20140808_2350.jpg"
+   },
+   {
+    "pageid": 63452,
+    "ns": 0,
+    "title": "Engelsburg",
+    "thumbnail": {
+     "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/7f/Castel_Sant%27Angelo_%28_Mausoleo_di_Andriano%29.jpg/960px-Castel_Sant%27Angelo_%28_Mausoleo_di_Andriano%29.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+     "width": 960,
+     "height": 665
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/7/7f/Castel_Sant%27Angelo_%28_Mausoleo_di_Andriano%29.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 5008,
+     "height": 3469
+    },
+    "pageimage": "Castel_Sant'Angelo_(_Mausoleo_di_Andriano).jpg"
+   },
+   {
+    "pageid": 77753,
+    "ns": 0,
+    "title": "Tiramisu",
+    "thumbnail": {
+     "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/b/b5/Home-made_tiramisu%2C_november_2008.jpg/960px-Home-made_tiramisu%2C_november_2008.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+     "width": 960,
+     "height": 720
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/b/b5/Home-made_tiramisu%2C_november_2008.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 2848,
+     "height": 2136
+    },
+    "pageimage": "Home-made_tiramisu,_november_2008.jpg"
+   },
+   {
+    "pageid": 88133,
+    "ns": 0,
+    "title": "Forum Romanum",
+    "thumbnail": {
+     "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/d/d7/Forum_romanum_6k_%285760x2097%29.jpg/960px-Forum_romanum_6k_%285760x2097%29.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+     "width": 960,
+     "height": 350
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/d/d7/Forum_romanum_6k_%285760x2097%29.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 5760,
+     "height": 2097
+    },
+    "pageimage": "Forum_romanum_6k_(5760x2097).jpg"
+   },
+   {
+    "pageid": 275275,
+    "ns": 0,
+    "title": "Trevi-Brunnen",
+    "thumbnail": {
+     "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c7/Trevi_Fountain_-_Roma.jpg/960px-Trevi_Fountain_-_Roma.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+     "width": 960,
+     "height": 521
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/c/c7/Trevi_Fountain_-_Roma.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 8734,
+     "height": 4738
+    },
+    "pageimage": "Trevi_Fountain_-_Roma.jpg"
+   },
+   {
+    "pageid": 285029,
+    "ns": 0,
+    "title": "Pantheon",
+    "thumbnail": {
+     "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/7b/Pantheon_%28Rome%29_-_Right_side_and_front.jpg/960px-Pantheon_%28Rome%29_-_Right_side_and_front.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+     "width": 960,
+     "height": 773
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/7/7b/Pantheon_%28Rome%29_-_Right_side_and_front.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 7512,
+     "height": 6048
+    },
+    "pageimage": "Pantheon_(Rome)_-_Right_side_and_front.jpg"
+   },
+   {
+    "pageid": 324203,
+    "ns": 0,
+    "title": "Spanische Treppe",
+    "thumbnail": {
+     "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/4/42/Rom_Spanish_Steps_BW_1.JPG/960px-Rom_Spanish_Steps_BW_1.JPG?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+     "width": 960,
+     "height": 1439
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/4/42/Rom_Spanish_Steps_BW_1.JPG?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 1244,
+     "height": 1865
+    },
+    "pageimage": "Rom_Spanish_Steps_BW_1.JPG"
+   },
+   {
+    "pageid": 599233,
+    "ns": 0,
+    "title": "Carbonara",
+    "thumbnail": {
+     "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/3/33/Espaguetis_carbonara.jpg/960px-Espaguetis_carbonara.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+     "width": 960,
+     "height": 640
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/3/33/Espaguetis_carbonara.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 2048,
+     "height": 1365
+    },
+    "pageimage": "Espaguetis_carbonara.jpg"
+   },
+   {
+    "pageid": 1278360,
+    "ns": 0,
+    "title": "Albert Einstein",
+    "thumbnail": {
+     "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/3/3f/Albert_Einstein_1921_by_F_Schmutzer.jpg/960px-Albert_Einstein_1921_by_F_Schmutzer.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+     "width": 960,
+     "height": 1261
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/3/3f/Albert_Einstein_1921_by_F_Schmutzer.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 2523,
+     "height": 3313
+    },
+    "pageimage": "Albert_Einstein_1921_by_F_Schmutzer.jpg"
+   },
+   {
+    "pageid": 2527125,
+    "ns": 0,
+    "title": "Haushund",
+    "thumbnail": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/4/42/Harzer_Fuchs_H%C3%BCndin_2.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=thumbnail_unscaled",
+     "width": 864,
+     "height": 704
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/4/42/Harzer_Fuchs_H%C3%BCndin_2.jpg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 864,
+     "height": 704
+    },
+    "pageimage": "Harzer_Fuchs_Hündin_2.jpg"
+   },
+   {
+    "pageid": 13593742,
+    "ns": 0,
+    "title": "Pixel 10",
+    "thumbnail": {
+     "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/88/Pixel_wordmark.svg/960px-Pixel_wordmark.svg.png?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+     "width": 960,
+     "height": 385
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/8/88/Pixel_wordmark.svg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 167,
+     "height": 67
+    },
+    "pageimage": "Pixel_wordmark.svg"
+   },
+   {
+    "pageid": 13612323,
+    "ns": 0,
+    "title": "IPhone 17",
+    "thumbnail": {
+     "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/e6/IPhone_17_Vector.svg/960px-IPhone_17_Vector.svg.png?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+     "width": 960,
+     "height": 1987
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/e/e6/IPhone_17_Vector.svg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 274,
+     "height": 567
+    },
+    "pageimage": "IPhone_17_Vector.svg"
+   }
+  ]
+ }
+}

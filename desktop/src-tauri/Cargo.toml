@@ -1,0 +1,40 @@
+[package]
+name = "hermes-ui-desktop"
+version = "0.1.0-alpha.1"
+description = "Hermes UI desktop app"
+edition = "2021"
+publish = false
+
+[lib]
+name = "hermes_desktop_lib"
+crate-type = ["staticlib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+
+[dependencies]
+tauri = { version = "2.12", features = ["tray-icon", "image-png", "macos-private-api"] }
+tauri-plugin-window-state = "2.5"
+tauri-plugin-notification = "2.6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+tauri-plugin-global-shortcut = "2.4"
+
+# macOS-native bits Tauri does not cover (src/mac.rs)
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = "0.3"
+objc2-app-kit = "0.3"
+objc2-user-notifications = "0.3"
+objc2-local-authentication = "0.3"
+objc2-service-management = "0.3"
+block2 = "0.6"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

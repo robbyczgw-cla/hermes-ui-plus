@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Blocks pushes whose commits contain secrets (gitleaks over the pushed range) or private names (leak-guard on the pushed tree).
+set -euo pipefail
+. "$(dirname "$0")/_common.sh"
+hui_check_env
+cd "$ROOT"
+remote="${1:-origin}"
+zero=0000000000000000000000000000000000000000
+status=0
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ -n "${local_sha:-}" ] || continue
+  [ "$local_sha" = "$zero" ] && continue   # branch deletion
+  if [ "$remote_sha" = "$zero" ]; then
+    range="$local_sha --not --remotes=$remote"   # new branch: everything not already on the remote
+  else
+    range="$remote_sha..$local_sha"
+  fi
+  echo "pre-push: scanning $local_ref ($range)" >&2
+  gitleaks git --log-opts="$range" --config "$GITLEAKS_CFG" --redact --no-banner --verbose \
+    || { echo "pre-push: gitleaks found secrets (or failed) in $local_ref." >&2; status=1; }
+  "${LEAK_GUARD[@]}" --tree --ref "$local_sha" --quiet \
+    || { echo "pre-push: leak-guard blocked $local_ref (exit $?)." >&2; status=1; }
+done
+exit "$status"

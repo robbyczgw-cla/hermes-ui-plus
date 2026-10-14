@@ -1,0 +1,12 @@
+{
+  "ios": {
+    "NSCameraUsageDescription": "Hermes uses the camera to take photos for your messages and to scan pairing codes (QR).",
+    "NSMicrophoneUsageDescription": "Hermes uses the microphone so you can dictate messages. The recording is only used for speech recognition.",
+    "NSSpeechRecognitionUsageDescription": "Hermes uses your device's speech recognition to turn dictation into text.",
+    "NSPhotoLibraryUsageDescription": "Hermes needs access to your photos to attach images to messages.",
+    "NSPhotoLibraryAddUsageDescription": "Hermes saves images from the chat to your photo library when you choose Save Image.",
+    "NSCalendarsUsageDescription": "Hermes adds events to your calendar when you confirm it in the chat.",
+    "NSCalendarsFullAccessUsageDescription": "Hermes adds events to your calendar when you confirm it in the chat.",
+    "NSLocalNetworkUsageDescription": "Hermes connects to your Hermes server or bridge on your local network."
+  }
+}

@@ -1,0 +1,96 @@
+{
+ "batchcomplete": true,
+ "continue": {
+  "gsroffset": 5,
+  "continue": "gsroffset||"
+ },
+ "query": {
+  "pages": [
+   {
+    "pageid": 2145515,
+    "ns": 0,
+    "title": "IPhone",
+    "index": 5,
+    "thumbnail": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/c/c3/IPhone_18_Pro_Vorderseite_Schwarz.jpeg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=thumbnail_unscaled",
+     "width": 206,
+     "height": 420
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/c/c3/IPhone_18_Pro_Vorderseite_Schwarz.jpeg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 206,
+     "height": 420
+    },
+    "pageimage": "IPhone_18_Pro_Vorderseite_Schwarz.jpeg"
+   },
+   {
+    "pageid": 13612249,
+    "ns": 0,
+    "title": "IPhone 17 Pro",
+    "index": 2,
+    "thumbnail": {
+     "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/f5/IPhone_17_Pro_Vector.svg/960px-IPhone_17_Pro_Vector.svg.png?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+     "width": 960,
+     "height": 1987
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/f/f5/IPhone_17_Pro_Vector.svg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 274,
+     "height": 567
+    },
+    "pageimage": "IPhone_17_Pro_Vector.svg"
+   },
+   {
+    "pageid": 13612323,
+    "ns": 0,
+    "title": "IPhone 17",
+    "index": 1,
+    "thumbnail": {
+     "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/e6/IPhone_17_Vector.svg/960px-IPhone_17_Vector.svg.png?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+     "width": 960,
+     "height": 1987
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/e/e6/IPhone_17_Vector.svg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 274,
+     "height": 567
+    },
+    "pageimage": "IPhone_17_Vector.svg"
+   },
+   {
+    "pageid": 13612343,
+    "ns": 0,
+    "title": "IPhone Air",
+    "index": 3,
+    "thumbnail": {
+     "source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/20/IPhone_Air_Vector.svg/960px-IPhone_Air_Vector.svg.png?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=thumbnail",
+     "width": 960,
+     "height": 1980
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/2/20/IPhone_Air_Vector.svg?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 286,
+     "height": 590
+    },
+    "pageimage": "IPhone_Air_Vector.svg"
+   },
+   {
+    "pageid": 13792177,
+    "ns": 0,
+    "title": "IPhone 17e",
+    "index": 4,
+    "thumbnail": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/0/05/IPhone_17e.png?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=thumbnail_unscaled",
+     "width": 828,
+     "height": 1676
+    },
+    "original": {
+     "source": "https://upload.wikimedia.org/wikipedia/commons/0/05/IPhone_17e.png?utm_source=de.wikipedia.org&utm_campaign=api&utm_content=original",
+     "width": 828,
+     "height": 1676
+    },
+    "pageimage": "IPhone_17e.png"
+   }
+  ]
+ }
+}

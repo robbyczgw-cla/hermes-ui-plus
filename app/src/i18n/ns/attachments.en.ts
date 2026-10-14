@@ -1,0 +1,96 @@
+import type { attachments as de } from './attachments.de.ts';
+
+// Namespace 'attachments' (English). Must have exactly the keys of attachments.de.ts.
+export const attachments = {
+  type: {
+    image: 'IMAGE',
+    file: 'FILE',
+  },
+  source: {
+    camera: 'Camera',
+    library: 'Photos',
+    document: 'File',
+  },
+  button: {
+    a11y: 'Add attachment',
+  },
+  tray: {
+    count: '{count, plural, one {# attachment} other {# attachments}}',
+    uploading: 'Uploading…',
+    uploadingPct: 'Uploading… {percent} %',
+    errorGeneric: 'Error',
+    errorRetry: '{name}: {error}. Tap to retry',
+    remove: 'Remove {name}',
+    fileA11y: '{name}, {sub}',
+    fileA11yRetry: '{name}, {sub}. Tap to retry',
+  },
+  message: {
+    openImage: 'Open image {name}',
+    fileA11y: '{name}, {size}. Tap to open or share',
+  },
+  validate: {
+    unsupportedType: '“{name}”: File type not supported.',
+    unsupportedImage: '“{name}”: Image format not supported.',
+    tooLarge: '“{name}” is too large ({size}, max. {max}).',
+    needsBridge: 'Files need the UI bridge. Without it, only images and small text files (≤ {limit}) are possible.',
+    tooLargeInline: '“{name}” is too large to embed ({size}, max. {max}). Larger files need the UI bridge.',
+    tooLargeText: '“{name}” is too large ({size}, max. {max} for text files).',
+    tooMany: 'At most {max} attachments per message.',
+    defective: '“{name}” has an error. Please remove it.',
+    payloadTooLarge: 'Attachments too large: {size} (max. {max} per message). Please attach fewer images.',
+    historyTooLarge: 'Attachments too large: the chat already holds {history} of attachments (max. {max} in total). Please start a new chat.',
+    openaiTextOnly: 'This server only supports images and text files.',
+    openaiNoImages: 'This server does not accept images.',
+    claudeTooLarge: 'Attachments too large: {size} (max. {max}).',
+  },
+  upload: {
+    unauthorized: 'Upload refused: bridge token invalid. Please check your API key in the settings.',
+    notSupported: 'This connection does not support file uploads. Is the UI bridge up to date?',
+    tooLarge: '“{name}” is too large to upload (max. {max}).',
+    unsupportedType: '“{name}”: file type not accepted by the server.',
+    failedWithReason: 'Upload of “{name}” failed: {reason}',
+    failed: 'Upload of “{name}” failed.',
+    failedNoConnection: 'Upload of “{name}” failed: no connection.',
+    failedStatus: 'Upload of “{name}” failed (HTTP {status}).',
+    badResponse: 'Upload of “{name}”: unexpected response from the server.',
+    aborted: 'Upload cancelled.',
+    noBridge: 'No bridge connection configured.',
+    failedGeneric: 'Upload failed.',
+  },
+  file: {
+    prepareFailed: '“{name}” could not be processed.',
+    openFailed: '“{name}” could not be opened.',
+  },
+  encode: {
+    readFailed: '“{name}” could not be read.',
+    notUploaded: '“{name}” has not been uploaded yet.',
+    messageTooLarge: 'Message too large: {size} (max. {max}). Please attach less.',
+  },
+  picker: {
+    cameraNoAccess: 'Without camera access, Hermes cannot take a photo.',
+    cameraDenied: 'Camera access is turned off. You can allow it in the app settings.',
+    cameraUnavailable: 'No camera access.',
+    videoUnsupported: 'Videos are not supported.',
+    imageFailed: 'An image could not be processed.',
+    limitedPick: 'Only the first {limit} images were added.',
+    onlyRemaining: 'Only {remaining} more attachments possible.',
+    unsupportedType: '“{name}”: file type not supported (PDF, text, Markdown, CSV, JSON, Word, Excel or images).',
+    failedCamera: 'The camera could not be opened.',
+    failedLibrary: 'The photo picker could not be opened.',
+    failedDocument: 'The file picker could not be opened.',
+  },
+  share: {
+    unavailableTitle: 'Not available',
+    gone: '“{name}” is no longer on this device.',
+    impossibleTitle: 'Sharing not possible',
+    noDialog: 'No share sheet is available on this device.',
+  },
+  send: {
+    notUploaded: 'Not all files are uploaded. Please try again.',
+    failed: 'Attachments cannot be sent.',
+  },
+  permission: {
+    title: 'No access',
+    settings: 'Settings',
+  },
+} satisfies typeof de;

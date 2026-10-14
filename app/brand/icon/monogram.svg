@@ -1,0 +1,32 @@
+<!-- Concept A "monogram": bold geometric H with a mint plus spark, on a deep indigo field.
+     Hand-written, 1024 grid. Sections between the markers are composed by scripts/brand-icons.mjs:
+     bg = full-bleed background, mark = glyph (designed for the full 1024 icon, scaled for adaptive / maskable). -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<!--defs--><defs>
+  <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#34319A"/>
+    <stop offset="1" stop-color="#14143A"/>
+  </linearGradient>
+  <radialGradient id="bgGlow" cx="0.3" cy="0.22" r="0.75">
+    <stop offset="0" stop-color="#6C68E8" stop-opacity="0.45"/>
+    <stop offset="1" stop-color="#6C68E8" stop-opacity="0"/>
+  </radialGradient>
+  <linearGradient id="glyphGrad" gradientUnits="userSpaceOnUse" x1="0" y1="262" x2="0" y2="762">
+    <stop offset="0" stop-color="#FFFFFF"/>
+    <stop offset="1" stop-color="#E2DEFF"/>
+  </linearGradient>
+</defs><!--/defs-->
+<!--bg--><g id="bg">
+  <rect width="1024" height="1024" fill="url(#bgGrad)"/>
+  <rect width="1024" height="1024" fill="url(#bgGlow)"/>
+</g><!--/bg-->
+<!--mark--><g id="mark" transform="translate(-34 26)">
+  <!-- H: stems 136 wide, 500 tall; crossbar 100 tall -->
+  <rect x="270" y="262" width="136" height="500" rx="34" fill="url(#glyphGrad)"/>
+  <rect x="566" y="262" width="136" height="500" rx="34" fill="url(#glyphGrad)"/>
+  <rect x="380" y="462" width="212" height="100" fill="url(#glyphGrad)"/>
+  <!-- plus spark, top right, separated from the stem by the field -->
+  <rect x="736" y="212" width="58" height="196" rx="29" fill="#5EF0C8"/>
+  <rect x="667" y="281" width="196" height="58" rx="29" fill="#5EF0C8"/>
+</g><!--/mark-->
+</svg>

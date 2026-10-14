@@ -1,0 +1,23 @@
+refs/
+node_modules/
+.expo/
+.env.local
+dist/
+references/img/
+branding-private/
+
+# push credentials (docs/SELF-HOSTING.md "Push notifications") – never commit
+google-services.json
+GoogleService-Info.plist
+*.p8
+*-firebase-adminsdk-*.json
+vapid*.key
+push-registrations.json
+push-threads.json
+push-hermes.json
+
+# large demo media: hosted on the homepage / release assets, not in git
+docs/media/*.mp4
+docs/media/demo-*.gif
+# website demo videos: copied in at deploy time (website/README.md); the poster JPGs are committed
+website/media/*.mp4

@@ -1,0 +1,55 @@
+{
+ "type": "images",
+ "query": {
+  "original": "Eiffelturm"
+ },
+ "results": [
+  {
+   "type": "image_result",
+   "title": "Eiffelturm Paris",
+   "url": "https://www.paris.example/eiffelturm",
+   "source": "paris.example",
+   "thumbnail": {
+    "src": "https://imgs.search.brave.com/abc",
+    "width": 500,
+    "height": 333
+   },
+   "properties": {
+    "url": "https://img.paris.example/eiffel.jpg",
+    "placeholder": "https://imgs.search.brave.com/ph",
+    "width": 2000,
+    "height": 1333
+   }
+  },
+  {
+   "type": "image_result",
+   "title": "No thumb",
+   "url": "https://b.example/x",
+   "source": "b.example",
+   "properties": {
+    "url": "https://img.b.example/x.jpg",
+    "placeholder": "https://imgs.search.brave.com/ph2"
+   }
+  },
+  {
+   "type": "image_result",
+   "title": "http",
+   "url": "https://c.example/x",
+   "properties": {
+    "url": "http://img.c.example/x.jpg",
+    "width": 900,
+    "height": 900
+   }
+  },
+  {
+   "type": "image_result",
+   "title": "small",
+   "url": "https://d.example/x",
+   "properties": {
+    "url": "https://img.d.example/x.jpg",
+    "width": 299,
+    "height": 900
+   }
+  }
+ ]
+}

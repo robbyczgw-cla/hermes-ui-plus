@@ -1,0 +1,15 @@
+<!-- Round 2 concept "dispatch": three rounded UI bars converge into a paper-plane / send arrow, a swift messenger wing.
+     Hand-written, 1024 grid; sections are composed by scripts/brand-icons.mjs (see monogram.svg). -->
+<!--meta {"round":2,"title":"Dispatch","palette":"ink + mint","rationale":"Three UI bars fold into a send-arrow wing: the messenger in flight, made of interface parts."}-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<!--defs--><defs>
+  <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2E2C86"/><stop offset="1" stop-color="#111134"/></linearGradient>
+  <radialGradient id="bgGlow" cx="0.28" cy="0.2" r="0.8"><stop offset="0" stop-color="#6C68E8" stop-opacity="0.35"/><stop offset="1" stop-color="#6C68E8" stop-opacity="0"/></radialGradient>
+</defs><!--/defs-->
+<!--bg--><g id="bg"><rect width="1024" height="1024" fill="url(#bgGrad)"/><rect width="1024" height="1024" fill="url(#bgGlow)"/></g><!--/bg-->
+<!--mark--><g id="mark" transform="translate(512 512) scale(0.9) translate(-512 -512) translate(34 -14) rotate(-24 512 512) translate(0 60)" fill="none" stroke-linecap="round">
+  <path d="M250 300 L760 330" stroke="#F4F2FF" stroke-width="116"/>
+  <path d="M310 500 L760 330" stroke="#5EF0C8" stroke-width="116"/>
+  <path d="M440 690 L760 330" stroke="#5EF0C8" stroke-width="116"/>
+</g><!--/mark-->
+</svg>

@@ -1,0 +1,57 @@
+{
+  "name": "hermes-ui-plus-bridge",
+  "version": "0.1.0-alpha.1",
+  "description": "Optional UI Bridge for the Hermes Interactive UI+ app (unofficial community client for Hermes Agent): presentation router, uploads, voice, QR pairing and SSE pass-through in front of the Hermes Agent API.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "dev": "node --env-file-if-exists=.env src/server.mjs",
+    "test": "node --test \"test/*.test.mjs\"",
+    "eval": "node eval/run.mjs --backend heuristic",
+    "eval:holdout": "node eval/run.mjs --backend heuristic --cases eval/holdout.jsonl",
+    "eval:anthropic": "node --env-file-if-exists=.env eval/run.mjs --backend heuristic,anthropic",
+    "eval:openai": "node --env-file-if-exists=.env eval/run.mjs --backend heuristic,openai",
+    "eval:cases": "node eval/build-cases.mjs",
+    "bridge": "node bin/hermes-ui-bridge.mjs",
+    "bundle-skill": "node scripts/bundle-skill.mjs",
+    "prepack": "node scripts/bundle-skill.mjs",
+    "docker:build": "node scripts/bundle-skill.mjs && docker build -t hermes-ui-plus-bridge .",
+    "setup": "node bin/hermes-ui-bridge.mjs setup"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
+    "qrcode": "^1.5.4"
+  },
+  "bin": {
+    "hermes-ui-plus-bridge": "bin/hermes-ui-bridge.mjs",
+    "hermes-ui-bridge": "bin/hermes-ui-bridge.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "skill",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "hermes",
+    "hermes-agent",
+    "bridge",
+    "qr-pairing",
+    "setup",
+    "tailscale"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/robbyczgw-cla/hermes-ui-plus.git",
+    "directory": "bridge"
+  },
+  "homepage": "https://github.com/robbyczgw-cla/hermes-ui-plus#readme",
+  "bugs": {
+    "url": "https://github.com/robbyczgw-cla/hermes-ui-plus/issues"
+  }
+}

@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hermes Interactive UI+ – interactive chat for Hermes Agent</title>
+<meta name="description" content="Interactive chat for Hermes Agent. An unofficial, open-source mobile and web app for Hermes Agent: approvals, live tool steps and interactive answers. No accounts, no tracking.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#0F131A">
+<link rel="canonical" href="https://hermesui.xyz/">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Hermes Interactive UI+ – interactive chat for Hermes Agent">
+<meta property="og:description" content="Interactive chat for Hermes Agent. An unofficial, open-source mobile and web app for Hermes Agent: approvals, live tool steps and interactive answers. No accounts, no tracking.">
+<meta property="og:url" content="https://hermesui.xyz/">
+<meta property="og:image" content="https://hermesui.xyz/media/trailer-poster.jpg">
+<meta name="twitter:card" content="summary_large_image">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top">
+<div class="wrap bar">
+<a class="brand" href="/"><img src="/icon.svg" alt="" width="32" height="32"><span>Hermes UI+</span></a>
+<nav aria-label="Main"><ul>
+<li><a href="/#demos">Demos</a></li>
+<li><a href="/#platforms">Platforms</a></li>
+<li><a href="/#self-hosting">Self-hosting</a></li>
+<li><a href="/privacy">Privacy</a></li>
+<li><a href="/support">Support</a></li>
+<li><a href="/security">Security</a></li>
+<li><a href="https://github.com/robbyczgw-cla/hermes-ui-plus">GitHub</a></li>
+</ul></nav>
+</div>
+</header>
+<main id="main" class="wrap" tabindex="-1">
+<section class="hero" aria-labelledby="h-title">
+<p class="eyebrow">Alpha · open source · unofficial community client</p>
+<h1 id="h-title">Hermes Interactive UI+</h1>
+<p class="lead">Interactive chat for Hermes Agent. Approve commands from your phone, watch every tool step live, leave the app while Hermes keeps working, and get answers that are not walls of text.</p>
+<p class="cta">
+<a class="btn primary" href="https://github.com/robbyczgw-cla/hermes-ui-plus/releases">Get the Android alpha</a>
+<a class="btn" href="#self-hosting">Self-hosting</a>
+<a class="btn" href="https://github.com/robbyczgw-cla/hermes-ui-plus">View source on GitHub</a>
+</p>
+<p class="dim">Made for people who run <a href="https://github.com/NousResearch/hermes-agent">Hermes Agent</a> and talk to it through Telegram or the terminal today. Requires Hermes Agent v0.21 or newer and a small bridge that you run yourself.</p>
+</section>
+
+<section aria-labelledby="h-what">
+<h2 id="h-what">What it does</h2>
+<ul class="cards">
+<li><h3>Approvals</h3><p>When Hermes asks before running a command, you see the command and answer in the app.</p></li>
+<li><h3>Live tool steps</h3><p>A timeline shows what ran and how long it took, while the answer streams in.</p></li>
+<li><h3>Leave the app</h3><p>Hermes keeps working in the background; the finished answer waits for you.</p></li>
+<li><h3>Interactive answers</h3><p>About 50 components: tables, charts, checklists, maps, recipes, quizzes, timers. Your taps go back to Hermes as the next message.</p></li>
+<li><h3>Local-first</h3><p>Conversations stay on your device and your own server. No accounts, no telemetry.</p></li>
+<li><h3>Your server only</h3><p>The app talks to your bridge, never to a service of ours. The bridge holds the Hermes API key.</p></li>
+</ul>
+</section>
+
+<section id="demos" aria-labelledby="h-demos">
+<h2 id="h-demos">Demos</h2>
+<p>Short recordings of the app (web build, phone size). All content is prepared sample data, nothing real. The videos have no sound.</p>
+<figure class="trailer">
+<video controls playsinline preload="none" poster="/media/trailer-poster.jpg" width="1920" height="1080" aria-label="Trailer, 45 seconds">
+<source src="/media/trailer.mp4" type="video/mp4">
+<a href="/media/trailer.mp4">Download the trailer (MP4)</a>
+</video>
+<figcaption><strong>Trailer</strong> <span class="dim">45 s</span><br>The best moments in 45 seconds.</figcaption>
+</figure>
+<h3 id="clips-1">For your Hermes Agent</h3>
+<div class="gallery">
+<figure class="clip">
+<video controls muted loop playsinline preload="none" poster="/media/09-freigabe.jpg" width="540" height="960" aria-label="Approvals: demo recording, no sound">
+<source src="/media/09-freigabe.mp4" type="video/mp4">
+<a href="/media/09-freigabe.mp4">Download the demo video (MP4)</a>
+</video>
+<figcaption><strong>Approvals</strong> <span class="dim">21 s</span><br>Hermes wants to delete old files: see the exact command, the risk and the deadline, then tap “Allow once” – from your phone.</figcaption>
+</figure>
+<figure class="clip">
+<video controls muted loop playsinline preload="none" poster="/media/12-langtask.jpg" width="540" height="960" aria-label="Long task, answer waiting: demo recording, no sound">
+<source src="/media/12-langtask.mp4" type="video/mp4">
+<a href="/media/12-langtask.mp4">Download the demo video (MP4)</a>
+</video>
+<figcaption><strong>Long task, answer waiting</strong> <span class="dim">29 s</span><br>A research task with several tool steps: switch to another chat, Hermes keeps working, and the app tells you when the answer – summary and sources – is ready. (Web app: push notification; Android: keeps running in the background.)</figcaption>
+</figure>
+<figure class="clip">
+<video controls muted loop playsinline preload="none" poster="/media/13-toolsteps.jpg" width="540" height="960" aria-label="Live tool steps: demo recording, no sound">
+<source src="/media/13-toolsteps.mp4" type="video/mp4">
+<a href="/media/13-toolsteps.mp4">Download the demo video (MP4)</a>
+</video>
+<figcaption><strong>Live tool steps</strong> <span class="dim">22 s</span><br>A server check: terminal commands, a file read and a web search appear live in “Tools &amp; activity”, then a compact table.</figcaption>
+</figure>
+<figure class="clip">
+<video controls muted loop playsinline preload="none" poster="/media/08-befehle.jpg" width="540" height="960" aria-label="Models &amp; slash commands: demo recording, no sound">
+<source src="/media/08-befehle.mp4" type="video/mp4">
+<a href="/media/08-befehle.mp4">Download the demo video (MP4)</a>
+</video>
+<figcaption><strong>Models &amp; slash commands</strong> <span class="dim">18 s</span><br>Type “/” for the command palette: pick the model for this chat, set reasoning effort, see every command.</figcaption>
+</figure>
+</div>
+<h3 id="clips-2">And answers that look great</h3>
+<div class="gallery">
+<figure class="clip">
+<video controls muted loop playsinline preload="none" poster="/media/02-produkte.jpg" width="540" height="960" aria-label="Product top 5 &amp; compare: demo recording, no sound">
+<source src="/media/02-produkte.mp4" type="video/mp4">
+<a href="/media/02-produkte.mp4">Download the demo video (MP4)</a>
+</video>
+<figcaption><strong>Product top 5 &amp; compare</strong> <span class="dim">30 s</span><br>Headphone ranking with category scores, compare two models, details and “I’ll take this”.</figcaption>
+</figure>
+<figure class="clip">
+<video controls muted loop playsinline preload="none" poster="/media/07-umformen.jpg" width="540" height="960" aria-label="Transform bar: demo recording, no sound">
+<source src="/media/07-umformen.mp4" type="video/mp4">
+<a href="/media/07-umformen.mp4">Download the demo video (MP4)</a>
+</video>
+<figcaption><strong>Transform bar</strong> <span class="dim">28 s</span><br>A long answer about e-bike commuting: one tap on “As a table” and Hermes reshapes it.</figcaption>
+</figure>
+<figure class="clip">
+<video controls muted loop playsinline preload="none" poster="/media/01-orte.jpg" width="540" height="960" aria-label="Place cards: demo recording, no sound">
+<source src="/media/01-orte.mp4" type="video/mp4">
+<a href="/media/01-orte.mp4">Download the demo video (MP4)</a>
+</video>
+<figcaption><strong>Place cards</strong> <span class="dim">33 s</span><br>Restaurants near the Pantheon as cards: swipe, save, details with opening hours, all on a map.</figcaption>
+</figure>
+<figure class="clip">
+<video controls muted loop playsinline preload="none" poster="/media/03-anleitung.jpg" width="540" height="960" aria-label="Step-by-step guide: demo recording, no sound">
+<source src="/media/03-anleitung.mp4" type="video/mp4">
+<a href="/media/03-anleitung.mp4">Download the demo video (MP4)</a>
+</video>
+<figcaption><strong>Step-by-step guide</strong> <span class="dim">34 s</span><br>Changing a bike tube: tick off steps; at step 3 tap “I’m stuck here” and Hermes helps with that step.</figcaption>
+</figure>
+<figure class="clip">
+<video controls muted loop playsinline preload="none" poster="/media/11-designs.jpg" width="540" height="960" aria-label="Themes: demo recording, no sound">
+<source src="/media/11-designs.mp4" type="video/mp4">
+<a href="/media/11-designs.mp4">Download the demo video (MP4)</a>
+</video>
+<figcaption><strong>Themes</strong> <span class="dim">27 s</span><br>Settings → Appearance: Standard, OLED black, Paper, Nord, switched live.</figcaption>
+</figure>
+<figure class="clip">
+<video controls muted loop playsinline preload="none" poster="/media/04-training.jpg" width="540" height="960" aria-label="Workout with rest timer: demo recording, no sound">
+<source src="/media/04-training.mp4" type="video/mp4">
+<a href="/media/04-training.mp4">Download the demo video (MP4)</a>
+</video>
+<figcaption><strong>Workout with rest timer</strong> <span class="dim">33 s</span><br>Full-body session: tapping a set starts the rest countdown; a summary at the end.</figcaption>
+</figure>
+<figure class="clip">
+<video controls muted loop playsinline preload="none" poster="/media/05-vokabeln.jpg" width="540" height="960" aria-label="Vocabulary trainer: demo recording, no sound">
+<source src="/media/05-vokabeln.mp4" type="video/mp4">
+<a href="/media/05-vokabeln.mp4">Download the demo video (MP4)</a>
+</video>
+<figcaption><strong>Vocabulary trainer</strong> <span class="dim">26 s</span><br>English to Spanish: flip cards, multiple choice and forgiving typing with Leitner boxes.</figcaption>
+</figure>
+<figure class="clip">
+<video controls muted loop playsinline preload="none" poster="/media/06-mindmap.jpg" width="540" height="960" aria-label="Mind map: demo recording, no sound">
+<source src="/media/06-mindmap.mp4" type="video/mp4">
+<a href="/media/06-mindmap.mp4">Download the demo video (MP4)</a>
+</video>
+<figcaption><strong>Mind map</strong> <span class="dim">25 s</span><br>A heat pump as a mind map: zoom in, pan, tap a node and ask for more with “Dig deeper”.</figcaption>
+</figure>
+<figure class="clip">
+<video controls muted loop playsinline preload="none" poster="/media/10-rezept.jpg" width="540" height="960" aria-label="Recipe with timers &amp; shopping list: demo recording, no sound">
+<source src="/media/10-rezept.mp4" type="video/mp4">
+<a href="/media/10-rezept.mp4">Download the demo video (MP4)</a>
+</video>
+<figcaption><strong>Recipe with timers &amp; shopping list</strong> <span class="dim">33 s</span><br>Shakshuka: scale servings, start a timer, send ingredients to a shopping list and tick them off.</figcaption>
+</figure>
+</div>
+</section>
+
+<section id="platforms" aria-labelledby="h-platforms">
+<h2 id="h-platforms">Platforms</h2>
+<p>The current version is an alpha (0.1.0-alpha.1). Expect rough edges. It is not in the Google Play Store or the Apple App Store.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Platforms, scrolls sideways on narrow screens"><table>
+<thead><tr><th scope="col">Platform</th><th scope="col">How to get it</th><th scope="col">Status</th></tr></thead>
+<tbody>
+<tr><th scope="row">Android</th><td>Signed APK from <a href="https://github.com/robbyczgw-cla/hermes-ui-plus/releases">GitHub Releases</a>, or add the repository to <a href="https://obtainium.imranr.dev">Obtainium</a> for automatic updates (turn on “Include prereleases”). Android 7.0 or newer, 64-bit ARM.</td><td>Alpha</td></tr>
+<tr><th scope="row">Web app (PWA)</th><td>Prebuilt bundle from GitHub Releases, served by your own bridge, installable to the home screen. <a href="https://github.com/robbyczgw-cla/hermes-ui-plus/blob/main/docs/WEB-APP.md">Install guide</a>.</td><td>Alpha</td></tr>
+<tr><th scope="row">iOS</th><td>Use the web app for now (installable, with push). A native app is prepared for TestFlight.</td><td>Web app now</td></tr>
+<tr><th scope="row">Linux</th><td>Desktop app as AppImage or .deb (x86_64, Ubuntu 22.04 / Debian 12 or newer), see the <a href="https://github.com/robbyczgw-cla/hermes-ui-plus/blob/main/desktop/README.md">desktop notes</a>.</td><td>Alpha</td></tr>
+<tr><th scope="row">macOS</th><td>Native desktop app for Apple Silicon (macOS 13+), signed and notarized: menus and shortcuts, approval actions in notifications, dock badge, menu bar mode, Touch ID lock. See the <a href="https://github.com/robbyczgw-cla/hermes-ui-plus/blob/main/desktop/README.md">desktop notes</a>.</td><td>Alpha</td></tr>
+</tbody></table></div>
+</section>
+
+<section id="self-hosting" aria-labelledby="h-self">
+<h2 id="h-self">Install and self-hosting</h2>
+<p>There is no hosted service. You run a small Node.js service, the <em>bridge</em>, next to your Hermes (Node.js 22+ or Docker). It authenticates your devices, routes presentation, handles uploads, voice and push, and pairs a new phone with a QR code. We strongly recommend reaching it over <a href="https://tailscale.com">Tailscale</a> and never exposing it to the public internet.</p>
+<ol class="steps">
+<li>Turn on the Hermes API server and start the Hermes gateway.</li>
+<li>Run the setup wizard on that machine: <code>npx hermes-ui-plus-bridge setup</code>.</li>
+<li>Install the app and scan the pairing QR code.</li>
+</ol>
+<ul>
+<li><a href="https://github.com/robbyczgw-cla/hermes-ui-plus#quick-start-5-minutes">Quick start (5 minutes)</a></li>
+<li><a href="https://github.com/robbyczgw-cla/hermes-ui-plus/blob/main/docs/SELF-HOSTING.md">Self-hosting guide: bridge, Tailscale, tokens, push, updating</a></li>
+<li><a href="https://github.com/robbyczgw-cla/hermes-ui-plus/blob/main/docs/SETUP-WITH-AGENT.md">Let Hermes or a coding agent set it up for you</a></li>
+<li><a href="https://github.com/robbyczgw-cla/hermes-ui-plus/blob/main/docs/WEB-APP.md">Install the web app</a></li>
+<li><a href="https://github.com/robbyczgw-cla/hermes-ui-plus/blob/main/docs/BRIDGE.md">Why the bridge exists and how it is secured</a></li>
+</ul>
+</section>
+
+<section aria-labelledby="h-priv">
+<h2 id="h-priv">Privacy in short</h2>
+<p>The developers collect no data. There are no accounts, no analytics, no advertising and no crash reporting. Your messages go from your device to your bridge, then to your Hermes, and from there to the model providers you configured. Nowhere else. Read the <a href="/privacy">full privacy policy</a>.</p>
+</section>
+</main>
+<footer class="foot">
+<div class="wrap">
+<p>Hermes Interactive UI+ is an unofficial, open-source community client for the Hermes Agent. It is not affiliated with, endorsed by or supported by Nous Research. No accounts, no analytics, no cookies, no trackers on this site.</p>
+<p><a href="/privacy">Privacy</a> · <a href="/support">Support</a> · <a href="/security">Security</a> · <a href="https://github.com/robbyczgw-cla/hermes-ui-plus">Source code</a> · <a href="https://github.com/robbyczgw-cla/hermes-ui-plus/blob/main/LICENSE">MIT license</a></p>
+</div>
+</footer>
+</body>
+</html>
