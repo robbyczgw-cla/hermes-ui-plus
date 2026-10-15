@@ -19,6 +19,29 @@ Hermes Interactive UI+ (**Hermes UI+** on your home screen) is a mobile, web and
 
 About 10 minutes if Hermes already runs. **Just looking?** Install the Android or desktop app and start the demo from its welcome screen: recorded answers, no Hermes needed.
 
+### Set up with your agent
+
+Hermes can run shell commands, so it can set up its own bridge. Paste this prompt into a direct chat with your Hermes (Telegram, Hermes CLI) or into a coding agent on the machine where Hermes runs (Claude Code, Codex). It checks the prerequisites, asks before anything risky, stays on your tailnet and hands you the pair link. Prefer doing it by hand? Follow the steps below. Variants and details: [docs/SETUP-WITH-AGENT.md](docs/SETUP-WITH-AGENT.md).
+
+<!-- agent-setup-prompt: copied from docs/SETUP-WITH-AGENT.md, scripts/website.test.mjs fails if they differ -->
+```text
+Set up the Hermes UI+ bridge on this machine (the one that runs my Hermes Agent) so I can pair the Hermes UI+ app. Docs: https://github.com/robbyczgw-cla/hermes-ui-plus/blob/main/docs/SETUP-WITH-AGENT.md
+
+1. Check first, change nothing: `node --version` (22 or newer), Hermes home (`$HERMES_HOME` or `~/.hermes`), `tailscale status`. If something is missing, stop and tell me what and how to get it. Do not guess.
+2. Preview: `npx -y hermes-ui-plus-bridge@latest setup --dry-run --json`. Summarize the plan: Hermes API server, skill, env file, service, Tailscale URL, warnings.
+3. If the Hermes API server is off, show me the snippet and restart command from the report and wait. Do not edit Hermes' config or restart Hermes yourself (if you are Hermes, a restart ends this chat).
+4. After my OK: `npx -y hermes-ui-plus-bridge@latest setup --yes --json` (add `--no-pair` if this is not a private chat with me). If it says a system service needs a global install, ask me before `npm install -g hermes-ui-plus-bridge`.
+5. Verify: the report has "ok": true, `curl -s http://127.0.0.1:8790/health` answers, `tailscale serve status` lists the bridge.
+6. Send me the "pair.link" from the report. It carries a one-time code that expires after 1 hour, so do not open it yourself. With `--no-pair`, give me this command for my own terminal instead; it shows a QR code: `npx hermes-ui-plus-bridge devices add "Phone" --env-file <env file>`.
+7. Finally list what was installed and where (skill, env file, service, `tailscale serve`) and how to undo each part, e.g. stop and disable the service, `tailscale serve --https=8790 off`, delete the env file and the skill, restore a skill backup from `~/.hermes/skill-backups/`.
+
+Rules:
+- Tailnet or LAN only: never `tailscale funnel`, port forwarding or a public address for the bridge or the Hermes API.
+- Never print, log or paste API keys or device tokens (the report masks them). Only the one-time pair link may go to me.
+- Ask before installing system packages, changing Hermes' config or restarting Hermes.
+- If a step fails, stop and show me the error with secrets removed.
+```
+
 ### Before you start
 
 - **Hermes Agent v0.21 or newer** on a machine you control. Tested with Hermes v0.22.0; see [Hermes compatibility](#hermes-compatibility).
@@ -51,7 +74,7 @@ The wizard checks Hermes (home directory, API server, version), installs the `he
 - By default the bridge is a pure pass-through to Hermes: no provider keys are asked for. Optional direct-provider extras (LLM router, chat titles, image search, voice) are opt-in with `setup --extras` and call providers from the bridge, outside Hermes; see [docs/BRIDGE.md](docs/BRIDGE.md#where-your-data-goes).
 - Preview first: `npx hermes-ui-plus-bridge setup --dry-run`. Re-run the wizard any time to update; it changes things in place.
 - It never edits Hermes' config without asking and never restarts Hermes. If the Hermes API server is off, it shows the exact config snippet and restart command.
-- **Let an agent do it:** paste a ready-made prompt into Hermes (Telegram, CLI) or Claude Code / Codex: [docs/SETUP-WITH-AGENT.md](docs/SETUP-WITH-AGENT.md). The agent runs `setup --yes --json` and sends you the pair link.
+- **Let an agent do it:** see [Set up with your agent](#set-up-with-your-agent) above; more prompts in [docs/SETUP-WITH-AGENT.md](docs/SETUP-WITH-AGENT.md).
 - Docker, manual setup and LAN-only use: [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md). The skill alone: [hermes-skill/INSTALL.md](hermes-skill/INSTALL.md).
 
 ### 3. Install the app and pair it

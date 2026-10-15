@@ -14,7 +14,33 @@ Many people already run an agent on the machine that hosts Hermes: Hermes itself
 
 The same prompts are built into the app (onboarding and diagnostics, "Copy prompt") in English, German and Spanish. Their source is `app/src/onboarding/agentPrompts.ts`; this page mirrors it.
 
-## Prompts
+## The prompt
+
+One prompt for any agent with a shell on the Hermes machine: Hermes itself (in a direct chat over Telegram or the Hermes CLI), Claude Code, Codex or similar. Paste it as it is. The README and [hermesui.xyz](https://hermesui.xyz/#agent-setup) show the same text, generated from this block.
+
+<!-- agent-setup-prompt:begin -->
+```text
+Set up the Hermes UI+ bridge on this machine (the one that runs my Hermes Agent) so I can pair the Hermes UI+ app. Docs: https://github.com/robbyczgw-cla/hermes-ui-plus/blob/main/docs/SETUP-WITH-AGENT.md
+
+1. Check first, change nothing: `node --version` (22 or newer), Hermes home (`$HERMES_HOME` or `~/.hermes`), `tailscale status`. If something is missing, stop and tell me what and how to get it. Do not guess.
+2. Preview: `npx -y hermes-ui-plus-bridge@latest setup --dry-run --json`. Summarize the plan: Hermes API server, skill, env file, service, Tailscale URL, warnings.
+3. If the Hermes API server is off, show me the snippet and restart command from the report and wait. Do not edit Hermes' config or restart Hermes yourself (if you are Hermes, a restart ends this chat).
+4. After my OK: `npx -y hermes-ui-plus-bridge@latest setup --yes --json` (add `--no-pair` if this is not a private chat with me). If it says a system service needs a global install, ask me before `npm install -g hermes-ui-plus-bridge`.
+5. Verify: the report has "ok": true, `curl -s http://127.0.0.1:8790/health` answers, `tailscale serve status` lists the bridge.
+6. Send me the "pair.link" from the report. It carries a one-time code that expires after 1 hour, so do not open it yourself. With `--no-pair`, give me this command for my own terminal instead; it shows a QR code: `npx hermes-ui-plus-bridge devices add "Phone" --env-file <env file>`.
+7. Finally list what was installed and where (skill, env file, service, `tailscale serve`) and how to undo each part, e.g. stop and disable the service, `tailscale serve --https=8790 off`, delete the env file and the skill, restore a skill backup from `~/.hermes/skill-backups/`.
+
+Rules:
+- Tailnet or LAN only: never `tailscale funnel`, port forwarding or a public address for the bridge or the Hermes API.
+- Never print, log or paste API keys or device tokens (the report masks them). Only the one-time pair link may go to me.
+- Ask before installing system packages, changing Hermes' config or restarting Hermes.
+- If a step fails, stop and show me the error with secrets removed.
+```
+<!-- agent-setup-prompt:end -->
+
+## More prompts (as in the app)
+
+The app's onboarding and diagnostics offer these variants, tuned per agent, plus diagnosis and update prompts.
 
 ### (a) Prompt for your Hermes agent
 
