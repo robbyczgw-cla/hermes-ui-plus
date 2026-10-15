@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { ChatMessage } from '../hermes/types';
 import { createController } from './controller.ts';
-import { INDEX_KEY, createRepo, msgsKey, uriFieldsOf, type StorageLike } from './repo.ts';
+import { CORRUPT_PREFIX, INDEX_KEY, createRepo, msgsKey, uriFieldsOf, type StorageLike } from './repo.ts';
 import { createIndexStore } from './store.ts';
 
 function memory(initial: Record<string, string> = {}) {
@@ -541,4 +541,108 @@ test('save with keepOrder leaves updatedAt (the list order) untouched', async ()
   assert.equal(a.ctl.get(c.id)!.messageCount, 3);
   a.ctl.save(c.id, [m(0, 'Hallo'), m(1, 'Hi'), m(2, 'Noch was'), m(3, 'ok')]);
   assert.ok(a.ctl.get(c.id)!.updatedAt > before);
+});
+
+test('saveNow: the unacknowledged send is in storage before the request starts (no debounce), as queued', async () => {
+  const st = memory();
+  const repo = createRepo(st, { debounceMs: 60_000 }); // a debounced write would not happen within this test
+  const store = createIndexStore(await repo.loadIndex());
+  store.subscribe(() => repo.saveIndex(store.get()));
+  const ctl = createController(store, repo);
+  const c = ctl.create(profile);
+  const user: ChatMessage = { id: 'u1', role: 'user', text: 'Hallo', tools: [], status: 'done', createdAt: 1, sendKey: 'turn-test-1', sendUnacked: true };
+  const placeholder: ChatMessage = { id: 'a1', role: 'assistant', text: '', tools: [], status: 'streaming', createdAt: 1, sendKey: 'turn-test-1' };
+  await ctl.saveNow(c.id, [user, placeholder]);
+  // a kill now: a fresh start reads the transcript and the index straight from storage
+  const b = await boot(st);
+  const meta = b.ctl.get(c.id);
+  assert.ok(meta, 'the chat is in the stored index');
+  assert.equal(meta.historyTruncated, undefined, 'the left-out placeholder is not a cut history');
+  const back = await b.ctl.loadMessages(c.id);
+  assert.deepEqual(back.map((x) => [x.id, x.sendQueued, x.sendKey]), [['u1', true, 'turn-test-1']]);
+});
+
+test('transcript writes are byte-identical to JSON.stringify of the file while a long answer streams', async () => {
+  const st = memory();
+  const repo = createRepo(st, { debounceMs: 5 });
+  const odd: ChatMessage = {
+    ...m(2, 'Ünïcödé „quotes“   \\ "esc" 😀 \u0000'),
+    attachments: [{ id: 'a1', kind: 'image', name: 'a b.png', mimeType: 'image/png', size: 3, uri: 'file:///x/a b.png', status: 'ready' }] as unknown as ChatMessage['attachments'],
+    error: undefined,
+  };
+  const history = [m(0), m(1, 'erste Antwort'), odd, m(3)];
+  let answer = { ...m(5, ''), status: 'streaming' as const };
+  for (let i = 0; i < 12; i++) {
+    answer = { ...answer, text: answer.text + `Teil ${i} – mit **Markdown** und "Zitat".\n` };
+    if (i === 6) history.push(m(4, 'Nachfrage')); // a new message in between
+    const stored = repo.saveMessages('c1', [...history, answer]);
+    await repo.flush();
+    assert.equal(st.data.get(msgsKey('c1')), JSON.stringify({ v: 1, messages: stored }), `save ${i}`);
+  }
+  // the end of the stream (status changes, text replaced) and a reload of what was written
+  const done = repo.saveMessages('c1', [...history, { ...answer, status: 'done', text: 'ersetzt' }]);
+  await repo.flush();
+  assert.equal(st.data.get(msgsKey('c1')), JSON.stringify({ v: 1, messages: done }));
+  assert.deepEqual(JSON.parse(st.data.get(msgsKey('c1'))!).messages, JSON.parse(JSON.stringify(done)));
+});
+
+test('Sol F01: an unreadable transcript is retried, and a persistent read failure never lets a save replace it', async () => {
+  const meta = { id: 'c-1', title: 'x', profile, createdAt: 1, updatedAt: 1, messageCount: 4 };
+  const original = JSON.stringify({ v: 1, messages: [m(0, 'a'), m(1, 'b'), m(2, 'c'), m(3, 'd')] });
+  const st = memory({ [INDEX_KEY]: JSON.stringify({ v: 1, items: [meta] }), [msgsKey('c-1')]: original });
+  let fails = 1;
+  const flaky: StorageLike = { ...st, getItem: async (k) => (k === msgsKey('c-1') && fails-- > 0 ? Promise.reject(new Error('EIO')) : st.getItem(k)) };
+  const ok = await boot(flaky);
+  assert.equal((await ok.ctl.loadMessages('c-1')).length, 4, 'transient failure retried');
+
+  fails = 99;
+  const errors: string[] = [];
+  const broken = await boot(flaky, (_e, w) => errors.push(w));
+  assert.deepEqual(await broken.ctl.loadMessages('c-1'), []); // the chat still opens …
+  broken.ctl.save('c-1', [m(0, 'new message')]); // … but this fallback view never replaces the stored history
+  await broken.repo.flush();
+  assert.equal(st.data.get(msgsKey('c-1')), original, 'stored transcript untouched');
+  assert.equal(broken.store.get().items[0].messageCount, 4, 'index meta not rewritten from the fallback');
+  assert.ok(errors.includes('saveMessages blocked'), errors.join());
+
+  fails = 0; // storage is readable again: the real history comes back and saves work as usual
+  const healed = await broken.ctl.loadMessages('c-1');
+  assert.deepEqual(healed.map((x) => x.text), ['a', 'b', 'c', 'd']);
+  broken.ctl.save('c-1', [...healed, m(4, 'e')]);
+  await broken.repo.flush();
+  assert.equal(JSON.parse(st.data.get(msgsKey('c-1'))!).messages.length, 5);
+});
+
+test('Sol F01: a corrupt transcript is quarantined before the chat may be saved again', async () => {
+  const st = memory({ [msgsKey('x')]: 'oops' });
+  const repo = createRepo(st, { onError: () => {} });
+  assert.deepEqual(await repo.loadMessages('x'), []);
+  repo.saveMessages('x', [m(0, 'fresh')]);
+  await repo.flush();
+  assert.equal(st.data.get(CORRUPT_PREFIX + 'x'), 'oops', 'the unreadable original is kept');
+  assert.equal(JSON.parse(st.data.get(msgsKey('x'))!).messages.length, 1);
+
+  const failing = memory({ [msgsKey('y')]: 'oops' });
+  failing.failNext = true; // the quarantine copy cannot be written: the chat stays read-only
+  const repo2 = createRepo(failing, { onError: () => {} });
+  assert.deepEqual(await repo2.loadMessages('y'), []);
+  repo2.saveMessages('y', [m(0, 'fresh')]);
+  await repo2.flush();
+  assert.equal(failing.data.get(msgsKey('y')), 'oops');
+});
+
+test('Sol F08: an empty save after the queued bubble (cancelled first message) reaches storage; the chat is a draft again', async () => {
+  const st = memory();
+  const a = await boot(st);
+  const c = a.ctl.create(profile);
+  await a.ctl.loadMessages(c.id);
+  a.ctl.save(c.id, [{ ...m(0, 'mit Anhang'), sendQueued: true }]);
+  await a.repo.flush();
+  assert.equal(a.ctl.list().length, 1);
+  a.ctl.save(c.id, []);
+  await a.repo.flush();
+  assert.deepEqual(JSON.parse(st.data.get(msgsKey(c.id))!).messages, []);
+  assert.equal(a.ctl.list().length, 0, 'nothing sent: a draft again');
+  const b = await boot(st);
+  assert.deepEqual(await b.ctl.loadMessages(c.id), [], 'the cancelled message does not come back on restart');
 });

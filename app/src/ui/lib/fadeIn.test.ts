@@ -3,9 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { FADE_IN_MS, FADE_IN_SETTLED, REANIMATED_HANDBACK_MS, fadeInFrom, fadeInPlan, fadeInReactStyle } from './fadeIn.ts';
-
-/** A5 stagger cap of the markdown block entrance (chat/Markdown.tsx ENTER_STAGGER_MAX_MS) */
-const MAX_STAGGER_MS = 200;
+import { ENTER_STAGGER_MAX_MS as MAX_STAGGER_MS } from '../../chat/enterBlock.ts';
 
 test('fade-in: React owns the end state after the fade – before Reanimated could hand back or drop it', () => {
   for (const delay of [0, 40, 120, MAX_STAGGER_MS]) {

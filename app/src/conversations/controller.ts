@@ -6,13 +6,16 @@ import type { ChatMessage } from '../hermes/types.ts';
 import { newConversationId, newSessionIdFor } from './ids.ts';
 import { isDraft } from './indexReducer.ts';
 import { firstUserText, messagesSignature, previewOf } from './messages.ts';
+import { withoutUnackedAnswers } from '../hermes/pendingSend.ts';
 import type { ConversationRepo } from './repo.ts';
 import { searchConversations } from './search.ts';
 import { sortByRecency } from './group.ts';
 import type { IndexStore } from './store.ts';
 import type { ConversationMeta, HermesChatOptions, ProfileRef, SearchHit } from './types.ts';
+import type { ModelLockState } from '../hermes/modelLock.ts';
 import type { RemoteSession } from '../hermes/sessions.ts';
 import { hiddenKey, mergeRemoteSessions, type MergeResult, type SyncFilter } from './remoteSync.ts';
+import { botOf } from '../hermes/bots.ts';
 
 export function createController(store: IndexStore, repo: ConversationRepo, now: () => number = Date.now) {
   /** signature of the last persisted list per conversation: identical saves are no-ops */
@@ -27,12 +30,13 @@ export function createController(store: IndexStore, repo: ConversationRepo, now:
   const mergeRemote = (
     profile: ProfileRef,
     sessions: RemoteSession[],
-    opts: { completeSources?: string[]; filter?: SyncFilter; sameServer?: (profileId: string) => boolean } = {}
+    opts: { completeSources?: string[]; filter?: SyncFilter; sameServer?: (profileId: string) => boolean; bot?: string } = {}
   ): MergeResult => {
     const st = store.get();
     const res = mergeRemoteSessions(st.items, {
       profile,
       sessions,
+      bot: opts.bot,
       completeSources: opts.completeSources,
       filter: opts.filter,
       sameServer: opts.sameServer,
@@ -47,6 +51,36 @@ export function createController(store: IndexStore, repo: ConversationRepo, now:
     return res;
   };
 
+  /**
+   * Persist a conversation's messages (debounced) and refresh title/preview/updatedAt. `keepOrder`: leave
+   * `updatedAt` as it is (a transcript fetched ahead in the background must not move the chat in the list).
+   */
+  const save = (id: string, messages: ChatMessage[], opts: { keepOrder?: boolean } = {}) => {
+    if (!get(id)) return; // deleted meanwhile
+    const sig = messagesSignature(messages);
+    if (sigs.get(id) === sig) return;
+    const stored = repo.saveMessages(id, messages);
+    if (!stored) return; // unreadable stored transcript: neither it nor the index meta is replaced (repo.ts)
+    sigs.set(id, sig);
+    store.dispatch({
+      type: 'saved',
+      id,
+      now: opts.keepOrder ? (get(id)?.updatedAt ?? now()) : now(),
+      firstUserText: firstUserText(messages),
+      preview: previewOf(stored),
+      messageCount: stored.length,
+      // the answer placeholder of a send the server has not accepted yet is not stored (not a cut history)
+      truncated: stored.length < withoutUnackedAnswers(messages).length,
+    });
+  };
+
+  /** Hermes bot of an EMPTY chat (picker "Bot" section); chats with messages keep theirs (no-op). */
+  const setBot = (id: string, bot: string | undefined) => {
+    const c = get(id);
+    if (!c) return;
+    store.dispatch({ type: 'setBot', id, bot, sessionId: newSessionIdFor(c.profileKind) });
+  };
+
   return {
     get,
     list,
@@ -55,20 +89,24 @@ export function createController(store: IndexStore, repo: ConversationRepo, now:
      * Start a conversation for a profile and make it active; re-uses an existing empty draft of the same profile.
      * `{ fresh: true }`: always a new entry and the open conversation stays active (messages arriving for a
      * chat that does not exist yet must never take over the user's open draft).
+     * `bot`: Hermes profile of the new chat (a re-used draft switches to it; hermes/bots.ts).
      */
-    create(profile: ProfileRef, opts: { fresh?: boolean } = {}): ConversationMeta {
+    create(profile: ProfileRef, opts: { fresh?: boolean; bot?: string } = {}): ConversationMeta {
       if (!opts.fresh) {
         const draft = store.get().items.find((c) => isDraft(c) && c.profileId === profile.id && c.profileKind === profile.kind);
         if (draft) {
+          if ((draft.hermesProfile ?? undefined) !== botOf(opts.bot)) setBot(draft.id, opts.bot);
           store.dispatch({ type: 'setActive', id: draft.id });
           return get(draft.id)!;
         }
       }
       const t = now();
       const id = newConversationId(t);
-      store.dispatch({ type: 'create', id, profile, sessionId: newSessionIdFor(profile.kind), now: t, activate: !opts.fresh });
+      store.dispatch({ type: 'create', id, profile, sessionId: newSessionIdFor(profile.kind), now: t, activate: !opts.fresh, bot: opts.bot });
       return get(id)!;
     },
+
+    setBot,
 
     /**
      * A branched chat ("In neuem Chat fortsetzen", /branch): ALWAYS a new conversation (never a re-used draft –
@@ -77,11 +115,12 @@ export function createController(store: IndexStore, repo: ConversationRepo, now:
      */
     createBranch(
       profile: ProfileRef,
-      b: { messages: ChatMessage[]; sessionId?: string; seed?: number; model?: string; modelOptions?: HermesChatOptions; title?: string }
+      b: { messages: ChatMessage[]; sessionId?: string; seed?: number; model?: string; modelOptions?: HermesChatOptions; title?: string; bot?: string }
     ): ConversationMeta {
       const t = now();
       const id = newConversationId(t);
-      store.dispatch({ type: 'create', id, profile, sessionId: b.sessionId ?? newSessionIdFor(profile.kind), now: t, activate: false });
+      // a branch stays on the bot of its source chat (a forked session lives in the same Hermes profile)
+      store.dispatch({ type: 'create', id, profile, sessionId: b.sessionId ?? newSessionIdFor(profile.kind), now: t, activate: false, bot: b.bot });
       this.save(id, b.messages);
       if (b.seed) store.dispatch({ type: 'setBranchSeed', id, count: b.seed });
       if (b.model) store.dispatch({ type: 'setModel', id, model: b.model });
@@ -148,6 +187,11 @@ export function createController(store: IndexStore, repo: ConversationRepo, now:
       store.dispatch({ type: 'setModelOptions', id, options });
     },
 
+    /** outcome of the Hermes session model lock (hermes/modelLock.ts) */
+    setModelLock(id: string, lock: ModelLockState | undefined) {
+      store.dispatch({ type: 'setModelLock', id, lock });
+    },
+
     mergeRemote,
 
     /**
@@ -203,25 +247,15 @@ export function createController(store: IndexStore, repo: ConversationRepo, now:
       }
     },
 
+    save,
+
     /**
-     * Persist a conversation's messages (debounced) and refresh title/preview/updatedAt. `keepOrder`: leave
-     * `updatedAt` as it is (a transcript fetched ahead in the background must not move the chat in the list).
+     * `save` + write to storage now (not debounced); resolves once written (a failed write is reported by the repo
+     * and retried, never thrown). Before a turn request starts (hermes/pendingSend.ts "durable send").
      */
-    save(id: string, messages: ChatMessage[], opts: { keepOrder?: boolean } = {}) {
-      if (!get(id)) return; // deleted meanwhile
-      const sig = messagesSignature(messages);
-      if (sigs.get(id) === sig) return;
-      sigs.set(id, sig);
-      const stored = repo.saveMessages(id, messages);
-      store.dispatch({
-        type: 'saved',
-        id,
-        now: opts.keepOrder ? (get(id)?.updatedAt ?? now()) : now(),
-        firstUserText: firstUserText(messages),
-        preview: previewOf(stored),
-        messageCount: stored.length,
-        truncated: stored.length < messages.length,
-      });
+    saveNow(id: string, messages: ChatMessage[]): Promise<void> {
+      save(id, messages);
+      return repo.flush();
     },
 
     /** Title + message-text search over all (non-draft) conversations. */

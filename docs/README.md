@@ -21,7 +21,8 @@ Start with the [README](../README.md) for an overview and quick start. The files
 
 ## Design notes and maintainer docs
 
-- [QUICK-QUESTIONS.md](QUICK-QUESTIONS.md): design summary for fast one-off questions (design only, not implemented).
+- [QUICK-QUESTIONS.md](QUICK-QUESTIONS.md): design summary for fast one-off questions (Schnellfrage); the backend part is superseded by HERMES-PLUGIN.md.
+- [HERMES-PLUGIN.md](HERMES-PLUGIN.md): optional Hermes plugin `hermes-ui-plus` (experimental), install guide: quick answers through Hermes' own providers, migration plan, risks.
 - [WSP-INTEGRATION.md](WSP-INTEGRATION.md): design summary for the optional Web Search Plus integration (not implemented).
 - [STORE.md](STORE.md): store-readiness checklist and drafts for Google Play and the App Store (nothing submitted).
 - [IOS.md](IOS.md): iOS today (web app / PWA; the native app is prepared, TestFlight pending) and the path to TestFlight and the App Store: release config, versioning, `MODE=appstore` builds, owner checklist, review notes, privacy label.

@@ -31,10 +31,10 @@ export const attachments = {
   validate: {
     unsupportedType: '“{name}”: File type not supported.',
     unsupportedImage: '“{name}”: Image format not supported.',
-    tooLarge: '“{name}” is too large ({size}, max. {max}).',
+    tooLarge: '“{name}” is too large ({size}, max. {max} per file).',
     needsBridge: 'Files need the UI bridge. Without it, only images and small text files (≤ {limit}) are possible.',
     tooLargeInline: '“{name}” is too large to embed ({size}, max. {max}). Larger files need the UI bridge.',
-    tooLargeText: '“{name}” is too large ({size}, max. {max} for text files).',
+    tooLargeText: '“{name}” is too large ({size}, max. {max} per text file).',
     tooMany: 'At most {max} attachments per message.',
     defective: '“{name}” has an error. Please remove it.',
     payloadTooLarge: 'Attachments too large: {size} (max. {max} per message). Please attach fewer images.',
@@ -46,7 +46,7 @@ export const attachments = {
   upload: {
     unauthorized: 'Upload refused: bridge token invalid. Please check your API key in the settings.',
     notSupported: 'This connection does not support file uploads. Is the UI bridge up to date?',
-    tooLarge: '“{name}” is too large to upload (max. {max}).',
+    tooLarge: '“{name}” is too large to upload (max. {max} per file).',
     unsupportedType: '“{name}”: file type not accepted by the server.',
     failedWithReason: 'Upload of “{name}” failed: {reason}',
     failed: 'Upload of “{name}” failed.',
@@ -60,6 +60,7 @@ export const attachments = {
   file: {
     prepareFailed: '“{name}” could not be processed.',
     openFailed: '“{name}” could not be opened.',
+    missingAfterRestart: '“{name}” is no longer on this device – remove it or discard the message.',
   },
   encode: {
     readFailed: '“{name}” could not be read.',

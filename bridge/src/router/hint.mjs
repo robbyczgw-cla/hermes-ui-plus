@@ -33,18 +33,25 @@ export function buildHint(d, o = {}) {
 }
 
 /**
- * Prepend the constant bootstrap system message (unless the client already sent the marker)
- * and append the hint after the leading system messages. Returns a new array; no mutation.
+ * Prepend the constant bootstrap system message (unless the client already sent the marker),
+ * put the constant skill core (bridge/src/skillInline.mjs) right after it, and append the hint
+ * after the leading system messages. Returns a new array; no mutation.
  * Hermes concatenates all system messages in order into the ephemeral system prompt.
+ * The skill only goes into app turns: only together with the bootstrap, once (dedupe by its first line).
  * @param {any[]} messages
- * @param {{bootstrap?: string|null, bootstrapMarker?: string, hint?: string|null}} o
+ * @param {{bootstrap?: string|null, bootstrapMarker?: string, skill?: string|null, hint?: string|null}} o
  */
 export function applySystemMessages(messages, o) {
   let out = [...messages];
   if (o.bootstrap) {
     const marker = o.bootstrapMarker ?? '[hermes-ui-app] Client:';
-    const has = out.some((m) => m?.role === 'system' && typeof m.content === 'string' && m.content.includes(marker));
-    if (!has) out = [{ role: 'system', content: o.bootstrap }, ...out];
+    const isSys = (m) => m?.role === 'system' && typeof m.content === 'string';
+    let at = out.findIndex((m) => isSys(m) && m.content.includes(marker));
+    if (at < 0) { out = [{ role: 'system', content: o.bootstrap }, ...out]; at = 0; }
+    const skillHead = o.skill ? o.skill.split('\n', 1)[0] : '';
+    if (o.skill && !out.some((m) => isSys(m) && m.content.startsWith(skillHead))) {
+      out = [...out.slice(0, at + 1), { role: 'system', content: o.skill }, ...out.slice(at + 1)];
+    }
   }
   if (o.hint) {
     let i = 0;

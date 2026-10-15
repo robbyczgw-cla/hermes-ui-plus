@@ -21,6 +21,8 @@ app/src/attachments/
   share.ts            shareAttachment() (expo-sharing)
   useAttachmentDraft.ts  composer state hook (pick → prepare → eager upload → takeForSend)
   pendingUploads.ts   upload tasks + "send while uploading" (PendingUploads, handed to the chat)  (pure)
+  queuedFilesCore.ts  bytes of a send queued when the app stopped mid-upload: web → IndexedDB, native → existence check  (pure)
+  queuedFiles.ts      its platform wiring (IndexedDB `hui-queued-files`, expo-file-system)
   components/         AttachmentButton, AttachmentTray, MessageAttachments, ImageViewer, icons
   *.test.ts           node:test (46 tests): `node --test src/attachments/*.test.ts`
 ```

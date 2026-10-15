@@ -2,6 +2,9 @@
 # Release gate: scan a built artifact for private content and secrets BEFORE it is published or shared.
 #   scripts/scan-artifact.sh <app-release.apk | .aab | .ipa | .zip | directory (dist/web, unzipped APK) | Foo.app>
 # Runs leak-guard --path (denylist REQUIRED + generic patterns) and gitleaks dir on the unpacked content.
+# A JS bundle (index.android.bundle / main.jsbundle) must decode as Hermes bytecode, so every string of its string
+# table is scanned with its real boundaries (leak-guard --expect-hermes). AAB and IPA are release-only and must contain
+# one; a debug APK has none (it loads from Metro).
 # Exit 0 only when both are clean. Needs HUI_PRIVATE_DIR (private denylist) and gitleaks (docs/LEAK-GUARD.md).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -21,6 +24,7 @@ command -v node >/dev/null || { echo "scan-artifact: node not found" >&2; exit 2
 command -v gitleaks >/dev/null || { echo "scan-artifact: gitleaks not found (docs/LEAK-GUARD.md)" >&2; exit 2; }
 
 work=""
+HERMES=()
 cleanup() { [ -n "$work" ] && rm -rf "$work"; return 0; }
 trap cleanup EXIT
 
@@ -36,14 +40,25 @@ else
     *) echo "scan-artifact: don't know how to unpack $target (give an apk/aab/ipa/zip or a directory)" >&2; exit 2 ;;
   esac
 fi
+if [ -n "$(find "$scan_dir" -type f \( -name index.android.bundle -o -name main.jsbundle \) -print -quit)" ]; then
+  HERMES=(--expect-hermes)
+else
+  case "$target" in
+    *.aab|*.ipa) echo "scan-artifact: $target has no JS bundle (index.android.bundle / main.jsbundle)" >&2; exit 2 ;;
+    *.apk) echo "scan-artifact: no JS bundle in $target (debug APK)" ;;
+  esac
+fi
 echo "scan-artifact: scanning $target"
 rc=0
+# leak-guard --path reads .leak-guard-allow from the working directory: always the repo's, wherever this is called from
+scan_dir="$(cd "$scan_dir" && pwd)"
+lg() { (cd "$ROOT" && node scripts/leak-guard.mjs --path "$scan_dir" "$@"); }
 if [ "$PUBLIC" = 1 ]; then
   echo "== leak-guard (public: generic patterns only, no private overlay) =="
-  node "$ROOT/scripts/leak-guard.mjs" --path "$scan_dir" --generic-only || rc=1
+  lg --generic-only ${HERMES[@]+"${HERMES[@]}"} || rc=1
 else
   echo "== leak-guard (denylist required + generic patterns) =="
-  node "$ROOT/scripts/leak-guard.mjs" --path "$scan_dir" --require-denylist || rc=1
+  lg --require-denylist ${HERMES[@]+"${HERMES[@]}"} || rc=1
 fi
 echo "== gitleaks (secrets) =="
 gitleaks dir "$scan_dir" --config "$ROOT/.gitleaks.toml" --redact --no-banner --verbose || rc=1

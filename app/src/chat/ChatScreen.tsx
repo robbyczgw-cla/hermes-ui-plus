@@ -1,6 +1,6 @@
 import { isConversationVisible } from '../flavor';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { Suspense, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { Suspense, lazy, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { StyleSheet, View, useWindowDimensions } from 'react-native';
 import { setActiveConversation } from '../actions/activeConversation.ts';
 import { markRead, shellState } from '../background/noticeState';
@@ -21,7 +21,8 @@ import {
   type RemoteTranscript,
   type UseConversation,
 } from '../conversations';
-import { HermesOptionsSheet, chatOptionsSummary, effectiveChatOptions, useHermesCapabilities, useHermesChat } from '../hermes';
+import { HermesOptionsSheet, chatOptionsSummary, effectiveChatOptions, modelLocked, useHermesCapabilities, useHermesChat, useHermesModelLock } from '../hermes';
+import { withBot } from '../hermes/bots';
 import { useT } from '../i18n';
 import { isDesktopApp, onDesktopCommand, requestComposerFocus } from '../desktop/bridge';
 import { useWindowVibrancy } from '../desktop/chrome';
@@ -47,6 +48,12 @@ import { useModelFallback } from './useModelFallback';
 import { useConnectionHealth } from './useConnectionHealth';
 import { sessionOptions, usePersistOnNewMessage } from './useSessionPersistence';
 import { usePendingApprovalTarget } from '../approvals/usePendingApprovalTarget';
+import { quickConversationId } from '../quick/core';
+import { useQuickAvailability } from '../quick/hooks';
+import { closeQuick, useQuickOpen } from '../quick/nav';
+
+// the quick thread (⚡) is its own lazy chunk: nothing of it loads until it is opened once
+const QuickSession = lazy(() => import('../quick/QuickSession'));
 
 export type SessionProps = {
   conversationId: string;
@@ -128,6 +135,25 @@ export function ChatScreen() {
     [activeConv, profiles, active, rebound],
   );
   const profile = resolved.status === 'ok' ? resolved.profile : null;
+
+  // ⚡ quick thread of the open chat's connection: shown instead of the chat (which stays mounted, `covered`), mounted
+  // on first use and kept (hidden) afterwards so a running quick answer survives switching back
+  const quickOpen = useQuickOpen();
+  const quickAvail = useQuickAvailability(profile);
+  const showQuick = quickOpen && !!profile && quickAvail.available;
+  const [quickMounted, setQuickMounted] = useState<string | null>(null);
+  if (showQuick && profile && quickMounted !== profile.id) setQuickMounted(profile.id);
+  // not (or no longer) available here – e.g. 404 feature_off mid-session, connection switched: back to the chat
+  useEffect(() => {
+    if (quickOpen && !showQuick) closeQuick();
+  }, [quickOpen, showQuick]);
+  // another chat opened (drawer, new chat, hand-off): the chat column shows it
+  const openChatId = activeConv?.id;
+  const lastChatId = useRef(openChatId);
+  useEffect(() => {
+    if (lastChatId.current !== openChatId) closeQuick();
+    lastChatId.current = openChatId;
+  }, [openChatId]);
   const rebind = useCallback(
     (profileId: string) => {
       if (!activeConv) return;
@@ -189,6 +215,7 @@ export function ChatScreen() {
 
   const openConversation = useCallback(
     (meta: ConversationMeta) => {
+      closeQuick();
       const p = profiles.find((x) => x.id === meta.profileId);
       if (p && p.id !== active.id) setActive(p.id);
       convs.setActiveId(meta.id);
@@ -197,11 +224,14 @@ export function ChatScreen() {
     [profiles, active.id, setActive, convs],
   );
 
+  // a new chat stays on the Hermes bot of the open chat (picker "Bot" section, hermes/bots.ts)
+  const openBot = activeConv?.profileId === active.id ? activeConv.hermesProfile : undefined;
   const newChat = useCallback(() => {
+    closeQuick();
     stopSpeaking();
-    create(active); // also sets it active; re-uses an empty draft of this profile
+    create(active, { bot: openBot }); // also sets it active; re-uses an empty draft of this profile
     setDrawerOpen(false);
-  }, [create, active]);
+  }, [create, active, openBot]);
 
   // desktop app (Tauri): global shortcut / tray / ⌘N → fresh chat with the composer focused
   useEffect(
@@ -307,13 +337,14 @@ export function ChatScreen() {
     </ChatLayoutContext.Provider>
   );
   // sessions of chats with a running turn that are not open (rendered hidden, see `kept`)
-  const slot = (id: string, p: ConnectionProfile, kind: string, visible: boolean) => (
+  const slot = (id: string, p: ConnectionProfile, kind: string, visible: boolean, covered = false) => (
     <SessionSlot
       key={id}
       conversationId={id}
       profile={p}
       kind={kind}
       visible={visible}
+      covered={covered}
       remote={remote}
       onNewChat={newChat}
       onOpenDrawer={openDrawer}
@@ -348,7 +379,12 @@ export function ChatScreen() {
   // stable order (by id): switching between a hidden running chat and the open one only flips visibility,
   // React never re-parents (= remounts) a session
   const ids = mountedSessionIds(activeConv.id, kept);
-  return frame(<>{ids.map((id) => (id === activeConv.id ? slot(id, profile, activeConv.profileKind, true) : hiddenSlot(id)))}</>);
+  return frame(
+    <>
+      {ids.map((id) => (id === activeConv.id ? slot(id, profile, activeConv.profileKind, true, showQuick) : hiddenSlot(id)))}
+      {quickMounted === profile.id && quickAvail.available ? <QuickSlot profile={profile} visible={showQuick} onNewChat={newChat} onSwitchConnection={switchConnection} /> : null}
+    </>,
+  );
 }
 
 type SlotProps = {
@@ -357,6 +393,8 @@ type SlotProps = {
   kind: string;
   /** false: a chat the user left while its turn still runs – hooks stay, ChatView renders nothing */
   visible: boolean;
+  /** the quick thread is shown instead: not displayed, but the whole view stays mounted (scroll, draft) */
+  covered?: boolean;
   remote: ChatShell['remote'];
   onNewChat(): void;
   onOpenDrawer(): void;
@@ -365,8 +403,8 @@ type SlotProps = {
 };
 
 /** One conversation's session (open or hidden-running), with its own shell context and crash boundary. */
-function SessionSlot({ conversationId: id, profile, kind, visible, remote, onNewChat, onOpenDrawer, onResetChat, onSwitchConnection }: SlotProps) {
-  const shell = useMemo<ChatShell>(() => ({ conversationId: id, remote, hidden: !visible }), [id, remote, visible]);
+function SessionSlot({ conversationId: id, profile, kind, visible, covered = false, remote, onNewChat, onOpenDrawer, onResetChat, onSwitchConnection }: SlotProps) {
+  const shell = useMemo<ChatShell>(() => ({ conversationId: id, remote, hidden: !visible, covered }), [id, remote, visible, covered]);
   const resetChat = useCallback(() => onResetChat(id), [onResetChat, id]);
   const sessionProps: SessionProps = { conversationId: id, profile, onNewChat, onOpenDrawer };
   // Hermes renders inline; every other backend is its own lazy chunk (sessionRegistry, integration-B). While that
@@ -374,7 +412,7 @@ function SessionSlot({ conversationId: id, profile, kind, visible, remote, onNew
   const Session = kind === 'hermes' ? undefined : SESSION_COMPONENTS[kind];
   const pending = <SessionPending profile={profile} model={effectiveModel(kind, undefined, profile.model)} onNewChat={onNewChat} onOpenDrawer={onOpenDrawer} />;
   return (
-    <View style={visible ? styles.flex : styles.hidden}>
+    <View style={visible && !covered ? styles.flex : styles.hidden} importantForAccessibility={covered ? 'no-hide-descendants' : 'auto'}>
       <ChatShellContext.Provider value={shell}>
         {/* keyed by chat + profile: a crash never survives a switch; per-message boundaries live in MessageList */}
         <ChatBoundary
@@ -398,6 +436,25 @@ function SessionSlot({ conversationId: id, profile, kind, visible, remote, onNew
   );
 }
 
+/** The ⚡ quick thread of a connection (quick/QuickSession), with its own shell scope and crash boundary. */
+function QuickSlot({ profile, visible, onNewChat, onSwitchConnection }: { profile: ConnectionProfile; visible: boolean; onNewChat(): void; onSwitchConnection(): void }) {
+  const t = useTheme();
+  const id = quickConversationId(profile.id);
+  const shell = useMemo<ChatShell>(() => ({ conversationId: id, hidden: !visible }), [id, visible]);
+  const reset = useCallback(() => deleteConversationState(id), [id]);
+  return (
+    <View style={visible ? styles.flex : styles.hidden}>
+      <ChatShellContext.Provider value={shell}>
+        <ChatBoundary key={id} conversationId={id} profileId={profile.id} onNewChat={onNewChat} onResetChat={reset} onSwitchConnection={onSwitchConnection}>
+          <Suspense fallback={<View style={[styles.flex, { backgroundColor: t.colors.bg }]} />}>
+            <QuickSession profile={profile} />
+          </Suspense>
+        </ChatBoundary>
+      </ChatShellContext.Provider>
+    </View>
+  );
+}
+
 /**
  * Header and composer from the first frame, for every chat. The chat hook mounts once the LOCAL transcript is in
  * (its `initialMessages`; usually synchronous from memory, else one storage read – meanwhile ChatViewPending shows
@@ -408,7 +465,10 @@ function SessionSlot({ conversationId: id, profile, kind, visible, remote, onNew
 function HermesSession(props: SessionProps) {
   const t = useTheme();
   const conv = useConversation(props.conversationId);
-  const transcript = useRemoteTranscript(props.conversationId, props.profile);
+  // the chat's Hermes bot: its sessions API lives under /p/<bot>/ (hermes/bots.ts)
+  const bot = conv.meta?.hermesProfile;
+  const botProfile = useMemo(() => withBot(props.profile, bot), [props.profile, bot]);
+  const transcript = useRemoteTranscript(props.conversationId, botProfile);
   if (!conv.meta) return <View style={[styles.flex, { backgroundColor: t.colors.bg }]} />; // deleted / not in the index
   if (!conv.ready) {
     const model = effectiveModel('hermes', conv.meta.model, props.profile.model);
@@ -420,20 +480,27 @@ function HermesSession(props: SessionProps) {
 function HermesSessionInner({ conv, transcript, profile, onNewChat, onOpenDrawer }: SessionProps & { conv: UseConversation; transcript: RemoteTranscript }) {
   const tr = useT();
   const model = effectiveModel('hermes', conv.meta?.model, profile.model);
+  // Hermes profile ("bot") of this chat: every Hermes request goes to /p/<bot>/… (bridge routes stay at the root)
+  const bot = conv.meta?.hermesProfile;
   const conn = useMemo(
-    () => ({
-      baseUrl: profile.baseUrl,
-      apiKey: profile.apiKey,
-      model,
-      sessionKey: profile.sessionKey,
-      // the UI bridge injects the bootstrap system message itself and takes file uploads
-      bootstrap: !profile.bridge,
-      bridge: !!profile.bridge,
-    }),
-    [profile.baseUrl, profile.apiKey, model, profile.sessionKey, profile.bridge],
+    () =>
+      withBot(
+        {
+          baseUrl: profile.baseUrl,
+          apiKey: profile.apiKey,
+          model,
+          sessionKey: profile.sessionKey,
+          // the UI bridge injects the bootstrap system message itself and takes file uploads
+          bootstrap: !profile.bridge,
+          bridge: !!profile.bridge,
+        },
+        bot,
+      ),
+    [profile.baseUrl, profile.apiKey, model, profile.sessionKey, profile.bridge, bot],
   );
+  const botConn = useMemo(() => withBot({ baseUrl: profile.baseUrl, apiKey: profile.apiKey }, bot), [profile.baseUrl, profile.apiKey, bot]);
   // per-chat reasoning / "Schnell" (read at send time; hidden when the model reports no support)
-  const caps = useHermesCapabilities(profile);
+  const caps = useHermesCapabilities(botConn);
   const modelCaps = caps.modelCaps(model);
   const modelOptions = conv.meta?.modelOptions;
   // branched from an earlier answer: the copied turns go along as context until Hermes accepted a turn (answerMenu.ts)
@@ -450,6 +517,18 @@ function HermesSessionInner({ conv, transcript, profile, onNewChat, onOpenDrawer
     approvalTimeoutSeconds: caps.caps?.approvalTimeoutSeconds,
     branchSeed: conv.meta?.branchSeed,
     onBranchSeedUsed,
+  });
+  // Hermes v0.22: the chat's own model pick is locked on its Hermes session (survives restarts, other Hermes clients)
+  useHermesModelLock({
+    conn,
+    caps: caps.caps,
+    sessionId: chat.sessionId,
+    model: conv.meta?.model,
+    lock: conv.meta?.modelLock,
+    messages: chat.messages,
+    status: chat.status,
+    fromServer: !!conv.meta?.remote,
+    onLock: conv.setModelLock,
   });
   // notification tap "Hermes braucht eine Freigabe" → openPendingApproval(conversationId, runId) (approvals/stackModel.ts)
   usePendingApprovalTarget(conv.meta?.id, chat.openApproval);
@@ -502,6 +581,7 @@ function HermesSessionInner({ conv, transcript, profile, onNewChat, onOpenDrawer
         health={denied ? 'offline' : health}
         offlineHint={denied ? tr('backends.hermes.errors.authDenied') : undefined}
         model={model}
+        modelLocked={modelLocked(conv.meta?.model, conv.meta?.modelLock)}
         onPickModel={(m) => conv.setModel(overrideFor('hermes', m, profile.model))}
         onNewChat={onNewChat}
         onOpenDrawer={onOpenDrawer}

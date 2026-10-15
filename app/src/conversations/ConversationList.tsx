@@ -6,7 +6,6 @@
  * (local only) sit in a collapsible "Archiv" section at the bottom; search still finds them.
  */
 import { useSurfaceBackground } from '../desktop/chrome';
-import { isConversationVisible } from '../flavor';
 import { useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { BackHandler, Modal, Pressable, SectionList, StyleSheet, TextInput, View } from 'react-native';
 import Animated, { FadeOut, ReduceMotion } from 'react-native-reanimated';
@@ -14,9 +13,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useT, type TFn, type TKey } from '../i18n';
 import { Badge, bestOn, haptic, HText, Icon, PressableScale, useTheme } from '../ui';
 import { Loader } from '../ui/loaders';
-import { usePreference } from '../settings/PreferencesProvider';
 import { applyListFilter, EMPTY_SELECTION, selectableIds, selectionReducer } from './bulkDelete';
-import { filterChatScope, inChatScope } from './chatScope';
+import { filterDrawer, shownInDrawer } from './drawerFilter';
+import { useDrawerView } from './useDrawerView';
 import { BulkDeleteDialog, SelectionBox, useRunningIds } from './BulkDeleteDialog';
 import { useConversations } from './ConversationsProvider';
 import { SelectionBottomBar, SelectionHeader, type SelectionFilters } from './SelectionBars';
@@ -103,8 +102,9 @@ export function ConversationList({ onSelect, onNewChat, onDeleted, activeId, pro
   const [filters, setFilters] = useState<SelectionFilters>({ old: false, profile: false });
   const [bulkOpen, setBulkOpen] = useState(false);
   const running = useRunningIds();
-  // Settings → Chat → "Chats": only the chats started on this device (chatScope.ts) – list and search alike
-  const chatScope = usePreference('chatScope');
+  // what the drawer lists – list and search alike (drawerFilter.ts; the desktop menus use the same rule): this build's
+  // kinds, Settings → Chat → "Chats" (chatScope.ts)
+  const view = useDrawerView();
 
   // debounced async search (title + message text)
   const { search, list } = api;
@@ -121,15 +121,9 @@ export function ConversationList({ onSelect, onNewChat, onDeleted, activeId, pro
     // re-run when the list changes (rename/delete while searching)
   }, [query, search, list]);
   const rawHits = query.trim() ? result : null;
-  const filteredHits = useMemo(() => {
-    // chats of kinds this build hides (flavor.ts) stay on disk but are neither listed nor found
-    const flavored = rawHits ? rawHits.filter((h) => isConversationVisible(h.meta) && inChatScope(h.meta, chatScope)) : rawHits;
-  return flavored;
-  }, [rawHits, chatScope]);
-  const allVisible = useMemo(() => {
-    const flavored = filterChatScope(api.list.filter((m) => isConversationVisible(m)), chatScope);
-  return flavored;
-  }, [api.list, chatScope]);
+  // chats of kinds this build hides (flavor.ts) stay on disk but are neither listed nor found
+  const filteredHits = useMemo(() => (rawHits ? rawHits.filter((h) => shownInDrawer(h.meta, view)) : rawHits), [rawHits, view]);
+  const allVisible = useMemo(() => filterDrawer(api.list, view), [api.list, view]);
   // selection filters: "Älter als 7 Tage", "Nur dieses Profil" (= profile of the open chat)
   const activeProfileId = activeId ? api.get(activeId)?.profileId : undefined;
   const listFilter = useMemo(
@@ -476,7 +470,10 @@ function Row({
         disabled={selecting && running}
         accessibilityRole={selecting ? 'checkbox' : 'button'}
         accessibilityState={selecting ? { checked: !!selected, disabled: !!running } : undefined}
-        accessibilityLabel={tr('conversations.list.rowLabel', { title: meta.title, source: source ?? kindLabel(tr, meta.profileKind) })}
+        accessibilityLabel={tr('conversations.list.rowLabel', {
+          title: meta.title,
+          source: (source ?? kindLabel(tr, meta.profileKind)) + (meta.hermesProfile ? `, ${tr('bots.drawer.badgeA11y', { name: meta.hermesProfile })}` : ''),
+        })}
         accessibilityHint={selecting ? (running ? tr('conversations.list.running') : tr('conversations.list.rowSelectHint')) : tr('conversations.list.rowHint')}
         style={({ pressed }) => [styles.rowMain, selecting && styles.rowMainSelecting, pressed && !active && { backgroundColor: t.colors.surfacePressed, borderRadius: t.radii.m }]}
       >
@@ -506,6 +503,8 @@ function Row({
             label={source ?? kindLabel(tr, meta.profileKind)}
             tone={meta.profileKind !== 'hermes' ? KIND_TONE[meta.profileKind] : source && meta.remote?.source !== 'api_server' ? 'success' : 'accent'}
           />
+          {/* Hermes bot (profile) of the chat, only when not the default one (hermes/bots.ts) */}
+          {meta.hermesProfile ? <Badge label={meta.hermesProfile} tone="neutral" /> : null}
           {archivedBadge ? <Badge label={tr('menus.archive.badge')} tone="neutral" /> : null}
           {profileName ? (
             <HText variant="micro" color="subtle" numberOfLines={1} style={styles.flex}>

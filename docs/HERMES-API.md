@@ -13,7 +13,7 @@ call (fixtures in `mock-server/fixtures/`); the rest is from source only.
 
 ## Endpoints (route table AS:1718-1766, RUNS:234-240)
 
-Every path is also mirrored under `/p/<profile>/…` (profile multiplexing; ignore).
+Every path is also mirrored under `/p/<profile>/…` (profile multiplexing, see "Profiles (bots)" below).
 
 | Method + path | Auth | Notes |
 |---|---|---|
@@ -24,7 +24,7 @@ Every path is also mirrored under `/p/<profile>/…` (profile multiplexing; igno
 | `POST /v1/chat/completions` | yes | **the one the app uses** (OR:636). Streaming + non-streaming |
 | `POST /v1/responses`, `GET/DELETE /v1/responses/{id}` | yes | OpenAI Responses API (OR:1060+); different SSE events (`response.*`); not used |
 | `POST /v1/runs`, `GET /v1/runs/{id}`, `GET /v1/runs/{id}/events` (SSE), `POST /v1/runs/{id}/approval`, `/steer`, `/stop` | yes | structured runs API (RUNS:234). **`/approval` also resolves approvals of a streaming chat completion** (see below) |
-| `GET/POST /api/sessions`, `GET/PATCH/DELETE /api/sessions/{id}`, `GET /api/sessions/{id}/messages`, `POST …/fork`, `POST …/chat`, `POST …/chat/stream`, `POST …/model` | yes | Hermes-native session API (server root, not `/v1`). Used for drawer sync, transcript restore and tool details – see "Sessions API" below |
+| `GET/POST /api/sessions`, `GET/PATCH/DELETE /api/sessions/{id}`, `GET /api/sessions/{id}/messages`, `POST …/fork`, `POST …/chat`, `POST …/chat/stream`, `POST …/model` | yes | Hermes-native session API (server root, not `/v1`). Used for drawer sync, transcript restore, tool details and (v0.22) the per-chat model lock – see "Sessions API" and "v0.22 additions" below |
 | `GET /api/model/options` | yes | provider/model catalog with per-model `capabilities` (reasoning/fast) – see "Capabilities + model_options" |
 | `GET /v1/skills`, `/v1/toolsets`, `/api/jobs…`, artifacts, browser-control | yes | out of scope |
 
@@ -36,6 +36,42 @@ not set by default. Native apps send no `Origin`, so they are unaffected. Even w
 the session key nor read `X-Hermes-Session-Id`. => Web preview must use the mock server (or a bridge/proxy).
 Set `API_SERVER_CORS_ORIGINS` only if a web build must talk to Hermes directly; the bridge serves the web app on its
 own origin instead.
+
+## Profiles (bots)
+
+A Hermes **profile** is a named bot with its own model, memory, skills, sessions and `.env`
+(`HERMES_HOME/profiles/<name>/`, created with `hermes profile create <name>`). The desktop app calls this "Bot Mode".
+One gateway serves every profile (`gateway.multiplex_profiles`, default on in current versions):
+
+- Every API path is mirrored under `/p/<profile>/…`: `/p/<name>/v1/chat/completions`, `/p/<name>/v1/models`,
+  `/p/<name>/v1/runs/{id}/approval`, `/p/<name>/api/sessions…`, `/p/<name>/api/model/options`, `/p/<name>/health`.
+  Unprefixed = the default profile. A prefix naming an unknown profile → 404.
+- Auth is the same `API_SERVER_KEY`. Sessions are namespaced per profile; session ids/keys carry the profile.
+- Profile names: lowercase letter or digit first, then lowercase letters, digits, `-`, `_` (max 64). The app and
+  the bridge refuse anything else before it reaches Hermes.
+- Out of scope: bot-to-bot messaging and the desktop app's leased "Bot Chats".
+
+How the app uses it:
+- A Hermes connection can have bots: from `GET /bridge/profiles` (UI bridge) and/or a manual list in the connection
+  editor ("Hermes profiles (bots)", for direct connections). The header model picker shows a compact "Bot" section.
+- A conversation stores its bot (`ConversationMeta.hermesProfile`, absent = default). Every Hermes request of that
+  chat goes to `<root>/p/<bot>/…` (the client rewrites the base URL, `app/src/hermes/bots.ts`); bridge endpoints
+  (`/bridge/*`, uploads, media, voice, meta, `/health`) stay at the server root.
+- Session sync lists `/p/<bot>/api/sessions` per known bot and merges with bot attribution (drawer badge).
+- Bridge approvals, inbox events and push payloads carry `hermesProfile` (absent = default), so a tap opens the
+  chat of the right bot and the answer goes to `/p/<bot>/v1/runs/{id}/approval`.
+
+UI bridge (`bridge/src/profiles.mjs`): the same allow-list as unprefixed paths, the prefix is forwarded verbatim;
+`BRIDGE_PROFILES` = `auto` (directories in `HERMES_HOME/profiles/`), a comma list (`research,work=Work bot`) or `off`;
+unset = `auto` when the Hermes home is readable, otherwise any valid name passes and Hermes answers 404 for unknown
+ones. `GET /bridge/profiles` → `{"object":"list","mode":"auto","data":[{"name":"default","default":true,"model":"…"},
+{"name":"research","default":false,"label":"…","model":"…"}]}` (model = `model.default` of the profile's `config.yaml`,
+nothing else is read out).
+
+Without profiles: the bridge lists the default only and the app shows no "Bot" section. An older bridge without
+`GET /bridge/profiles` (404) counts as "no bots" (cached like a list, not retried every few seconds). A bot whose
+`/p/<bot>/api/sessions` answers 404 (profile gone, or `multiplex_profiles` off) is skipped by the session sync until the
+app restarts.
 
 ## `POST /v1/chat/completions` (OR:636-884)
 
@@ -60,7 +96,8 @@ own origin instead.
 - `content` may be a string or an OpenAI content-part array (`text`, `image_url` with https or `data:` URLs;
   validated by `_normalize_multimodal_content`, ≤1000 parts, ≤64 KB per text part). Body limit 10 MB (AS:233).
 - There is **no `hermes_*` request field** besides `hermes_notification_category`. Hermes-specific knobs are headers.
-- `Idempotency-Key` header only applies to non-streaming requests (OR:786-797).
+- `Idempotency-Key` header only applies to non-streaming requests (OR:786-797). The app sends one per message anyway: the UI bridge
+  dedupes and resumes streaming turns itself (docs/BRIDGE.md "Idempotent send and resume").
 
 ### Request headers
 | Header | Meaning |
@@ -206,6 +243,10 @@ The client is tested with Hermes v0.22.0; the wire facts in this document were v
 5. Stop = abort the fetch. Approvals = separate POST to `/v1/runs/{completion id}/approval`.
 6. Retry after 429/503 honoring `Retry-After`.
 7. `hermes.ui.route` is **not** sent by Hermes – only by the planned UI Bridge (`event: hermes.ui.route`, `data: RouteDecision`, before the first token).
+8. `hermes.text.replace` is **not** sent by Hermes either: an OpenAI-compatible server that streams provisional text may send
+   `event: hermes.text.replace` / `data: {"text": "<whole answer so far>"}` when that text changes before its end; the app
+   replaces the running answer's text (`textReplace`). A `data:` chunk carrying `"hermes": {"replace_fallback": true}` right
+   after it holds the same correction for clients without this event and is skipped by the app.
 
 ## Sessions API **[verified 2026-10-10]** (AS:2972-3300, `hermes_state_messages.py`)
 Auth = Bearer like everything else; the session routes ignore `X-Hermes-Session-Key`. Client: `app/src/hermes/sessions.ts`.
@@ -242,6 +283,80 @@ Auth = Bearer like everything else; the session routes ignore `X-Hermes-Session-
   capabilities:{<model>:{fast, reasoning, can_disable_reasoning?, ultrafast?}}, featured_models, limit?, …}], model, provider}`.
 - Chat completion body `model_options` (source only): `{reasoning:{enabled:bool, effort:"none|minimal|low|medium|high|xhigh|max|ultra"}}` or legacy
   `reasoning_effort`; `fast:true` → service tier `priority` (or explicit `service_tier`). Unknown efforts are ignored, never an error. The bridge forwards the body unchanged.
+
+## v0.22 additions (Hermes v0.22.0, source-verified 2026-10-14)
+
+Source: `api_server.py` (**AS**), `api_server_openai_routes.py` (**OR**), `api_server_runs.py` (**RUNS**),
+`api_server_run_idempotency.py`, `hermes_state_sessions.py`; cited by function name (line numbers move with local patches).
+Only `GET /v1/capabilities` was called for real (through the bridge); everything else is from source and the bridge's
+fake-Hermes tests. No chat turn was sent.
+
+**Capabilities.** `features` gains `run_submission`, `run_status`, `run_events_sse`, `run_stop`, `run_steer`,
+`session_chat`, `session_chat_streaming`, `session_fork`, `session_model_lock`, `reasoning_streaming` (booleans) and
+`runs_idempotency: {supported, durable, retention_seconds: 86400}` (an **object**; the app's parser keeps booleans only).
+`endpoints` names them (`run_steer`: `POST /v1/runs/{run_id}/steer`, `session_model_lock`: `POST /api/sessions/{session_id}/model`, …).
+
+### Reasoning streaming (`reasoning_streaming`)
+- Stream: `data: {"object":"chat.completion.chunk", …, "choices":[{"index":0,"delta":{"reasoning_content":"…"},"finish_reason":null}]}`,
+  interleaved with content chunks, fed by the agent's structured `reasoning_callback` (not the 500-char preview). Never part of
+  `delta.content` (OR `_write_sse_chat_completion`, `__reasoning__` queue items).
+- Non-stream: `choices[0].message.reasoning_content` = the turn's reasoning as persisted (`_turn_reasoning_text`), omitted when empty.
+- Stored: session messages carry `reasoning` / `reasoning_content` (Sessions API above).
+- Not on the other transports: `/v1/runs` events only have `reasoning.available {text: preview}`; `/api/sessions/{id}/chat/stream`
+  sends `tool.progress {tool_name: "_thinking", delta: preview}`.
+- App: `reasoning` events fill `ChatMessage.reasoning` (collapsed "Gedankengang" row in `MessageItem`, thinking steps in the
+  verbose tool timeline), persisted capped at 4000 chars. Already the case since v0.21; v0.22 adds the non-stream field (handled).
+
+### Session model lock (`session_model_lock`)
+```
+POST /api/sessions/{id}/model     {"model": "<route alias | raw model | provider::model>", "provider"?: "…", "model_options"?: {…}}
+→ 200 {"object":"hermes.session.model_lock","session_id":"…","runtime":{"provider","model","route_source","model_lock":"accepted",…}}
+```
+- Aliases: `model_id` / `provider_id`. The virtual `hermes-agent` counts as no model → **400 `missing_model`**. A model Hermes
+  cannot route → **409 `model_lock_unavailable`** ("refusing silent global fallback"). Unknown session → **404 `session_not_found`**
+  (the row must exist: the first accepted turn creates it). DB failure → 500 `model_lock_persistence_failed`.
+- Persisted: `sessions.model_config.browser_model_lock = {provider, model, model_options, route_source, confirmed: true, updated_at}` and
+  `sessions.model` (COALESCE) → survives restarts; `GET /api/sessions` shows `model`, never `model_config` (only `has_model_config`).
+  A `/model` switch inside the session (`update_session_model`) clears the lock. There is **no unlock route**.
+- Honoured by `/api/sessions/{id}/chat` and `/chat/stream` (`_effective_session_runtime_request`: a body model wins, else the
+  stored lock; a confirmed lock disables the fallback-model chain and fails closed). **`/v1/chat/completions` does not read it**
+  (`_select_request_route`: body `model`/`provider`, route alias, per-key `/model` override only).
+- App: a model picked for a chat is locked once the session exists (`hermes/modelLock.ts`); turns still send `model` per request.
+  The header shows "· fixiert" once Hermes confirmed. Bridge allow-list: `POST /api/sessions/{id}/model` (8 KB body).
+
+### Steer (`run_steer`)
+```
+POST /v1/runs/{run_id}/steer   {"input"|"message"|"text": "<text or content parts>"}
+→ 200 {"object":"hermes.run.steer","run_id":"…","accepted":true}        (+ event run.steered on the run's stream)
+```
+Errors: 404 `run_not_found`, 400 `invalid_steer_input`, **409 `run_not_accepting_steer`** (status not `running` or no live agent),
+409 `steer_not_accepted`, 500 `steer_failed`. Steer text the agent did not consume comes back as `pending_steer` on the terminal
+event/status. Needs the run's agent in `_active_run_agents`, which only `/v1/runs` and `/api/sessions/{id}/chat/stream` (run id
+`run_<hex>` in its events) register. **Chat completions never do** (`_spawn_stream_agent` without `active_run_id`; the completion id is
+registered for approvals and status only), so steering a `chatcmpl-…` id always answers 409. Same reason `/v1/runs/{id}/stop` answers
+409 `run_not_active` for them. => not available to the app on its current transport (docs/adr/0002).
+
+### Runs, idempotency, run events
+- `POST /v1/runs` `{input: string | [{role, content}], session_id?, model?, provider?, model_options?, instructions?, previous_response_id?,
+  conversation_history?}` + `X-Hermes-Session-Key`, `Idempotency-Key` (1–255 visible ASCII, else 400 `invalid_idempotency_key`)
+  → **202** `{run_id:"run_<32 hex>", status:"started", replayed:false}`. History comes from `session_id` (live compression tip) when given.
+- Idempotency (`runs_idempotency`): scope = sha256(profile, API key); fingerprint = sha256({body, session key}). Same key + same
+  fingerprint → 202 `{run_id:<original>, status:<current>, replayed:true}` + `Idempotency-Replayed: true`, no new run (also at the
+  concurrency cap); other fingerprint → 409 `idempotency_key_conflict`. SQLite store, 24 h; a non-terminal run whose gateway died reads
+  `interrupted`. Chat completions: the key works **only without `stream`** (in-memory, 5 min, 1000 entries); streaming ignores it.
+- `GET /v1/runs/{id}` → `{object:"hermes.run", run_id, status: queued|running|waiting_for_approval|stopping|completed|failed|cancelled|interrupted,
+  created_at, updated_at, session_id, model, last_event, approval?, output?, usage?, runtime?, error?, pending_steer?}` (terminal: 1 h in memory).
+- `GET /v1/runs/{id}/events` (SSE): `: open` first, then frames `id: <seq>` + `data: {event, run_id, timestamp, …, seq}` (no `event:` line),
+  `: keepalive` every 10 s, `: stream closed` at the end. Events: `message.delta {delta}`, `message.interim {text, already_streamed}`,
+  `tool.started {tool, preview}`, `tool.completed {tool, duration, error, preview≤500}`, `reasoning.available {text}`, `subagent.*`,
+  `approval.request`, `approval.responded`, `run.steered`, `run.completed {output, usage, runtime, completed, partial, interrupted}`,
+  `run.failed {error}`, `run.cancelled`, `run.interrupted`.
+- Replay: the last 1000 events per run stay in memory. `Last-Event-ID: <seq>` (or `?last_seq=<seq>`) replays every event with a higher
+  seq, then continues live; when older events were dropped, `{event:"replay.truncated", oldest_retained_seq, requested_seq?}` comes first.
+  The buffer is dropped 5 min after the run started unless a subscriber is attached (then 404), and is not durable across restarts. A slow
+  subscriber (256 queued events) is disconnected. Only `/v1/runs` runs have this buffer; chat completions and session streams do not.
+- App/bridge 0.1: Hermes' run idempotency and replay need the runs transport, so the bridge provides both for chat completions itself
+  (docs/BRIDGE.md "Idempotent send and resume"); moving to `/v1/runs` is evaluated in docs/adr/0002.
 
 ## Real calls made while writing this doc (3, all with key `hermes-ui-dev`)
 1. `POST /v1/chat/completions` stream, "Antworte nur mit OK" → `fixtures/01-plain.sse` (+ `.headers.txt`)

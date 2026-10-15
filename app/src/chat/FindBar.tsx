@@ -2,7 +2,7 @@
  * "Im Chat suchen": inline find bar under the chat header (chat menu, ⌘/Ctrl+F). Match count, previous / next
  * (Enter / ⇧Enter on a keyboard), Esc or ✕ closes. Matching + highlighting: findInChat.ts / findContext.tsx.
  */
-import { useEffect, useRef } from 'react';
+import { memo, useEffect, useRef } from 'react';
 import { Platform, Pressable, StyleSheet, Text, TextInput, View, type NativeSyntheticEvent, type TextInputKeyPressEventData } from 'react-native';
 import { useT } from '../i18n';
 import { useTheme } from '../ui';
@@ -25,7 +25,7 @@ type Props = {
   focusKey: number;
 };
 
-export function FindBar({ query, onChange, total, current, active, onPrev, onNext, onClose, focusKey }: Props) {
+export const FindBar = memo(function FindBar({ query, onChange, total, current, active, onPrev, onNext, onClose, focusKey }: Props) {
   const t = useTheme();
   const tr = useT();
   const input = useRef<TextInput>(null);
@@ -75,7 +75,7 @@ export function FindBar({ query, onChange, total, current, active, onPrev, onNex
       <BarButton icon="close" label={tr('menus.find.close')} onPress={onClose} />
     </View>
   );
-}
+});
 
 function BarButton({ icon, label, onPress, disabled, flip }: { icon: IconName; label: string; onPress(): void; disabled?: boolean; flip?: boolean }) {
   const t = useTheme();

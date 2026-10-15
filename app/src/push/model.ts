@@ -7,6 +7,7 @@
 import type { ChatMessage } from '../hermes/types.ts';
 import type { ConversationMeta } from '../conversations/types.ts';
 import { inboxSources, sessionAllowed, type SyncFilter } from '../conversations/remoteSync.ts';
+import { botOf } from '../hermes/bots.ts';
 
 export type PreviewMode = 'auto' | 'on' | 'off';
 export type QuietHours = { from: string; to: string };
@@ -145,6 +146,8 @@ export type PushTarget = {
   kind?: 'approval';
   runId?: string;
   requestId?: string;
+  /** hermes: Hermes profile ("bot") of the session (bridge `hermesProfile`; undefined = default) */
+  hermesProfile?: string;
 };
 
 /**
@@ -177,6 +180,7 @@ export function parseTarget(raw: unknown): PushTarget | null {
     source: str(o.source),
     messageId: str(o.messageId),
     ...(str(o.conversationId) ? { conversationId: str(o.conversationId) } : {}),
+    ...(botOf(str(o.hermesProfile)) ? { hermesProfile: botOf(str(o.hermesProfile)) } : {}),
     ...(o.kind === 'approval' ? { kind: 'approval' as const, runId: str(o.runId), requestId: str(o.requestId) } : {}),
   };
 }
@@ -192,6 +196,8 @@ export type InboxEvent = {
   source?: string;
   /** agent servers */
   agent?: string;
+  /** hermes: Hermes profile ("bot") of the session (undefined = default) */
+  hermesProfile?: string;
 };
 
 export function parseInboxEvent(data: string): InboxEvent | null {
@@ -206,6 +212,7 @@ export function parseInboxEvent(data: string): InboxEvent | null {
       sessionId: typeof o.sessionId === 'string' ? o.sessionId : null,
       source: typeof o.source === 'string' ? o.source : undefined,
       agent: typeof o.agent === 'string' ? o.agent : undefined,
+      ...(typeof o.hermesProfile === 'string' && botOf(o.hermesProfile) ? { hermesProfile: botOf(o.hermesProfile) } : {}),
     };
   } catch {
     return null;
@@ -217,7 +224,8 @@ const isDraft = (c: ConversationMeta) => !c.preview && c.messageCount === 0;
 /**
  * The conversation an inbox event / notification belongs to, or null (Hermes: fetch + merge the session;
  * agent servers: start a new conversation).
- * - Hermes: same profile and `hermesSessionId === sessionId`.
+ * - Hermes: same profile and `hermesSessionId === sessionId`; the chat of the same bot (`hermesProfile`) wins over
+ *   one of another bot with the same session id (events of older bridges carry no bot: session match only).
  * - agent servers: same profile; with a session id only the matching chat (none → null: a new chat bound to it),
  *   otherwise (the adapter's default thread per user+agent) the most recent chat of that agent
  *   (`meta.model ?? profile.model`).
@@ -225,10 +233,15 @@ const isDraft = (c: ConversationMeta) => !c.preview && c.messageCount === 0;
 export function pickConversation(
   list: readonly ConversationMeta[],
   profile: Pick<PushProfile, 'id' | 'kind' | 'model'>,
-  t: { sessionId?: string | null; agent?: string },
+  t: { sessionId?: string | null; agent?: string; hermesProfile?: string },
 ): ConversationMeta | null {
   const mine = list.filter((c) => c.profileId === profile.id);
-  if (profile.kind === 'hermes') return t.sessionId ? (mine.find((c) => c.hermesSessionId === t.sessionId) ?? null) : null;
+  if (profile.kind === 'hermes') {
+    if (!t.sessionId) return null;
+    const bot = botOf(t.hermesProfile);
+    const same = mine.filter((c) => c.hermesSessionId === t.sessionId);
+    return same.find((c) => botOf(c.hermesProfile) === bot) ?? same[0] ?? null;
+  }
   // an explicit session is THAT thread: unmatched stays unmatched (never another chat of the agent, Astra F09)
   if (t.sessionId) return mine.find((c) => c.hermesSessionId === t.sessionId) ?? null;
   const agentChats = mine

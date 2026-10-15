@@ -32,6 +32,15 @@ export function formatElapsed(ms: number, locale: string): string {
   return `${Math.floor(total / 60)} min ${total % 60} s`;
 }
 
+/**
+ * Duration from `from` to `to`, or undefined when it is unknown or not positive. A chat loaded from the server
+ * (e.g. started on another device) only has message timestamps: its turn "ends" at the moment it starts, which
+ * would read "0 ms".
+ */
+export function knownDuration(from: number, to: number | undefined): number | undefined {
+  return to !== undefined && to > from ? to - from : undefined;
+}
+
 /** "950" · "1,2k" · "18,7k" · "187k" · "1,2 M" */
 export function formatTokens(n: number, locale: string): string {
   const v = Math.max(0, Math.round(n));
@@ -247,7 +256,7 @@ function stepRow(msg: ChatMessage, s: TraceStep, next: TraceStep | undefined, st
         title: running ? t('chat.thinking.live') : t('chat.thinking.done'),
         summary: thinkingSummary(msg, s, t),
         state: running ? 'running' : 'done',
-        durationMs: s.endedAt !== undefined ? s.endedAt - s.at : undefined,
+        durationMs: knownDuration(s.at, s.endedAt), // server-loaded thinking has no duration (endedAt = at)
       };
     }
     case 'fallback': {
@@ -356,7 +365,8 @@ export function footerParts(msg: ChatMessage, { t, locale }: Fmt, { tokens = tru
   const parts: string[] = [];
   const n = msg.tools.length;
   if (n) parts.push(t('chat.toolTimeline.toolCount', { count: n }));
-  if (m?.endedAt !== undefined) parts.push(formatElapsed(m.endedAt - msg.createdAt, locale));
+  const total = knownDuration(msg.createdAt, m?.endedAt);
+  if (total !== undefined) parts.push(formatElapsed(total, locale));
   if (!tokens) return parts;
   const prompt = msg.usage?.promptTokens ?? (m ? (m.inputTokens ?? 0) + (m.cacheReadTokens ?? 0) + (m.cacheWriteTokens ?? 0) : 0);
   const out = msg.usage?.completionTokens ?? m?.outputTokens;
@@ -473,7 +483,8 @@ function stepDetail(msg: ChatMessage, s: TraceStep | undefined, kind: TraceKind,
     case 'thinking': {
       const text = s ? thinkingText(msg, s) : null;
       const meta = [...when];
-      if (s?.endedAt !== undefined) meta.push({ label: t('chat.detail.duration'), value: formatElapsed(s.endedAt - s.at, locale) });
+      const dur = s ? knownDuration(s.at, s.endedAt) : undefined;
+      if (dur !== undefined) meta.push({ label: t('chat.detail.duration'), value: formatElapsed(dur, locale) });
       if (text) meta.push({ label: t('chat.detail.characters'), value: formatNumber(locale, text.length) });
       return {
         icon: '💭',
@@ -506,8 +517,10 @@ export function turnDetail(msg: ChatMessage, { t, locale }: Fmt): RowDetail {
   if (model) meta.push({ label: t('chat.detail.model'), value: model });
   if (c.fellBack) meta.push({ label: t('chat.detail.fallback'), value: t('chat.fmt.yes') });
   if (msg.finishReason) meta.push({ label: t('chat.detail.finishReason'), value: msg.finishReason });
-  if (m.firstTokenAt !== undefined) meta.push({ label: t('chat.detail.firstToken'), value: formatElapsed(m.firstTokenAt - msg.createdAt, locale) });
-  if (m.endedAt !== undefined) meta.push({ label: t('chat.detail.totalTime'), value: formatElapsed(m.endedAt - msg.createdAt, locale) });
+  const firstToken = knownDuration(msg.createdAt, m.firstTokenAt);
+  const total = knownDuration(msg.createdAt, m.endedAt);
+  if (firstToken !== undefined) meta.push({ label: t('chat.detail.firstToken'), value: formatElapsed(firstToken, locale) });
+  if (total !== undefined) meta.push({ label: t('chat.detail.totalTime'), value: formatElapsed(total, locale) });
   if (m.requests && m.requests > 1) meta.push({ label: t('chat.detail.apiRequests'), value: num(m.requests) });
   if (m.inputTokens !== undefined) meta.push({ label: m.cacheReadTokens !== undefined ? t('chat.detail.inputUncached') : t('chat.detail.promptTokens'), value: num(m.inputTokens) });
   if (m.cacheReadTokens !== undefined) meta.push({ label: t('chat.detail.cacheRead'), value: num(m.cacheReadTokens) });

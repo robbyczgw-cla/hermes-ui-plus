@@ -24,7 +24,7 @@ type Props = {
 
 export function ImageEditProvider({ profile, backendName, history, send, onSent, children }: Props) {
   const [source, setSource] = useState<EditSource | null>(null);
-  const gate = editGate(profile, null);
+  const gate = useMemo(() => editGate(profile, null), [profile]);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const api = useMemo<ImageEditApi>(
@@ -46,17 +46,26 @@ export function ImageEditProvider({ profile, backendName, history, send, onSent,
     [onSent],
   );
 
-  return (
-    <ImageEditContext.Provider value={api}>
-      {children}
+  // the provider re-renders with the whole chat (its children) on every streaming update; the sheet only on its props
+  const sheetHistory = gate.ok && gate.target.kind === 'claude' ? history : undefined;
+  const sheet = useMemo(
+    () => (
       <ImageEditSheet
         source={source}
         gate={gate}
         backendName={backendName}
-        history={gate.ok && gate.target.kind === 'claude' ? history : undefined}
+        history={sheetHistory}
         onSend={send}
         onClose={onClose}
       />
+    ),
+    [source, gate, backendName, sheetHistory, send, onClose],
+  );
+
+  return (
+    <ImageEditContext.Provider value={api}>
+      {children}
+      {sheet}
     </ImageEditContext.Provider>
   );
 }

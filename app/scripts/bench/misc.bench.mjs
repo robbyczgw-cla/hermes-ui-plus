@@ -3,7 +3,7 @@
 import { mapRemoteMessages } from '../../src/hermes/sessionMapping.ts';
 import { headerMinWidth, keepArrayIdentity, numericCellMinWidth, sortTableRows, tableLayoutMode } from '../../src/ui/lib/tableMath.ts';
 import { detectEntities } from '../../src/chat/answers/entities.ts';
-import { extractMedia } from '../../src/chat/mediaTags.ts';
+import { createMediaTagCache, extractMedia, extractMediaCached } from '../../src/chat/mediaTags.ts';
 import { parseInline, parseMarkdown } from '../../src/chat/markdown.ts';
 import { parseMessage } from '../../src/protocol/streamParser.ts';
 import { withCitationSources } from '../../src/chat/answers/citations.ts';
@@ -78,6 +78,13 @@ header('media tags (MessageItem: extractMedia on every streaming update)');
   // a tag (or just the word `media:`, e.g. a "Social Media:" heading) early in the answer: the mask path on every tick
   const early = 'Here is the chart. MEDIA:/tmp/test/chart.png\n\n' + text;
   report('… with a MEDIA tag in the first line', perStep(() => (t) => extractMedia(t, true), prefixes(early, 16).filter((_, i) => i % 8 === 0)));
+  // what MessageItem runs while streaming: complete lines are frozen, only the tail is scanned again
+  const cached = () => {
+    const cache = createMediaTagCache();
+    return (t) => extractMediaCached(t, true, cache);
+  };
+  report('extractMediaCached per tick over a 43K answer', perStep(cached, prefixes(text, 16).filter((_, i) => i % 8 === 0)));
+  report('… with a MEDIA tag in the first line', perStep(cached, prefixes(early, 16).filter((_, i) => i % 8 === 0)));
 }
 
 header('finished answer (end of stream / history mount)');

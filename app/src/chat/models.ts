@@ -35,6 +35,12 @@ export function modelLabel(kind: string, model: string | undefined): string {
   return model;
 }
 
+
+/** The header's model subtitle (modelLabel of the profile's kind). */
+export function headerModelLabel(profile: { kind: string; name?: string; model?: string; baseUrl?: string; provider?: string }, model: string | undefined): string {
+  return modelLabel(profile.kind, model);
+}
+
 /** Kinds whose model list comes from the server (GET /v1/models). */
 export function listsServerModels(kind: string): boolean {
   return kind === 'hermes';

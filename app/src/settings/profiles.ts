@@ -34,6 +34,11 @@ export type ConnectionProfile = {
   showCronReports?: boolean;
   /** extra request headers (openai: e.g. OpenRouter HTTP-Referer / X-Title); kept in the secure store (secretHeaders.ts) */
   headers?: Record<string, string>;
+  /**
+   * hermes: Hermes profiles ("bots") entered by hand (direct connections; bridge connections also get the bridge's
+   * list from GET /bridge/profiles). Valid profile names only, without `default` (hermes/bots.ts parseBotList).
+   */
+  hermesBots?: string[];
   /** persona waiting animation (ui/loaders LoaderKind, e.g. 'chameleon'); unset/'auto' = heuristic on name/model */
   loaderStyle?: string;
 };

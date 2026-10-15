@@ -30,10 +30,10 @@ export const attachments = {
   validate: {
     unsupportedType: '„{name}“: Dateityp wird nicht unterstützt.',
     unsupportedImage: '„{name}“: Bildformat wird nicht unterstützt.',
-    tooLarge: '„{name}“ ist zu groß ({size}, max. {max}).',
+    tooLarge: '„{name}“ ist zu groß ({size}, max. {max} pro Datei).',
     needsBridge: 'Dateien brauchen die UI-Bridge. Ohne Bridge gehen nur Bilder und kleine Textdateien (≤ {limit}).',
     tooLargeInline: '„{name}“ ist zu groß zum Einbetten ({size}, max. {max}). Größere Dateien brauchen die UI-Bridge.',
-    tooLargeText: '„{name}“ ist zu groß ({size}, max. {max} für Textdateien).',
+    tooLargeText: '„{name}“ ist zu groß ({size}, max. {max} pro Textdatei).',
     tooMany: 'Höchstens {max} Anhänge pro Nachricht.',
     defective: '„{name}“ ist fehlerhaft. Bitte entfernen.',
     payloadTooLarge: 'Anhänge zu groß: {size} (max. {max} pro Nachricht). Bitte weniger Bilder anhängen.',
@@ -45,7 +45,7 @@ export const attachments = {
   upload: {
     unauthorized: 'Upload abgelehnt: Bridge-Token ungültig. Bitte API-Schlüssel in den Einstellungen prüfen.',
     notSupported: 'Diese Verbindung kennt keine Datei-Uploads. Ist die UI-Bridge aktuell?',
-    tooLarge: '„{name}“ ist zu groß für den Upload (max. {max}).',
+    tooLarge: '„{name}“ ist zu groß für den Upload (max. {max} pro Datei).',
     unsupportedType: '„{name}“: Dateityp wird vom Server nicht angenommen.',
     failedWithReason: 'Upload von „{name}“ fehlgeschlagen: {reason}',
     failed: 'Upload von „{name}“ fehlgeschlagen.',
@@ -59,6 +59,7 @@ export const attachments = {
   file: {
     prepareFailed: '„{name}“ konnte nicht verarbeitet werden.',
     openFailed: '„{name}“ konnte nicht geöffnet werden.',
+    missingAfterRestart: '„{name}“ ist auf diesem Gerät nicht mehr vorhanden – entferne die Datei oder verwirf die Nachricht.',
   },
   encode: {
     readFailed: '„{name}“ konnte nicht gelesen werden.',

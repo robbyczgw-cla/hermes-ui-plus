@@ -8,6 +8,8 @@
 //
 // Options: --show (print matched text; default is masked, safe for logs)  --json  --generic-only
 //          --denylist FILE  --require-denylist (missing/empty denylist = error)  --quiet
+//          --expect-hermes (artifact scans: index.android.bundle / main.jsbundle must exist and be decoded as Hermes
+//          bytecode, else error; scan-artifact.sh sets it for APK/AAB/IPA)
 //
 // Two checks:
 //   1. Denylist: private terms from $HUI_PRIVATE_DIR/leak-denylist.txt (NOT in the repo). Missing file = warning,
@@ -263,10 +265,84 @@ export function maskSignatures(buf) {
 }
 
 // ---------------------------------------------------------------------------------------------------------
+// Hermes bytecode (index.android.bundle in APK/AAB, main.jsbundle in IPA). The compiler packs all strings of the
+// bundle into one storage blob without separators (and lets strings share bytes), and stores non-ASCII strings as
+// UTF-16. A `strings`-style scan therefore misses names glued to a neighbour ("Alice" in "Aliceglobal" fails the
+// word boundary) and every non-ASCII name. Decoding the string table gives each string with its real boundaries.
+// ---------------------------------------------------------------------------------------------------------
+
+const HBC_MAGIC = Buffer.from([0xc6, 0x1f, 0xbc, 0x03, 0xc1, 0x03, 0x19, 0x1f]); // 0x1F1903C103BC1FC6, little-endian
+const HBC_HEADER_BYTES = 128;
+// Function header size: 12 bytes in bytecode v98 (Hermes 1.0), 16 bytes in older versions. Both are tried; only a
+// layout whose string-kind counts add up to exactly stringCount / identifierCount and whose every entry lies inside
+// the string storage is accepted, so a wrong guess cannot pass.
+const HBC_FUNC_HEADER_BYTES = [12, 16];
+export const isHermesBytecode = (buf) => buf.length >= 8 && buf.subarray(0, 8).equals(HBC_MAGIC);
+
+/** The string table at one candidate layout, or null when the structure does not validate. */
+function hermesStringTable(buf, funcHeaderBytes) {
+  const u32 = (o) => buf.readUInt32LE(o);
+  const fileLength = u32(32);
+  const [functionCount, kindCount, identifierCount, stringCount, overflowCount, storageSize] = [40, 44, 48, 52, 56, 60].map(u32);
+  const align = (n) => n + ((4 - (n % 4)) % 4);
+  // sections in file order, each 4-byte aligned: function headers, string kinds, identifier hashes, small string
+  // table (4 bytes each), overflow string table (8 bytes each), string storage
+  const kinds = HBC_HEADER_BYTES + align(functionCount * funcHeaderBytes);
+  const small = kinds + align(kindCount * 4) + align(identifierCount * 4);
+  const overflow = small + stringCount * 4;
+  const storage = align(overflow + overflowCount * 8);
+  if (storage + storageSize > fileLength) return null;
+  let total = 0;
+  let identifiers = 0;
+  for (let i = 0; i < kindCount; i++) {
+    const e = u32(kinds + i * 4);
+    total += e & 0x7fffffff;
+    if (e >>> 31) identifiers += e & 0x7fffffff;
+  }
+  if (total !== stringCount || identifiers !== identifierCount) return null;
+  const strings = [];
+  for (let i = 0; i < stringCount; i++) {
+    const e = u32(small + i * 4); // bit 0 isUTF16, bits 1-23 offset, bits 24-31 length (0xff = overflow index)
+    const utf16 = (e & 1) === 1;
+    let offset = (e >>> 1) & 0x7fffff;
+    let length = e >>> 24;
+    if (length === 0xff) {
+      if (offset >= overflowCount) return null;
+      length = u32(overflow + offset * 8 + 4);
+      offset = u32(overflow + offset * 8);
+    }
+    const bytes = utf16 ? length * 2 : length;
+    if (offset + bytes > storageSize) return null;
+    const start = storage + offset;
+    strings.push({ offset: start, text: buf.toString(utf16 ? 'utf16le' : 'latin1', start, start + bytes) });
+  }
+  return strings;
+}
+
+/**
+ * Every string of a Hermes bytecode file's string table (identifiers and string literals, small and overflow
+ * entries, 8-bit and UTF-16), each with its byte offset. Throws when the file has the Hermes magic but its layout
+ * is not recognized: the caller reports that as a scan error, never as clean.
+ * @returns {{version:number, strings:{offset:number,text:string}[]}}
+ */
+export function hermesStrings(buf) {
+  if (!isHermesBytecode(buf)) throw new Error('not Hermes bytecode');
+  if (buf.length < HBC_HEADER_BYTES) throw new Error('Hermes bytecode: truncated header');
+  const version = buf.readUInt32LE(8);
+  if (buf.readUInt32LE(32) > buf.length) throw new Error(`Hermes bytecode v${version}: truncated (fileLength > size)`);
+  for (const size of HBC_FUNC_HEADER_BYTES) {
+    const strings = hermesStringTable(buf, size);
+    if (strings) return { version, strings };
+  }
+  throw new Error(`Hermes bytecode v${version}: unrecognized string table layout`);
+}
+
+// ---------------------------------------------------------------------------------------------------------
 // Scanning
 // ---------------------------------------------------------------------------------------------------------
 
 const BINARY_EMAIL_RE = /^[a-z0-9._%+-]{2,}@[a-z0-9-]{2,}(?:\.[a-z0-9-]{2,})*\.[a-z]{2,24}$/;
+const NON_ASCII = /[^\x00-\x7f]/;
 const MP4_VIDEO_CODECS = new Set(['avc1', 'avc3', 'hvc1', 'hev1', 'av01', 'vp08', 'vp09', 'mp4v']);
 const MP4_AUDIO_CODECS = new Set(['mp4a', 'ac-3', 'ec-3', 'Opus']);
 
@@ -346,6 +422,8 @@ export function makeScanner({ denylist = [], allow = [], signature = false, inli
     return spans;
   }
   const inSpan = (spans, index, text) => spans.some(([a, b]) => index >= a && index + text.length <= b);
+  /** hermes: Hermes bytecode files whose string table was decoded ({path, version, strings}) */
+  const stats = { hermes: [] };
 
   function scanLine(line, ctx, push) {
     // inline marker: source files only. In artifacts (inlineAllow false) a minified one-line bundle or a binary string
@@ -405,6 +483,19 @@ export function makeScanner({ denylist = [], allow = [], signature = false, inli
         findings.push(f);
       }
     };
+    if (isHermesBytecode(buf)) {
+      let decoded;
+      try {
+        decoded = hermesStrings(buf);
+      } catch (e) {
+        findings.push({ path, line: null, col: null, rule: 'scan-error', text: e.message, error: true });
+        return findings;
+      }
+      stats.hermes.push({ path, version: decoded.version, strings: decoded.strings.length });
+      // exact JS strings, no binary noise: the text rules apply as in a plain JS bundle
+      const strCtx = { ...ctx, binary: false };
+      for (const s of decoded.strings) scanLine(s.text, strCtx, (rule, text, idx) => push('hermes')(rule, text, s.offset + idx));
+    }
     const latin1 = buf.toString('latin1');
     const compressed = /\.(mp4|m4v|mov|m4a)$/i.test(path) ? mp4CompressedRanges(buf) : [];
     for (const m of latin1.matchAll(/[\x20-\x7e]{4,}/g)) {
@@ -417,10 +508,28 @@ export function makeScanner({ denylist = [], allow = [], signature = false, inli
     if (buf.length <= MAX_UTF16_BYTES) for (const m of latin1.matchAll(/(?:[\x20-\x7e]\x00){4,}/g)) {
       scanLine(m[0].replace(/\x00/g, ''), ctx, (rule, text, idx) => push('utf16le')(rule, text, m.index + idx * 2));
     }
+    // Non-ASCII names: UTF-8 runs (invalid bytes decode to U+FFFD and end a run) and UTF-16LE runs at both
+    // alignments (letters limited to Latin, Greek and Cyrillic, so random bytes rarely form a run). Only matches that
+    // contain a non-ASCII character count here; every ASCII match is the ASCII passes' business (incl. media noise).
+    if (buf.length <= MAX_UTF16_BYTES) {
+      const unicode = (run, variant, offset) => {
+        if (!NON_ASCII.test(run)) return;
+        scanLine(run, ctx, (rule, text, idx) => { if (NON_ASCII.test(text)) push(variant)(rule, text, offset(idx)); });
+      };
+      const utf8 = buf.toString('utf8');
+      for (const m of utf8.matchAll(/[\x20-\x7e\u00a0-\ud7ff\ue000-\ufffc]{4,}/g)) {
+        // a run re-encodes to exactly its source bytes (U+FFFD never inside a run): locate it only for a finding
+        unicode(m[0], 'utf8', (idx) => buf.indexOf(Buffer.from(m[0])) + Buffer.byteLength(m[0].slice(0, idx)));
+      }
+      for (const align of [0, 1]) {
+        const utf16 = buf.toString('utf16le', align, buf.length - ((buf.length - align) % 2));
+        for (const m of utf16.matchAll(/[\x20-\x7e\u00a0-\u024f\u0370-\u04ff]{4,}/g)) unicode(m[0], 'utf16le', (idx) => align + (m.index + idx) * 2);
+      }
+    }
     return findings;
   }
 
-  return { scanContent };
+  return { scanContent, stats };
 }
 
 export const mask = (s) => (s.length <= 3 ? '***' : `${s.slice(0, 2)}***[${s.length}]`);
@@ -488,6 +597,7 @@ function parseArgs(argv) {
     else if (t === '--quiet') a.quiet = true;
     else if (t === '--generic-only') a.genericOnly = true;
     else if (t === '--require-denylist') a.requireDenylist = true;
+    else if (t === '--expect-hermes') a.expectHermes = true;
     else if (t === '-h' || t === '--help') a.help = true;
     else throw new Error(`unknown argument: ${t}`);
   }
@@ -495,7 +605,7 @@ function parseArgs(argv) {
 }
 
 const USAGE = `usage: leak-guard.mjs (--staged | --tree [--ref REV] | --path DIR [--path DIR...])
-       [--show] [--json] [--quiet] [--generic-only] [--require-denylist] [--denylist FILE]
+       [--show] [--json] [--quiet] [--generic-only] [--require-denylist] [--denylist FILE] [--expect-hermes]
 Private terms come from $HUI_PRIVATE_DIR/leak-denylist.txt (not in the repo). See docs/LEAK-GUARD.md.`;
 
 /** Collect {path, read()} entries for the selected mode. Throws on environment errors. */
@@ -629,6 +739,15 @@ export async function main(argv, env = process.env) {
     findings.push(...scanner.scanContent(e.path, buf));
   }
   for (const f of findings) if (f.error) errors.push(`${f.path}: ${f.text}`);
+  const hermes = scanner.stats.hermes;
+  if (args.expectHermes) {
+    // the JS bundle of a release build must have gone through the string-table decoder, not only the `strings` scan
+    const bundles = collected.entries.filter((e) => /(^|\/)(index\.android\.bundle|main\.jsbundle)$/.test(e.path.split(sep).join('/')));
+    if (!bundles.length) errors.push('--expect-hermes: no index.android.bundle / main.jsbundle found');
+    for (const b of bundles) {
+      if (!hermes.some((h) => h.path === b.path) && !findings.some((f) => f.error && f.path === b.path)) errors.push(`${b.path}: --expect-hermes: not Hermes bytecode`);
+    }
+  }
   const real = findings.filter((f) => !f.error);
 
   const label = args.mode === 'path' ? `--path ${args.paths.join(' ')}` : args.ref ? `--tree --ref ${args.ref}` : `--${args.mode}`;
@@ -640,7 +759,7 @@ export async function main(argv, env = process.env) {
   if (args.json) {
     console.log(
       JSON.stringify(
-        { mode: label, scanned: collected.entries.length, signatureFilesSkipped: sigFiles, denylist: denylistSource ? denylist.length : 0, warnings, errors, byRule, findings: real.map((f) => ({ ...f, text: shown(f) })) },
+        { mode: label, scanned: collected.entries.length, signatureFilesSkipped: sigFiles, hermes, denylist: denylistSource ? denylist.length : 0, warnings, errors, byRule, findings: real.map((f) => ({ ...f, text: shown(f) })) },
         null,
         2,
       ),
@@ -648,7 +767,7 @@ export async function main(argv, env = process.env) {
   } else {
     for (const w of warnings) console.error(`leak-guard: WARNING: ${w}`);
     if (!args.quiet || real.length || errors.length) {
-      console.error(`leak-guard ${label}: scanned ${collected.entries.length} file(s), ${denylist.length} denylist term(s)${args.genericOnly ? ' (generic only)' : ''}${sigFiles ? `, ${sigFiles} code-signature file(s) skipped` : ''}`);
+      console.error(`leak-guard ${label}: scanned ${collected.entries.length} file(s), ${denylist.length} denylist term(s)${args.genericOnly ? ' (generic only)' : ''}${sigFiles ? `, ${sigFiles} code-signature file(s) skipped` : ''}${hermes.length ? `, ${hermes.length} Hermes bytecode file(s) decoded (${hermes.reduce((n, h) => n + h.strings, 0)} strings)` : ''}`);
     }
     if (real.length) {
       console.error(`\nFOUND ${real.length} finding(s) in ${files.size} file(s)${args.show ? '' : ' (matches masked; use --show to reveal, or look at file:line)'}:`);

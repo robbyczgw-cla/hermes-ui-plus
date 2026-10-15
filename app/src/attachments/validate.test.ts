@@ -38,6 +38,15 @@ test('hermes with bridge: files up to 20 MB, any supported type', () => {
   assert.ok(encodedSize(att({ name: 'a.pdf', mimeType: MIME.pdf, size: 19_000_000 }), HB) < 1000);
 });
 
+test('too large at the boundary: size and limit never read the same', () => {
+  const just = checkAttachment(att({ name: 'a.pdf', mimeType: MIME.pdf, size: 20_400_000 }), HB);
+  assert.deepEqual(just?.vars, { name: 'a.pdf', size: '20,4 MB', max: '20,0 MB' });
+  const byte = checkAttachment(att({ name: 'a.pdf', mimeType: MIME.pdf, size: 20_000_001 }), HB);
+  assert.notEqual(byte?.vars?.size, byte?.vars?.max);
+  const far = checkAttachment(att({ name: 'a.pdf', mimeType: MIME.pdf, size: 25_000_000 }), HB);
+  assert.deepEqual(far?.vars, { name: 'a.pdf', size: '25 MB', max: '20 MB' });
+});
+
 test('claude: office rejected, pdf/text accepted, image formats', () => {
   assert.equal(checkAttachment(att({ name: 'a.pdf', mimeType: MIME.pdf, size: 5_000_000 }), CL), null);
   assert.equal(checkAttachment(att({ name: 'a.json', mimeType: MIME.json }), CL), null);

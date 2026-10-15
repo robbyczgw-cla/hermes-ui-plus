@@ -9,6 +9,7 @@ import { BackgroundTurnHost } from '../background/BackgroundTurnHost';
 import { ToastProvider, useToast } from '../chat/Toast';
 import { ConversationsProvider, useStorageFullToast } from '../conversations';
 import { APP_TITLE } from '../brand';
+import { FLAVOR_MARK } from '../flavor';
 import { ConsentHost } from '../compliance/ConsentHost';
 import { DesktopHost } from '../desktop/DesktopHost';
 import { useStackHeaderInset, useWindowVibrancy } from '../desktop/chrome';
@@ -23,6 +24,9 @@ import { useTheme } from '../ui';
 
 /** header + web document title (browser tab); build-time override for the PWA, see brand.ts / scripts/build-web.sh */
 const APP_NAME = APP_TITLE;
+
+// a global keeps the flavor sentinel in every bundle (minifiers drop unused constants); flavor.ts FLAVOR_MARK
+(globalThis as { __HUI_FLAVOR__?: string }).__HUI_FLAVOR__ = FLAVOR_MARK;
 
 export default function RootLayout() {
   // web: the React app has mounted -> drop the inline boot splash from public/index.html (#boot)

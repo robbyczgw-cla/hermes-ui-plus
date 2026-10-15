@@ -18,6 +18,8 @@ import { slash as slashNS } from './ns/slash.es.ts';
 import { compliance as complianceNS } from './ns/compliance.es.ts';
 import { menus as menusNS } from './ns/menus.es.ts';
 import { desktop as desktopNS } from './ns/desktop.es.ts';
+import { bots as botsNS } from './ns/bots.es.ts';
+import { quick as quickNS } from './ns/quick.es.ts';
 
 type Dict = typeof de;
 
@@ -41,6 +43,8 @@ export const es = {
   compliance: complianceNS,
   menus: menusNS,
   desktop: desktopNS,
+  bots: botsNS,
+  quick: quickNS,
   actions: {
     send: 'Enviar',
     cancel: 'Cancelar',

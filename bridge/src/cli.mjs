@@ -186,7 +186,7 @@ export function directProvidersLine(providers) {
 }
 
 /** Which optional features are active (one line each). */
-export function featureSummary(config, env, { pairing } = {}) {
+export function featureSummary(config, env, { pairing, profiles } = {}) {
   const lines = [];
   const r = config.router;
   const direct = directProviders(env, r.kind);
@@ -201,10 +201,16 @@ export function featureSummary(config, env, { pairing } = {}) {
   lines.push(['meta', direct.meta ? 'on (titles & follow-ups via Claude)' : metaOn ? 'off (BRIDGE_META=on needs ANTHROPIC_API_KEY)' : 'off (opt-in: BRIDGE_META=on + ANTHROPIC_API_KEY)']);
   // not a provider: no key, no model; it only fetches pictures that Hermes' own tools returned (src/image-proxy.mjs)
   lines.push(['images', /^(off|0|false|no)$/i.test((env.BRIDGE_IMAGE_PROXY ?? '').trim()) ? 'proxy off (BRIDGE_IMAGE_PROXY=off)' : 'proxy on (pictures from Hermes answers, fetched by the bridge)']);
-  lines.push(['skill', config.bootstrap ? 'bootstrap message on (the hermes-ui skill triggers for app chats)'
+  const inline = config.skillInline ? ' + skill core inline' : config.skillInlineMissing ? ` (skill core inline MISSING: ${config.skillInlineMissing})` : ' (skill core inline off)';
+  lines.push(['skill', config.bootstrap ? `bootstrap message on${inline} (the hermes-ui skill triggers for app chats)`
     : config.bootstrapMissing ? `bootstrap message MISSING (${config.bootstrapMissing}): no interactive components, see the warning above`
       : 'bootstrap message off (BRIDGE_BOOTSTRAP=off)']);
   lines.push(['pairing', pairing ? (pairing.isEnabled() ? 'remote pairing enabled (BRIDGE_PAIRING=1)' : 'local only') : 'n/a']);
   lines.push(['extras', directProvidersLine(direct)]);
+  if (profiles) {
+    const n = profiles.names().length;
+    const desc = { off: 'off (BRIDGE_PROFILES=off)', any: 'any /p/<name>/ (Hermes home not readable; Hermes decides)', auto: `auto, ${n} besides default`, list: `${n} besides default (BRIDGE_PROFILES)` };
+    lines.push(['bots', desc[profiles.mode] ?? profiles.mode]);
+  }
   return lines;
 }

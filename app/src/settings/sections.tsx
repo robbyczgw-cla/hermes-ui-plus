@@ -35,29 +35,16 @@ export type SettingsRow = {
   render(last: boolean): ReactNode;
 };
 
-export type SettingsSection = { id: string; title: string; rows: SettingsRow[]; reset?: PrefSection };
+export type SettingsSection = {
+  id: string;
+  title: string;
+  /** extra search words that show the whole section, like a hit on its title */
+  keywords?: string[];
+  rows: SettingsRow[];
+  reset?: PrefSection;
+};
 
-const norm = (s: string) =>
-  s
-    .toLocaleLowerCase()
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '');
-
-/** Search predicate: every word of the query must appear in one of the texts. Empty query → everything. */
-export function makeMatcher(query: string): (texts: string[]) => boolean {
-  const words = norm(query).split(/\s+/).filter(Boolean);
-  if (!words.length) return () => true;
-  return (texts) => {
-    const hay = norm(texts.join(' '));
-    return words.every((w) => hay.includes(w));
-  };
-}
-
-/** Visible rows of a section for a query (section title hit → all rows). */
-export function visibleRows(section: SettingsSection, match: (texts: string[]) => boolean): SettingsRow[] {
-  if (match([section.title])) return section.rows;
-  return section.rows.filter((r) => match([section.title, ...r.texts]));
-}
+export { makeMatcher, visibleRows } from './searchMatch';
 
 export function SettingsSectionView({ section, rows }: { section: SettingsSection; rows: SettingsRow[] }) {
   const tr = useT();
@@ -243,6 +230,7 @@ export function useCustomizationSections(): SettingsSection[] {
   const chat: SettingsSection = {
     id: 'chat',
     title: tr('settings.sections.chat'),
+    keywords: [tr('settings.chat.keywords')],
     reset: 'chat',
     rows: [
       sw('showTimestamps', tr('settings.chat.timestamps'), tr('settings.chat.timestampsSub')),
@@ -303,7 +291,7 @@ export function useCustomizationSections(): SettingsSection[] {
           <Segmented<ImageLoadingPref> label={tr('settings.media.images')} value={prefs.imageLoading} options={imgOpts} onChange={(v) => set('imageLoading', v)} />
           <Footnote>{imgHint}</Footnote>
         </>,
-        ['Wikipedia', 'Wikimedia'],
+        ['Wikipedia', 'Wikimedia', tr('settings.media.imagesKeywords')],
       ),
       block(
         'unknownImages',

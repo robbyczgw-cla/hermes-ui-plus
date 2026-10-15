@@ -4,6 +4,7 @@
  * it in 10 % steps. A chip toggles the comparison.
  */
 import { Image } from 'expo-image';
+import { useAttachmentUri } from '../attachments/useAttachmentUri';
 import { useMemo, useRef, useState } from 'react';
 import { PanResponder, Platform, Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
 import { useT } from '../i18n';
@@ -15,11 +16,15 @@ export function clampFraction(v: number): number {
   return Math.min(1, Math.max(0, v));
 }
 
-export function BeforeAfter({ before, after }: { before: string; after: string }) {
+export function BeforeAfter({ before: beforeUri, after: afterUri }: { before: string; after: string }) {
   const t = useTheme();
   const tr = useT();
   const [open, setOpen] = useState(true);
   const [aspect, setAspect] = useState(1);
+  // stored web / desktop attachments (`hui-att:`) show from their session URL
+  const before = useAttachmentUri(beforeUri);
+  const after = useAttachmentUri(afterUri);
+  if (!before || !after) return null;
   return (
     <View style={{ gap: 8, maxWidth: MAX_W, marginBottom: 10 }}>
       <Pressable

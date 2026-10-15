@@ -2,7 +2,7 @@
  * Attachments inside a sent user message: image thumbnails (tap → fullscreen viewer) and file cards
  * (tap → system share sheet). Render it above the user bubble, right-aligned.
  */
-import { Image } from 'expo-image';
+import { AttachmentImage } from './AttachmentImage';
 import { memo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useT } from '../../i18n';
@@ -56,8 +56,8 @@ export const MessageAttachments = memo(function MessageAttachments({ attachments
     <View style={[styles.wrap, { alignSelf, alignItems: alignSelf, maxWidth }]}>
       {single ? (
         <Pressable onPress={() => setViewing(single)} {...editProps(single)} accessibilityRole="imagebutton" accessibilityLabel={tr('attachments.message.openImage', { name: single.name })}>
-          <Image
-            source={{ uri: single.uri }}
+          <AttachmentImage
+            uri={single.uri}
             style={{ width: singleW, height: Math.round(singleW / singleAspect), borderRadius: t.radii.l, backgroundColor: t.colors.surfaceAlt }}
             contentFit="cover"
             transition={150}
@@ -68,8 +68,8 @@ export const MessageAttachments = memo(function MessageAttachments({ attachments
         <View style={[styles.grid, { width: tile * cols + GAP * (cols - 1), justifyContent: align === 'end' ? 'flex-end' : 'flex-start' }]}>
           {images.map((img) => (
             <Pressable key={img.id} onPress={() => setViewing(img)} {...editProps(img)} accessibilityRole="imagebutton" accessibilityLabel={tr('attachments.message.openImage', { name: img.name })}>
-              <Image
-                source={{ uri: img.uri }}
+              <AttachmentImage
+                uri={img.uri}
                 style={{ width: tile, height: tile, borderRadius: t.radii.m, backgroundColor: t.colors.surfaceAlt }}
                 contentFit="cover"
                 transition={150}

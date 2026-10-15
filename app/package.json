@@ -50,6 +50,7 @@
     "@types/react": "~19.2.2",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~57.0.2",
+    "patch-package": "^8.0.1",
     "typescript": "~6.0.3"
   },
   "scripts": {
@@ -60,7 +61,8 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "test": "node --test \"src/**/*.test.ts\"",
     "lint": "expo lint",
-    "compat": "node scripts/hermes-compat-check.mjs"
+    "compat": "node scripts/hermes-compat-check.mjs",
+    "postinstall": "patch-package"
   },
   "private": true
 }

@@ -1,0 +1,10 @@
+name: hermes-ui-plus
+version: "0.1.0"
+description: >
+  Thin companion plugin for the Hermes Interactive UI+ app: quick answers (one-off questions answered by a
+  fast model through Hermes' own providers, without the agent) on a loopback-only listener for the UI Bridge.
+  Stdlib only. Kill switch: HERMES_UI_PLUS_DISABLE=1.
+author: Hermes Interactive UI+ contributors
+license: MIT
+homepage: https://github.com/robbyczgw-cla/hermes-ui-plus
+kind: standalone

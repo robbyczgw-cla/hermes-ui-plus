@@ -37,6 +37,8 @@ import { isMeteredConnection } from '../images/policy';
 import type { ChatScope } from './chatScope';
 import type { ConversationMeta } from './types';
 import { emitAnswerReady, recoveredAnswers } from '../background/noticeState';
+import { botNames, withBot } from '../hermes/bots';
+import { botStore, botsNow, ensureBots } from '../hermes/useHermesBots';
 
 /** Structural subset of settings' ConnectionProfile (+ the new optional `syncSessions` flag). */
 export type SyncProfile = {
@@ -50,6 +52,10 @@ export type SyncProfile = {
   showForeignChats?: boolean;
   /** "Cron-Berichte anzeigen" (drawer, live inbox, notifications); default off */
   showCronReports?: boolean;
+  /** UI bridge connection (its bots come from GET /bridge/profiles) */
+  bridge?: boolean;
+  /** Hermes profiles ("bots") entered by hand (hermes/bots.ts) */
+  hermesBots?: readonly string[];
 };
 
 /** The profile's session filter (remoteSync.SyncFilter); both default off. */
@@ -145,7 +151,9 @@ export function useHermesSessionSync(profiles: SyncProfile[], options: SessionSy
       return true;
     });
   }, [profiles]);
-  const targetsKey = targets.map((p) => `${p.id}@${serverKey(p)}`).join('|');
+  // bots (Hermes profiles): every bot's sessions are listed under /p/<bot>/; a changed bot list syncs again
+  const botVer = useSyncExternalStore(botStore.subscribe, botStore.version, botStore.version);
+  const targetsKey = targets.map((p) => `${p.id}@${serverKey(p)}+${p.hermesBots?.join(',') ?? ''}`).join('|');
 
   const running = useRef(false);
   const lastRun = useRef(0);
@@ -193,31 +201,40 @@ export function useHermesSessionSync(profiles: SyncProfile[], options: SessionSy
       let failure: string | undefined;
       try {
         for (const p of active) {
-          const client = hermesSessions(p, 12000);
           const filter = syncFilterOf(p);
           const srcs = syncSources(filter);
-          const sessions: RemoteSession[] = [];
-          const complete: string[] = [];
-          const ck = cursorKey(p);
-          try {
-            const firstPages: { source: string; count: number; hasMore: boolean }[] = [];
-            for (const source of srcs) {
-              const page = await client.list({ source, limit: SESSION_PAGE });
-              sessions.push(...page.sessions);
-              if (!page.hasMore) complete.push(source);
-              firstPages.push({ source, count: page.sessions.length, hasMore: page.hasMore });
+          const sameServer = sameServerAs(p);
+          // the default profile first, then every known bot (bridge list + manual list), each under /p/<bot>/ with
+          // its own paging cursors (the bot's base URL gives it its own cursor key)
+          await ensureBots(p);
+          for (const bot of [undefined, ...botNames(botsNow(p))]) {
+            const conn = withBot(p, bot);
+            if (bot && sessionsSupported(conn) === false) continue; // unknown bot (404): skipped until restart
+            const client = hermesSessions(conn, 12000);
+            const sessions: RemoteSession[] = [];
+            const complete: string[] = [];
+            const ck = cursorKey(conn);
+            try {
+              const firstPages: { source: string; count: number; hasMore: boolean }[] = [];
+              for (const source of srcs) {
+                const page = await client.list({ source, limit: SESSION_PAGE });
+                sessions.push(...page.sessions);
+                if (!page.hasMore) complete.push(source);
+                firstPages.push({ source, count: page.sessions.length, hasMore: page.hasMore });
+              }
+              // against the cursors as they are NOW (a "load older" may have moved them while this was in flight)
+              const next = { ...cursorsRef.current[ck] };
+              for (const f of firstPages) next[f.source] = afterFirstPage(next[f.source], f.count, f.hasMore);
+              setCursor(ck, next);
+              setSessionsSupported(conn, true);
+            } catch (e) {
+              if (isUnsupportedError(e)) setSessionsSupported(conn, false);
+              else failure = sessionErrorText(e);
+              if (!bot) break; // the server itself failed: its bots would too
+              continue;
             }
-            // against the cursors as they are NOW (a "load older" may have moved them while this was in flight)
-            const next = { ...cursorsRef.current[ck] };
-            for (const f of firstPages) next[f.source] = afterFirstPage(next[f.source], f.count, f.hasMore);
-            setCursor(ck, next);
-            setSessionsSupported(p, true);
-          } catch (e) {
-            if (isUnsupportedError(e)) setSessionsSupported(p, false);
-            else failure = sessionErrorText(e);
-            continue;
+            controller.mergeRemote({ id: p.id, kind: 'hermes' }, sessions, { completeSources: complete, filter, sameServer, bot });
           }
-          controller.mergeRemote({ id: p.id, kind: 'hermes' }, sessions, { completeSources: complete, filter, sameServer: sameServerAs(p) });
         }
       } finally {
         running.current = false;
@@ -239,31 +256,35 @@ export function useHermesSessionSync(profiles: SyncProfile[], options: SessionSy
     setOlderState({ loading: true });
     let failure: string | undefined;
     try {
-      for (const p of list) {
-        const ck = cursorKey(p);
-        const cur = cursorsRef.current[ck];
+      outer: for (const p of list) {
         const filter = syncFilterOf(p);
         const sources = pagedSources(filter, sc);
-        if (!cur || sessionsSupported(p) === false || !hasOlder(cur, sources)) continue;
-        const client = hermesSessions(p, 12000);
         const profile = { id: p.id, kind: 'hermes' as const };
         const sameServer = sameServerAs(p);
-        try {
-          const r = await loadOlderSessions({
-            cursors: cur,
-            sources,
-            fetch: (source, offset, limit) => client.list({ source, offset, limit }),
-            merge: (sessions) =>
-              controller
-                .mergeRemote(profile, sessions, { filter, sameServer })
-                .added.map((id) => controller.get(id))
-                .filter((c): c is ConversationMeta => !!c && !c.archived && inChatScope(c, sc)),
-          });
-          setCursor(ck, r.cursors);
-          if (r.added > 0) break;
-        } catch (e) {
-          if (isUnsupportedError(e)) setSessionsSupported(p, false);
-          else failure = sessionErrorText(e);
+        // the default profile first, then the bots, each with its own cursors (see refresh)
+        for (const bot of [undefined, ...botNames(botsNow(p))]) {
+          const conn = withBot(p, bot);
+          const ck = cursorKey(conn);
+          const cur = cursorsRef.current[ck];
+          if (!cur || sessionsSupported(conn) === false || !hasOlder(cur, sources)) continue;
+          const client = hermesSessions(conn, 12000);
+          try {
+            const r = await loadOlderSessions({
+              cursors: cur,
+              sources,
+              fetch: (source, offset, limit) => client.list({ source, offset, limit }),
+              merge: (sessions) =>
+                controller
+                  .mergeRemote(profile, sessions, { filter, sameServer, bot })
+                  .added.map((id) => controller.get(id))
+                  .filter((c): c is ConversationMeta => !!c && !c.archived && inChatScope(c, sc)),
+            });
+            setCursor(ck, r.cursors);
+            if (r.added > 0) break outer;
+          } catch (e) {
+            if (isUnsupportedError(e)) setSessionsSupported(conn, false);
+            else failure = sessionErrorText(e);
+          }
         }
       }
     } finally {
@@ -271,10 +292,13 @@ export function useHermesSessionSync(profiles: SyncProfile[], options: SessionSy
       setOlderState({ loading: false, error: failure });
     }
   }, [controller, setCursor, sameServerAs]);
-  const olderAvailable = targets.some((p) => {
-    const cur = cursors[cursorKey(p)];
-    return !!cur && sessionsSupported(p) !== false && hasOlder(cur, pagedSources(syncFilterOf(p), scope));
-  });
+  const olderAvailable = targets.some((p) =>
+    [undefined, ...botNames(botsNow(p))].some((bot) => {
+      const conn = withBot(p, bot);
+      const cur = cursors[cursorKey(conn)];
+      return !!cur && sessionsSupported(conn) !== false && hasOlder(cur, pagedSources(syncFilterOf(p), scope));
+    }),
+  );
   const older = useMemo<OlderSessions>(
     () => ({ available: olderAvailable, loading: olderState.loading, error: olderState.error, load: () => void loadOlder() }),
     [olderAvailable, olderState, loadOlder],
@@ -283,7 +307,7 @@ export function useHermesSessionSync(profiles: SyncProfile[], options: SessionSy
   // on start / when the profile set changes
   useEffect(() => {
     if (ready && enabled) void refresh(true);
-  }, [ready, enabled, targetsKey, filterKey, refresh]);
+  }, [ready, enabled, targetsKey, filterKey, botVer, refresh]);
 
   // on foreground
   useEffect(() => {
@@ -312,7 +336,7 @@ export function useHermesSessionSync(profiles: SyncProfile[], options: SessionSy
         const p = profileFor(meta);
         if (!p || !meta.hermesSessionId) return;
         try {
-          await hermesSessions(p).rename(meta.hermesSessionId, title);
+          await hermesSessions(withBot(p, meta.hermesProfile)).rename(meta.hermesSessionId, title);
         } catch (e) {
           if (isNotFoundError(e)) return; // never reached the server (no message sent yet)
           // keep the server's error code (`invalid_title` = title taken → the auto title retries a variant)
@@ -327,7 +351,7 @@ export function useHermesSessionSync(profiles: SyncProfile[], options: SessionSy
         // sessions from Telegram/CLI/cron/other clients are never deleted on Hermes (hide locally instead)
         if (!isAppConversation(meta)) throw new Error(tr('conversations.sync.foreignNoDelete'));
         try {
-          await hermesSessions(p).remove(meta.hermesSessionId);
+          await hermesSessions(withBot(p, meta.hermesProfile)).remove(meta.hermesSessionId);
         } catch (e) {
           // never reached the server (nothing sent yet) / already deleted elsewhere: gone either way
           if (!isNotFoundError(e)) throw new Error(sessionErrorText(e));
@@ -349,7 +373,7 @@ export function useHermesSessionSync(profiles: SyncProfile[], options: SessionSy
   return { status, error, lastSyncAt, refresh, remote, older };
 }
 
-/** paging cursors belong to one profile on one server (a changed URL starts over) */
+/** paging cursors belong to one profile on one server and bot (a changed URL starts over; a bot's URL has /p/<bot>) */
 function cursorKey(p: SyncProfile): string {
   return `${p.id}@${serverKey(p)}`;
 }
@@ -580,13 +604,14 @@ export function useRemotePrefetch(profile: SyncProfile | undefined, o: RemotePre
         if (!meta?.hermesSessionId || meta.remote?.loadedAt || isMounted(id)) return true;
         const activityAtStart = meta.remote?.lastActive;
         try {
-          const fetched = await fetchRemoteTranscript(p, meta.hermesSessionId);
+          const conn = withBot(p, meta.hermesProfile); // a bot's chat lives under /p/<bot>/
+          const fetched = await fetchRemoteTranscript(conn, meta.hermesSessionId);
           await storeFetchedTranscript(controller, id, fetched, { activityAtStart, isMounted, cancelled });
           log.record(id, true);
           return true;
         } catch (e) {
           log.record(id, false);
-          if (isUnsupportedError(e)) setSessionsSupported(p, false);
+          if (isUnsupportedError(e)) setSessionsSupported(withBot(p, meta.hermesProfile), false);
           // a missing session drops out with the next list sync; anything else (offline, timeout, 5xx): stop here
           if (!isNotFoundError(e)) pass.cancelled = true;
           return false;

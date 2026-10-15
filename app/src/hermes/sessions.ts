@@ -13,6 +13,7 @@
  *   PATCH  /api/sessions/{id} {title}             → {object:"hermes.session", session}
  *          (titles are unique per server and ≤ 100 chars → 400 invalid_title)
  *   DELETE /api/sessions/{id}                     → {object:"hermes.session.deleted", id, deleted}
+ *   POST   /api/sessions/{id}/model {model, provider?} (v0.22) → {object:"hermes.session.model_lock", session_id, runtime}
  *          (409 session_active_turn while a turn is running)
  *   GET    /api/sessions/{id}/messages?order=latest|oldest&limit(≤500)&offset&include_compacted
  *          → {object:"list", session_id(resolved tip), data:[Message], pagination}
@@ -21,6 +22,7 @@
  */
 import { makeT, type TFn } from '../i18n/core.ts';
 import { HermesError, errorFromResponse, withRequestTimeout, joinUrl, keyedHermesError, type FetchLike } from './stream.ts';
+import { modelLockBody } from './modelLock.ts';
 
 const deT = makeT('de', 'de-DE');
 
@@ -267,6 +269,17 @@ export function createSessionsClient(fetchImpl: FetchLike, conn: ApiConn, timeou
     async rename(id: string, title: string): Promise<RemoteSession | null> {
       const j = await request('PATCH', sessionPath(id), { title });
       return parseSession(isObj(j) ? j.session : undefined);
+    },
+    /**
+     * Hermes v0.22 session model lock (`POST /api/sessions/{id}/model`, hermes/modelLock.ts):
+     * → `{object:"hermes.session.model_lock", session_id, runtime:{provider, model, route_source, model_lock}}`.
+     * 404 session_not_found before the first stored turn, 409 model_lock_unavailable / 400 missing_model when Hermes
+     * cannot route the model.
+     */
+    async lockModel(id: string, model: string): Promise<{ model?: string; provider?: string }> {
+      const j = await request('POST', `${sessionPath(id)}/model`, modelLockBody(model));
+      const rt = isObj(j) && isObj(j.runtime) ? j.runtime : {};
+      return { model: str(rt.model), provider: str(rt.provider) };
     },
     /** true when Hermes deleted it; a session that no longer exists counts as deleted */
     async remove(id: string): Promise<boolean> {

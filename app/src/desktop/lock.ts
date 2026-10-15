@@ -7,6 +7,11 @@
  * chat never paints unlocked at launch; the rest of the page is `inert` meanwhile, desktop commands are blocked and
  * notification actions / opened files wait (pending.ts). It is a privacy screen for the UI, not encryption:
  * stored chats stay as readable as without the lock.
+ *
+ * The shell holds the lock state (`desktop_lock` / `desktop_unlock` / `desktop_lock_state`): every page load starts
+ * covered (a plain cover without the lock UI) and asks it – the init script's prefs are those of the window's creation,
+ * so a reload after the lock was switched on and engaged must not trust them. Unreadable state = locked (fail closed).
+ * The shell ignores View → Reload (⌘R) while locked and refuses pref changes then.
  */
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import { brand } from '../brand';
@@ -15,7 +20,7 @@ import { useTheme } from '../ui';
 import { desktopConfig, invokeDesktop, setDesktopEventGate } from './bridge';
 import { getDesktopChrome } from './chrome';
 import { holdPending } from './pending';
-import { lockDue } from './policy';
+import { ingestAllowed, lockDue, staysLocked, type NativeLockState } from './policy';
 
 const ID = 'hermes-lock';
 type Texts = { title: string; unlock: string; reason: string; failed: string };
@@ -25,6 +30,12 @@ let textsReady = false;
 let locked = false;
 let busy = false;
 let autoPrompted = false;
+/** covered at page load, the shell's lock state not known yet: no prompt (and no lock UI while `plain`) */
+let checking = false;
+let plain = false;
+/** bumped whenever the lock engages: work started before (file drops) is stale once it differs */
+let epoch = 0;
+
 let colors: { bg: string; text: string; accent: string; onAccent: string } | null = null;
 
 /** events that may pass while locked (no user command; their effects wait for the unlock themselves) */
@@ -47,6 +58,7 @@ const LOCK_SVG =
 
 function render(): void {
   let root = el();
+  const showUi = !(checking && plain);
   if (!root) {
     root = document.createElement('div');
     root.id = ID;
@@ -67,6 +79,7 @@ function render(): void {
   const c = colors ?? (dark ? { bg: '#1c1c1e', text: '#f2f2f7', accent: '#0a84ff', onAccent: '#ffffff' } : { bg: '#f5f5f7', text: '#1d1d1f', accent: '#007aff', onAccent: '#ffffff' });
   root.style.background = c.bg;
   root.style.color = c.text;
+  for (const part of Array.from(root.children) as HTMLElement[]) part.style.visibility = showUi ? '' : 'hidden';
   const title = root.querySelector<HTMLElement>('[data-part="title"]');
   if (title) title.textContent = texts.title || brand().name;
   const btn = root.querySelector<HTMLButtonElement>('[data-part="btn"]');
@@ -92,19 +105,40 @@ const keyBlocker = (e: KeyboardEvent) => {
   e.stopPropagation();
 };
 
+// the cover's own right-click: no WebKit menu (its "Reload" would only bring the cover back, but nothing to offer)
+const menuBlocker = (e: Event) => {
+  if (locked) e.preventDefault();
+};
+
 export function isLocked(): boolean {
   return locked;
 }
 
-export function lockNow(): void {
-  if (locked || typeof document === 'undefined') return;
+/**
+ * For work that starts now and finishes later (files dropped / opened: read, prepared, uploaded): the returned check
+ * is false while locked and once the lock engaged in between – the files are discarded then.
+ */
+export function ingestGate(): () => boolean {
+  const since = epoch;
+  return () => ingestAllowed(since, { locked, epoch });
+}
+
+function cover(): void {
   locked = true;
+  epoch++;
   autoPrompted = false;
   render();
   setInert(true);
   setDesktopEventGate((e) => PASS.has(e.cmd));
   holdPending(true);
   document.addEventListener('keydown', keyBlocker, true);
+  document.addEventListener('contextmenu', menuBlocker, true);
+}
+
+export function lockNow(): void {
+  if (locked || typeof document === 'undefined') return;
+  cover();
+  void invokeDesktop('desktop_lock');
   el()?.querySelector('button')?.focus();
   // already in front: ask right away (at launch once the texts are there); otherwise when the window comes back
   if (textsReady && document.hasFocus()) void unlock(true);
@@ -112,15 +146,18 @@ export function lockNow(): void {
 
 function unlockDone(): void {
   locked = false;
+  checking = false;
+  plain = false;
   setInert(false);
   el()?.remove();
   setDesktopEventGate(null);
   document.removeEventListener('keydown', keyBlocker, true);
+  document.removeEventListener('contextmenu', menuBlocker, true);
   holdPending(false);
 }
 
 async function unlock(auto = false): Promise<void> {
-  if (!locked || busy) return;
+  if (!locked || busy || checking) return;
   if (auto) {
     if (autoPrompted) return;
     autoPrompted = true;
@@ -137,8 +174,30 @@ async function unlock(auto = false): Promise<void> {
   }
 }
 
-// launch: cover before the first paint when the lock is on
-if (desktopConfig()?.prefs.lockEnabled && typeof document !== 'undefined' && document.body) lockNow();
+/**
+ * Page load: covered before the first paint, then the shell's state decides. The init script's `lockEnabled` only
+ * picks whether the lock UI shows right away (launch with the lock on) or a plain cover waits for the answer.
+ */
+async function checkNativeLock(): Promise<void> {
+  const native = await invokeDesktop<NativeLockState>('desktop_lock_state');
+  if (!checking) return;
+  if (!staysLocked(native)) {
+    unlockDone();
+    return;
+  }
+  checking = false;
+  plain = false;
+  render();
+  el()?.querySelector('button')?.focus();
+  if (textsReady && document.hasFocus()) void unlock(true);
+}
+
+if (desktopConfig() && typeof document !== 'undefined' && document.body) {
+  checking = true;
+  plain = !desktopConfig()?.prefs.lockEnabled;
+  cover();
+  void checkNativeLock();
+}
 
 /** mounted once via DesktopHost: texts / colors of the cover, the background timer */
 export function useDesktopLock(): void {
@@ -156,7 +215,7 @@ export function useDesktopLock(): void {
     textsReady = true;
     if (locked) {
       render();
-      if (first && document.hasFocus()) void unlock(true);
+      if (first && !checking && document.hasFocus()) void unlock(true);
     }
   }, [tr, th]);
 

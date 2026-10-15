@@ -11,7 +11,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { formatBytes } from '../attachments/mime';
 import { useI18n } from '../i18n';
 import { useTheme } from '../ui';
-import { Photo } from '../ui/components/imageParts';
+import { Photo, useNaturalAspect } from '../ui/components/imageParts';
 import { useCopy } from './actions';
 import type { MemoryNote } from './hermesTools';
 import { Icon, type IconName } from './icons';
@@ -162,7 +162,8 @@ function MediaImage({ file, conn }: { file: MediaRef; conn: MediaConn }) {
   const t = useTheme();
   const [uri, setUri] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
-  const [aspect, setAspect] = useState(4 / 3);
+  // keyed by the server path (the local copy's uri is only known after the fetch): no reflow when shown again
+  const [aspect, onNaturalSize] = useNaturalAspect(`media:${file.path}`);
 
   useEffect(() => {
     let alive = true;
@@ -185,7 +186,7 @@ function MediaImage({ file, conn }: { file: MediaRef; conn: MediaConn }) {
         fit="contain"
         label={file.name}
         onPress={() => void openLocalMedia(uri, file)}
-        onNaturalSize={(w, h) => h > 0 && setAspect(w / h)}
+        onNaturalSize={onNaturalSize}
       />
     </View>
   );

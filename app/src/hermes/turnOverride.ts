@@ -87,34 +87,57 @@ export function overrideHistory(history: ChatMessage[], o: TurnOverride | undefi
 /** max characters of the context block (Hermes caps a text part at 64 KB; leave room for the prompt) */
 export const SEED_MAX_CHARS = 24_000;
 
-export type SeedLabels = { intro: string; user: string; assistant: string; attachment: string };
+export type SeedLabels = {
+  intro: string;
+  user: string;
+  assistant: string;
+  attachment: string;
+  /** intro when the copied turns are quick answers ("Mit Hermes weitermachen", app/src/quick) */
+  quickIntro?: string;
+  /** label of a quick answer; `{model}` is replaced (or the parentheses dropped when unknown) */
+  quick?: string;
+};
 
 const DEFAULT_SEED_LABELS: SeedLabels = {
   intro: 'This chat continues an earlier conversation. Its turns so far (for context only, do not repeat them):',
   user: 'User',
   assistant: 'Assistant',
   attachment: 'attachment',
+  quickIntro:
+    'This chat continues a quick answer from a small fast model that had no tools, no memory and no live data. ' +
+    'Context only, do not repeat it; check it before you build on it:',
+  quick: 'Quick answer ({model})',
 };
+
+function quickLabel(labels: SeedLabels, model: string | undefined): string {
+  const l = labels.quick ?? DEFAULT_SEED_LABELS.quick!;
+  return model ? l.replace('{model}', model) : l.replace(/\s*\(\{model\}\)/, '').replace('{model}', '');
+}
 
 /**
  * Prior turns as plain text for the context block. Newest turns win when the transcript is too long (older ones are
  * dropped with a "…" line); interim tool notes and hui JSON stay as they were stored (the model wrote them).
  */
 export function branchSeedText(
-  messages: readonly Pick<ChatMessage, 'role' | 'text' | 'attachments' | 'status'>[],
+  messages: readonly Pick<ChatMessage, 'role' | 'text' | 'attachments' | 'status' | 'quick'>[],
   labels: SeedLabels = DEFAULT_SEED_LABELS,
   maxChars: number = SEED_MAX_CHARS,
 ): string {
   const turns: string[] = [];
+  let quick = false;
   for (const m of messages) {
     const text = (m.role === 'user' ? stripTurnExtras(m.text) : m.text).trim();
     const files = m.role === 'user' ? (m.attachments ?? []).map((a) => `[${labels.attachment}: ${a.name}]`) : [];
     if (!text && !files.length) continue;
-    turns.push(`${m.role === 'user' ? labels.user : labels.assistant}: ${[text, ...files].filter(Boolean).join('\n')}`);
+    // a handed-over quick answer is labelled as such, so Hermes does not mistake it for its own earlier turn
+    const label = m.role === 'user' ? labels.user : m.quick ? quickLabel(labels, m.quick.model) : labels.assistant;
+    if (m.role === 'assistant' && m.quick) quick = true;
+    turns.push(`${label}: ${[text, ...files].filter(Boolean).join('\n')}`);
   }
   if (!turns.length) return '';
+  const intro = quick ? (labels.quickIntro ?? DEFAULT_SEED_LABELS.quickIntro!) : labels.intro;
   const kept: string[] = [];
-  let size = labels.intro.length;
+  let size = intro.length;
   for (let i = turns.length - 1; i >= 0; i--) {
     const t = turns[i];
     if (size + t.length + 2 > maxChars) {
@@ -125,5 +148,5 @@ export function branchSeedText(
     kept.unshift(t);
     size += t.length + 2;
   }
-  return `${labels.intro}\n\n${kept.join('\n\n')}`;
+  return `${intro}\n\n${kept.join('\n\n')}`;
 }

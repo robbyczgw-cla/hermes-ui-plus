@@ -22,6 +22,7 @@ import { makeAuthorizer, makeCredentials } from './auth.mjs';
 import { createApprovalWatcher } from './approvals.mjs';
 import { upstreamUrl } from './paths.mjs';
 import { writeFileAtomicSync } from './atomic-write.mjs';
+import { profilePrefix } from './profiles.mjs';
 
 export const INBOX_PATH = '/bridge/inbox/stream';
 export const HOOK_PATH = '/bridge/hermes-hook';
@@ -30,6 +31,8 @@ const SILENT_MARKERS = new Set(['[SILENT]', 'SILENT', 'NO_REPLY', 'NO REPLY']);
 // The hook only triggers a poll; an oversized (or forged) body is dropped early (review L4). Polling still covers it.
 const HOOK_BODY_MAX = 1024 * 1024;
 const REAUTH_MS = 30_000;
+/** Hermes profiles polled besides the default one (each costs one sessions request per source and poll). */
+export const MAX_POLLED_PROFILES = 8;
 /** What a client gets when it does not ask for sources (stream / device scope): the app's own sessions only.
  * api_server sessions are further limited to BRIDGE_PUSH_SESSION_PREFIX (hui-) by the poller. Cron is opt-in. */
 export const DEFAULT_CLIENT_SOURCES = Object.freeze(['api_server']);
@@ -93,7 +96,8 @@ export function loadPushConfig(env) {
 
 /**
  * @param {ReturnType<typeof import('./config.mjs').loadConfig>} config
- * @param {{env?: Record<string, string|undefined>, logger?: any, fetch?: typeof fetch, senders?: object, now?: () => number}} [o]
+ * @param {{env?: Record<string, string|undefined>, logger?: any, fetch?: typeof fetch, senders?: object, now?: () => number,
+ *   profiles?: {names: () => string[]}}} [o]  profiles: Hermes profiles to watch besides the default (src/profiles.mjs)
  */
 export function createHermesPush(config, o = {}) {
   const env = o.env ?? process.env;
@@ -126,10 +130,12 @@ export function createHermesPush(config, o = {}) {
 
   // ---------- state: per session last_active + seen-until (epoch s), persisted without content ----------
   const stateFile = pc.stateDir ? path.join(pc.stateDir, 'push-hermes.json') : null;
-  let state = { initialized: false, sessions: {} };
+  // sessions: key = session id (default profile) or `<profile>/<session id>`; profiles: non-default profiles with a baseline
+  let state = { initialized: false, sessions: {}, profiles: /** @type {string[]} */ ([]) };
   if (stateFile && fs.existsSync(stateFile)) {
     try {
-      state = { initialized: false, sessions: {}, ...JSON.parse(fs.readFileSync(stateFile, 'utf8')) };
+      state = { initialized: false, sessions: {}, profiles: [], ...JSON.parse(fs.readFileSync(stateFile, 'utf8')) };
+      if (!Array.isArray(state.profiles)) state.profiles = [];
     } catch {
       /* start fresh (baseline again, no notifications for old rows) */
     }
@@ -152,7 +158,8 @@ export function createHermesPush(config, o = {}) {
   /** @type {Map<string, {start: number, end: number|null, detached?: boolean}[]>} */
   const turns = new Map();
   const turnHooks = {
-    begin(sessionId) {
+    /** @param {string} sessionId @param {string|null} [profile] Hermes profile of the turn (null = default) */
+    begin(sessionId, profile = null) {
       /** @type {{start: number, end: number|null, detached?: boolean}|null} */
       let w = null;
       const end = () => {
@@ -164,16 +171,17 @@ export function createHermesPush(config, o = {}) {
         if (w) w.detached = true;
       };
       if (!sessionId) return end;
-      const list = turns.get(sessionId) ?? [];
+      const key = sessionKey(profile, sessionId);
+      const list = turns.get(key) ?? [];
       w = { start: now(), end: null };
       list.push(w);
-      turns.set(sessionId, list.slice(-5));
+      turns.set(key, list.slice(-5));
       if (turns.size > 1000) turns.delete(turns.keys().next().value);
       return end;
     },
   };
-  const busy = (sid) => (turns.get(sid) ?? []).some((w) => w.end === null);
-  const streamedByBridge = (sid, tsSec) => (turns.get(sid) ?? []).some((w) => !w.detached && tsSec * 1000 >= w.start - 2000 && tsSec * 1000 <= (w.end ?? Infinity) + 5000);
+  const busy = (key) => (turns.get(key) ?? []).some((w) => w.end === null);
+  const streamedByBridge = (key, tsSec) => (turns.get(key) ?? []).some((w) => !w.detached && tsSec * 1000 >= w.start - 2000 && tsSec * 1000 <= (w.end ?? Infinity) + 5000);
 
   // ---------- approvals: Hermes waits for a decision (src/approvals.mjs) ----------
   // approval.request seen on a chat stream (live or detached) → live inbox event `approval`, else push; the answer /
@@ -194,7 +202,8 @@ export function createHermesPush(config, o = {}) {
           text: ev.command,
           previewDefault: pc.preview, // previews off: generic body, no command text
           ttl: Math.max(60, Math.ceil(pc.approvalTimeoutMs / 1000)),
-          data: { src: 'hermes', sessionId: ev.sessionId, source: 'api_server', runId: ev.runId, requestId: ev.requestId },
+          // hermesProfile: the bot whose chat asks (absent = default); the app opens / answers under /p/<profile>/
+          data: { src: 'hermes', sessionId: ev.sessionId, source: 'api_server', runId: ev.runId, requestId: ev.requestId, ...(ev.hermesProfile ? { hermesProfile: ev.hermesProfile } : {}) },
           match: (reg) => (reg.scope?.sources?.length ? reg.scope.sources : DEFAULT_CLIENT_SOURCES).includes('api_server'),
           inbox: ev,
           inboxEvent: 'hui.approval',
@@ -223,17 +232,20 @@ export function createHermesPush(config, o = {}) {
     }
   }
 
-  let jobs = { at: 0, map: new Map() };
-  async function cronJob(sessionId) {
+  /** cron jobs per Hermes profile ('' = default) */
+  const jobsByProfile = new Map();
+  async function cronJob(sessionId, prefix = '') {
     const m = /^cron_(.+)_\d{8}_\d{6}$/.exec(sessionId);
     if (!m) return null;
+    let jobs = jobsByProfile.get(prefix) ?? { at: 0, map: new Map() };
     if (now() - jobs.at > 10 * 60_000) {
       try {
-        const j = await hermes('/api/jobs?include_disabled=true');
+        const j = await hermes(`${prefix}/api/jobs?include_disabled=true`);
         jobs = { at: now(), map: new Map((j?.jobs ?? []).map((x) => [String(x.id), { name: x.name, deliver: x.deliver }])) };
       } catch {
         jobs = { at: now(), map: jobs.map }; // jobs API unavailable: keep the old map, do not filter
       }
+      jobsByProfile.set(prefix, jobs);
     }
     return jobs.map.get(m[1]) ?? null;
   }
@@ -244,36 +256,52 @@ export function createHermesPush(config, o = {}) {
   let unsupported = false;
   const active = () => service.store.size > 0 || service.inbox.size > 0;
 
+  /** Hermes profiles to watch: the default (null) + the bridge's known profiles (capped). */
+  const watchedProfiles = () => [null, ...(o.profiles?.names?.() ?? []).slice(0, MAX_POLLED_PROFILES)];
+
   async function pollOnce() {
     if (unsupported) return;
+    for (const profile of watchedProfiles()) {
+      const ok = await pollProfile(profile);
+      if (!ok && !profile) return; // the default profile failed: try again next time (state not marked initialized)
+    }
+    state.initialized = true;
+    saveState();
+  }
+
+  /** @returns {Promise<boolean>} false when the session list could not be read */
+  async function pollProfile(profile) {
+    const prefix = profilePrefix(profile);
     const nowSec = now() / 1000;
-    const first = !state.initialized;
+    // baseline per profile: everything that exists when a profile is first watched counts as seen
+    const first = profile ? !state.profiles.includes(profile) : !state.initialized;
     for (const source of pc.sources) {
       let list;
       try {
-        list = (await hermes(`/api/sessions?source=${encodeURIComponent(source)}&limit=25`))?.data ?? [];
+        list = (await hermes(`${prefix}/api/sessions?source=${encodeURIComponent(source)}&limit=25`))?.data ?? [];
       } catch (e) {
-        if (e?.status === 404) {
+        if (e?.status === 404 && !profile) {
           unsupported = true; // Hermes without the sessions API
           log.warn('push_sessions_api_missing');
-        } else log.warn('push_poll_failed', { error: String(e?.message ?? e).slice(0, 80) });
-        return;
+        } else log.warn('push_poll_failed', { error: String(e?.message ?? e).slice(0, 80), ...(profile ? { profile } : {}) });
+        return false;
       }
       for (const s of list) {
         if (!s?.id || typeof s.last_active !== 'number') continue;
         if (source === 'api_server' && pc.sessionPrefix && !s.id.startsWith(pc.sessionPrefix)) continue;
-        const prev = state.sessions[s.id];
+        const key = sessionKey(profile, s.id);
+        const prev = state.sessions[key];
         if (first || (!prev && source !== 'cron')) {
           // baseline: everything that exists now (and app sessions we first see) counts as seen
-          state.sessions[s.id] = { la: s.last_active, su: s.last_active };
+          state.sessions[key] = { la: s.last_active, su: s.last_active };
           continue;
         }
         if (prev && s.last_active <= prev.la) continue;
-        if (busy(s.id)) continue;
+        if (busy(key)) continue;
         if (!s.ended_at && nowSec - s.last_active < pc.settleMs / 1000) continue; // still running: next poll
         let msgs = [];
         try {
-          msgs = (await hermes(`/api/sessions/${encodeURIComponent(s.id)}/messages?order=latest&limit=10`))?.data ?? [];
+          msgs = (await hermes(`${prefix}/api/sessions/${encodeURIComponent(s.id)}/messages?order=latest&limit=10`))?.data ?? [];
         } catch {
           continue;
         }
@@ -281,39 +309,41 @@ export function createHermesPush(config, o = {}) {
         const fresh = msgs
           .filter((m) => m?.role === 'assistant' && typeof m.timestamp === 'number' && m.timestamp > su)
           .filter((m) => m.display_kind !== 'hidden' && m.finish_reason !== 'tool_calls' && messageText(m.content).trim())
-          .filter((m) => !streamedByBridge(s.id, m.timestamp))
+          .filter((m) => !streamedByBridge(key, m.timestamp))
           .sort((a, b) => a.timestamp - b.timestamp);
         const maxTs = Math.max(su, s.last_active, ...msgs.map((m) => (typeof m.timestamp === 'number' ? m.timestamp : 0)));
-        state.sessions[s.id] = { la: s.last_active, su: maxTs };
+        state.sessions[key] = { la: s.last_active, su: maxTs };
         if (!fresh.length) continue;
         const last = fresh.at(-1);
         const text = messageText(last.content);
         let name = s.title || '';
         if (s.source === 'cron') {
           if (isSilence(text)) continue;
-          const job = await cronJob(s.id);
+          const job = await cronJob(s.id, prefix);
           if (pc.cronMode === 'delivered' && job && (!job.deliver || /^(local|none)$/i.test(String(job.deliver)))) continue;
           name = job?.name || name;
         }
         const title = name ? `${pc.title} · ${String(name).replace(/<think>[\s\S]*?(<\/think>|$)/g, '').trim().slice(0, 60)}` : pc.title;
-        const inbox = { id: `h_${s.id}_${last.id}`, sessionId: s.id, source: s.source, messageId: String(last.id), role: 'assistant', content: text, timestamp: Math.round(last.timestamp * 1000), title, count: fresh.length };
+        // hermesProfile: the bot of the session (absent = default) – the app fetches it under /p/<profile>/
+        const bot = profile ? { hermesProfile: profile } : {};
+        const inbox = { id: `h_${profile ? `${profile}_` : ''}${s.id}_${last.id}`, sessionId: s.id, ...bot, source: s.source, messageId: String(last.id), role: 'assistant', content: text, timestamp: Math.round(last.timestamp * 1000), title, count: fresh.length };
         const via = await service.dispatch({
           user: OWNER,
-          key: `${s.id}#${last.id}`,
-          threadKey: s.id,
+          key: `${key}#${last.id}`,
+          threadKey: key,
           title,
           text,
           count: fresh.length,
           previewDefault: pc.preview,
-          data: { src: 'hermes', sessionId: s.id, source: s.source, messageId: String(last.id) },
+          data: { src: 'hermes', sessionId: s.id, ...bot, source: s.source, messageId: String(last.id) },
           match: (reg) => (reg.scope?.sources?.length ? reg.scope.sources : DEFAULT_CLIENT_SOURCES).includes(s.source),
           inbox,
         });
-        log.info('push_hermes_message', { source: s.source, via, count: fresh.length });
+        log.info('push_hermes_message', { source: s.source, via, count: fresh.length, ...(profile ? { profile } : {}) });
       }
     }
-    state.initialized = true;
-    saveState();
+    if (profile && !state.profiles.includes(profile)) state.profiles = [...state.profiles, profile].slice(-50);
+    return true;
   }
 
   function poll() {
@@ -424,6 +454,11 @@ export function createHermesPush(config, o = {}) {
       service.stop();
     },
   };
+}
+
+/** State / turn key of a session: plain id for the default profile, `<profile>/<id>` otherwise. */
+export function sessionKey(profile, sessionId) {
+  return profile ? `${profile}/${sessionId}` : sessionId;
 }
 
 function timingSafeEq(a, b) {

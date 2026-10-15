@@ -14,7 +14,8 @@
 #   1. web bundle: scripts/build-web.sh (memory-capped, own flock; waits while another web build runs) with FLAVOR,
 #      WEB_SW=0 (no service worker: WebKitGTK on tauri:// has none) and WEB_OUT=dist/web-desktop-linux (not the mac
 #      script's dir, so both can run on the same evening); EXPO_PUBLIC_* of the calling shell are unset. A hermes
-#      build fails if private content would ship. SKIP_WEB=1 reuses an existing dist/web-desktop-linux.
+#      build fails if private content would ship. SKIP_WEB=1 reuses an existing dist/web-desktop-linux. Built or
+#      reused, its JS must carry the flavor mark of FLAVOR (scripts/verify-flavor-artifact.mjs) before it is uploaded.
 #   2. rsync desktop/ (no node_modules/target/gen) + the web bundle -> $LINUX_HOST:~/$REMOTE_DIR/desktop{,/dist-web}
 #   3. on the Linux host: waits while an Android emulator runs there; memory-capped (MemoryMax=$MEM_MAX, no swap,
 #      CARGO_BUILD_JOBS=$JOBS): npm ci (@tauri-apps/cli, npm cache inside the build dir), `tauri build --bundles
@@ -134,6 +135,8 @@ WEB_SWV="$(sed -n 's/^sw=//p' "$WEB_OUT.build-info" 2>/dev/null || true)"
 if [ "$WEB_FLAVOR" != "$FLAVOR" ] || [ "$WEB_SWV" != 0 ]; then
   echo "web bundle $WEB_OUT is flavor='${WEB_FLAVOR:-unknown}' sw='${WEB_SWV:-?}' (need $FLAVOR, sw=0): rebuild without SKIP_WEB=1"; exit 1
 fi
+# the JS that gets embedded must be this flavor's (app/src/flavor.ts FLAVOR_MARK), also for a reused bundle
+flavor_verify_artifact "$WEB_OUT" || { echo "web bundle $WEB_OUT does not carry the FLAVOR=$FLAVOR mark: rebuild without SKIP_WEB=1"; exit 1; }
 # hermes: guard the bundle as it is now (also when reused), not only when it was built
 if [ "$FLAVOR" = hermes ]; then flavor_guard_output "$WEB_OUT" || { echo "web bundle contains private content"; exit 1; }; fi
 echo "web bundle: $(du -sh "$WEB_OUT" | cut -f1)"

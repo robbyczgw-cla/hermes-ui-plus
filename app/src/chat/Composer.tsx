@@ -21,14 +21,36 @@ import { DictationNotice, MicButton, RecordingBar, insertDictation, useDictation
 import { useDesktopFileTarget } from '../desktop/files';
 import { lightHaptic } from './actions';
 import { useChatShell } from './ChatShellContext';
+import { ActionMenu } from './ActionMenu';
+import { useToast } from './Toast';
 import { SlashPalette, completeRow, paletteState, pickRow, submitSlash, type CommandDef, type PaletteRow, type SlashBinding, type SlashPaletteHandle } from './commands';
 import { Icon } from './icons';
 
 export type ComposerHandle = {
   focus(): void;
   setText(text: string): void;
-  /** a cancelled send's text comes back – only into an empty input (never overwrites what was typed since) */
-  restoreText(text: string): void;
+  /**
+   * a cancelled send's text comes back – only into an empty input (never overwrites what was typed since);
+   * `append`: added below what was typed instead (a discarded queued message must not get lost)
+   */
+  restoreText(text: string, append?: boolean): void;
+  /** the unsent text, removed from the composer (handed over when switching to / from the quick thread) */
+  takeText(): string;
+};
+
+/**
+ * Quick answers (app/src/quick): the ⚡ switch between the chat and the quick thread of its connection, and
+ * long-press on Send → "Als Schnellfrage senden". Omitted = quick is not available here (nothing changes).
+ */
+export type ComposerQuick = {
+  /** this composer belongs to the quick thread (⚡ on, text only, brass outline) */
+  active: boolean;
+  /** show the ⚡ switch (Settings → "⚡ im Eingabefeld anzeigen"; always shown in the quick thread) */
+  showToggle: boolean;
+  /** ⚡ pressed: switch views, the unsent text moves along */
+  onToggle(text: string): void;
+  /** long-press on Send in the chat: send this text as a quick question */
+  onSendQuick?(text: string): void;
 };
 
 type Props = {
@@ -50,6 +72,7 @@ type Props = {
   history?: readonly Attachment[];
   /** slash command palette ("/" at the very start); omitted = none */
   slash?: SlashBinding;
+  quick?: ComposerQuick;
 };
 
 const MAX_HEIGHT = 168;
@@ -63,11 +86,13 @@ function webSources(): PickSource[] {
 
 // memo: the chat view re-renders on every streaming update; the composer's props stay stable meanwhile
 export const Composer = memo(forwardRef<ComposerHandle, Props>(function Composer(
-  { streaming, disabled, placeholder, onSend, onStop, bottomInset, profile, history, slash, sendWhileUploading },
+  { streaming, disabled, placeholder, onSend, onStop, bottomInset, profile, history, slash, sendWhileUploading, quick },
   ref,
 ) {
   const t = useTheme();
   const tr = useT();
+  const toast = useToast();
+  const quickActive = !!quick?.active;
   const { formatNumber } = useLocale();
   // Settings: Chat → Enter sendet / Große Anhänge bestätigen, Darstellung → Schriftgröße
   const { prefs } = usePreferences();
@@ -77,7 +102,7 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>(function Composer
   const [text, setText] = useState('');
   // Hermes: own target (bridge uploads); demo: no attachments
   const target: AttachmentTarget = { kind: 'hermes', bridge: profile.kind === 'hermes' && !!profile.bridge };
-  const canAttach = profile.kind !== 'demo';
+  const canAttach = !quickActive && profile.kind !== 'demo';
   const draft = useAttachmentDraft({
     target,
     conn: profile.kind === 'hermes' && profile.bridge ? { baseUrl: profile.baseUrl, apiKey: profile.apiKey } : null,
@@ -121,13 +146,23 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>(function Composer
     shownConv.current = convId;
     dismissNotice('chatChanged');
   }, [convId, dismissNotice]);
+  const textRef = useRef(text);
+  useEffect(() => {
+    textRef.current = text;
+  }, [text]);
   useImperativeHandle(ref, () => ({
     focus: () => input.current?.focus(),
     setText: (v: string) => {
       setText(v);
       input.current?.focus();
     },
-    restoreText: (v: string) => setText((cur) => (cur.trim() ? cur : v)),
+    restoreText: (v: string, append?: boolean) => setText((cur) => (!cur.trim() ? v : append ? `${cur.trimEnd()}\n\n${v}` : cur)),
+    takeText: () => {
+      const v = textRef.current;
+      textRef.current = '';
+      setText('');
+      return v;
+    },
   }));
 
   const hasContent = !!text.trim() || draft.attachments.length > 0;
@@ -216,6 +251,30 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>(function Composer
     }
   };
 
+  // ---- quick answers: ⚡ switches views (the draft moves along), long-press on Send sends as a quick question
+  const [sendMenu, setSendMenu] = useState(false);
+  const clearDraftText = () => {
+    setText('');
+    selection.current = undefined;
+    setWebHeight(undefined);
+  };
+  const toggleQuick = () => {
+    if (!quick) return;
+    if (!quick.active && draft.attachments.length) return toast(tr('quick.composer.noAttachments'));
+    lightHaptic();
+    const v = text;
+    clearDraftText();
+    quick.onToggle(v);
+  };
+  const sendQuick = () => {
+    if (!quick?.onSendQuick || !text.trim()) return;
+    if (draft.attachments.length) return toast(tr('quick.composer.noAttachments'));
+    const v = text.trim();
+    clearDraftText();
+    quick.onSendQuick(v);
+  };
+  const canSendQuick = !!quick?.onSendQuick && !quickActive && !!text.trim() && !disabled && !sending;
+
   const showStop = streaming;
   return (
     <View style={[styles.outer, { paddingBottom: Math.max(bottomInset, 8), backgroundColor: t.colors.bg }, columnWidth !== undefined && { width: '100%', maxWidth: columnWidth, alignSelf: 'center' }]}>
@@ -227,7 +286,8 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>(function Composer
           styles.box,
           {
             backgroundColor: t.dark ? t.colors.surface : t.colors.bg,
-            borderColor: t.colors.borderStrong,
+            // quick thread: a brass outline marks where this message goes
+            borderColor: quickActive ? t.colors.accent : t.colors.borderStrong,
             borderRadius: 26,
           },
           !t.dark && t.shadows.sm,
@@ -271,15 +331,25 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>(function Composer
               />
             </>
           )}
+          {quick && (quickActive || quick.showToggle) && !dictation.active ? <QuickToggle active={quickActive} onPress={toggleQuick} /> : null}
           {/* the MicButton stays mounted for the whole recording (it is the ✓ / hold-to-talk target) */}
           {!showStop && (dictation.active || !hasContent) ? (
             <MicButton dictation={dictation} size={36} disabled={disabled || sending} />
           ) : (
             <Pressable
               onPress={showStop ? onStop : () => void submit()}
+              onLongPress={!showStop && canSendQuick ? () => {
+                lightHaptic();
+                setSendMenu(true);
+              } : undefined}
+              delayLongPress={400}
               disabled={!showStop && !canSend}
               accessibilityRole="button"
               accessibilityLabel={showStop ? tr('chat.composer.stop') : tr('actions.send')}
+              accessibilityActions={!showStop && canSendQuick ? [{ name: 'longpress', label: tr('quick.composer.sendAsQuick') }] : undefined}
+              onAccessibilityAction={(e) => {
+                if (e.nativeEvent.actionName === 'longpress') sendQuick();
+              }}
               hitSlop={6}
               style={({ pressed }) => [
                 styles.sendBtn,
@@ -295,6 +365,14 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>(function Composer
         </View>
       </View>
       <DictationNotice dictation={dictation} />
+      {sendMenu ? (
+        <ActionMenu
+          visible
+          onClose={() => setSendMenu(false)}
+          label={tr('quick.composer.sendMenu')}
+          items={[{ key: 'quick', icon: 'bolt', label: tr('quick.composer.sendAsQuick'), hint: tr('quick.composer.sendAsQuickHint'), onPress: sendQuick }]}
+        />
+      ) : null}
       {draft.error ? (
         <Text onPress={draft.clearError} style={[styles.error, { color: t.colors.danger }]} accessibilityRole="alert" accessibilityHint={tr('chat.composer.error.dismissHint')}>
           {draft.error}
@@ -303,6 +381,29 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>(function Composer
     </View>
   );
 }));
+
+/** ⚡ in the composer: a switch (on = the quick thread is shown and this composer asks quick questions). */
+function QuickToggle({ active, onPress }: { active: boolean; onPress(): void }) {
+  const t = useTheme();
+  const tr = useT();
+  return (
+    <Pressable
+      onPress={onPress}
+      hitSlop={6}
+      accessibilityRole="switch"
+      accessibilityState={{ checked: active }}
+      accessibilityLabel={tr('quick.composer.toggle')}
+      accessibilityHint={active ? tr('quick.composer.toggleOnHint') : tr('quick.composer.toggleOffHint')}
+      style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
+        styles.quickBtn,
+        active ? { backgroundColor: t.colors.accentSoft } : (pressed || hovered) && { backgroundColor: t.colors.surfacePressed },
+        pressed && { opacity: 0.75 },
+      ]}
+    >
+      <Icon name={active ? 'boltFilled' : 'bolt'} size={18} color={active ? t.colors.accent : t.colors.muted} strokeWidth={active ? 1.5 : 1.9} />
+    </Pressable>
+  );
+}
 
 /** Native: Alert with cancel/confirm; web: window.confirm. Resolves false on dismiss. */
 function confirmAsync(title: string, message: string, ok: string, cancel: string): Promise<boolean> {
@@ -350,4 +451,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: 0,
   },
   sendBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', marginBottom: 1 },
+  quickBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', marginBottom: 1, marginRight: -4 },
 });

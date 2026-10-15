@@ -35,6 +35,8 @@
 # --clean, pod install, xcodebuild archive (Release, automatic signing, -allowProvisioningUpdates), export
 # (method "debugging" = development), manifest + install page -> copy back -> delete DerivedData, archive,
 # Pods, ios/, node_modules and the npm/CocoaPods download caches on the Mac (it has little free disk).
+# Every mode fails unless the copied-back app's main.jsbundle carries the flavor mark of FLAVOR
+# (scripts/verify-flavor-artifact.mjs) – checked in staging, before anything lands in dist/ or is published / uploaded.
 #
 # Toolchain on the Mac (user-space, no sudo; see docs/BUILD.md "iOS (on a Mac)"):
 #   ~/.local/node        Node 22 LTS (nodejs.org tarball)
@@ -530,7 +532,9 @@ echo "$NAME|$BID|$VER|$BUILD" > "$PUB/meta.txt"
 # ---------------------------------------------------------------- simulator: copy back the zipped .app, guard it
 if [ "$MODE" = simulator ]; then
   SZ="$ROOT/dist/hermes-ui-ios-sim-$SHA.zip"
-  rsync -a "$MAC_HOST:$REMOTE_DIR/out/hermes-ui-sim.zip" "$SZ"
+  rsync -a "$MAC_HOST:$REMOTE_DIR/out/hermes-ui-sim.zip" "$SZ.partial"
+  flavor_verify_artifact "$SZ.partial" || { rm -f "$SZ.partial"; "${SSH[@]}" "rm -rf $REMOTE_DIR/out"; echo "simulator app is not FLAVOR=$FLAVOR JS (flavor mark) – removed"; exit 1; }
+  mv -f "$SZ.partial" "$SZ"
   IFS='|' read -r SAPPN BID VER SSIZE < <("${SSH[@]}" "cat $REMOTE_DIR/out/meta.txt")
   "${SSH[@]}" "rm -rf $REMOTE_DIR/out"
   if [ "$FLAVOR" = hermes ]; then
@@ -551,6 +555,7 @@ if [ "$MODE" = appstore ]; then
   rm -rf "$STAGE"; mkdir -p "$STAGE" "$ROOT/dist/appstore"
   rsync -a "$MAC_HOST:$REMOTE_DIR/out/" "$STAGE/"
   IFS='|' read -r NAME BID VER BUILD < "$STAGE/meta.txt"
+  flavor_verify_artifact "$STAGE/hermes-ui.ipa" || { rm -rf "$STAGE"; "${SSH[@]}" "rm -rf $REMOTE_DIR/out"; echo "App Store .ipa is not FLAVOR=$FLAVOR JS (flavor mark) – removed"; exit 1; }
   GX="$(mktemp -d)"; (cd "$GX" && unzip -q "$STAGE/hermes-ui.ipa")
   flavor_guard_output "$GX" || { rm -rf "$GX" "$STAGE"; "${SSH[@]}" "rm -rf $REMOTE_DIR/out"; echo "App Store .ipa contains private content – removed"; exit 1; }
   rm -rf "$GX"
@@ -592,6 +597,7 @@ rm -rf "$STAGE"; mkdir -p "$STAGE"
 rsync -a --delete "$MAC_HOST:$REMOTE_DIR/out/" "$STAGE/"
 "${SSH[@]}" "rm -rf $REMOTE_DIR/out"
 IFS='|' read -r NAME BID VER BUILD < "$STAGE/meta.txt"; rm -f "$STAGE/meta.txt"
+flavor_verify_artifact "$STAGE/hermes-ui.ipa" || { rm -rf "$STAGE"; echo ".ipa is not FLAVOR=$FLAVOR JS (flavor mark) – removed, nothing published"; exit 1; }
 if [ "$FLAVOR" = hermes ]; then  # the shipped app must not contain private content
   GX="$(mktemp -d)"; (cd "$GX" && unzip -q "$STAGE/hermes-ui.ipa")
   flavor_guard_output "$GX" || { rm -rf "$GX" "$STAGE"; echo "hermes .ipa contains private content – removed, nothing published"; exit 1; }

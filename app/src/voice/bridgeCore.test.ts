@@ -85,6 +85,20 @@ test('parseVoiceConfig: full contract', () => {
   assert.deepEqual(cfg.tts?.voices[2], { id: 'alloy', name: 'alloy', lang: '', provider: '' });
 });
 
+test('parseVoiceConfig: available:false (bridge has no provider key) counts as no STT / TTS (E2E round 12 F4)', () => {
+  // the bridge always names its configured provider/model and flags a missing key with available:false;
+  // settings showed "Recognition: groq · whisper-large-v3-turbo" while the mic said "not set up on the UI bridge"
+  const cfg = parseVoiceConfig({
+    stt: { provider: 'groq', model: 'whisper-large-v3-turbo', available: false, maxBytes: 1 },
+    tts: { provider: 'openai', model: 'gpt-4o-mini-tts', voices: [{ id: 'nova', name: 'Nova' }], defaultVoice: 'nova', available: false },
+  });
+  assert.deepEqual(cfg, { stt: null, tts: null });
+  // available:true and older bridges without the flag stay usable
+  assert.deepEqual(parseVoiceConfig({ stt: { provider: 'groq', model: 'w', available: true } }).stt, { provider: 'groq', model: 'w' });
+  assert.deepEqual(parseVoiceConfig({ stt: { provider: 'groq', model: 'w' } }).stt, { provider: 'groq', model: 'w' });
+  assert.equal(parseVoiceConfig({ tts: { provider: 'openai', voices: [], available: true } }).tts?.provider, 'openai');
+});
+
 test('parseVoiceConfig: tolerant to missing parts / bad default / string input', () => {
   const cfg = parseVoiceConfig('{"tts":{"provider":"x","voices":[{"id":"a","name":"A"}],"defaultVoice":"gone"}}');
   assert.equal(cfg.stt, null);

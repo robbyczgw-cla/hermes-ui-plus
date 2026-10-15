@@ -386,3 +386,42 @@ test('reconcile: remote-only refresh updates an unchanged partial answer to fail
   const remote = mapRemoteMessages([before[0], { ...before[1], finishReason: 'error' }]);
   assert.equal(reconcileTranscript(local, remote, 'remote')[1].status, 'error');
 });
+
+test('Sol F06: remote turns between two locally known turns are merged in, in stored order', () => {
+  // [U1,A1] here, [U2,A2] sent from another device, then U3 sent here from the cached history
+  const local = [ut('u-1', 'one'), at('a-1', 'answer one'), ut('u-3', 'three'), at('a-3', 'answer three')];
+  const remote = mapRemoteMessages([
+    row('1', 'user', 'one', 1),
+    row('2', 'assistant', 'answer one', 2),
+    row('3', 'user', 'two', 3),
+    row('4', 'assistant', 'answer two', 4),
+    row('5', 'user', 'three', 5),
+    row('6', 'assistant', 'answer three', 6),
+  ]);
+  const merged = reconcileTranscript(local, remote);
+  assert.deepEqual(merged.map((m) => m.text), ['one', 'answer one', 'two', 'answer two', 'three', 'answer three']);
+  assert.deepEqual(merged.map((m) => m.id), ['u-1', 'a-1', 'hu-3', 'ha-4', 'u-3', 'a-3']);
+  assert.equal(reconcileTranscript(merged, remote), merged, 'second pass is stable');
+
+  // a local-only turn (never reached the server) stays where it was; the remote turn follows it
+  const withLocal = [ut('u-1', 'one'), at('a-1', 'answer one'), ut('u-x', 'offline'), at('a-x', '', { status: 'error', error: 'Netz' }), ut('u-3', 'three'), at('a-3', 'answer three')];
+  assert.deepEqual(reconcileTranscript(withLocal, remote).map((m) => m.id), ['u-1', 'a-1', 'u-x', 'a-x', 'hu-3', 'ha-4', 'u-3', 'a-3']);
+
+  // a superseded run (retry) between two known turns is still not shown
+  const retried = [ut('u-1', 'one'), at('a-1', 'answer one'), ut('u-2', 'Wetter?'), at('a-2', 'Sonnig.'), ut('u-3', 'three'), at('a-3', 'answer three')];
+  const remoteRetried = mapRemoteMessages([
+    row('1', 'user', 'one', 1),
+    row('2', 'assistant', 'answer one', 2),
+    row('3', 'user', 'Wetter?', 3),
+    row('4', 'assistant', 'Regnerisch.', 4),
+    row('5', 'user', 'Wetter?', 5),
+    row('6', 'assistant', 'Sonnig.', 6),
+    row('7', 'user', 'three', 7),
+    row('8', 'assistant', 'answer three', 8),
+  ]);
+  assert.equal(reconcileTranscript(retried, remoteRetried), retried);
+
+  // turns before the first known one (a capped local history) are not brought back
+  const capped = local.slice(2);
+  assert.equal(reconcileTranscript(capped, remote), capped);
+});

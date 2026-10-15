@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import type { ApprovalChoice, ApprovalRequest } from '../hermes/types';
 import { useT } from '../i18n';
@@ -23,7 +23,7 @@ export type ApprovalStackProps = {
  * each card is answered independently (own request id, own double-tap lock). Hidden → a chip with the count re-opens it.
  * A new request reveals the stack again and is announced to screen readers.
  */
-export function ApprovalStack({ approvals, onRespond, onClose, focus, style }: ApprovalStackProps) {
+export const ApprovalStack = memo(function ApprovalStack({ approvals, onRespond, onClose, focus, style }: ApprovalStackProps) {
   const t = useTheme();
   const tr = useT();
   const keys = useMemo(() => approvals.map(stackKey), [approvals]);
@@ -106,7 +106,7 @@ export function ApprovalStack({ approvals, onRespond, onClose, focus, style }: A
       />
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   wrap: { gap: 6 },

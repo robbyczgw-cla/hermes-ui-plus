@@ -13,6 +13,7 @@ import { useConversationsInternals } from '../conversations/ConversationsProvide
 import { hermesSessions } from '../hermes/client';
 import { desktopNotifyRemove, desktopWindowFocused, isDesktopApp } from '../desktop/bridge';
 import { onDesktopNotificationOpen } from '../desktop/notifications';
+import { withBot } from '../hermes/bots';
 import { useI18n } from '../i18n';
 import { useConnection } from '../settings/ConnectionProvider';
 import type { ConnectionProfile } from '../settings/profiles';
@@ -48,10 +49,11 @@ export function PushHost({ children }: { children: ReactNode }) {
   });
 
   // ---------- Hermes: fetch the session and merge it (creates the drawer entry / bumps lastActive → transcript reload)
-  const refreshHermesSession = useCallback(async (p: ConnectionProfile, sessionId: string) => {
-    const s = await hermesSessions({ baseUrl: p.baseUrl, apiKey: p.apiKey }).get(sessionId);
+  // `bot`: Hermes profile of the session (bridge `hermesProfile`) → fetched under /p/<bot>/, the chat is bound to it
+  const refreshHermesSession = useCallback(async (p: ConnectionProfile, sessionId: string, bot?: string) => {
+    const s = await hermesSessions(withBot({ baseUrl: p.baseUrl, apiKey: p.apiKey }, bot)).get(sessionId);
     // the profile's session filter applies: a cron/Telegram session never becomes a chat unless enabled
-    latest.current.controller.mergeRemote({ id: p.id, kind: 'hermes' }, [s], { filter: pushFilterOf(p) });
+    latest.current.controller.mergeRemote({ id: p.id, kind: 'hermes' }, [s], { filter: pushFilterOf(p), bot });
   }, []);
 
   // ---------- open a chat from a notification tap
@@ -75,7 +77,7 @@ export function PushHost({ children }: { children: ReactNode }) {
       let conv = pickConversation(ctl.list(), p, target);
       if (p.kind === 'hermes' && target.sessionId) {
         try {
-          await refreshHermesSession(p, target.sessionId);
+          await refreshHermesSession(p, target.sessionId, target.hermesProfile);
         } catch {
           /* offline: open what we have */
         }
@@ -190,7 +192,7 @@ export function PushHost({ children }: { children: ReactNode }) {
           const r = await recoverFromInbox({ controller: ctl, deliverToOpenChat }, p, ev).catch(() => null);
           // a chat that is not open got its lost answer: "Antwort ist da" (the open chat reports via onTurnEnd)
           if (r?.recovered) emitAnswerReady({ conversationId: r.conversationId, message: r.recovered, late: true });
-          await refreshHermesSession(p, ev.sessionId).catch(() => {});
+          await refreshHermesSession(p, ev.sessionId, ev.hermesProfile).catch(() => {});
         }
       } else {
         await routeInboxEvent({ controller: ctl, activeId: () => st.get().activeId, deliverToOpenChat }, p, ev);
@@ -201,7 +203,7 @@ export function PushHost({ children }: { children: ReactNode }) {
         await presentLocal({
           title: ev.title || p.name,
           body: preview ? ev.content.replace(/```[\s\S]*?(```|$)/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 140) || tr('push.newMessage') : tr('push.newMessage'),
-          data: { src: 'hermes', profileId: p.id, ...(ev.sessionId ? { sessionId: ev.sessionId } : {}), ...(ev.agent ? { agent: ev.agent } : {}) },
+          data: { src: 'hermes', profileId: p.id, ...(ev.sessionId ? { sessionId: ev.sessionId } : {}), ...(ev.agent ? { agent: ev.agent } : {}), ...(ev.hermesProfile ? { hermesProfile: ev.hermesProfile } : {}) },
         });
       }
     },
@@ -226,7 +228,7 @@ export function PushHost({ children }: { children: ReactNode }) {
     await presentLocal({
       title: tr('push.approval.notifyTitle'),
       body: preview && n.command ? displayCommand(n.command).text.replace(/\s+/g, ' ').trim().slice(0, 140) : tr('push.approval.notifyBody'),
-      data: { src: 'hermes', kind: 'approval', profileId: p.id, ...(n.sessionId ? { sessionId: n.sessionId } : {}), runId: n.runId, requestId: n.requestId, messageId: n.id },
+      data: { src: 'hermes', kind: 'approval', profileId: p.id, ...(n.sessionId ? { sessionId: n.sessionId } : {}), ...(n.hermesProfile ? { hermesProfile: n.hermesProfile } : {}), runId: n.runId, requestId: n.requestId, messageId: n.id },
       tag: approvalTag(n.requestId),
       kind: 'approval',
     });
@@ -257,7 +259,15 @@ export function PushHost({ children }: { children: ReactNode }) {
     const b = approvalBanner;
     setApprovalBanner(null);
     if (!b) return;
-    void openTarget({ src: 'hermes', profileId: b.profileId, sessionId: b.n.sessionId ?? undefined, kind: 'approval', runId: b.n.runId, requestId: b.n.requestId });
+    void openTarget({
+      src: 'hermes',
+      profileId: b.profileId,
+      sessionId: b.n.sessionId ?? undefined,
+      kind: 'approval',
+      runId: b.n.runId,
+      requestId: b.n.requestId,
+      ...(b.n.hermesProfile ? { hermesProfile: b.n.hermesProfile } : {}),
+    });
   }, [approvalBanner, openTarget]);
 
   // serialised per profile: a burst of events (one chunk / a `since=` replay) must not overwrite each other

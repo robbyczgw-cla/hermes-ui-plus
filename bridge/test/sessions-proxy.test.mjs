@@ -87,6 +87,30 @@ test('POST /api/sessions/{id}/fork is allowed and forwards its body (app /branch
   assert.equal(seen.length, 0);
 });
 
+test('POST /api/sessions/{id}/model (Hermes v0.22 session model lock) is allowed, POST only, body capped at 8 KB', async () => {
+  seen = [];
+  const r = await call('/api/sessions/s1/model', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"model":"alias-main"}' });
+  assert.equal(r.status, 200);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].method, 'POST');
+  assert.equal(seen[0].url, '/api/sessions/s1/model');
+  assert.equal(seen[0].body, '{"model":"alias-main"}');
+  assert.equal(seen[0].headers.authorization, `Bearer ${UP_KEY}`);
+  seen = [];
+  for (const method of ['GET', 'PATCH', 'DELETE']) {
+    const bad = await call('/api/sessions/s1/model', { method, body: method === 'GET' ? undefined : '{}' });
+    assert.equal(bad.status, 405, method);
+    assert.equal(bad.headers.allow, 'POST');
+  }
+  const big = await call('/api/sessions/s1/model', { method: 'POST', body: `{"model":"${'x'.repeat(8 * 1024)}"}`, headers: { 'content-type': 'application/json' } }).catch((e) => ({ status: `err ${e.code}` }));
+  assert.ok(big.status === 413 || /ECONNRESET|EPIPE/.test(String(big.status)), String(big.status));
+  for (const p of ['/api/sessions/s1/model/x', '/api/sessions/a..b/model', '/api/sessions/%41/model']) {
+    const r2 = await call(p, { method: 'POST', body: '{}' }).catch((e) => ({ status: `err ${e.code}` }));
+    assert.ok(r2.status === 404 || r2.status === 400, `${p}: ${r2.status}`);
+  }
+  assert.equal(seen.length, 0);
+});
+
 test('query strings are forwarded verbatim', async () => {
   seen = [];
   await call('/api/sessions?limit=20&offset=40&q=a%20b&source=x&x=1&x=2');

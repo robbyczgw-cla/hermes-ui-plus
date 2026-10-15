@@ -2,6 +2,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadSkillInline } from './skillInline.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 // Source checkout: ../hermes-skill (wins, it is the source of truth); npm package: skill/ bundled by scripts/bundle-skill.mjs (prepack).
@@ -10,6 +11,9 @@ export const REPO_SKILL_DIR = resolve(here, '../../hermes-skill');
 export const DEFAULT_BOOTSTRAP_FILE = [REPO_SKILL_DIR, BUNDLED_SKILL_DIR]
   .map((d) => resolve(d, 'bootstrap-system-message.txt'))
   .find((f) => existsSync(f)) ?? resolve(REPO_SKILL_DIR, 'bootstrap-system-message.txt');
+
+// SKILL.md for the inline skill core when it is not next to the bootstrap message: repo checkout, then npm bundle.
+export const DEFAULT_SKILL_FILES = [REPO_SKILL_DIR, BUNDLED_SKILL_DIR].map((d) => resolve(d, 'hermes-ui', 'SKILL.md'));
 
 const bool = (v, d) => (v === undefined || v === '' ? d : /^(1|true|yes|on)$/i.test(v));
 const num = (v, d) => (v === undefined || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
@@ -25,7 +29,8 @@ export function normalizeBaseUrl(u) {
 
 /**
  * @param {Record<string, string|undefined>} env
- * @param {{defaultBootstrapFile?: string}} [o]  tests: override where the bundled bootstrap message is expected
+ * @param {{defaultBootstrapFile?: string, skillFiles?: string[]}} [o]  tests: override where the bundled bootstrap
+ *   message / SKILL.md are expected
  */
 export function loadConfig(env = process.env, o = {}) {
   if (!env.HERMES_BASE_URL) throw new Error('HERMES_BASE_URL is required');
@@ -58,10 +63,11 @@ export function loadConfig(env = process.env, o = {}) {
   // Path of the expected but missing default bootstrap file ('' = found or switched off). Without it the skill never
   // triggers on bridge connections (the app sends no bootstrap itself there), so the server warns loudly at startup.
   let bootstrapMissing = '';
+  let bootstrapFile = '';
   const bootstrapSetting = env.BRIDGE_BOOTSTRAP ?? '';
   if (!/^(0|off|false|no)$/i.test(bootstrapSetting)) {
     const file = env.BRIDGE_BOOTSTRAP_FILE || o.defaultBootstrapFile || DEFAULT_BOOTSTRAP_FILE;
-    if (existsSync(file)) bootstrap = readFileSync(file, 'utf8').trim();
+    if (existsSync(file)) { bootstrap = readFileSync(file, 'utf8').trim(); bootstrapFile = file; }
     else if (env.BRIDGE_BOOTSTRAP_FILE) throw new Error(`BRIDGE_BOOTSTRAP_FILE not found: ${file}`);
     else bootstrapMissing = file;
   }
@@ -84,6 +90,13 @@ export function loadConfig(env = process.env, o = {}) {
       maxHealthInFlight: Math.max(1, num(env.BRIDGE_MAX_HEALTH_INFLIGHT, 4)),
       // non-streaming pass-through routes (/health, sessions, models, run status, approval answers)
       apiTimeoutMs: Math.max(1000, num(env.BRIDGE_UPSTREAM_TIMEOUT_MS, 30_000)),
+    },
+    // idempotent send + stream resume for chat turns with an Idempotency-Key (src/replay.mjs); BRIDGE_RESUME=off disables it
+    resume: {
+      enabled: bool(env.BRIDGE_RESUME, true),
+      maxTurnBytes: Math.max(64 * 1024, num(env.BRIDGE_RESUME_TURN_KB, 2048) * 1024),
+      maxTotalBytes: Math.max(1024 * 1024, num(env.BRIDGE_RESUME_TOTAL_MB, 32) * 1024 * 1024),
+      retainMs: Math.max(0, num(env.BRIDGE_RESUME_RETAIN_MS, 10 * 60_000)),
     },
     drainMs: Math.max(1, num(env.BRIDGE_DRAIN_MS, 120_000)),
     logLevel: env.BRIDGE_LOG_LEVEL || 'info',
@@ -118,6 +131,8 @@ export function loadConfig(env = process.env, o = {}) {
     },
     bootstrap,
     bootstrapMissing,
+    // skill core inline after the bootstrap on app turns (src/skillInline.mjs): skillInline, skillInlineFile, skillInlineMissing
+    ...loadSkillInline(env, { bootstrap, bootstrapFile, candidates: o.skillFiles ?? DEFAULT_SKILL_FILES }),
     memory: {
       enabled: bool(env.BRIDGE_CONTEXT_MEMORY, true),
       maxSessions: num(env.BRIDGE_CONTEXT_MAX_SESSIONS, 500),

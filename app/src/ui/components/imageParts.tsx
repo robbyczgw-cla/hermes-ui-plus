@@ -3,7 +3,7 @@
  * tiny attribution line (tap → source page), thumbnails and a fullscreen lightbox.
  * Never shows a broken image: failures render a subtle placeholder glyph or nothing.
  */
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions, type StyleProp, type ViewStyle } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,6 +18,7 @@ import { useT } from '../../i18n';
 import { shareImageUrl } from '../../images/share';
 import { useImageEdit } from '../../imageedit/context';
 import { useEscapeToClose } from '../lib/useEscapeToClose';
+import { knownAspect, rememberAspect } from '../lib/aspectCache';
 import { fallbackHeight, slotStatus } from '../../images/slot';
 import { FallbackTile, useImageSlot, useSlotCap } from './imageSlot';
 
@@ -31,6 +32,23 @@ export function ImageGlyph({ size = 20, color }: { size?: number; color: string 
       <Path d="M3.5 17.5 9 12.5l3.5 3 3-2.5 5 4.5" {...p} />
     </Svg>
   );
+}
+
+/**
+ * Aspect ratio of an image without a known size, for `<Photo aspect onNaturalSize>`: the ratio it had when it was
+ * last shown (ui/lib/aspectCache.ts, so a reopened chat does not reflow), `fallback` before its first load.
+ */
+export function useNaturalAspect(uri: string | null, fallback = 4 / 3): [number, (width: number, height: number) => void] {
+  const [measured, setMeasured] = useState<{ uri: string | null; aspect: number } | null>(null);
+  const aspect = measured && measured.uri === uri ? measured.aspect : (knownAspect(uri) ?? fallback);
+  const onNaturalSize = useCallback(
+    (width: number, height: number) => {
+      const a = rememberAspect(uri, width, height);
+      if (a !== undefined) setMeasured({ uri, aspect: a });
+    },
+    [uri],
+  );
+  return [aspect, onNaturalSize];
 }
 
 /** Rounded photo box: shimmer until loaded, then fade-in; load error → placeholder glyph. */

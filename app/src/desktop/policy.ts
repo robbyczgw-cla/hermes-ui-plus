@@ -20,3 +20,24 @@ export function lockDue(blurredAt: number | null, now: number, minutes: number):
   if (blurredAt === null || minutes <= 0) return false;
   return now - blurredAt >= minutes * 60_000;
 }
+
+/** the shell's app lock state (`desktop_lock_state`); null = could not be read */
+export type NativeLockState = { enabled: boolean; locked: boolean } | null;
+
+/**
+ * Does a page that just loaded stay behind the lock cover? The init script's prefs are those of the window's
+ * creation (a reload after switching the lock on would miss it), so the shell's state decides – and when it cannot be
+ * read, the cover stays (fail closed).
+ */
+export function staysLocked(native: NativeLockState): boolean {
+  if (!native || typeof native !== 'object') return true;
+  return native.locked !== false;
+}
+
+/**
+ * May files that arrived at lock epoch `since` still become attachments? Not while locked, and not when the lock
+ * engaged in between (dropped while unlocked, locked before they were read / prepared: discarded, never uploaded).
+ */
+export function ingestAllowed(since: number, now: { locked: boolean; epoch: number }): boolean {
+  return !now.locked && now.epoch === since;
+}

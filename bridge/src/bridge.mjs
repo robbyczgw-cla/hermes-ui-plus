@@ -10,12 +10,15 @@ import { silentLogger } from './log.mjs';
 import { checkRequestPath, upstreamUrl } from './paths.mjs';
 import { makeAuthorizer, makeCredentials } from './auth.mjs';
 import { approvalAnswerRun } from './approvals.mjs';
+import { createReplayStore, idempotencyKey, resumeOffset, RESUMABLE_HEADER } from './replay.mjs';
+import { createProfiles, DEFAULT_PROFILE, isProfileName, PROFILES_PATH, splitProfilePath } from './profiles.mjs';
 
 const SAFE_ID = /^[A-Za-z0-9._:-]{1,128}$/;
 const API_BODY_MAX = 64 * 1024;
 const API_TIMEOUT_MS = 30_000;
 const STOP_BODY_MAX = 4 * 1024;
 const APPROVAL_BODY_MAX = 8 * 1024;
+const MODEL_LOCK_BODY_MAX = 8 * 1024;
 export const STOP_PATH = '/bridge/chat/stop';
 
 export const ROUTE_EVENT = 'hermes.ui.route';
@@ -35,7 +38,7 @@ export const FORWARD_REQUEST_HEADERS = new Set([
 ]);
 /** Never sent back to the client: hop-by-hop (above), upstream CORS (the bridge does its own), cookies. */
 const DROP_RESPONSE = new Set(['set-cookie', 'set-cookie2']);
-const EXPOSE_HEADERS = 'X-Hermes-Session-Id, X-Hermes-Session-Key, X-Hermes-Completed, X-Hermes-Partial, X-Hermes-Error, X-Hermes-UI-Route, X-Hermes-UI-Bridge';
+const EXPOSE_HEADERS = 'X-Hermes-Session-Id, X-Hermes-Session-Key, X-Hermes-Completed, X-Hermes-Partial, X-Hermes-Error, X-Hermes-UI-Route, X-Hermes-UI-Bridge, X-Hermes-UI-Resume, X-Hermes-UI-Resumed';
 
 /** @param {import('node:http').IncomingHttpHeaders} h */
 export function filterRequestHeaders(h) {
@@ -81,9 +84,11 @@ const truthy = (v) => v === true || v === 1 || (typeof v === 'string' && /^(1|tr
  * @param {ReturnType<typeof import('./config.mjs').loadConfig>} config
  * @param {{router: ReturnType<typeof import('./router/router.mjs').createRouter>|null,
  *   logger?: ReturnType<typeof import('./log.mjs').createLogger>,
- *   turns?: {begin: (sessionId: string) => () => void},
- *   approvals?: ReturnType<typeof import('./approvals.mjs').createApprovalWatcher>}} deps
- *   turns: push watcher (src/push-hermes.mjs) skips what we stream; approvals: approval.request → inbox + push (src/approvals.mjs)
+ *   turns?: {begin: (sessionId: string, profile?: string|null) => () => void},
+ *   approvals?: ReturnType<typeof import('./approvals.mjs').createApprovalWatcher>,
+ *   profiles?: ReturnType<typeof import('./profiles.mjs').createProfiles>}} deps
+ *   turns: push watcher (src/push-hermes.mjs) skips what we stream; approvals: approval.request → inbox + push (src/approvals.mjs);
+ *   profiles: Hermes profiles reachable under `/p/<name>/…` (src/profiles.mjs; default: from process.env)
  */
 export function createBridgeHandler(config, deps) {
   const log = deps.logger ?? silentLogger;
@@ -92,6 +97,12 @@ export function createBridgeHandler(config, deps) {
   const client = upstream.protocol === 'https:' ? https : http;
   const agent = new client.Agent({ keepAlive: true });
   const memory = config.memory.enabled ? new LruCache({ max: config.memory.maxSessions, ttlMs: config.memory.ttlMs }) : null;
+  // chat turns with an Idempotency-Key: a retry re-attaches instead of starting a second turn, a lost stream resumes
+  // from a byte offset (src/replay.mjs)
+  const replay = config.resume?.enabled === false ? null : createReplayStore(config.resume ?? {});
+  const profiles = deps.profiles ?? createProfiles(process.env);
+  // router context memory per (profile, session): sessions are namespaced per Hermes profile
+  const memoryKey = (profile, sid) => (profile ? `${profile}\0${sid}` : sid);
 
   // BRIDGE_TOKEN (admin/bootstrap) or a per-device token (src/devices.mjs) when the server wired one in
   const authorized = makeAuthorizer(config);
@@ -110,12 +121,14 @@ export function createBridgeHandler(config, deps) {
   let healthInFlight = 0;
 
   /**
-   * Running upstream chat requests per X-Hermes-Session-Id. A client that goes away (network switch, app in the
-   * background) does NOT stop the Hermes run any more – the answer lands in the session and reaches the app via
-   * the live inbox / session sync. A deliberate stop is `POST /bridge/chat/stop {sessionId}`.
+   * Running upstream chat requests per (Hermes profile, X-Hermes-Session-Id). A client that goes away (network switch,
+   * app in the background) does NOT stop the Hermes run any more – the answer lands in the session and reaches the app
+   * via the live inbox / session sync. A deliberate stop is `POST /bridge/chat/stop {sessionId, profile?}`.
    * @type {Map<string, Set<{reqId: string, up: import('node:http').ClientRequest}>>}
    */
   const runs = new Map();
+  // session ids are only unique within a profile; `default` is the unprefixed profile
+  const runKey = (profile, sid) => (profile && profile !== DEFAULT_PROFILE ? `${profile}\0${sid}` : sid);
   function trackRun(sessionId, entry) {
     if (!sessionId) return () => {};
     const set = runs.get(sessionId) ?? new Set();
@@ -172,9 +185,10 @@ export function createBridgeHandler(config, deps) {
    */
   function apiAllowed(path) {
     if (path === '/api/sessions' || path === '/api/model/options') return ['GET'];
-    const m = /^\/api\/sessions\/([^/]+)(\/messages|\/fork)?$/.exec(path);
+    const m = /^\/api\/sessions\/([^/]+)(\/messages|\/fork|\/model)?$/.exec(path);
     if (!m || !SAFE_ID.test(m[1]) || m[1].includes('..')) return null;
     if (m[2] === '/fork') return ['POST']; // /branch in the app: copies the session (Hermes marks the old one forked)
+    if (m[2] === '/model') return ['POST']; // Hermes v0.22 session model lock: the model picked for this chat
     return m[2] ? ['GET'] : ['GET', 'PATCH', 'DELETE'];
   }
 
@@ -272,9 +286,11 @@ export function createBridgeHandler(config, deps) {
 
   /**
    * @param {() => void} release  frees the turn slot (idempotent); called once the upstream request is over
+   * @param {ReturnType<ReturnType<typeof createReplayStore>['begin']>|null} rec  replay record (Idempotency-Key) or null
+   * @param {string|null} [profile]  Hermes profile of a `/p/<name>/` request (null = default)
    * @returns {Promise<boolean>} true when an upstream request was started (it owns `release` then)
    */
-  async function chatCompletions(req, res, reqId, started, release, ac) {
+  async function chatCompletions(req, res, reqId, started, release, ac, rec, profile = null) {
     let raw;
     try {
       raw = await readBody(req);
@@ -289,6 +305,11 @@ export function createBridgeHandler(config, deps) {
     try { body = JSON.parse(raw.toString('utf8')); } catch { /* forward untouched; Hermes answers 400 */ }
     const valid = body && typeof body === 'object' && Array.isArray(body.messages);
     const stream = valid && truthy(body.stream);
+    if (rec && !stream) {
+      // non-streaming: Hermes dedupes Idempotency-Key itself (forwarded below)
+      replay?.drop(rec);
+      rec = null;
+    }
     const sessionHeader = String(req.headers['x-hermes-session-id'] ?? '').trim();
     const routeOptOut = /^(off|0|false|none)$/i.test(String(req.headers['x-hermes-ui-route'] ?? ''));
 
@@ -319,7 +340,7 @@ export function createBridgeHandler(config, deps) {
     let turns = [];
     let outBody = raw;
     if (valid) {
-      const prior = sessionHeader && memory ? memory.get(sessionHeader) : undefined;
+      const prior = sessionHeader && memory ? memory.get(memoryKey(profile, sessionHeader)) : undefined;
       turns = routingContext(body.messages, { prior, maxChars: config.router.contextMaxChars });
       if (router && !routeOptOut && (stream || config.router.routeNonStream)) {
         decision = await router.route(turns, { signal: ac.signal, reqId });
@@ -331,7 +352,7 @@ export function createBridgeHandler(config, deps) {
       const hintAllowed = config.hint.mode === 'on' || (config.hint.mode === 'auto' && !statelessMultiTurn);
       const hint = decision && hintAllowed ? buildHint(decision, config.hint) : null;
       if (hint || config.bootstrap) {
-        const messages = applySystemMessages(body.messages, { bootstrap: config.bootstrap, hint });
+        const messages = applySystemMessages(body.messages, { bootstrap: config.bootstrap, skill: config.skillInline, hint });
         outBody = Buffer.from(JSON.stringify({ ...body, messages }));
       }
       if (decision) log.debug('hint', { reqId, injected: Boolean(hint), statelessMultiTurn });
@@ -346,10 +367,13 @@ export function createBridgeHandler(config, deps) {
     const abortUpstream = () => up.destroy(ac.signal.reason);
     ac.signal.addEventListener('abort', abortUpstream, { once: true });
     const headerTimer = setTimeout(() => up.destroy(Object.assign(new Error('response headers timed out'), { code: 'ETIMEDOUT' })), limits.chatHeaderTimeoutMs);
-    endTurn = deps.turns?.begin(sessionHeader) ?? (() => {});
-    const untrack = trackRun(sessionHeader, { reqId, up });
+    endTurn = deps.turns?.begin(sessionHeader, profile) ?? (() => {});
+    const untrack = trackRun(sessionHeader && runKey(profile, sessionHeader), { reqId, up });
     // 'close' = the upstream request is over: response consumed (also while detached), error, or stopped
     up.on('close', () => {
+      // a record whose turn never answered is dropped; once there is a response, its own 'close' ends the record: the
+      // socket can close (Connection: close) while a slow app still has unread bytes buffered in upRes
+      if (!upRes) rec?.end();
       clearTimeout(headerTimer);
       ac.signal.removeEventListener('abort', abortUpstream);
       unlink();
@@ -364,14 +388,32 @@ export function createBridgeHandler(config, deps) {
       upRes = r;
       const status = upRes.statusCode ?? 502;
       const isSse = status === 200 && /text\/event-stream/i.test(String(upRes.headers['content-type'] ?? ''));
+      // only a 200 SSE turn is recorded for retries / resume; any other answer drops the record (a retry runs anew)
+      if (rec && !isSse) {
+        replay?.drop(rec);
+        rec = null;
+      }
+      const head = {
+        ...filterResponseHeaders(upRes.headers, { dropLength: isSse && (Boolean(decision) || Boolean(rec)) }),
+        ...routeHeader,
+        'x-hermes-ui-bridge': '1',
+        ...(rec ? { [RESUMABLE_HEADER]: '1' } : {}),
+      };
+      rec?.start({ status, headers: head });
+      const routeFrame = isSse && decision ? sseFrame(ROUTE_EVENT, publicDecision(decision)) : '';
       if (!detached) {
-        res.writeHead(status, { ...filterResponseHeaders(upRes.headers, { dropLength: isSse && Boolean(decision) }), ...routeHeader, 'x-hermes-ui-bridge': '1' });
+        res.writeHead(status, head);
         res.flushHeaders?.();
-        if (isSse && decision) res.write(sseFrame(ROUTE_EVENT, publicDecision(decision)));
+        if (routeFrame) res.write(routeFrame);
+      }
+      if (rec) {
+        if (routeFrame) rec.append(Buffer.from(routeFrame));
+        upRes.on('data', (c) => rec.append(c));
+        upRes.on('close', () => rec.end(!upRes.complete));
       }
 
       // approval.request side channel (also while detached): inbox event + push, see src/approvals.mjs
-      const watch = isSse && deps.approvals ? deps.approvals.observe({ sessionId: () => String(upRes.headers['x-hermes-session-id'] ?? sessionHeader ?? '') || null }) : null;
+      const watch = isSse && deps.approvals ? deps.approvals.observe({ sessionId: () => String(upRes.headers['x-hermes-session-id'] ?? sessionHeader ?? '') || null, profile }) : null;
       if (watch) {
         upRes.on('data', (c) => watch.push(c));
         upRes.on('close', () => watch.end());
@@ -406,7 +448,7 @@ export function createBridgeHandler(config, deps) {
         if (!sid || !turns.length) return;
         const next = [...turns];
         if (typeof assistant === 'string' && assistant.trim()) next.push({ role: 'assistant', content: assistant.slice(0, config.router.contextMaxChars) });
-        memory?.set(sid, next.slice(-4));
+        memory?.set(memoryKey(profile, sid), next.slice(-4));
       });
     });
     up.on('error', (err) => {
@@ -421,7 +463,28 @@ export function createBridgeHandler(config, deps) {
     return true;
   }
 
-  /** POST /bridge/chat/stop {sessionId}: the user pressed stop → end the Hermes run(s) of that session. */
+  /**
+   * Same Idempotency-Key again: re-attach to the recorded turn (from `offset`, else from the start) instead of starting
+   * a second Hermes turn. A resume request (`offset` given) for an unknown key never starts a turn.
+   */
+  function reattach(req, res, reqId, rec, offset) {
+    req.resume(); // the body is the original request's: never sent upstream again
+    if (offset === null) return openaiError(res, 400, 'Invalid X-Hermes-UI-Resume-Offset', 'invalid_request_error', 'invalid_resume_offset');
+    if (!rec) return openaiError(res, 409, 'Nothing to resume for this Idempotency-Key', 'invalid_request_error', 'resume_unavailable');
+    const sid = String(req.headers['x-hermes-session-id'] ?? '').trim();
+    if (sid !== rec.sessionId) return openaiError(res, 409, 'Idempotency-Key was used for another session', 'invalid_request_error', 'idempotency_key_conflict');
+    const refused = rec.attach(res, offset ?? 0);
+    if (refused) {
+      if (refused.code === 'idempotency_in_progress' || refused.status === 429) res.setHeader('retry-after', '1');
+      return openaiError(res, refused.status, refused.message, refused.status === 429 ? 'rate_limit_error' : 'invalid_request_error', refused.code);
+    }
+    log.info('chat_resume', { reqId, offset: offset ?? 0, live: rec.state === 'live' });
+  }
+
+  /**
+   * POST /bridge/chat/stop {sessionId, profile?}: the user pressed stop → end the Hermes run(s) of that session in that
+   * profile (none / `default` = the unprefixed profile). Bridge routes have no `/p/<name>/` form, so it is in the body.
+   */
   async function stopRun(req, res, reqId) {
     let body = null;
     try {
@@ -438,7 +501,9 @@ export function createBridgeHandler(config, deps) {
     }
     const sessionId = String(body?.sessionId ?? req.headers['x-hermes-session-id'] ?? '').trim();
     if (!SAFE_ID.test(sessionId)) return openaiError(res, 400, 'sessionId required', 'invalid_request_error');
-    const set = runs.get(sessionId);
+    const profile = body?.profile ?? null;
+    if (profile !== null && profile !== '' && !isProfileName(profile)) return openaiError(res, 400, 'Invalid profile', 'invalid_request_error');
+    const set = runs.get(runKey(profile, sessionId));
     const stopped = set ? set.size : 0;
     // closing the upstream connection is what makes Hermes interrupt the agent (docs/HERMES-API.md)
     for (const r of set ?? []) r.up.destroy();
@@ -452,12 +517,20 @@ export function createBridgeHandler(config, deps) {
     const started = performance.now();
     // M1: decode once, refuse dot segments / encoded slashes, route on exactly what is forwarded upstream
     const checked = checkRequestPath(req.url);
-    const path = checked.ok ? checked.path : '(rejected)';
-    res.on('finish', () => log.info('http', { reqId, method: req.method, path, status: res.statusCode, ms: Math.round(performance.now() - started) }));
+    const fullPath = checked.ok ? checked.path : '(rejected)';
+    res.on('finish', () => log.info('http', { reqId, method: req.method, path: fullPath, status: res.statusCode, ms: Math.round(performance.now() - started) }));
     if (!checked.ok) return openaiError(res, 400, 'Invalid request path', 'invalid_request_error', 'invalid_path');
     // the forwarded target must stay below HERMES_BASE_URL's path (upstreamUrl throws otherwise; never for a checked path)
     try { upstreamUrl(config.upstream.baseUrl, req.url ?? ''); } catch { return openaiError(res, 400, 'Invalid request path', 'invalid_request_error', 'invalid_path'); }
     cors(req, res);
+    // Hermes profiles: `/p/<name>/<path>` routes like `<path>` (same allow-list) and is forwarded with the prefix
+    // (req.url untouched). Bridge endpoints have no profile form; an unknown / invalid name never reaches Hermes.
+    const split = splitProfilePath(fullPath);
+    if ('error' in split) return openaiError(res, 404, 'Not found', 'invalid_request_error', 'unknown_profile');
+    const { profile, path } = split;
+    if (profile && !/^\/(v1|api)\/|^\/health$/.test(path)) return openaiError(res, 404, 'Not found', 'invalid_request_error');
+    // the prefix must be literal in the raw target too (no %-escapes Hermes would decode into another name)
+    if (profile && !String(req.url).startsWith(`/p/${profile}/`)) return openaiError(res, 404, 'Not found', 'invalid_request_error', 'unknown_profile');
 
     if (req.method === 'OPTIONS' && req.headers.origin && config.corsOrigins.length) {
       res.writeHead(204, {
@@ -468,7 +541,7 @@ export function createBridgeHandler(config, deps) {
       return res.end();
     }
     if (req.headers.upgrade) return openaiError(res, 501, 'WebSocket upgrades are not proxied by the bridge', 'bridge_error');
-    if (req.method === 'GET' && (path === '/health' || path === '/v1/health')) {
+    if (req.method === 'GET' && !profile && (path === '/health' || path === '/v1/health')) {
       if (healthInFlight >= limits.maxHealthInFlight) {
         res.setHeader('retry-after', '1');
         return openaiError(res, 503, 'Too many health checks in flight', 'rate_limit_error', 'rate_limit_exceeded');
@@ -478,6 +551,12 @@ export function createBridgeHandler(config, deps) {
       return void apiPassthrough(req, res, reqId);
     }
     if (!authorized(req)) return openaiError(res, 401, 'Invalid bridge token', 'invalid_request_error', 'invalid_api_key');
+    // only after auth: which profiles exist is not public (a profiled /health needs the token, too)
+    if (profile && !profiles.allowed(profile)) return openaiError(res, 404, 'Not found', 'invalid_request_error', 'unknown_profile');
+    if (req.method === 'GET' && path === PROFILES_PATH && !profile) {
+      // Hermes profiles ("bots") the app can pick: name, default flag, optional label / model (never secrets)
+      return sendJson(res, 200, { object: 'list', mode: profiles.mode, data: profiles.list() });
+    }
     if (req.method === 'GET' && path === '/bridge/status') {
       return sendJson(res, 200, {
         ok: true,
@@ -485,10 +564,21 @@ export function createBridgeHandler(config, deps) {
         hint: config.hint.mode,
         bootstrap: Boolean(config.bootstrap),
         memorySessions: memory?.size ?? 0,
+        resume: replay ? { enabled: true, ...replay.stats() } : { enabled: false },
       });
     }
     if (req.method === 'POST' && path === '/v1/chat/completions') {
       const cred = credentials.of(req) ?? 'anonymous';
+      const key = replay ? idempotencyKey(req.headers) : null;
+      const scope = key ? `${cred}\0${profile ?? ''}\0${key}` : ''; // a key never re-attaches across profiles
+      if (key) {
+        const known = replay.get(scope);
+        const offset = resumeOffset(req.headers);
+        // a plain retry of a turn whose upstream stream broke (Hermes restart / timeout / reset) runs anew: that turn
+        // gave no answer, a re-attach could only refuse; a resume request (offset) never starts a turn
+        const rerun = known && offset === undefined && replay.rerunnable(known);
+        if ((known && !rerun) || offset !== undefined) return reattach(req, res, reqId, known, offset);
+      }
       const running = turnsByCredential.get(cred) ?? 0;
       if (running >= limits.maxConcurrentTurns || turnsTotal >= limits.maxTurnsTotal) {
         req.resume();
@@ -523,10 +613,15 @@ export function createBridgeHandler(config, deps) {
       };
       active.set(reqId, { abort, started });
       ceiling = setTimeout(abort, limits.turnMaxMs);
-      return void chatCompletions(req, res, reqId, started, release, ac).then((upstreamStarted) => {
-        if (!upstreamStarted) release(); // body refused / client gone while routing: nothing runs upstream
+      const rec = key ? replay.begin(scope, String(req.headers['x-hermes-session-id'] ?? '').trim()) : null;
+      return void chatCompletions(req, res, reqId, started, release, ac, rec, profile).then((upstreamStarted) => {
+        if (!upstreamStarted) {
+          release(); // body refused / client gone while routing: nothing runs upstream
+          if (rec) replay.drop(rec);
+        }
       }, (err) => {
         release();
+        if (rec) replay.drop(rec);
         log.error('chat_failed', { reqId, error: String(err?.message ?? err).slice(0, 200) });
         if (!res.headersSent) openaiError(res, 500, 'Bridge error', 'bridge_error');
         else res.destroy();
@@ -543,7 +638,7 @@ export function createBridgeHandler(config, deps) {
         res.setHeader('Allow', methods.join(', '));
         return openaiError(res, 405, 'Method not allowed', 'invalid_request_error', 'method_not_allowed');
       }
-      return void apiPassthrough(req, res, reqId);
+      return void apiPassthrough(req, res, reqId, path.endsWith('/model') ? { bodyMax: MODEL_LOCK_BODY_MAX } : {});
     }
     if (path.startsWith('/v1/')) {
       // run ids are plain [A-Za-z0-9._:-] as well: no %-escapes (no second decoding upstream)
@@ -555,9 +650,11 @@ export function createBridgeHandler(config, deps) {
         return openaiError(res, 405, 'Method not allowed', 'invalid_request_error', 'method_not_allowed');
       }
       const answerRun = deps.approvals ? approvalAnswerRun(req.method, path) : null;
-      const tap = answerRun ? (body) => deps.approvals.answered(answerRun, body) : null; // other devices dismiss the card
+      const tap = answerRun ? (body) => deps.approvals.answered(answerRun, body, profile) : null; // other devices dismiss the card
       return void apiPassthrough(req, res, reqId, { bodyMax: req.method === 'POST' ? APPROVAL_BODY_MAX : API_BODY_MAX, tap });
     }
+    // a profile's /health: token required (above), no unauthenticated health budget needed
+    if (profile && req.method === 'GET' && path === '/health') return void apiPassthrough(req, res, reqId);
     return openaiError(res, 404, 'Not found', 'invalid_request_error');
   };
   return Object.assign(handle, {

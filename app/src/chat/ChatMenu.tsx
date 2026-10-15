@@ -4,7 +4,7 @@
  * dynamic Android shortcuts need ShortcutManager, which no installed Expo module exposes (a native module would be
  * required) – and there is nothing comparable on the web.
  */
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { ConversationMeta } from '../conversations/types';
 import { useT } from '../i18n';
@@ -25,7 +25,7 @@ type Props = {
   onDelete(): void;
 };
 
-export function ChatMenu({ open, onClose, meta, hasMessages, onFind, onExport, onPin, onRename, onArchive, onDelete }: Props) {
+export const ChatMenu = memo(function ChatMenu({ open, onClose, meta, hasMessages, onFind, onExport, onPin, onRename, onArchive, onDelete }: Props) {
   const tr = useT();
   const [renaming, setRenaming] = useState(false);
   const stored = !!meta && hasMessages;
@@ -52,7 +52,7 @@ export function ChatMenu({ open, onClose, meta, hasMessages, onFind, onExport, o
       ) : null}
     </>
   );
-}
+});
 
 function RenameSheet({ initial, onCancel, onSave }: { initial: string; onCancel(): void; onSave(title: string): void }) {
   const t = useTheme();

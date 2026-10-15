@@ -3,13 +3,14 @@
 //   node --test scripts/leak-guard.test.mjs
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { crc32 } from 'node:zlib';
 
-import { dmgSignatureRange, isBinary, isSignaturePath, isTestPath, loadAllowList, machoSignatureRanges, makeScanner, mask, parseDenylist } from './leak-guard.mjs';
+import { dmgSignatureRange, hermesStrings, isBinary, isHermesBytecode, isSignaturePath, isTestPath, loadAllowList, machoSignatureRanges, makeScanner, mask, parseDenylist } from './leak-guard.mjs';
 
 const script = fileURLToPath(new URL('./leak-guard.mjs', import.meta.url));
 const j = (...p) => p.join('');
@@ -423,4 +424,238 @@ test('signed .dmg: the code signature SuperBlob before the koly trailer is exclu
   assert.equal(sc(leaky).length, 1);
   // no koly trailer → nothing excluded
   assert.equal(dmgSignatureRange(Buffer.concat([content, sb])), null);
+});
+
+// ---------------------------------------------------------------------------------------------------------
+// Hermes bytecode (index.android.bundle / main.jsbundle)
+// ---------------------------------------------------------------------------------------------------------
+
+// Real Hermes bytecode (v98) compiled from fixtures/hermes/strings.js by the hermesc in app/node_modules. In its string
+// storage the fake terms are glued to neighbours ("…zorbnikzorblaxoverflow…"), 'Qüxel' is UTF-16 and the long text is
+// an overflow entry: a `strings`-style scan finds none of the three.
+const HBC_FIXTURE = fileURLToPath(new URL('./fixtures/hermes/strings.hbc', import.meta.url));
+const HBC_SOURCE = fileURLToPath(new URL('./fixtures/hermes/strings.js', import.meta.url));
+const HERMESC = fileURLToPath(new URL('../app/node_modules/hermes-compiler/hermesc/linux64-bin/hermesc', import.meta.url));
+const HBC_DENY = 'zorblax\nzorbnik\nqüxel\n';
+
+/**
+ * Synthetic Hermes bytecode with the documented layout that hermesStrings decodes (leak-guard.mjs): 128-byte header
+ * (magic, version @8, fileLength @32, functionCount @40, stringKindCount @44, identifierCount @48, stringCount @52,
+ * overflowStringCount @56, stringStorageSize @60), then function headers (`funcHeaderBytes` each: 16 before v98,
+ * 12 from v98), string kinds, identifier hashes, small string table (bit 0 UTF-16, bits 1-23 offset, bits 24-31
+ * length, 0xff = overflow index), overflow table ({offset, length}), string storage; each section 4-byte aligned.
+ * Strings are packed without separators, like the compiler does. All are of kind String (no identifiers).
+ */
+function synthHbc({ version = 96, funcHeaderBytes = 16, functions = 3, strings, tail = 64 }) {
+  const align = (n) => n + ((4 - (n % 4)) % 4);
+  const parts = strings.map((s) => (typeof s === 'string' ? { text: s, utf16: false } : s));
+  const store = [];
+  let off = 0;
+  const small = [];
+  const overflow = [];
+  for (const p of parts) {
+    const bytes = Buffer.from(p.text, p.utf16 ? 'utf16le' : 'latin1');
+    const length = p.utf16 ? bytes.length / 2 : bytes.length;
+    if (length >= 0xff) {
+      small.push(((0xff << 24) | (overflow.length << 1) | (p.utf16 ? 1 : 0)) >>> 0);
+      overflow.push([off, length]);
+    } else small.push(((length << 24) | (off << 1) | (p.utf16 ? 1 : 0)) >>> 0);
+    store.push(bytes);
+    off += bytes.length;
+  }
+  const storage = Buffer.concat(store);
+  const kinds = 128 + align(functions * funcHeaderBytes);
+  const smallAt = kinds + 4; // one kind entry, no identifier hashes
+  const overflowAt = smallAt + small.length * 4;
+  const storageAt = align(overflowAt + overflow.length * 8);
+  const buf = Buffer.alloc(storageAt + storage.length + tail);
+  Buffer.from([0xc6, 0x1f, 0xbc, 0x03, 0xc1, 0x03, 0x19, 0x1f]).copy(buf, 0);
+  buf.writeUInt32LE(version, 8);
+  buf.writeUInt32LE(buf.length, 32);
+  [functions, 1, 0, small.length, overflow.length, storage.length].forEach((v, i) => buf.writeUInt32LE(v, 40 + i * 4));
+  buf.fill(0xab, 128, kinds); // function headers: arbitrary bytes
+  buf.writeUInt32LE(small.length, kinds); // kind String (bit 31 clear), count
+  small.forEach((e, i) => buf.writeUInt32LE(e, smallAt + i * 4));
+  overflow.forEach(([o, l], i) => { buf.writeUInt32LE(o, overflowAt + i * 8); buf.writeUInt32LE(l, overflowAt + i * 8 + 4); });
+  storage.copy(buf, storageAt);
+  return buf;
+}
+
+const hbcScan = (buf, path = 'assets/index.android.bundle', deny = HBC_DENY) => makeScanner({ denylist: parseDenylist(deny), signature: true }).scanContent(path, buf);
+const legacyScan = (buf, deny) => {
+  // what the scanner saw before the string-table decoder: printable ASCII runs and ASCII UTF-16LE runs only
+  const rules = parseDenylist(deny);
+  const latin1 = buf.toString('latin1');
+  const runs = [...latin1.matchAll(/[\x20-\x7e]{4,}/g)].map((m) => m[0]).concat([...latin1.matchAll(/(?:[\x20-\x7e]\x00){4,}/g)].map((m) => m[0].replace(/\x00/g, '')));
+  return runs.filter((r) => rules.some((x) => { x.re.lastIndex = 0; return x.re.test(r); }));
+};
+
+function assertFixtureStrings(buf) {
+  assert.ok(isHermesBytecode(buf));
+  const { version, strings } = hermesStrings(buf);
+  assert.ok(version >= 98, `bytecode v${version}`);
+  const texts = strings.map((s) => s.text);
+  for (const t of ['zorblax', 'Qüxel Fakename', 'globalThis', 'plain', 'unicode', 'overflow']) assert.ok(texts.includes(t), t);
+  const long = texts.find((t) => t.endsWith('zorbnik'));
+  assert.ok(long && long.length > 255 && long.startsWith('lorem ipsum'), 'overflow entry decoded');
+  assert.ok(buf.readUInt32LE(56) >= 1, 'fixture really has an overflow string table entry');
+  // offsets point at the string bytes in the file
+  const z = strings.find((s) => s.text === 'zorblax');
+  assert.equal(buf.toString('latin1', z.offset, z.offset + 7), 'zorblax');
+  const q = strings.find((s) => s.text === 'Qüxel Fakename');
+  assert.equal(buf.toString('utf16le', q.offset, q.offset + 28), 'Qüxel Fakename');
+  // the old `strings`-style scan misses all three, the decoder finds each one
+  assert.deepEqual(legacyScan(buf, HBC_DENY), []);
+  const f = hbcScan(buf);
+  assert.deepEqual(f.map((x) => [x.text.toLowerCase(), x.variant]).sort(), [['qüxel', 'hermes'], ['zorblax', 'hermes'], ['zorbnik', 'hermes']]);
+  assert.ok(f.every((x) => !x.error));
+}
+
+test('Hermes bytecode: real fixture: glued ASCII, UTF-16 and overflow strings are decoded and scanned', () => {
+  const buf = readFileSync(HBC_FIXTURE);
+  assertFixtureStrings(buf);
+  assert.match(readFileSync(HBC_SOURCE, 'utf8'), /globalThis\.plain = 'zorblax'/);
+  // file names do not matter: detection is by magic (main.jsbundle, any .hbc)
+  assert.equal(hbcScan(buf, 'Payload/App.app/main.jsbundle').length, 3);
+  // a clean bundle stays clean
+  assert.equal(hbcScan(buf, 'x.hbc', 'notpresentanywhere\n').length, 0);
+});
+
+test('Hermes bytecode: compiled now with the installed hermesc (catches a layout change on Hermes upgrades)', { skip: !existsSync(HERMESC) && 'hermesc not installed (app/node_modules)' }, () => {
+  const out = join(tmp(), 'index.android.bundle');
+  execFileSync(HERMESC, ['-emit-binary', '-out', out, HBC_SOURCE]);
+  assertFixtureStrings(readFileSync(out));
+});
+
+test('Hermes bytecode: synthetic pre-v98 layout (16-byte function headers), small + overflow + UTF-16 entries', () => {
+  const long = `${'x'.repeat(300)} zorbnik`;
+  const buf = synthHbc({ strings: ['zorblax', 'global', { text: 'Qüxel', utf16: true }, long, 'zorbnikend'] });
+  const { version, strings } = hermesStrings(buf);
+  assert.equal(version, 96);
+  assert.deepEqual(strings.map((s) => s.text), ['zorblax', 'global', 'Qüxel', long, 'zorbnikend']);
+  assert.deepEqual(legacyScan(buf, 'zorblax\nqüxel\n'), [], 'glued + UTF-16: invisible to the old scan');
+  const f = hbcScan(buf);
+  assert.deepEqual(f.map((x) => x.text.toLowerCase()).sort(), ['qüxel', 'zorblax', 'zorbnik']);
+  // 12-byte layout (v98) of the same strings decodes too
+  assert.equal(hermesStrings(synthHbc({ version: 98, funcHeaderBytes: 12, functions: 5, strings: ['a', 'zorblax'] })).strings[1].text, 'zorblax');
+  // the e-mail / host rules see decoded strings as text
+  const host = j('box.mynet', '.ts', '.net');
+  assert.deepEqual(rules(hbcScan(synthHbc({ strings: ['connect', host, 'next'] }))), ['generic:tailnet-host']);
+});
+
+test('Hermes bytecode: an unrecognized or broken layout is a scan error, never clean', () => {
+  const good = synthHbc({ strings: ['alpha', 'zorblax'] });
+  const broken = (mutate) => { const b = Buffer.from(good); mutate(b); return b; };
+  const cases = {
+    'kind counts do not add up': broken((b) => b.writeUInt32LE(b.readUInt32LE(52) + 1, 52)),
+    'storage past the end': broken((b) => b.writeUInt32LE(1 << 20, 60)),
+    'fileLength > size': broken((b) => b.writeUInt32LE(b.length + 1, 32)),
+    'truncated header': good.subarray(0, 100),
+    'entry outside the storage': broken((b) => b.writeUInt32LE(((50 << 24) | (0 << 1)) >>> 0, 128 + 48 + 4)),
+  };
+  for (const [name, buf] of Object.entries(cases)) {
+    assert.throws(() => hermesStrings(buf), /Hermes bytecode/, name);
+    const f = hbcScan(buf);
+    assert.ok(f.some((x) => x.error && x.rule === 'scan-error'), name);
+  }
+});
+
+test('binary: non-ASCII names in UTF-8 and UTF-16LE runs are found; ASCII hits are not double-counted', () => {
+  const deny = 'qüxel\nzorblax\n';
+  const sc = (buf, path = 'lib/x.so') => makeScanner({ denylist: parseDenylist(deny) }).scanContent(path, buf);
+  const pad = Buffer.from([0, 1, 2, 0xff]);
+  const u8 = sc(Buffer.concat([pad, Buffer.from('by Qüxel ok'), pad]));
+  assert.deepEqual(u8.map((f) => [f.text, f.variant, f.offset]), [['Qüxel', 'utf8', 7]]);
+  for (const lead of [[0, 1], [7, 0, 1]]) {
+    const u16 = sc(Buffer.concat([Buffer.from(lead), Buffer.from('a Qüxel b', 'utf16le'), pad]));
+    assert.deepEqual(u16.map((f) => [f.text, f.variant, f.offset]), [['Qüxel', 'utf16le', lead.length + 4]], `alignment ${lead.length}`);
+  }
+  // an ASCII term next to non-ASCII text: reported once (by the ASCII pass)
+  const mixed = sc(Buffer.concat([pad, Buffer.from('é zorblax é'), pad]));
+  assert.deepEqual(mixed.map((f) => [f.text, f.variant, f.count]), [['zorblax', 'latin1', 1]]);
+});
+
+/** Minimal stored (uncompressed) zip, enough for unzip in scan-artifact.sh. */
+function storedZip(files) {
+  const locals = [];
+  const central = [];
+  let off = 0;
+  for (const [name, data] of Object.entries(files)) {
+    const n = Buffer.from(name);
+    const crc = crc32(data);
+    const h = Buffer.alloc(30);
+    h.writeUInt32LE(0x04034b50, 0); h.writeUInt16LE(20, 4); h.writeUInt32LE(crc, 14);
+    h.writeUInt32LE(data.length, 18); h.writeUInt32LE(data.length, 22); h.writeUInt16LE(n.length, 26);
+    const c = Buffer.alloc(46);
+    c.writeUInt32LE(0x02014b50, 0); c.writeUInt16LE(20, 4); c.writeUInt16LE(20, 6); c.writeUInt32LE(crc, 16);
+    c.writeUInt32LE(data.length, 20); c.writeUInt32LE(data.length, 24); c.writeUInt16LE(n.length, 28); c.writeUInt32LE(off, 42);
+    locals.push(h, n, data);
+    central.push(c, n);
+    off += 30 + n.length + data.length;
+  }
+  const cd = Buffer.concat(central);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(central.length / 2, 8); end.writeUInt16LE(central.length / 2, 10);
+  end.writeUInt32LE(cd.length, 12); end.writeUInt32LE(off, 16);
+  return Buffer.concat([...locals, cd, end]);
+}
+
+test('CLI --expect-hermes: every JS bundle must decode as Hermes bytecode, and one must exist', () => {
+  const hbc = readFileSync(HBC_FIXTURE);
+  const env = { HUI_PRIVATE_DIR: privateDir() };
+  const dir = (files) => {
+    const d = tmp();
+    for (const [p, data] of Object.entries(files)) { mkdirSync(join(d, p, '..'), { recursive: true }); writeFileSync(join(d, p), data); }
+    return d;
+  };
+  const leaky = run(['--path', dir({ 'assets/index.android.bundle': hbc }), '--expect-hermes'], { env });
+  assert.equal(leaky.code, 1);
+  assert.match(leaky.err, /1 Hermes bytecode file\(s\) decoded \(\d+ strings\)/);
+  assert.match(leaky.err, /index\.android\.bundle:byte~\d+ hermes\s+\[denylist#1/);
+  const clean = run(['--path', dir({ 'Payload/A.app/main.jsbundle': hbc }), '--expect-hermes'], { env: { HUI_PRIVATE_DIR: tmp() } });
+  assert.equal(clean.code, 0, clean.err);
+  const text = run(['--path', dir({ 'assets/index.android.bundle': 'var a = 1;\n' }), '--expect-hermes'], { env });
+  assert.equal(text.code, 2);
+  assert.match(text.err, /not Hermes bytecode/);
+  assert.equal(run(['--path', dir({ 'a.txt': 'x\n' }), '--expect-hermes'], { env }).code, 2, 'no bundle');
+  const broken = Buffer.from(hbc); broken.writeUInt32LE(broken.readUInt32LE(52) + 1, 52);
+  const bad = run(['--path', dir({ 'assets/index.android.bundle': broken }), '--expect-hermes'], { env });
+  assert.equal(bad.code, 2);
+  assert.match(bad.err, /unrecognized string table layout/);
+});
+
+test('scan-artifact.sh: APK/AAB/IPA bundles go through the Hermes decoder; AAB/IPA without a bundle fail', () => {
+  const sh = fileURLToPath(new URL('./scan-artifact.sh', import.meta.url));
+  const bin = tmp();
+  writeFileSync(join(bin, 'gitleaks'), '#!/bin/sh\nexit 0\n'); // secrets scan stub: this test is about leak-guard
+  chmodSync(join(bin, 'gitleaks'), 0o755);
+  const art = (name, files) => { const p = join(tmp(), name); writeFileSync(p, storedZip(files)); return p; };
+  const go = (target, pdir) => {
+    const r = spawnSync('bash', [sh, target], { encoding: 'utf8', env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp(), HUI_PRIVATE_DIR: pdir } });
+    return { code: r.status, all: r.stdout + r.stderr };
+  };
+  const hbc = readFileSync(HBC_FIXTURE);
+  const deny = privateDir();
+  const cleanDeny = tmp();
+  writeFileSync(join(cleanDeny, 'leak-denylist.txt'), 'notpresentanywhere\n');
+  const apk = go(art('app.apk', { 'assets/index.android.bundle': hbc, 'AndroidManifest.xml': Buffer.from('<m/>') }), deny);
+  assert.equal(apk.code, 1, apk.all);
+  assert.match(apk.all, /Hermes bytecode file\(s\) decoded/);
+  assert.match(apk.all, /hermes\s+\[denylist#1/);
+  const aab = go(art('app.aab', { 'base/assets/index.android.bundle': hbc }), cleanDeny);
+  assert.equal(aab.code, 0, aab.all);
+  assert.match(aab.all, /1 Hermes bytecode file\(s\) decoded/);
+  const ipa = go(art('app.ipa', { 'Payload/A.app/main.jsbundle': hbc }), deny);
+  assert.equal(ipa.code, 1, ipa.all);
+  for (const name of ['app.aab', 'app.ipa']) {
+    const r = go(art(name, { 'a.txt': Buffer.from('x\n') }), cleanDeny);
+    assert.equal(r.code, 2, `${name} without a bundle: ${r.all}`);
+    assert.match(r.all, /no JS bundle/);
+  }
+  const debugApk = go(art('debug.apk', { 'AndroidManifest.xml': Buffer.from('<m/>') }), cleanDeny);
+  assert.equal(debugApk.code, 0, debugApk.all);
+  assert.match(debugApk.all, /no JS bundle in .* \(debug APK\)/);
+  const textBundle = go(art('app.apk', { 'assets/index.android.bundle': Buffer.from('var a = 1;\n') }), cleanDeny);
+  assert.equal(textBundle.code, 1, textBundle.all);
+  assert.match(textBundle.all, /not Hermes bytecode/);
 });

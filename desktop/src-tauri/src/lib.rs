@@ -38,7 +38,7 @@ use tauri::{
 use tauri_plugin_notification::NotificationExt;
 
 use menus::{MenuState, MenuStore, RecentChat};
-use prefs::{DesktopPrefs, PrefsStore};
+use prefs::{DesktopPrefs, LockState, PrefsStore};
 
 const MAIN: &str = "main";
 const LOG_MAX_BYTES: u64 = 1024 * 1024;
@@ -201,6 +201,10 @@ fn on_menu(app: &AppHandle, id: &str) {
             show_main(app);
         }
         "reload" => {
+            // a reload while locked would start a page that has to ask for the lock state first: not needed
+            if is_locked(app) {
+                return;
+            }
             if let Some(w) = app.get_webview_window(MAIN) {
                 let _ = w.eval("location.reload()");
             }
@@ -212,6 +216,9 @@ fn on_menu(app: &AppHandle, id: &str) {
         }
         _ => {
             if let Some(i) = id.strip_prefix("recent:").and_then(|n| n.parse::<usize>().ok()) {
+                if is_locked(app) {
+                    return;
+                }
                 show_main(app);
                 emit_web(app, &json!({ "cmd": "open-recent", "index": i }));
             } else if let Some(rest) = id.strip_prefix("ctx:") {
@@ -223,10 +230,17 @@ fn on_menu(app: &AppHandle, id: &str) {
     }
 }
 
+fn is_locked(app: &AppHandle) -> bool {
+    app.try_state::<LockState>().map(|l| l.locked()).unwrap_or(false)
+}
+
 /// dock menu (mac.rs): tag 0 = new chat, n = n-th recent chat
 #[allow(dead_code)] // called from the objc dock menu target (macOS only)
 pub(crate) fn on_dock_item(tag: i64) {
     let Some(app) = APP.get() else { return };
+    if tag > 0 && is_locked(app) {
+        return;
+    }
     if tag <= 0 {
         new_chat(app);
         return;
@@ -390,17 +404,25 @@ fn desktop_set_menu(app: AppHandle, store: tauri::State<'_, MenuStore>, labels: 
     let _ = app.run_on_main_thread(move || rebuild_menus(&a, labels_changed));
 }
 
+/// menu bar + dock menu again (on the main thread), e.g. the recent chats disappear / return with the app lock
+fn refresh_menus(app: &AppHandle) {
+    let a = app.clone();
+    let _ = app.run_on_main_thread(move || rebuild_menus(&a, false));
+}
+
 fn rebuild_menus(app: &AppHandle, labels_changed: bool) {
     let Some(store) = app.try_state::<MenuStore>() else { return };
     let Ok(st) = store.0.lock() else { return };
-    if let Err(e) = menus::build_menu_bar(app, &st) {
+    let locked = is_locked(app);
+    if let Err(e) = menus::build_menu_bar(app, &st, locked) {
         log(app, "warn", &format!("menu bar: {e}"));
     }
     let _ = menus::update_tray(app, &st);
     #[cfg(target_os = "macos")]
     if let Some(mtm) = objc2::MainThreadMarker::new() {
         let name = app.package_info().name.clone();
-        let titles: Vec<String> = st.recent.iter().take(menus::MAX_DOCK_CHATS).map(|c| menus::clip(&c.title, 50)).collect();
+        let titles: Vec<String> =
+            menus::listed_chats(&st, locked).iter().take(menus::MAX_DOCK_CHATS).map(|c| menus::clip(&c.title, 50)).collect();
         mac::set_dock_menu(mtm, &menus::label(&st.labels, "newChat", "New Chat", &name), &titles);
         if labels_changed {
             mac::set_approval_actions(
@@ -512,8 +534,14 @@ fn apply_activation_policy(app: &AppHandle, menu_bar_only: bool) {
 
 /// desktop prefs (menu bar only, app lock); "menu bar only" applies right away
 #[tauri::command]
-fn desktop_set_prefs(app: AppHandle, store: tauri::State<'_, PrefsStore>, prefs: DesktopPrefs) -> Result<DesktopPrefs, String> {
+fn desktop_set_prefs(
+    app: AppHandle,
+    store: tauri::State<'_, PrefsStore>,
+    lock: tauri::State<'_, LockState>,
+    prefs: DesktopPrefs,
+) -> Result<DesktopPrefs, String> {
     let before = store.get();
+    lock.check_prefs_change(&prefs)?;
     store.set(prefs)?;
     let now = store.get();
     #[cfg(target_os = "macos")]
@@ -526,19 +554,41 @@ fn desktop_set_prefs(app: AppHandle, store: tauri::State<'_, PrefsStore>, prefs:
     Ok(now)
 }
 
-/// Touch ID / Apple Watch / password (system dialog); true = unlocked
+/// Touch ID / Apple Watch / password (system dialog); true = unlocked (also the shell's lock state)
 #[tauri::command]
-async fn desktop_unlock(reason: String) -> Result<bool, String> {
+async fn desktop_unlock(app: AppHandle, reason: String) -> Result<bool, String> {
     #[cfg(target_os = "macos")]
-    {
+    let ok = {
         let reason = clip(&reason, 200);
-        return tauri::async_runtime::spawn_blocking(move || mac::authenticate(&reason)).await.map_err(|e| e.to_string())?;
-    }
+        tauri::async_runtime::spawn_blocking(move || mac::authenticate(&reason)).await.map_err(|e| e.to_string())??
+    };
     #[cfg(not(target_os = "macos"))]
-    {
+    let ok = {
         let _ = reason;
-        Ok(true)
+        true
+    };
+    if ok {
+        if let Some(l) = app.try_state::<LockState>() {
+            l.unlocked();
+        }
+        refresh_menus(&app);
     }
+    Ok(ok)
+}
+
+/// the web app engaged the lock (launch, time in the background); returns the resulting state
+#[tauri::command]
+fn desktop_lock(app: AppHandle, store: tauri::State<'_, PrefsStore>, lock: tauri::State<'_, LockState>) -> bool {
+    let locked = lock.lock(&store.get());
+    // the dock / "Chat" menus drop the chat titles while locked
+    refresh_menus(&app);
+    locked
+}
+
+/// read on every page load: the init script's prefs are those of the window's creation (fail closed on the web side)
+#[tauri::command]
+fn desktop_lock_state(store: tauri::State<'_, PrefsStore>, lock: tauri::State<'_, LockState>) -> Value {
+    json!({ "enabled": store.get().lock_enabled, "locked": lock.locked() })
 }
 
 #[tauri::command]
@@ -707,6 +757,8 @@ pub fn run() {
             desktop_open_login_items,
             desktop_set_prefs,
             desktop_unlock,
+            desktop_lock,
+            desktop_lock_state,
             desktop_titlebar_double_click,
             desktop_take_pending,
             desktop_read_file,
@@ -721,6 +773,7 @@ pub fn run() {
             app.manage(PendingStore(Mutex::new(Pending::default())));
             app.manage(OpenedFiles(Mutex::new(HashSet::new())));
             let prefs = handle.state::<PrefsStore>().get();
+            app.manage(LockState::new(&prefs));
 
             // "menu bar only": no dock icon from the start
             #[cfg(target_os = "macos")]
@@ -731,7 +784,7 @@ pub fn run() {
             build_main_window(&handle, &prefs)?;
             {
                 let st = MenuState::default();
-                menus::build_menu_bar(&handle, &st)?;
+                menus::build_menu_bar(&handle, &st, prefs.lock_enabled)?;
                 menus::build_tray(&handle, &st)?;
             }
             #[cfg(target_os = "macos")]

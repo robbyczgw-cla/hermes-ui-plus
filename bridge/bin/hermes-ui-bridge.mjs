@@ -105,7 +105,7 @@ async function main() {
     if (results.some((r) => r.level === 'error' || (opts.strict && r.fatalWhenStrict))) process.exit(1);
   }
   out('  features:');
-  for (const [k, v] of featureSummary(config, env, { pairing })) out(`    ${k.padEnd(8)} ${v}`);
+  for (const [k, v] of featureSummary(config, env, { pairing, profiles: ctx.profiles })) out(`    ${k.padEnd(8)} ${v}`);
 
   const stopServices = startServices(ctx); // uploads retention + push watcher, same as src/server.mjs (Astra F13)
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(config.port, config.host, resolve); });

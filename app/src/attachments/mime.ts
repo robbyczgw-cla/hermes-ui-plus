@@ -134,6 +134,31 @@ export function formatBytes(n: number, lang: 'de' | 'en' | 'es' = 'de'): string 
   return `${lang === 'en' ? s : s.replace('.', ',')} MB`;
 }
 
+/** formatBytes with one decimal (KB / MB); bytes stay exact */
+function formatBytes1(n: number, lang: 'de' | 'en' | 'es'): string {
+  if (n < 1000) return `${Math.round(n)} B`;
+  const [v, unit] = n < 1_000_000 ? [n / 1000, 'KB'] : [n / 1_000_000, 'MB'];
+  const s = v.toFixed(1);
+  return `${lang === 'en' ? s : s.replace('.', ',')} ${unit}`;
+}
+
+/** exact byte count, digits grouped with no-break spaces (reads the same in every language) */
+function exactBytes(n: number): string {
+  return `${String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, '\u00a0')} B`;
+}
+
+/**
+ * Size and limit for a "too large" message. When rounding would make them read the same ("20 MB, max. 20 MB"), both
+ * get one decimal, and if that is still equal, exact bytes.
+ */
+export function formatSizeOverLimit(n: number, max: number, lang: 'de' | 'en' | 'es' = 'de'): { size: string; max: string } {
+  const plain = { size: formatBytes(n, lang), max: formatBytes(max, lang) };
+  if (plain.size !== plain.max) return plain;
+  const one = { size: formatBytes1(n, lang), max: formatBytes1(max, lang) };
+  if (one.size !== one.max) return one;
+  return { size: exactBytes(n), max: exactBytes(max) };
+}
+
 /** Short label for file cards ("PDF", "DOCX", "CSV" …; generic image/file labels are translated via `t`). */
 export function typeLabel(name: string, mime: string, t: TFn): string {
   const e = extOf(name);

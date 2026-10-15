@@ -17,9 +17,10 @@ adds them **without changing Hermes**:
 | Need | Without bridge | With bridge |
 |---|---|---|
 | Which device may connect | everyone gets the one Hermes master key | one **revocable token per device** (QR pairing); the master key never leaves the server |
-| Answer survives app switch / dead zone | Hermes stops the run when the connection drops | the run continues; the answer arrives via live inbox or push |
+| Answer survives app switch / dead zone | Hermes stops the run when the connection drops | the run continues; the app picks the stream up where it broke off, or the answer arrives via live inbox or push |
+| Retry after a dropped send | may ask Hermes the same thing twice | never a second turn for the same message ([Idempotent send and resume](#idempotent-send-and-resume)) |
 | Notifications ("answer ready", "approval needed") | none | Web Push (FCM/APNs optional) |
-| Interactive answers | the model decides alone | a fast **router** adds a format hint, so cards appear reliably; the app shows a matching skeleton immediately |
+| Interactive answers | the model decides alone | a fast **router** adds a format hint and the [skill core](#skill-core-inline) comes inline, so cards appear reliably; the app shows a matching skeleton immediately |
 | Photos and files in chat | not possible | uploads with size limits and automatic cleanup |
 | Product / place photos from Hermes' answers | tap to load each one (your phone would contact the image host) | shown at once through the bridge's **image proxy**; the image host only sees your bridge |
 | Voice, image search, chat titles | device voice only | optional server-side providers you configure |
@@ -66,12 +67,15 @@ Hermes API directly, with the limitations above.
   - `GET /v1/models`, `GET /v1/capabilities`, `GET /v1/skills`
   - `GET /v1/runs/{id}` (run status after a lost stream) and `POST /v1/runs/{id}/approval` (answer an approval)
   - `GET /api/sessions`, `GET|PATCH|DELETE /api/sessions/{id}`, `GET /api/sessions/{id}/messages`,
-    `POST /api/sessions/{id}/fork`, `GET /api/model/options`
+    `POST /api/sessions/{id}/fork`, `POST /api/sessions/{id}/model` (Hermes v0.22 per-chat model lock, body ≤ 8 KB),
+    `GET /api/model/options`
 
   Everything else is refused before it reaches Hermes: unknown paths with 404, a wrong method with 405 and an `Allow`
   header. That includes run creation (`POST /v1/runs`), run events/steer/stop, `/v1/responses`, `/v1/toolsets`,
   artifacts, `/health/detailed` and Hermes' admin, cron and config APIs. Requests keep the path of `HERMES_BASE_URL`
   (a reverse-proxy sub-path such as `https://example.com/hermes` works).
+  Hermes profiles (bots, `/p/<profile>/…`) get exactly the same allow-list (their `/health` needs the token);
+  which profiles exist is only answered after the token check (`BRIDGE_PROFILES`, `GET /bridge/profiles`).
 - **Turn budget:** a chat turn counts until Hermes has finished it, also when the app disconnected and the bridge
   keeps the run going. Limits: `BRIDGE_MAX_CONCURRENT_TURNS` per token (default 8) and `BRIDGE_MAX_TURNS_TOTAL` for
   the whole bridge (default 16); above that the bridge answers 429 with `Retry-After`.
@@ -118,6 +122,39 @@ Hermes API directly, with the limitations above.
   `ProtectSystem=strict` and `NoNewPrivileges` (user units get the subset available without root). Secrets live in a 0600 env file or systemd credentials.
 - **Logging:** only metadata (time, route, status, duration, request id). **Message content is never logged**,
   and tests check this.
+
+## Idempotent send and resume
+
+Hermes dedupes `Idempotency-Key` only for non-streaming requests and its own `/v1/runs` API, and it has no replay for a
+streamed chat answer. The app sends every message with an `Idempotency-Key`; for those turns the bridge does both itself
+(`src/replay.mjs`):
+
+- **Recording:** a `200 text/event-stream` turn with a key is recorded per device token + key: exactly the bytes the app
+  gets (the router frame and Hermes' stream). The response carries `X-Hermes-UI-Resume: 1`. Any other answer (an error,
+  `429`, non-streaming JSON) drops the record, so a retry runs anew.
+- **No second turn:** the same key again (the app retries a send whose connection broke before any answer arrived)
+  re-attaches to the recorded turn (`X-Hermes-UI-Resumed: 0`, the stream from the start, then live). Nothing goes to
+  Hermes. While the first request is still starting: `409 idempotency_in_progress` + `Retry-After: 1`. The same key with
+  another `X-Hermes-Session-Id`: `409 idempotency_key_conflict`. A turn whose upstream stream broke (Hermes restart,
+  timeout, reset) gave no answer: the same key without a resume offset runs it anew (the record is replaced). A turn
+  that ran but is not recorded (over the per-turn buffer, or its bytes evicted for the total budget) answers
+  `409 turn_unrecorded` instead: it is never run twice, the app recovers its answer from the stored session. On
+  `resume_unavailable` / `idempotency_key_conflict` for a plain send the app takes a fresh key for the next retry.
+- **Resume:** `X-Hermes-UI-Resume-Offset: <bytes>` with the same key continues a broken stream at that byte offset (the
+  app keeps its parser state, so every event arrives exactly once), from the record and then live. A resume never starts
+  a turn: an unknown or expired key, an offset beyond the record or a broken turn get `409 resume_unavailable`, a turn
+  over the buffer limit `409 turn_unrecorded`; the app then falls back to the live inbox / stored session. The resume header is consumed by
+  the bridge and never forwarded.
+- **Limits:** `BRIDGE_RESUME_TURN_KB` per turn (default 2048; a longer turn stays live but is no longer resumable),
+  `BRIDGE_RESUME_TOTAL_MB` for all records (default 32; finished records lose their bytes oldest first and then answer
+  `turn_unrecorded`), finished records are
+  kept `BRIDGE_RESUME_RETAIN_MS` (default 10 min), at most 4 re-attached streams per turn and 64 over all turns
+  (`429` beyond). A re-attached stream never buffers without limit: it catches up from the record only as fast as the
+  app reads (backpressure), a live reader that falls behind continues from the record, and once a turn is no longer
+  recorded a reader with 256 KiB unsent is disconnected (it resumes from its offset or reads the session). A slow reader
+  never pauses the turn. Records live in memory only (lost on restart; the turns themselves are aborted on shutdown
+  anyway). `BRIDGE_RESUME=off` turns it off.
+  `GET /bridge/status` reports `resume: {enabled, turns, bytes, subscribers}`. Nothing of the content is logged.
 
 ## Image proxy
 
@@ -168,6 +205,77 @@ prompt-injected page could make the model write an image URL with data in its qu
 it. Hermes' own web tools can already reach any public URL, so the proxy adds no new reach; it only keeps your phone's
 address out of it. Turn it off if your Hermes has no web tools and you want no outgoing requests from the bridge.
 
+## Skill core inline
+
+App chats need the `hermes-ui` skill: it teaches the model the `hui` blocks and how to follow the router hint. The
+bootstrap system message asks the model to load the skill with `skill_view` on the first turn, but some models skip that
+call (seen with Claude Sonnet on Hermes v0.22: no `skill_view`, the `format=compare` hint ignored, plain text with the
+result last, so the app's card skeleton disappeared again). Asking harder in the bootstrap did not help.
+
+So the bridge sends the skill's core text itself:
+
+- **What:** the body of `hermes-ui/SKILL.md` (YAML front matter removed) as ONE extra system message, starting with
+  `[hermes-ui-skill]`, placed right after the bootstrap message. Order on an app turn: bootstrap, skill core, the app's
+  own system messages, router hint, conversation. The per-component reference files stay on demand: the model loads
+  them with `skill_view("hermes-ui", file_path="references/<ref>.md")` as the skill describes.
+- **When:** only on app turns, i.e. chat requests that carry the bootstrap message, and only while the bootstrap is
+  active (`BRIDGE_BOOTSTRAP` not `off`). Never twice in one request. Requests the bridge does not rewrite (bootstrap
+  off, invalid JSON) are forwarded unchanged. Other Hermes clients and platforms (Telegram, cron, CLI) are not
+  affected; they do not go through the bridge.
+- **Cost:** about 2k input tokens per turn, but the text is read once at startup and is byte-identical on every turn, so
+  Hermes and the provider keep it in the prompt cache (Hermes appends request system messages to the end of its cached
+  system prompt and never stores them in the session history).
+- **Which file:** `hermes-ui/SKILL.md` next to the bootstrap file, else the repository's `hermes-skill/`, else the copy
+  bundled into the npm package or Docker image (`npm run bundle-skill`). `BRIDGE_SKILL_FILE=<path>` picks another
+  file. If none is found the bridge logs a warning at startup, the `skill` line of the startup output says
+  `skill core inline MISSING`, and app turns get the bootstrap message alone.
+- **Switch off:** `BRIDGE_SKILL_INLINE=off`. The bootstrap then asks the model to load the skill with `skill_view`, as
+  before. Keep the skill installed in Hermes either way: references and other clients use it.
+
+SKILL.md itself is unchanged and still works as a normal Hermes skill. Background: ADR 0001, addendum to decision 5.
+
+## Hermes profiles (bots)
+
+A Hermes profile (`hermes profile create <name>`) is a bot with its own model, memory, skills and sessions. One
+Hermes gateway serves all of them and mirrors its API under `/p/<profile>/…` (`gateway.multiplex_profiles`, on by
+default in current Hermes versions). The bridge passes that through:
+
+- **Same allow-list:** `/p/<profile>/<path>` is forwarded exactly when `<path>` would be, with the prefix kept, so the
+  request reaches that profile. Bridge routes (`/bridge/*`) have no profile form, and a profile's `/health` needs the
+  token. Profile names follow Hermes' rule (lowercase letter or digit first, then lowercase letters, digits, `-`, `_`);
+  anything else is refused before it reaches Hermes.
+- **Which profiles:** `BRIDGE_PROFILES` decides. Unset or `auto`: the directories in `HERMES_HOME/profiles/` (re-read
+  at most every 30 s; needs read access to the Hermes home, else any valid name is passed on and Hermes answers 404 for
+  unknown ones). A list such as `research,work=Work bot` (optional label after `=`), or `off` (no `/p/` at all).
+  Unknown profiles get 404, and only after the token check, so the list is not public.
+- **`GET /bridge/profiles`** (token required) lists the default profile and the others with their label and model id
+  (`model.default` of the profile's `config.yaml`; nothing else is read). The app builds its "Bot" section from it.
+- **Per profile:** router context memory, turn tracking, stop (`POST /bridge/chat/stop` stays at the root and names
+  the profile in its body: `{sessionId, profile}`; without one it stops the default profile's run only), resume records
+  (an `Idempotency-Key` never re-attaches to another profile's turn), approvals and push watching are kept per profile; push payloads carry `hermesProfile` so a
+  tap opens the right bot's chat. The push watcher polls at most 8 profiles besides the default.
+- **No profiles:** nothing changes. `GET /bridge/profiles` lists the default only and the app shows no "Bot" section.
+
+## Quick answers (Schnellfrage, optional plugin)
+
+The ⚡ quick questions of the app are answered by the optional Hermes plugin `hermes-ui-plus`
+([HERMES-PLUGIN.md](HERMES-PLUGIN.md), code in `hermes-plugin/`). It runs inside Hermes, uses Hermes' own providers
+and listens on loopback only; the bridge is the transport:
+
+- **Routes** (device token required): `GET /bridge/quick/config` (is it available, which model, the limits) and
+  `POST /bridge/quick` (alias `POST /bridge/quick/v1/chat/completions`, OpenAI-compatible, streamed). The bridge
+  forwards to `BRIDGE_HERMES_PLUGIN_URL` (default `http://127.0.0.1:8646`) with the shared secret from
+  `BRIDGE_HERMES_PLUGIN_SECRET_FILE`, applies per-device limits (`BRIDGE_QUICK_RATE` per minute, default 20;
+  `BRIDGE_QUICK_DAILY`, default 300), checks a requested model against Hermes' `GET /api/model/options` and stops the
+  plugin call when the app goes away. Message content is never logged.
+- **Without the plugin** (not installed, disabled, unreachable or answering garbage) the quick routes answer
+  `404 feature_off` and `/bridge/quick/config` says `{"available": false}`. The bridge re-probes the plugin at most
+  every 30 s; the app caches "off" for 10 minutes and checks again only when it returns to the foreground or the
+  connection comes back. Nothing else depends on it. `BRIDGE_QUICK=off` switches the routes off entirely.
+- **Not per profile:** the plugin listens once for the whole gateway and answers with its `auxiliary.hui_quick`
+  model, whichever profile loaded it first. So the app offers ⚡ only in chats of the default profile, not in bot
+  (`/p/<profile>/`) chats.
+
 ## Where your data goes
 
 The bridge stores **no chat history**. Hermes does that, as before.
@@ -200,6 +308,7 @@ Not an extra, a normal feature:
 | Feature | Sent to | What |
 |---|---|---|
 | Push | Google / Apple push services (Web Push: your browser's push service) | an encrypted notification; message previews are **off** by default |
+| Quick answers (only with the `hermes-ui-plus` plugin) | your Hermes (the plugin on loopback), which calls the model configured for `auxiliary.hui_quick` | the quick question and at most 6 earlier quick turns |
 | Image proxy (`BRIDGE_IMAGE_PROXY`, default on) | the image host named in a Hermes answer | a plain request for that one picture, from the bridge's address, without cookies or referrer |
 
 The startup log lists exactly which extras are active, by provider name and without keys, for example

@@ -79,7 +79,8 @@ export function cspHeader(mode = 'on', options) {
 
 /** Paths that always belong to the API, never to the web app. */
 export function isApiPath(p) {
-  return p === '/v1' || p.startsWith('/v1/') || p === '/api' || p.startsWith('/api/') || p === '/bridge' || p.startsWith('/bridge/') || p === '/health' || p.startsWith('/health/');
+  // `/p/<profile>/…`: Hermes profile multiplexing (src/profiles.mjs), never a web app file
+  return p === '/p' || p.startsWith('/p/') || p === '/v1' || p.startsWith('/v1/') || p === '/api' || p.startsWith('/api/') || p === '/bridge' || p.startsWith('/bridge/') || p === '/health' || p.startsWith('/health/');
 }
 
 export { resolveStaticFile };

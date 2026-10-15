@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { TABLE_CARDS_MAX_VIEWPORT, TEXT_COLUMN_FIT_MIN, canFitTable, keepArrayIdentity, fitMinWidth, headerMinWidth, longestWordLength, scrollEdges, tableCardMode, tableLayoutMode, visibleTableRows } from './tableMath.ts';
+import { TABLE_CARDS_MAX_VIEWPORT, TEXT_COLUMN_FIT_MIN, canFitTable, cellMinWidth, isUnbreakableCell, keepArrayIdentity, keepTogether, markdownColumnWidth, fitMinWidth, headerMinWidth, longestWordLength, scrollEdges, tableCardMode, tableLayoutMode, visibleTableRows } from './tableMath.ts';
 
 test('longestWordLength uses the longest word, not the whole label', () => {
   assert.equal(longestWordLength('Einwohner'), 9);
@@ -147,4 +147,51 @@ test('keepArrayIdentity: unchanged values keep the previous array (memoised rows
   assert.equal(keepArrayIdentity(prev, longer), longer);
   const fresh = [1, 2];
   assert.equal(keepArrayIdentity(undefined, fresh), fresh);
+});
+
+// E2E round 11, F2: at font scale 1.3 a markdown table broke "c. 1011–1021" mid-number ("c. 1011–1 / 021")
+test('isUnbreakableCell: numbers, ranges, years and short labels stay on one line; prose may wrap', () => {
+  for (const c of ['c. 1011–1021', '1670s', '1.299 €', '12–15 %', 'ca. 229–244 USD', 'Ja', 'Robo X1']) assert.equal(isUnbreakableCell(c), true, c);
+  for (const c of ['', 'Theory of optics and light', 'Micrographia, term "cell"', 'between 1590 and 1610 in the Netherlands']) assert.equal(isUnbreakableCell(c), false, c);
+});
+
+test('keepTogether glues spaces and dashes of unbreakable cells only, never links or code', () => {
+  assert.equal(keepTogether('c. 1011–1021'), 'c.\u00a01011\u2060–\u20601021');
+  assert.equal(keepTogether('Theory of optics and light'), 'Theory of optics and light');
+  assert.equal(keepTogether('[a](b/c)'), '[a](b/c)');
+  assert.equal(keepTogether('`1-2`'), '`1-2`');
+});
+
+test('cellMinWidth: the whole unbreakable cell, else the longest word; grows with the font scale', () => {
+  assert.equal(cellMinWidth(['c. 1011–1021', '1665'], 1, 8, 22), 12 * 8 + 22);
+  assert.equal(cellMinWidth(['Theory of optics and light'], 1, 8, 22), 6 * 8 + 22);
+  assert.ok(cellMinWidth(['c. 1011–1021'], 1.3, 8, 22) > cellMinWidth(['c. 1011–1021'], 1, 8, 22));
+  assert.equal(cellMinWidth([], 1.3), 0);
+});
+
+test('markdownColumnWidth scales with the font: the round-11 period column fits "c. 1011–1021" at 1.3', () => {
+  const period = ['Period', 'c. 1011–1021', 'c. 1590', '1665', '1670s'];
+  const at1 = markdownColumnWidth(period, 1);
+  const at13 = markdownColumnWidth(period, 1.3);
+  assert.equal(at1, 118); // unchanged at scale 1
+  // 12 glyphs at 14.5 px × 1.3 (≈ 0.55 em each) + 20 px padding need ≈ 145 dp; the old width stayed 118
+  assert.ok(at13 >= Math.ceil(12 * 14.5 * 0.55 * 1.3) + 22, String(at13));
+  // a long prose column is capped (it wraps), the cap grows with the scale
+  const prose = ['Development', 'Electron microscopes resolve structures far below the wavelength of visible light'];
+  assert.equal(markdownColumnWidth(prose, 1), 260);
+  assert.equal(markdownColumnWidth(prose, 1.3), 338);
+});
+
+test('fill mode never squeezes a text column below its unbreakable content (keep)', () => {
+  const widths = [160, 300];
+  const numeric = [false, false];
+  const heads = ['Period', 'Development'];
+  // without keep a text column may shrink to TEXT_COLUMN_FIT_MIN × scale
+  assert.equal(fitMinWidth(widths, numeric, heads, 0, 1.3), Math.round(TEXT_COLUMN_FIT_MIN * 1.3));
+  assert.equal(fitMinWidth(widths, numeric, heads, 0, 1.3, [158, 0]), 158);
+  // never above the column's own width
+  assert.equal(fitMinWidth(widths, numeric, heads, 0, 1.3, [400, 0]), 160);
+  // and the fit decision accounts for it
+  assert.equal(canFitTable(400, widths, numeric, heads, 1.3), true);
+  assert.equal(canFitTable(300, widths, numeric, heads, 1.3, [158, 158]), false);
 });

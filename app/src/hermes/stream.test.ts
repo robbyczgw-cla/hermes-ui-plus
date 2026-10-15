@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { streamChatCore, respondApprovalCore, HermesError, isHermesError } from './stream.ts';
 import { BOOTSTRAP_SYSTEM_MESSAGE } from './bootstrap.ts';
+import { CAP_MARKER, MAX_MESSAGE_TEXT } from './chatState.ts';
 import type { HermesEvent, HermesConn } from './types';
 
 const conn: HermesConn = { baseUrl: 'http://h.test:8645/v1/', apiKey: 'sekrit', sessionKey: 'hermes-ui-dev' };
@@ -322,3 +323,136 @@ for (const reason of ['stop', 'error']) {
     assert.equal(result.aborted, false);
   });
 }
+
+// ---------------------------------------------------------------- idempotent send + resume (UI bridge, bridge/src/replay.mjs)
+
+/** SSE response that delivers `bytes` in `size` chunks and then breaks the connection after `cutAt` bytes */
+function brokenResponse(bytes: Uint8Array, cutAt: number, headers: Record<string, string> = {}, size = 64) {
+  let pos = 0;
+  const body = new ReadableStream<Uint8Array>({
+    pull(c) {
+      if (pos >= cutAt) return c.error(new TypeError('Software caused connection abort'));
+      const n = Math.min(size, cutAt - pos);
+      c.enqueue(bytes.slice(pos, pos + n));
+      pos += n;
+    },
+  });
+  return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream', 'x-hermes-session-id': 'hui-r', ...headers } });
+}
+
+const RESUMABLE = { 'x-hermes-ui-resume': '1' };
+
+test('Idempotency-Key header only when a key is given', async () => {
+  const f = fakeFetch(() => sseResponse(fixture('01-plain.sse'), [999]).res);
+  await streamChatCore(f.fn, { conn, text: 'x', sessionId: 's', onEvent: () => {} });
+  await streamChatCore(f.fn, { conn, text: 'x', sessionId: 's', idempotencyKey: 'turn-1', onEvent: () => {} });
+  assert.equal(f.calls[0].init.headers['Idempotency-Key'], undefined);
+  assert.equal(f.calls[1].init.headers['Idempotency-Key'], 'turn-1');
+});
+
+test('lost stream on a resumable bridge turn: re-attached at the byte offset, every event exactly once', async () => {
+  const bytes = fixture('02-tool.sse');
+  const ref: HermesEvent[] = [];
+  const full = await streamChatCore(fakeFetch(() => sseResponse(bytes, [999]).res).fn, { conn, text: 'x', sessionId: 's', onEvent: (e) => ref.push(e) });
+  const cutAt = 701; // mid-frame on purpose
+  let n = 0;
+  const f = fakeFetch(() => (n++ === 0 ? brokenResponse(bytes, cutAt, RESUMABLE) : sseResponse(bytes.slice(cutAt), [37], RESUMABLE).res));
+  const events: HermesEvent[] = [];
+  const r = await streamChatCore(f.fn, { conn, text: 'x', sessionId: 's', idempotencyKey: 'turn-2', resumeDelaysMs: [1, 1], onEvent: (e) => events.push(e) });
+  assert.equal(f.calls.length, 2);
+  assert.equal(f.calls[1].init.headers['X-Hermes-UI-Resume-Offset'], String(cutAt));
+  assert.equal(f.calls[1].init.headers['Idempotency-Key'], 'turn-2');
+  assert.equal(f.calls[1].init.body, f.calls[0].init.body, 'same request body');
+  assert.equal(r.text, full.text);
+  assert.equal(r.finishReason, 'stop');
+  assert.deepEqual(events, ref);
+});
+
+test('resume refused (409 resume_unavailable) → the original transport error, marked accepted (recovery takes over)', async () => {
+  const bytes = fixture('02-tool.sse');
+  let n = 0;
+  const f = fakeFetch(() =>
+    n++ === 0
+      ? brokenResponse(bytes, 300, RESUMABLE)
+      : new Response('{"error":{"message":"gone","code":"resume_unavailable"}}', { status: 409, headers: { 'content-type': 'application/json' } }),
+  );
+  const err = await streamChatCore(f.fn, { conn, text: 'x', sessionId: 's', idempotencyKey: 'k', resumeDelaysMs: [1, 1, 1], onEvent: () => {} }).catch((e) => e);
+  assert.equal(f.calls.length, 2, 'a refusal ends the attempts');
+  assert.equal(err.kind, 'network');
+  assert.equal(err.accepted, true);
+});
+
+test('resume while still offline: every attempt is used, then the transport error', async () => {
+  const bytes = fixture('02-tool.sse');
+  let n = 0;
+  const fn = async (url: string, init: Call['init']) => {
+    if (n++ === 0) return brokenResponse(bytes, 300, RESUMABLE) as never;
+    void url;
+    void init;
+    throw new TypeError('Network request failed');
+  };
+  const err = await streamChatCore(fn as never, { conn, text: 'x', sessionId: 's', idempotencyKey: 'k', resumeDelaysMs: [1, 1, 1], onEvent: () => {} }).catch((e) => e);
+  assert.equal(n, 4);
+  assert.equal(err.accepted, true);
+});
+
+test('no resume without the bridge header or without a key (unchanged behaviour)', async () => {
+  const bytes = fixture('02-tool.sse');
+  for (const [headers, key] of [[{}, 'k'], [RESUMABLE, undefined]] as const) {
+    const f = fakeFetch(() => brokenResponse(bytes, 300, headers));
+    const err = await streamChatCore(f.fn, { conn, text: 'x', sessionId: 's', idempotencyKey: key, resumeDelaysMs: [1], onEvent: () => {} }).catch((e) => e);
+    assert.equal(f.calls.length, 1);
+    assert.equal(err.accepted, true);
+  }
+});
+
+test('stop during the resume pause → aborted, no further request', async () => {
+  const bytes = fixture('02-tool.sse');
+  const ctrl = new AbortController();
+  const f = fakeFetch(() => brokenResponse(bytes, 300, RESUMABLE));
+  setTimeout(() => ctrl.abort(), 30);
+  const r = await streamChatCore(f.fn, { conn, text: 'x', sessionId: 's', idempotencyKey: 'k', signal: ctrl.signal, resumeDelaysMs: [500], onEvent: () => {} });
+  assert.equal(r.aborted, true);
+  assert.equal(f.calls.length, 1);
+});
+
+test('JSON fallback carries message.reasoning_content as a reasoning event (Hermes v0.22)', async () => {
+  const f = fakeFetch(
+    () =>
+      new Response(JSON.stringify({ id: 'chatcmpl-9', choices: [{ message: { role: 'assistant', content: 'Hallo', reasoning_content: 'kurz nachdenken' }, finish_reason: 'stop' }] }), {
+        headers: { 'content-type': 'application/json' },
+      }),
+  );
+  const events: HermesEvent[] = [];
+  const r = await streamChatCore(f.fn, { conn, text: 'x', sessionId: 's', onEvent: (e) => events.push(e) });
+  assert.equal(r.text, 'Hallo', 'reasoning never mixed into the answer');
+  assert.deepEqual(events.filter((e) => e.type === 'reasoning'), [{ type: 'reasoning', text: 'kurz nachdenken' }]);
+});
+
+test('Sol F12: the transport text stops growing at the same cap as the chat message (stream, text.replace, JSON)', async () => {
+  const kib = 'x'.repeat(1024);
+  const chunk = (t: string) => `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: t }, finish_reason: null }] })}\n\n`;
+  const frames: string[] = [];
+  for (let i = 0; i < 1100; i++) frames.push(chunk(kib)); // ~1.1 M chars > MAX_MESSAGE_TEXT
+  frames.push(`event: hermes.text.replace\ndata: ${JSON.stringify({ text: 'y'.repeat(MAX_MESSAGE_TEXT + 10) })}\n\n`);
+  frames.push(chunk(kib));
+  frames.push(`data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`);
+  const result = await streamChatCore(fakeFetch(() => sseResponse(new TextEncoder().encode(frames.join('')), [65536]).res).fn, {
+    conn,
+    text: 'hi',
+    sessionId: 'hui-1',
+    onEvent: () => {},
+  });
+  const max = MAX_MESSAGE_TEXT + CAP_MARKER.length;
+  assert.ok(result.text.length <= max, `stream: ${result.text.length} > ${max}`);
+  assert.ok(result.text.startsWith('yyy'), 'text.replace still replaces');
+  assert.equal(result.textCapped, true);
+
+  const json = JSON.stringify({ id: 'c', choices: [{ message: { content: 'z'.repeat(MAX_MESSAGE_TEXT * 2) }, finish_reason: 'stop' }] });
+  const one = await streamChatCore(fakeFetch(() => new Response(json, { status: 200, headers: { 'content-type': 'application/json' } })).fn, { conn, text: 'hi', sessionId: 'hui-1', onEvent: () => {} });
+  assert.ok(one.text.length <= max, `json: ${one.text.length}`);
+
+  const small = await streamChatCore(fakeFetch(() => sseResponse(new TextEncoder().encode(chunk('OK') + 'data: [DONE]\n\n'), [64]).res).fn, { conn, text: 'hi', sessionId: 'hui-1', onEvent: () => {} });
+  assert.equal(small.text, 'OK');
+  assert.equal(small.textCapped, undefined);
+});

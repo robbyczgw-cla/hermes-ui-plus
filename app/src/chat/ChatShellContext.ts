@@ -15,6 +15,11 @@ export type ChatShell = {
    * (background/turnRegistry). ChatView renders nothing then; the hooks keep streaming and persisting.
    */
   hidden?: boolean;
+  /**
+   * the open chat while the quick thread of its connection is shown instead (app/src/quick): mounted but not displayed
+   * (scroll position, draft and running turn stay); it takes no focus requests or shortcuts meanwhile.
+   */
+  covered?: boolean;
 };
 
 export const ChatShellContext = createContext<ChatShell | null>(null);

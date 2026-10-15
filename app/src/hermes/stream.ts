@@ -6,9 +6,12 @@ import { withDeadline } from '../net/deadline.ts';
 import { authErrorText } from './authError.ts';
 import { makeT, type TFn, type TKey, type Vars } from '../i18n/core.ts';
 import { createSseParser, createUtf8Decoder } from './sse.ts';
+import { appendCapped, MAX_MESSAGE_TEXT } from './chatState.ts';
 import { mapApproval, mapFrame, parseJson } from './events.ts';
 import { answerBlocked, type RunStatus } from './approvals.ts';
 import { BOOTSTRAP_SYSTEM_MESSAGE } from './bootstrap.ts';
+import { scrubHosts } from './networkFailure.ts';
+import { botFromBaseUrl, serverRootOf } from './bots.ts';
 import { modelOptionsBody, splitProviderModel, type HermesChatOptions } from './capabilities.ts';
 import type { HermesContentPart } from '../attachments/encodeHermes.ts';
 import type {
@@ -82,7 +85,7 @@ export function keyedHermesError(
 /** Timeout (`timedOut`) or network failure of a fetch as a HermesError. */
 export function hermesFetchFailure(e: unknown, timedOut: boolean): HermesError {
   if (timedOut) return keyedHermesError('timeout', 'backends.hermes.errors.timeout');
-  return keyedHermesError('network', 'backends.hermes.errors.networkDetail', { detail: e instanceof Error ? e.message : String(e) });
+  return keyedHermesError('network', 'backends.hermes.errors.networkDetail', { detail: scrubHosts(e instanceof Error ? e.message : String(e)) });
 }
 
 /** Text of an error in the active language; server-provided messages are shown as they are. */
@@ -112,6 +115,15 @@ export type StreamChatParams = {
   onAccepted?: () => void;
   /** follow-up suggestions wanted (Settings → Chat). `false` adds the FOLLOWUPS_OFF_MESSAGE; default on */
   followups?: boolean;
+  /** `Idempotency-Key` of this send (bridge: no second turn on a retry, resumable stream) */
+  idempotencyKey?: string;
+  /** pauses before each resume attempt (tests); default RESUME_DELAYS_MS */
+  resumeDelaysMs?: readonly number[];
+  /**
+   * a prepared request instead of `buildRequest(conn, …)` (quick answers: POST /bridge/quick/v1/chat/completions
+   * with their own short history, quick/stream.ts). Same streaming, error and abort handling.
+   */
+  request?: { url: string; headers: Record<string, string>; body: string };
 };
 
 export type StreamChatResult = {
@@ -121,8 +133,10 @@ export type StreamChatResult = {
   finishReason?: string;
   /** finish/error message if the agent reported one */
   error?: string;
-  /** concatenated assistant text */
+  /** concatenated assistant text, capped like the chat message (MAX_MESSAGE_TEXT + CAP_MARKER, chatState.ts) */
   text: string;
+  /** `text` hit that cap: a runaway stream no longer grows it */
+  textCapped?: true;
   aborted: boolean;
 };
 
@@ -143,7 +157,8 @@ export function buildRequest(
   content: string | HermesContentPart[],
   sessionId: string,
   options?: HermesChatOptions,
-  followups: boolean = true
+  followups: boolean = true,
+  idempotencyKey?: string
 ): { url: string; headers: Record<string, string>; body: string } {
   const modelOptions = modelOptionsBody(options);
   // a per-chat provider model (`provider::model`) goes out as `model` + `provider`
@@ -156,6 +171,9 @@ export function buildRequest(
       Accept: 'text/event-stream',
       'X-Hermes-Session-Id': sessionId,
       'X-Hermes-Session-Key': conn.sessionKey || 'hermes-ui',
+      // one key per sent message (kept by a retry of a send that never reached Hermes): the UI bridge never runs it
+      // twice and can resume the stream; Hermes itself only dedupes non-streaming requests (docs/HERMES-API.md)
+      ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
     },
     body: JSON.stringify({
       model: picked.model,
@@ -206,35 +224,74 @@ export async function errorFromResponse(res: FetchResponseLike): Promise<HermesE
   return err;
 }
 
+/**
+ * Pauses before re-attaching to a lost stream (UI bridge with Idempotency-Key, `X-Hermes-UI-Resume: 1`). Each attempt
+ * continues at the byte offset the app has; afterwards the normal recovery (live inbox / stored session) takes over.
+ */
+export const RESUME_DELAYS_MS: readonly number[] = [500, 1500, 3000];
+/** request header: continue the recorded stream of this Idempotency-Key at this byte offset (bridge/src/replay.mjs) */
+export const RESUME_OFFSET_HEADER = 'X-Hermes-UI-Resume-Offset';
+
+/** resolves after `ms` or as soon as `signal` aborts (never rejects) */
+function pause(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) return resolve();
+    const done = () => {
+      clearTimeout(t);
+      signal?.removeEventListener('abort', done);
+      resolve();
+    };
+    const t = setTimeout(done, ms);
+    signal?.addEventListener('abort', done);
+  });
+}
+
 export async function streamChatCore(
   fetchImpl: FetchLike,
   params: StreamChatParams
 ): Promise<StreamChatResult> {
   const { conn, text, sessionId, onEvent } = params;
   const idleMs = params.idleTimeoutMs ?? 45000;
-  const req = buildRequest(conn, params.content ?? text, sessionId, params.modelOptions, params.followups);
+  const resumeDelays = params.resumeDelaysMs ?? RESUME_DELAYS_MS;
+  const req = params.request ?? buildRequest(conn, params.content ?? text, sessionId, params.modelOptions, params.followups, params.idempotencyKey);
+  if (params.signal?.aborted) return { sessionId, text: '', aborted: true };
 
-  const ctrl = new AbortController();
+  // One HTTP connection at a time (the request, then resumed streams): its own AbortController, idle timer and a
+  // promise that rejects as soon as it is aborted (user stop or idle timeout), even if the fetch implementation or its
+  // body stream does not react to the signal promptly.
+  let ctrl = new AbortController();
   let timedOut = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let abortPromise: Promise<never> = Promise.reject();
+  abortPromise.catch(() => {});
   const kick = () => {
     if (timer) clearTimeout(timer);
+    const c = ctrl;
     timer = setTimeout(() => {
       timedOut = true;
-      ctrl.abort();
+      c.abort();
     }, idleMs);
   };
   const onExternalAbort = () => ctrl.abort();
-  // Rejects as soon as the request is aborted (user stop or idle timeout), even if the fetch
-  // implementation or its body stream does not react to the signal promptly.
-  const abortPromise = new Promise<never>((_, reject) => {
-    ctrl.signal.addEventListener('abort', () => reject(wrapFetchError(undefined, ctrl.signal, timedOut)));
-  });
-  abortPromise.catch(() => {});
-  if (params.signal) {
-    if (params.signal.aborted) return { sessionId, text: '', aborted: true };
-    params.signal.addEventListener('abort', onExternalAbort);
-  }
+  params.signal?.addEventListener('abort', onExternalAbort);
+  const open = async (extraHeaders: Record<string, string>): Promise<FetchResponseLike> => {
+    const c = (ctrl = new AbortController());
+    timedOut = false;
+    abortPromise = new Promise<never>((_, reject) => {
+      c.signal.addEventListener('abort', () => reject(wrapFetchError(undefined, c.signal, timedOut)));
+    });
+    abortPromise.catch(() => {});
+    if (params.signal?.aborted) c.abort();
+    kick();
+    try {
+      return await Promise.race([
+        fetchImpl(req.url, { method: 'POST', headers: { ...req.headers, ...extraHeaders }, body: req.body, signal: c.signal }),
+        abortPromise,
+      ]);
+    } catch (e) {
+      throw wrapFetchError(e, c.signal, timedOut);
+    }
+  };
 
   const result: StreamChatResult = { sessionId, text: '', aborted: false };
   let sawFinish = false;
@@ -242,6 +299,8 @@ export async function streamChatCore(
   let sawError = false;
   let accepted = false;
   let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  /** body bytes received for this turn (the resume offset) */
+  let received = 0;
 
   const emit = (ev: HermesEvent) => {
     switch (ev.type) {
@@ -249,8 +308,14 @@ export async function streamChatCore(
         if (ev.completionId) result.completionId = ev.completionId;
         break;
       case 'text':
-        result.text += ev.text;
+      case 'textReplace': {
+        // the same bound as the reducer: past the cap the transport keeps no (ever growing) copy either (Sol F12)
+        const r = appendCapped(ev.type === 'text' ? result.text : '', ev.text, MAX_MESSAGE_TEXT);
+        result.text = r.text;
+        if (r.capped) result.textCapped = true;
+        else delete result.textCapped;
         break;
+      }
       case 'finish':
         sawFinish = true;
         result.finishReason = ev.reason;
@@ -272,22 +337,66 @@ export async function streamChatCore(
     onEvent(ev);
   };
 
-  try {
-    kick();
-    let res: FetchResponseLike;
-    try {
-      res = await Promise.race([
-        fetchImpl(req.url, {
-          method: 'POST',
-          headers: req.headers,
-          body: req.body,
-          signal: ctrl.signal,
-        }),
-        abortPromise,
-      ]);
-    } catch (e) {
-      throw wrapFetchError(e, ctrl.signal, timedOut);
+  const parser = createSseParser();
+  const decoder = createUtf8Decoder();
+  const handle = (chunk: string) => {
+    for (const frame of parser.push(chunk)) {
+      for (const ev of mapFrame(frame)) emit(ev);
     }
+  };
+  /** read one response body into the (shared) parser until it ends or [DONE] */
+  const pump = async (body: ReadableStream<Uint8Array>) => {
+    reader = body.getReader();
+    for (;;) {
+      if (ctrl.signal.aborted) throw wrapFetchError(undefined, ctrl.signal, timedOut);
+      let r: ReadableStreamReadResult<Uint8Array>;
+      try {
+        r = await Promise.race([reader.read(), abortPromise]);
+      } catch (e) {
+        throw wrapFetchError(e, ctrl.signal, timedOut);
+      }
+      if (r.done) break;
+      kick();
+      received += r.value.byteLength;
+      handle(decoder.decode(r.value));
+      if (sawDone) break;
+    }
+  };
+  /** close the current connection (a lost stream before resuming, or the end of the turn) */
+  const closeConnection = () => {
+    if (timer) clearTimeout(timer);
+    timer = null;
+    if (reader) reader.cancel().catch(() => {});
+    reader = null;
+    ctrl.abort();
+  };
+  let resumeAttempt = 0;
+  /** re-attach at `received` (same Idempotency-Key); null when the bridge cannot continue this stream */
+  const resume = async (): Promise<FetchResponseLike | null> => {
+    while (resumeAttempt < resumeDelays.length) {
+      closeConnection();
+      await pause(resumeDelays[resumeAttempt++], params.signal);
+      if (params.signal?.aborted) return null;
+      let res: FetchResponseLike;
+      try {
+        res = await open({ [RESUME_OFFSET_HEADER]: String(received) });
+      } catch (e) {
+        if (isTransportFailure(e)) continue; // still offline: next attempt
+        return null;
+      }
+      if (res.ok && res.body && (res.headers.get('content-type') || '').toLowerCase().includes('text/event-stream')) {
+        kick();
+        return res;
+      }
+      // 409 resume_unavailable (bridge restarted, turn broken or expired), turn_unrecorded (over the buffer) or anything else
+      res.text().catch(() => {});
+      return null;
+    }
+    return null;
+  };
+
+  try {
+    let res = await open({});
     kick();
     if (!res.ok) throw await Promise.race([errorFromResponse(res), abortPromise]);
 
@@ -295,6 +404,8 @@ export async function streamChatCore(
     if (sid) result.sessionId = sid;
     accepted = true;
     params.onAccepted?.();
+    // UI bridge recorded this turn under our Idempotency-Key: a lost stream can be continued at a byte offset
+    const resumable = !!params.idempotencyKey && res.headers.get('x-hermes-ui-resume') === '1';
 
     const contentType = (res.headers.get('content-type') || '').toLowerCase();
     if (contentType.includes('application/json') || !res.body) {
@@ -306,10 +417,13 @@ export async function streamChatCore(
         throw wrapFetchError(e, ctrl.signal, timedOut);
       }
       const json = parseJson(raw) as
-        | { id?: string; choices?: { message?: { content?: string }; finish_reason?: string }[] }
+        | { id?: string; choices?: { message?: { content?: string; reasoning_content?: string }; finish_reason?: string }[] }
         | undefined;
       const choice = json?.choices?.[0];
       emit({ type: 'start', completionId: json?.id ?? '' });
+      // Hermes v0.22: the non-streaming twin of `delta.reasoning_content`
+      const reasoning = choice?.message?.reasoning_content;
+      if (typeof reasoning === 'string' && reasoning) emit({ type: 'reasoning', text: reasoning });
       const content = choice?.message?.content;
       if (content) emit({ type: 'text', text: content });
       emit({ type: 'finish', reason: choice?.finish_reason ?? 'stop' });
@@ -317,27 +431,27 @@ export async function streamChatCore(
       return result;
     }
 
-    const parser = createSseParser();
-    const decoder = createUtf8Decoder();
-    const handle = (chunk: string) => {
-      for (const frame of parser.push(chunk)) {
-        for (const ev of mapFrame(frame)) emit(ev);
-      }
-    };
-
-    reader = res.body.getReader();
+    let body: ReadableStream<Uint8Array> = res.body;
     for (;;) {
-      if (ctrl.signal.aborted) throw wrapFetchError(undefined, ctrl.signal, timedOut);
-      let r: ReadableStreamReadResult<Uint8Array>;
+      let failure: unknown = null;
       try {
-        r = await Promise.race([reader.read(), abortPromise]);
+        await pump(body);
       } catch (e) {
-        throw wrapFetchError(e, ctrl.signal, timedOut);
+        failure = e;
       }
-      if (r.done) break;
-      kick();
-      handle(decoder.decode(r.value));
-      if (sawDone) break;
+      if (failure === null && (sawFinish || sawDone || sawError)) break;
+      // the body ended or broke before the turn did: continue where it stopped (parser state is kept, no flush)
+      const lost = failure === null || isTransportFailure(failure);
+      if (resumable && lost && !sawFinish && !sawError && !params.signal?.aborted) {
+        const next = await resume();
+        if (next?.body) {
+          body = next.body;
+          continue;
+        }
+        if (params.signal?.aborted) throw keyedHermesError('aborted', 'backends.hermes.errors.aborted');
+      }
+      if (failure !== null) throw failure;
+      break;
     }
     const tail = decoder.flush();
     if (tail) handle(tail);
@@ -381,7 +495,8 @@ function wrapFetchError(e: unknown, signal: AbortSignal, timedOut: boolean): Her
     return keyedHermesError('timeout', 'backends.hermes.errors.noResponseTimeout');
   }
   if (signal.aborted) return keyedHermesError('aborted', 'backends.hermes.errors.aborted');
-  const msg = e instanceof Error ? e.message : String(e);
+  // no host names / IPs in the stored message (failure card "Details", logs)
+  const msg = scrubHosts(e instanceof Error ? e.message : String(e));
   return keyedHermesError('network', 'backends.hermes.errors.networkDetail', { detail: msg });
 }
 
@@ -486,13 +601,14 @@ export async function fetchRunStatusCore(fetchImpl: FetchLike, conn: HermesConn,
 /**
  * UI bridge only: stop the Hermes run of `sessionId` (POST /bridge/chat/stop). The bridge keeps a run going when
  * the app's connection drops (network switch, background), so a deliberate stop has to say so. Best effort.
+ * Session ids are per profile: the bot of `conn` goes in the body (bridge routes have no `/p/<bot>` form).
  */
 export async function stopBridgeTurnCore(fetchImpl: FetchLike, conn: HermesConn, sessionId: string): Promise<void> {
-  const root = conn.baseUrl.replace(/\/+$/, '').replace(/\/v1$/i, '');
+  const root = serverRootOf(conn.baseUrl); // bridge route: never under a bot's /p/<bot> prefix
   const res = await fetchImpl(joinUrl(root, '/bridge/chat/stop'), {
     method: 'POST',
     headers: { Authorization: `Bearer ${conn.apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId }),
+    body: JSON.stringify({ sessionId, profile: botFromBaseUrl(conn.baseUrl) ?? null }),
   });
   if (!res.ok) throw await errorFromResponse(res);
 }

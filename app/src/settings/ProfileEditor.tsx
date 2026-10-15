@@ -11,6 +11,7 @@ import { runConnectionTest, type TestView } from './testConnection';
 import { createLatestRun } from './latestRun';
 import { Button, Chips, Field, Footnote, Group, ResultRow, Segmented, SectionTitle, SwitchRow } from './ui';
 import { isProfilesReadOnlyError } from './storage';
+import { formatBotList, invalidBotNames, parseBotList } from '../hermes/bots';
 
 
 type Props = {
@@ -27,6 +28,8 @@ export function ProfileEditor({ initial, isNew, bottomInset, onSave, onCancel, o
   const t = useT();
   const reducedMotion = useMotionReduced();
   const [p, setP] = useState<ConnectionProfile>(initial);
+  // hermes: "Hermes-Profile (Bots)" as typed (parsed on save, hermes/bots.ts parseBotList)
+  const [botsText, setBotsText] = useState(() => formatBotList(initial.hermesBots));
   const [showKey, setShowKey] = useState(false);
   const [makeActive, setMakeActive] = useState(isNew);
   const [testing, setTesting] = useState(false);
@@ -53,9 +56,12 @@ export function ProfileEditor({ initial, isNew, bottomInset, onSave, onCancel, o
 
   /** profile as it will be saved (hermes: normalized URL) */
   const effective = useCallback((): ConnectionProfile => {
-    if (p.kind === 'hermes') return { ...p, baseUrl: cleanBaseUrl('hermes', p.baseUrl) };
+    if (p.kind === 'hermes') {
+      const bots = parseBotList(botsText);
+      return { ...p, baseUrl: cleanBaseUrl('hermes', p.baseUrl), hermesBots: bots.length ? bots : undefined };
+    }
     return p;
-  }, [p]);
+  }, [p, botsText]);
 
   const check = (q: ConnectionProfile): string | null => {
     const e = validateProfile(q);
@@ -185,6 +191,22 @@ export function ProfileEditor({ initial, isNew, bottomInset, onSave, onCancel, o
               last
             />
           </Group>
+          {/* Hermes profiles ("bots"): own model, memory, skills; picked per chat in the model menu */}
+          <SectionTitle>{t('bots.settings.title')}</SectionTitle>
+          <Group>
+            <Field
+              label={t('bots.settings.field')}
+              value={botsText}
+              onChangeText={(v) => {
+                setBotsText(v);
+                update({});
+              }}
+              placeholder={t('bots.settings.placeholder')}
+              hint={invalidBotNames(botsText).length ? t('bots.settings.invalid', { names: invalidBotNames(botsText).join(', ') }) : undefined}
+              last
+            />
+          </Group>
+          <Footnote>{t('bots.settings.footnote')}</Footnote>
         </>
       );
   }

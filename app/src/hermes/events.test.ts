@@ -40,6 +40,16 @@ test('tool fixture: running then done with label/emoji, reasoning separated from
   assert.ok(!text.includes('Der Nutzer'));
 });
 
+test('hermes.text.replace -> textReplace (empty text clears); replace_fallback chunks carry no text', () => {
+  assert.deepEqual(mapFrame({ event: 'hermes.text.replace', data: '{"text":"Neu"}' }), [{ type: 'textReplace', text: 'Neu' }]);
+  assert.deepEqual(mapFrame({ event: 'hermes.text.replace', data: '{"text":""}' }), [{ type: 'textReplace', text: '' }]);
+  assert.deepEqual(mapFrame({ event: 'hermes.text.replace', data: '{"text":7}' }), []);
+  const chunk = (extra: object) =>
+    JSON.stringify({ id: 'c', choices: [{ index: 0, delta: { content: 'rest' }, finish_reason: null }], ...extra });
+  assert.deepEqual(mapFrame({ event: 'message', data: chunk({ hermes: { replace_fallback: true } }) }), []);
+  assert.deepEqual(mapFrame({ event: 'message', data: chunk({}) }), [{ type: 'text', text: 'rest' }]);
+});
+
 test('hermes.ui.route, hermes.status, approval.request', () => {
   const route = { format: 'chart', confidence: 0.9, reason: 'r', model: 'm', ms: 120 };
   assert.deepEqual(mapFrame({ event: 'hermes.ui.route', data: JSON.stringify(route) }), [{ type: 'route', route }]);

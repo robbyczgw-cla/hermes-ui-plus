@@ -10,7 +10,7 @@
  * - files without bridge → small text files are inlined as a fenced block (split into ≤ 60k-char
  *   parts on line boundaries; Hermes joins all-text arrays with "\n"), everything else → error
  */
-import { fenceLang, formatBytes, isImageMime } from './mime.ts';
+import { fenceLang, formatBytes, formatSizeOverLimit, isImageMime } from './mime.ts';
 import { validateForTarget } from './validate.ts';
 import { AttachmentError, LIMITS } from './types.ts';
 import type { Attachment, AttachmentReader } from './types.ts';
@@ -116,7 +116,7 @@ export async function buildHermesContent(
   if (bytes > LIMITS.hermesPayloadBudget) {
     throw new AttachmentError('too_large', {
       key: 'attachments.encode.messageTooLarge',
-      vars: { size: formatBytes(bytes), max: formatBytes(LIMITS.hermesPayloadBudget) },
+      vars: formatSizeOverLimit(bytes, LIMITS.hermesPayloadBudget),
     });
   }
   return parts;

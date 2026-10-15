@@ -8,6 +8,7 @@ node mock-server/server.mjs            # http://localhost:8787/v1
 node mock-server/server.mjs --route    # also emits `event: hermes.ui.route` before the first token (bridge behaviour)
 node mock-server/server.mjs --port 9000 --host 127.0.0.1 --fast   # --fast: no delays (tests)
 node mock-server/server.mjs --route --slow-ms 90   # fixed per-token delay for `langsam`/`slow` (streaming/skeleton checks)
+node mock-server/server.mjs --profiles research,work   # Hermes profiles (bots) under /p/<name>/ (default: research)
 ```
 
 App connection: base URL `http://localhost:8787/v1` (Android emulator: `http://10.0.2.2:8787/v1`),

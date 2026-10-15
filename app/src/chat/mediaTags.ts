@@ -8,6 +8,7 @@
  * that is exactly one `MEDIA:` tag (models format paths that way). Pure (node:test, mediaTags.test.ts).
  */
 import { bridgeOrigin } from '../attachments/uploadCore.ts';
+import { extendsText, type AppendRun } from '../protocol/appendRun.ts';
 
 export type MediaKind = 'image' | 'pdf' | 'audio' | 'video' | 'doc' | 'sheet' | 'slides' | 'archive' | 'text' | 'file';
 
@@ -76,16 +77,28 @@ function blankRanges(s: string, ranges: [number, number][]): string {
   return parts.join('');
 }
 
-/** Length-preserving copy of `text` with fenced code, inline code (except whole tags) and blockquotes blanked. */
-export function maskProtected(text: string): string {
+/**
+ * `text` with fenced code and blockquotes blanked, and where a fence that is still open at the end of the text starts
+ * (-1: none).
+ */
+function maskBlocks(text: string): [string, number] {
   const ranges: [number, number][] = [];
+  let openAt = -1;
   // fenced code, closed or still open (streaming)
-  const fence = /^[ \t]{0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n[ \t]{0,3}\1[ \t]*(?=\n|$)|$)/gm;
-  for (const m of text.matchAll(fence)) ranges.push([m.index ?? 0, (m.index ?? 0) + m[0].length]);
+  const fence = /^[ \t]{0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n[ \t]{0,3}\1[ \t]*(?=\n|$)|(?![\s\S]))/gm;
+  for (const m of text.matchAll(fence)) {
+    const from = m.index ?? 0;
+    ranges.push([from, from + m[0].length]);
+    // a closed fence ends before the newline after its closing line; only an open one runs to the end
+    if (from + m[0].length === text.length) openAt = from;
+  }
   // blockquotes
   for (const m of text.matchAll(/^[ \t]{0,3}>.*$/gm)) ranges.push([m.index ?? 0, (m.index ?? 0) + m[0].length]);
-  const out = blankRanges(text, ranges);
-  // inline code (on what is left)
+  return [blankRanges(text, ranges), openAt];
+}
+
+/** `out` (fences and quotes blanked) with inline code blanked too, except code spans that are a tag or its path. */
+function maskInline(out: string): string {
   const inline = /(`+)([^`\n]|[^`\n][^\n]*?[^`\n])\1(?!`)/g;
   const spans: [number, number][] = [];
   for (const m of out.matchAll(inline)) {
@@ -96,6 +109,11 @@ export function maskProtected(text: string): string {
     spans.push([start, start + m[0].length]);
   }
   return blankRanges(out, spans);
+}
+
+/** Length-preserving copy of `text` with fenced code, inline code (except whole tags) and blockquotes blanked. */
+export function maskProtected(text: string): string {
+  return maskInline(maskBlocks(text)[0]);
 }
 
 /** `media:` at `i - 5 … i` (ASCII case-insensitive; `| 32` lower-cases ASCII letters and maps nothing else onto them) */
@@ -152,13 +170,18 @@ export type MediaExtract = {
   text: string;
 };
 
-/**
- * Find the MEDIA tags of an answer. With `streaming`, a tag that is still being written at the end of the text
- * (`MEDIA:/tmp/ab…`) is hidden until it is complete, so the raw path never flashes.
- */
-export function extractMedia(text: string, streaming = false): MediaExtract {
-  if (!hasMediaMarker(text)) return { refs: [], text };
-  const masked = maskProtected(text);
+type TagScan = {
+  refs: MediaRef[];
+  /** number of cut ranges (tags, plus an unfinished tag at the end while streaming) */
+  cuts: number;
+  /** `text` with the tags (and lines that only held a tag) cut out, before `cleanUp` */
+  raw: string;
+  /** the last cut runs to the end of the text */
+  toEnd: boolean;
+};
+
+/** Tags of `text` (`masked`: `maskProtected(text)`) and the text without them. */
+function scanTags(text: string, masked: string, streaming: boolean): TagScan {
   const refs: MediaRef[] = [];
   const cuts: [number, number][] = [];
   // a tag starts at most 3 chars (quotes / emphasis) before its `MEDIA:`, so nothing before the first marker can match:
@@ -181,7 +204,7 @@ export function extractMedia(text: string, streaming = false): MediaExtract {
       if (!cuts.some(([a, b]) => from >= a && from < b)) cuts.push([from, text.length]);
     }
   }
-  if (!cuts.length) return { refs, text };
+  if (!cuts.length) return { refs, cuts: 0, raw: text, toEnd: false };
   cuts.sort((x, y) => x[0] - y[0]);
   let out = '';
   let pos = 0;
@@ -201,11 +224,169 @@ export function extractMedia(text: string, streaming = false): MediaExtract {
     toEnd = b >= text.length;
   }
   out += text.slice(pos);
-  if (toEnd && streaming) out = out.trimEnd();
-  if (refs.length) out = out.replace(VOICE_MARKER_RE, '');
+  return { refs, cuts: cuts.length, raw: out, toEnd };
+}
+
+/** The line-local cleanup after cutting: voice markers (when there are tags), trailing blanks, blank-line runs. */
+function cleanUp(raw: string, voice: boolean): string {
+  const out = voice ? raw.replace(VOICE_MARKER_RE, '') : raw;
   // a line that only held a tag leaves whitespace / a blank-line run behind
-  out = out.replace(/[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n');
-  return { refs, text: out.trim() === '' ? '' : out.replace(/^\n+/, '') };
+  return out.replace(/[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n');
+}
+
+/**
+ * Find the MEDIA tags of an answer. With `streaming`, a tag that is still being written at the end of the text
+ * (`MEDIA:/tmp/ab…`) is hidden until it is complete, so the raw path never flashes.
+ */
+export function extractMedia(text: string, streaming = false): MediaExtract {
+  if (!hasMediaMarker(text)) return { refs: [], text };
+  const scan = scanTags(text, maskProtected(text), streaming);
+  if (!scan.cuts) return { refs: scan.refs, text };
+  const out = cleanUp(scan.toEnd && streaming ? scan.raw.trimEnd() : scan.raw, scan.refs.length > 0);
+  return { refs: scan.refs, text: out.trim() === '' ? '' : out.replace(/^\n+/, '') };
+}
+
+// ---------------------------------------------------------------- streaming: only the tail is scanned again
+
+/** cleaned frozen text (leading newlines dropped), its trailing newline count and whether it has non-blank chars */
+type CleanPart = { s: string; trail: number; content: boolean };
+
+/**
+ * Per-message memo of `extractMediaCached`: the result for the text up to `end` (a line start) is frozen, every
+ * update scans only the rest. Valid while the text extends `src`; anything else (a replaced answer) starts over.
+ */
+export type MediaTagCache = {
+  src: string;
+  end: number;
+  /** a `media:` marker in the frozen part */
+  marker: boolean;
+  refs: MediaRef[];
+  cuts: number;
+  /** the frozen part cleaned without / with the voice markers removed (they go only when the answer has tags) */
+  plain: CleanPart;
+  voice: CleanPart;
+  /** line start a freeze attempt failed at (retried only once a further line is complete) */
+  tried: number;
+  /** append run of the last text (protocol/appendRun.ts): the same run again → it extends `src` */
+  run?: AppendRun;
+};
+
+export function createMediaTagCache(): MediaTagCache {
+  return { src: '', end: 0, marker: false, refs: [], cuts: 0, plain: EMPTY_PART, voice: EMPTY_PART, tried: 0, run: undefined };
+}
+
+const EMPTY_PART: CleanPart = { s: '', trail: 0, content: false };
+const NON_BLANK_RE = /\S/;
+const VOICE_TAG = '[[audio_as_voice]]';
+
+function leadingNewlines(s: string): number {
+  let n = 0;
+  while (n < s.length && s.charCodeAt(n) === 10) n++;
+  return n;
+}
+
+function trailingNewlines(s: string): number {
+  let n = 0;
+  while (n < s.length && s.charCodeAt(s.length - 1 - n) === 10) n++;
+  return n;
+}
+
+/**
+ * `part` followed by the cleaned `next`, as if both had been cleaned as one text: a newline run across the seam
+ * collapses to two (the cleanup's `\n{3,}` → `\n\n` is `min(run, 2)`, so cleaning the halves first is the same),
+ * and leading newlines of the whole text go.
+ */
+function joinClean(part: CleanPart, next: string): string {
+  if (part.s === '') return next.replace(/^\n+/, '');
+  return next.slice(Math.max(0, part.trail + leadingNewlines(next) - 2));
+}
+
+function appendClean(part: CleanPart, next: string): CleanPart {
+  const add = joinClean(part, next);
+  if (!add) return part;
+  const s = part.s + add;
+  const trail = leadingNewlines(add) === add.length ? part.trail + add.length : trailingNewlines(add);
+  return { s, trail, content: part.content || NON_BLANK_RE.test(add) };
+}
+
+/** the last non-blank chars of `masked` are a `media:` marker (a tag's path may still follow on a later line) */
+function endsWithMarker(masked: string): boolean {
+  let i = masked.length - 1;
+  while (i >= 0 && NON_BLANK_RE.test(masked[i]) === false) i--;
+  return i >= 5 && masked.charCodeAt(i) === 58 && markerEndsAt(masked, i);
+}
+
+type Frozen = { len: number; marker: boolean; refs: MediaRef[]; cuts: number; plain: string; voice: string };
+
+/**
+ * Scan `chunk` (complete lines, the text before it already frozen) on its own. Returns what it froze – all of it, or
+ * the lines before a code fence that is still open – or null when its end is no safe cut: inside an open fence, after
+ * a `media:` whose path may still follow (`MEDIA:\s*` spans lines), or after a voice marker whose trailing
+ * whitespace the cleanup would eat across the cut. Fences and quotes are line based, inline code and tags never
+ * span a line otherwise, so a scan from a safe cut finds exactly what a scan of the whole text finds there.
+ */
+function freezeChunk(chunk: string): Frozen | null {
+  const [blocks, openAt] = maskBlocks(chunk);
+  if (openAt !== -1) {
+    const lineStart = chunk.lastIndexOf('\n', openAt - 1) + 1;
+    return lineStart > 0 ? freezeChunk(chunk.slice(0, lineStart)) : null;
+  }
+  const marker = firstMediaMarker(chunk) !== -1;
+  let scan: TagScan = { refs: [], cuts: 0, raw: chunk, toEnd: false };
+  if (marker) {
+    const masked = maskInline(blocks);
+    // `blocks`: the inline-code check looks back across the cut on the text before inline code is blanked
+    if (endsWithMarker(blocks) || endsWithMarker(masked)) return null;
+    scan = scanTags(chunk, masked, false);
+  }
+  if (scan.raw.trimEnd().slice(-VOICE_TAG.length).toLowerCase() === VOICE_TAG) return null;
+  return { len: chunk.length, marker, refs: scan.refs, cuts: scan.cuts, plain: cleanUp(scan.raw, false), voice: cleanUp(scan.raw, true) };
+}
+
+function mergeRefs(a: MediaRef[], b: MediaRef[]): MediaRef[] {
+  if (!b.length) return a;
+  const out = a.slice();
+  for (const r of b) if (!out.some((x) => x.path === r.path)) out.push(r);
+  return out;
+}
+
+/**
+ * `extractMedia(text, streaming)` for an answer that grows between calls (same result, tested over many split
+ * points): complete lines are scanned once and frozen in `cache`, each call scans only the tail from the last safe
+ * line start. Without it a long answer with one tag was masked, regex-scanned and copied in full on every update.
+ */
+export function extractMediaCached(text: string, streaming: boolean, cache: MediaTagCache, run?: AppendRun): MediaExtract {
+  if (!extendsText(cache.src, text, cache.run, run)) Object.assign(cache, createMediaTagCache());
+  cache.run = run;
+  // freeze up to the start of the last line (it may be the line being written, even when it already ends in `\n`)
+  const lineStart = text.lastIndexOf('\n', text.length - 2) + 1;
+  if (lineStart > cache.end && lineStart !== cache.tried) {
+    const f = freezeChunk(text.slice(cache.end, lineStart));
+    if (f) {
+      cache.end += f.len;
+      cache.src = text.slice(0, cache.end);
+      cache.marker ||= f.marker;
+      cache.refs = mergeRefs(cache.refs, f.refs);
+      cache.cuts += f.cuts;
+      cache.plain = appendClean(cache.plain, f.plain);
+      cache.voice = appendClean(cache.voice, f.voice);
+    }
+    if (cache.end < lineStart) cache.tried = lineStart;
+  }
+  const tail = cache.end ? text.slice(cache.end) : text;
+  const tailMarker = firstMediaMarker(tail) !== -1;
+  if (!cache.marker && !tailMarker) return { refs: [], text };
+  const scan: TagScan = tailMarker ? scanTags(tail, maskProtected(tail), streaming) : { refs: [], cuts: 0, raw: tail, toEnd: false };
+  if (!cache.cuts && !scan.cuts) return { refs: [], text };
+  const trimEnd = scan.toEnd && streaming;
+  // the trim would reach into the frozen part (a tag alone on the last line): rare and short, the full scan does it
+  if (trimEnd && !NON_BLANK_RE.test(scan.raw)) return extractMedia(text, streaming);
+  const refs = mergeRefs(cache.refs, scan.refs);
+  const voice = refs.length > 0;
+  const part = voice ? cache.voice : cache.plain;
+  const rest = joinClean(part, cleanUp(trimEnd ? scan.raw.trimEnd() : scan.raw, voice));
+  const out = part.s + rest;
+  return { refs, text: part.content || NON_BLANK_RE.test(rest) ? out : out.trim() === '' ? '' : out };
 }
 
 const MIME: Record<string, string> = {

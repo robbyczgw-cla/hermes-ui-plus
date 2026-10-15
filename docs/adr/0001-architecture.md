@@ -57,6 +57,19 @@ have to install several things separately.
    - Version and capability negotiation runs through `/bridge/capabilities`.
 5. **The skill stays a skill.** It is not folded into a permanent prompt section, which would cost about 2k tokens on
    every turn on every platform.
+
+   *Addendum (2026-10-14): skill core inline for app turns.* In end-to-end tests on Hermes v0.22, Claude Sonnet often
+   did not call `skill_view` although the bootstrap message asked for it, then ignored the router hint and answered in
+   plain text with the result last. Stronger wording did not change that. The bridge therefore sends the core of
+   `SKILL.md` (without front matter) as one system message right after the bootstrap message.
+   - Why: reliability on models that skip `skill_view`; the protocol no longer depends on a tool call.
+   - Scope: only app turns through the bridge (requests with the bootstrap message, bootstrap active), not other
+     platforms or API clients, so the reason for this decision still holds. Direct connections without the bridge keep
+     the `skill_view` path. `BRIDGE_SKILL_INLINE=off` restores it for the bridge too.
+   - Cost: about 2k input tokens per app turn, cached: the message is byte-identical on every turn and Hermes appends it
+     to the end of its cached system prompt without persisting it.
+   - Unchanged: the skill stays a normal Hermes skill (references load on demand with `skill_view`, other clients use it
+     as before), and the plugin plan for 1.0 (decisions 2 and 3) is not affected.
 6. **Titles come from Hermes** (`title_generation`). Planned for 1.0: until then the bridge's own title generation
    stays available as an opt-in extra (`BRIDGE_META=on`).
 7. **Option C is rejected.**

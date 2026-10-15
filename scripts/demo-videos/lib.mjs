@@ -47,6 +47,8 @@ export function seed({ theme = 'paper', mode = 'light', lang = 'en', prefs = {} 
     'hermes.profiles.v1': JSON.stringify({ v: 2, profiles: [{ id: PROFILE_ID, kind: 'hermes', name: 'Hermes', baseUrl: `http://${DEMO_HOST}/v1`, bridge: true, syncSessions: false }] }),
     [`hermes.apikey.${PROFILE_ID}`]: 'demo-video',
     'hermes.activeProfile.v1': PROFILE_ID,
+    // the data-sharing notice was accepted already (otherwise its sheet opens over the first taps)
+    'hui.aiConsent': JSON.stringify({ version: 2, at: Date.now() }),
     'hui.lang': lang,
     'hermes.prefs.v1': JSON.stringify({ v: 1, prefs: { themeMode: mode, themeFamily: theme, toolDetails: 'compact', ...prefs } }),
   };
@@ -83,7 +85,7 @@ function touchOverlay() {
   else install();
 }
 
-export async function newClipPage(browser, { theme, mode, lang, prefs, locale = 'en-US' } = {}) {
+export async function newClipPage(browser, { theme, mode, lang, prefs, locale = 'en-US', imageDelay = 0, bindFetch = false } = {}) {
   const ctx = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: DSF, locale, colorScheme: mode || 'light', hasTouch: false, isMobile: false });
   await ctx.addInitScript((s) => {
     try {
@@ -94,7 +96,10 @@ export async function newClipPage(browser, { theme, mode, lang, prefs, locale = 
     } catch {}
   }, seed({ theme, mode, lang, prefs }));
   await ctx.addInitScript(touchOverlay);
-  await routeNetwork(ctx);
+  // quick/availability.ts calls `o.fetch(...)` with the browser's fetch as a method (expo/fetch is globalThis.fetch on
+  // web) → "Illegal invocation" → ⚡ stays off in the web build. Recording-only workaround: a wrapper ignores `this`.
+  if (bindFetch) await ctx.addInitScript(() => { const f = window.fetch.bind(window); window.fetch = function (...a) { return f(...a); }; });
+  await routeNetwork(ctx, imageDelay);
   const page = await ctx.newPage();
   page.on('pageerror', (e) => console.warn('  pageerror:', String(e).slice(0, 200)));
   return { ctx, page };
@@ -108,7 +113,8 @@ const ALLOWED_HOSTS = (process.env.DEMO_ALLOW_HOSTS || 'tile.openstreetmap.de,un
  * Wikimedia lookups get an empty answer (so the app falls through to the fake bridge search), and everything else
  * outside the app / mock / allowed map tiles is aborted.
  */
-async function routeNetwork(ctx) {
+async function routeNetwork(ctx, imageDelay = 0) {
+  let imgN = 0;
   const app = new URL(APP_URL);
   await ctx.route('**/*', async (route) => {
     const u = new URL(route.request().url());
@@ -116,6 +122,8 @@ async function routeNetwork(ctx) {
     if (u.host === app.host || u.hostname === DEMO_HOST || u.hostname === 'localhost' || u.hostname === '127.0.0.1') return route.continue();
     if (u.hostname === 'images.example.org') {
       const f = join(MEDIA_DIR, basename(u.pathname));
+      // slow photos (clip option imageDelay): staggered arrival shows that cards keep their size while images load
+      if (imageDelay) await new Promise((r) => setTimeout(r, imageDelay + (imgN++ % 5) * 450));
       if (existsSync(f)) return route.fulfill({ status: 200, contentType: 'image/jpeg', body: readFileSync(f), headers: { 'access-control-allow-origin': '*', 'cache-control': 'max-age=3600' } });
       return route.fulfill({ status: 404, body: '' });
     }

@@ -9,6 +9,7 @@ import { useCallback, useMemo } from 'react';
 import { useConversations, useConversationsInternals } from '../conversations/ConversationsProvider';
 import { requestComposerFocus } from '../desktop/bridge';
 import { createJsonRequest, sessionErrorText } from '../hermes/sessions';
+import { withBot } from '../hermes/bots';
 import type { FetchLike } from '../hermes/stream';
 import { sessionsSupported } from '../hermes/support';
 import type { ChatMessage } from '../hermes/types';
@@ -33,7 +34,9 @@ export function useAnswerBranch(opts: {
   const { controller } = useConversationsInternals();
   const toast = useToast();
   const tr = useT();
-  const request = useMemo(() => createJsonRequest(nativeFetch, { baseUrl: profile.baseUrl, apiKey: profile.apiKey }), [profile.baseUrl, profile.apiKey]);
+  // fork under the chat's Hermes bot (/p/<bot>/api/sessions/{id}/fork)
+  const bot = conversationId ? convs.get(conversationId)?.hermesProfile : undefined;
+  const request = useMemo(() => createJsonRequest(nativeFetch, withBot({ baseUrl: profile.baseUrl, apiKey: profile.apiKey }, bot)), [profile.baseUrl, profile.apiKey, bot]);
 
   return useCallback(
     async (answerId: string) => {
@@ -48,7 +51,7 @@ export function useAnswerBranch(opts: {
         kind: profile.kind,
         isLast: list[list.length - 1]?.id === answerId,
         hasRemoteSession: hermes && !!sid && history.some((m) => m.role === 'user'),
-        sessionsApi: hermes ? sessionsSupported({ baseUrl: profile.baseUrl, apiKey: profile.apiKey }) : undefined,
+        sessionsApi: hermes ? sessionsSupported(withBot({ baseUrl: profile.baseUrl, apiKey: profile.apiKey }, meta.hermesProfile)) : undefined,
       });
       let fork: { id: string; title?: string } | null = null;
       if (mode === 'fork' && sid) {
@@ -71,6 +74,7 @@ export function useAnswerBranch(opts: {
             model: meta.model,
             modelOptions: meta.modelOptions,
             title: fork?.title ?? meta.title,
+            bot: meta.hermesProfile,
           }
         );
         toast(tr('menus.answer.branchDone'));

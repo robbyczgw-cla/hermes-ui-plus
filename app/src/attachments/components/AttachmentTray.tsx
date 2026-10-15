@@ -2,7 +2,7 @@
  * Horizontal strip above the composer input: image thumbnails + file chips with remove ×,
  * upload progress and error state (tap an errored item to retry).
  */
-import { Image } from 'expo-image';
+import { AttachmentImage } from './AttachmentImage';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useT, type TFn } from '../../i18n';
 import { useTheme } from '../../ui';
@@ -89,7 +89,7 @@ function ImageItem({ att, t, onRemove, onRetry }: ItemProps) {
         accessibilityLabel={error ? tr('attachments.tray.errorRetry', { name: att.name, error: errorText(att, tr) }) : att.name}
         style={[styles.thumb, { borderRadius: t.radii.m, backgroundColor: t.colors.surfaceAlt, borderColor: error ? t.colors.danger : t.colors.border }]}
       >
-        <Image source={{ uri: att.uri }} style={StyleSheet.absoluteFill} contentFit="cover" transition={120} recyclingKey={att.id} />
+        <AttachmentImage uri={att.uri} style={StyleSheet.absoluteFill} contentFit="cover" transition={120} recyclingKey={att.id} />
         {att.status === 'uploading' ? (
           <View style={[StyleSheet.absoluteFill, styles.center, { backgroundColor: 'rgba(0,0,0,0.35)' }]}>
             <ActivityIndicator color="#fff" size="small" />

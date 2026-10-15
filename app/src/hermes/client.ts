@@ -21,6 +21,7 @@ import { hermesFetchFailure, stopBridgeTurnCore } from './stream.ts';
 import { createJsonRequest, createSessionsClient, type ApiConn, type SessionsClient } from './sessions';
 import { reportReachable } from '../chat/healthMachine';
 import { parseCapabilities, parseModelOptions, type HermesCapabilities, type ModelOptionsCatalog } from './capabilities';
+import { parseBridgeProfiles, serverRootOf, type HermesBot } from './bots';
 
 export { HermesError, isHermesError } from './stream';
 export type { StreamChatParams, StreamChatResult } from './stream';
@@ -79,8 +80,8 @@ export async function checkHealth(conn: HermesConn, timeoutMs = 8000): Promise<H
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    // /health lives at the server root, the base URL ends in /v1
-    const root = conn.baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '');
+    // /health lives at the server root: the base URL ends in /v1 (a bot's base URL also has /p/<bot>)
+    const root = serverRootOf(conn.baseUrl);
     const res = await nativeFetch(joinUrl(root, '/health'), {
       method: 'GET',
       headers: { Accept: 'application/json' },
@@ -139,4 +140,17 @@ export async function fetchCapabilities(conn: ApiConn, timeoutMs = 8000): Promis
 /** GET /api/model/options (provider catalog with per-model reasoning/fast capabilities). Throws HermesError. */
 export async function fetchModelOptions(conn: ApiConn, timeoutMs = 12000): Promise<ModelOptionsCatalog | null> {
   return parseModelOptions(await createJsonRequest(nativeFetch, conn, timeoutMs)('GET', '/api/model/options'));
+}
+
+/**
+ * UI bridge: GET /bridge/profiles → the Hermes profiles ("bots") it serves (null: unreadable list). An older bridge
+ * without the route (404) has no bots: `[]`, cached like a list (no retries every 30 s). Throws HermesError otherwise.
+ */
+export async function fetchBridgeProfiles(conn: ApiConn, timeoutMs = 8000): Promise<HermesBot[] | null> {
+  try {
+    return parseBridgeProfiles(await createJsonRequest(nativeFetch, { baseUrl: serverRootOf(conn.baseUrl), apiKey: conn.apiKey }, timeoutMs)('GET', '/bridge/profiles'));
+  } catch (e) {
+    if (e instanceof HermesError && e.status === 404) return [];
+    throw e;
+  }
 }

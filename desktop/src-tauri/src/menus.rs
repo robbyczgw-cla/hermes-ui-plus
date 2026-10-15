@@ -53,7 +53,17 @@ pub fn label(labels: &HashMap<String, String>, key: &str, default: &str, name: &
         .replace("{name}", name)
 }
 
-pub fn build_menu_bar(app: &AppHandle, st: &MenuState) -> tauri::Result<()> {
+/// The chats the menus list: none while the app lock is on (titles are chat content; the dock menu and the "Chat"
+/// menu are reachable without unlocking)
+pub fn listed_chats(st: &MenuState, locked: bool) -> &[RecentChat] {
+    if locked {
+        &[]
+    } else {
+        &st.recent
+    }
+}
+
+pub fn build_menu_bar(app: &AppHandle, st: &MenuState, locked: bool) -> tauri::Result<()> {
     let name = app.package_info().name.clone();
     let l = |k: &str, d: &str| label(&st.labels, k, d, &name);
     let item = |id: &str, text: String, accel: &str| {
@@ -105,9 +115,10 @@ pub fn build_menu_bar(app: &AppHandle, st: &MenuState) -> tauri::Result<()> {
         .separator()
         .item(&item("prev-chat", l("prevChat", "Previous Chat"), "Alt+CmdOrCtrl+ArrowUp")?)
         .item(&item("next-chat", l("nextChat", "Next Chat"), "Alt+CmdOrCtrl+ArrowDown")?);
-    if !st.recent.is_empty() {
+    let recent = listed_chats(st, locked);
+    if !recent.is_empty() {
         chat = chat.separator();
-        for (i, c) in st.recent.iter().take(MAX_MENU_CHATS).enumerate() {
+        for (i, c) in recent.iter().take(MAX_MENU_CHATS).enumerate() {
             chat = chat.item(&item(&format!("recent:{i}"), clip(&c.title, 60), &format!("CmdOrCtrl+{}", i + 1))?);
         }
     }
@@ -176,5 +187,14 @@ mod tests {
         assert_eq!(label(&m, "quit", "Quit {name}", "Hermes"), "Hermes beenden");
         assert_eq!(label(&m, "hide", "Hide {name}", "Hermes"), "Hide Hermes");
         assert_eq!(clip("a\u{7}bc", 2), "ab…");
+    }
+
+    #[test]
+    fn no_chat_titles_while_locked() {
+        let st = MenuState { labels: HashMap::new(), recent: vec![RecentChat { id: "c1".into(), title: "Alice's tax return".into() }] };
+        assert_eq!(listed_chats(&st, false).len(), 1);
+        assert!(listed_chats(&st, true).is_empty());
+        // the stored list stays: unlocking shows it again
+        assert_eq!(st.recent.len(), 1);
     }
 }

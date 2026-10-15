@@ -26,10 +26,14 @@ import { MessageBoundary } from './MessageBoundary';
 import { AssistantMessage, UserMessage, type ActionHandler } from './MessageItem';
 import { createListDerive, createReversedList } from './listDerive';
 import { initialRenderCount } from './messageArea';
+import { createStick, STICK_AWAY_PX } from './stickToBottom';
 import { clearPill, pillStore, setNearBottom } from '../background/noticeState';
 
 export type MessageListHandle = {
+  /** also pins the bottom for the next content changes (stickToBottom.ts) */
   scrollToBottom(animated?: boolean): void;
+  /** a send failed: show the error card unless the user scrolled away since the send */
+  revealLatest(): void;
   /** "Im Chat suchen": bring a message into the middle of the view */
   scrollToMessage(id: string): void;
 };
@@ -47,7 +51,7 @@ type Props = {
   historyTruncated?: boolean;
 };
 
-const SHOW_JUMP_AT = 180;
+const SHOW_JUMP_AT = STICK_AWAY_PX;
 
 /**
  * Inverted FlatList: offset 0 == bottom, so a streaming answer stays pinned to the bottom for
@@ -112,9 +116,18 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
   // B9: the first answer of the chat (its own compaction is a timeline note, not a divider)
   const firstAssistantId = messages.find((m) => m.role === 'assistant')?.id;
 
-  const scrollToBottom = useCallback((animated = true) => {
-    list.current?.scrollToOffset({ offset: 0, animated });
-  }, []);
+  // after a send: the new bubble / error card must not end up below the fold (E2E round 12 F2)
+  const [stick] = useState(createStick);
+  const scrollToBottom = useCallback(
+    (animated = true) => {
+      stick.arm(Date.now());
+      list.current?.scrollToOffset({ offset: 0, animated });
+    },
+    [stick],
+  );
+  const revealLatest = useCallback(() => {
+    if (stick.pinned()) list.current?.scrollToOffset({ offset: 0, animated: true });
+  }, [stick]);
   const dataRef = useRef(data);
   useEffect(() => {
     dataRef.current = data;
@@ -123,16 +136,17 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
   const scrollToMessage = useCallback((id: string) => {
     const index = dataRef.current.findIndex((m) => m.id === id);
     if (index < 0) return;
+    stick.release();
     retryRef.current = 0;
     list.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
-  }, []);
+  }, [stick]);
   // rows far away are not measured yet: jump close by the average height, then once more precisely
   const onScrollToIndexFailed = useCallback((info: { index: number; averageItemLength: number }) => {
     list.current?.scrollToOffset({ offset: Math.max(0, info.averageItemLength * info.index), animated: false });
     if (retryRef.current++ > 2) return;
     setTimeout(() => list.current?.scrollToIndex({ index: info.index, animated: true, viewPosition: 0.5 }), 120);
   }, []);
-  useImperativeHandle(ref, () => ({ scrollToBottom, scrollToMessage }), [scrollToBottom, scrollToMessage]);
+  useImperativeHandle(ref, () => ({ scrollToBottom, revealLatest, scrollToMessage }), [scrollToBottom, revealLatest, scrollToMessage]);
 
   const dragScroll = useMemo<DragScroll>(
     () => ({
@@ -171,9 +185,10 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
       const y = e.nativeEvent.contentOffset.y;
       offset.current = y;
+      stick.scrolled(y, Date.now());
       setJump(y > SHOW_JUMP_AT);
     },
-    [setJump],
+    [setJump, stick],
   );
 
   const renderItem = useCallback<ListRenderItem<ChatMessage>>(
@@ -233,7 +248,10 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
         }}
         onContentSizeChange={(_w, h) => {
           contentH.current = h;
+          // mvcp keeps the previously visible row still → re-pin the bottom right after a send
+          if (stick.follow(Date.now())) list.current?.scrollToOffset({ offset: 0, animated: false });
         }}
+        onScrollBeginDrag={stick.release}
         scrollEventThrottle={32}
         maintainVisibleContentPosition={mvcp}
         onScrollToIndexFailed={onScrollToIndexFailed}
@@ -251,9 +269,10 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
           {
             opacity: jumpAnim,
             transform: [{ scale: jumpAnim.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1] }) }],
-            pointerEvents: showJump ? 'box-none' : 'none',
           },
         ]}
+        // a prop, not a style: react-native-web drops an inline-style 'box-none' (invalid CSS)
+        pointerEvents={showJump ? 'box-none' : 'none'}
       >
         <Pressable
           onPress={() => {

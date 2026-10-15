@@ -8,6 +8,8 @@
 #           dist/hermes-ui-<variant>-<gitsha>.apk, dist/latest-<variant>.apk (symlink)
 #         dist/build-<variant>-<timestamp>.log
 # A hermes build fails if its input or the APK contains anything from the private overlay (scripts/flavor-guard.mjs).
+# Every build fails unless the APK/AAB's JS bundle carries the flavor mark of FLAVOR (scripts/verify-flavor-artifact.mjs,
+# checked on Gradle's output before it is copied anywhere); Metro runs with the flavor's own TMPDIR (docs/BUILD.md).
 #
 # Safety model (see docs/BUILD.md): this machine also hosts interactive sessions and has NO swap,
 # so every heavy step (npm ci, expo prebuild, Gradle, Metro, clang) runs inside ONE transient
@@ -81,11 +83,13 @@ if [ "${HERMES_BUILD_INNER:-0}" = 1 ]; then
   export NODE_OPTIONS="--max-old-space-size=2048"   # Metro / expo CLI heap cap
   export GRADLE_OPTS="-Xmx384m"                      # Gradle *client* JVM only
   cd "$BUILD_DIR/app"
+  flavor_require_tmpdir   # Gradle's bundle task runs Metro: its transform cache must be this flavor's own
   # Always stop Gradle daemons, also on failure/interrupt.
   trap '[ -x "$BUILD_DIR/app/android/gradlew" ] && (cd "$BUILD_DIR/app/android" && ./gradlew --stop >/dev/null 2>&1) || true' EXIT
 
   t "npm ci"
-  LOCK_HASH="$(sha256sum package-lock.json | cut -d' ' -f1)"
+  # the dependency patches (patches/, applied by the postinstall patch-package) are part of the installed state
+  LOCK_HASH="$(cat package-lock.json patches/*.patch 2>/dev/null | sha256sum | cut -d' ' -f1)"
   if [ "${SKIP_NPM_CI:-0}" = 1 ] && [ -f node_modules/.lock-hash ] && [ "$LOCK_HASH" = "$(cat node_modules/.lock-hash)" ]; then
     echo "node_modules up to date (SKIP_NPM_CI=1)"
   else
@@ -130,11 +134,13 @@ EOP
 
   if [ "$TASK" = bundle ]; then
     AAB="$(ls -1 app/build/outputs/bundle/$VARIANT/*.aab | head -1)"
+    t "flavor mark ($FLAVOR)"; flavor_verify_artifact "$AAB"
     cp "$AAB" "$BUILD_DIR/latest-$VARIANT.aab"
     ls -l "$AAB"
     exit 0
   fi
   APK="$(ls -1 app/build/outputs/apk/$VARIANT/*.apk | head -1)"
+  t "flavor mark ($FLAVOR)"; flavor_verify_artifact "$APK"
   cp "$APK" "$BUILD_DIR/latest-$VARIANT.apk"
   ls -l "$APK"
   exit 0
@@ -284,6 +290,7 @@ collect_bundle() {
   # every step works on a temporary file; the final name only ever holds a verified, release-signed bundle
   out="${final%.aab}.partial.aab"; rm -f "$out"   # keeps the .aab extension for scan-artifact
   [ -f "$src" ] || { echo "AAB missing: $src"; return 1; }
+  flavor_verify_artifact "$src" || { echo "AAB is not FLAVOR=$FLAVOR JS (flavor mark) – not collected"; return 1; }
   cp "$src" "$out"
   gx="$(mktemp -d)"; (cd "$gx" && unzip -q "$out")
   if [ "$FLAVOR" = hermes ]; then
@@ -339,6 +346,7 @@ if [ "$BUNDLE" = 1 ]; then collect_bundle; exit $?; fi
 step "Collecting APK"
 APK_SRC="$BUILD_DIR/latest-$VARIANT.apk"
 [ -f "$APK_SRC" ] || { echo "APK missing: $APK_SRC"; exit 1; }
+flavor_verify_artifact "$APK_SRC" || { echo "APK is not FLAVOR=$FLAVOR JS (flavor mark) – not collected"; exit 1; }
 cp "$APK_SRC" "$OUT"
 if [ "$FLAVOR" = hermes ]; then
   GX="$(mktemp -d)"; (cd "$GX" && unzip -q "$OUT")

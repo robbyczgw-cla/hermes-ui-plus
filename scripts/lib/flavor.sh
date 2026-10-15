@@ -8,6 +8,8 @@
 #           Values already set in the environment win over both files.
 # hermes:   loads nothing from the overlay and refuses personal EXPO_PUBLIC_* values (scripts/flavor-guard.mjs --env).
 #           `flavor_guard_tree DIR` / `flavor_guard_output DIR` fail the build if private content would ship.
+# both:     TMPDIR=/var/tmp/hiui-tmp-$FLAVOR (Metro cache per flavor, `flavor_require_tmpdir` before bundling);
+#           `flavor_verify_artifact ARTIFACT` fails unless the artifact's JS carries this flavor's mark.
 
 _flavor_load_env() { # file: KEY=VALUE lines; existing env wins
   # Data, never code: no eval/expansion. Supported: [export ]KEY=value, KEY="value", KEY='value' (one pair of
@@ -45,6 +47,12 @@ flavor_init() {
   HUI_PRIVATE_DIR="${HUI_PRIVATE_DIR:-$HOME/work/hermesiui-private}"
   case "$HUI_PRIVATE_DIR" in "~/"*) HUI_PRIVATE_DIR="$HOME/${HUI_PRIVATE_DIR#\~/}" ;; esac
   export FLAVOR EXPO_PUBLIC_FLAVOR="$FLAVOR" HUI_PRIVATE_DIR
+  # Metro keeps its transform cache in $TMPDIR (metro-cache) and inlines EXPO_PUBLIC_* there without keying the
+  # cache on them: two flavors sharing it ship each other's JS (a personal APK once ran as the hermes flavor).
+  # Each flavor gets its own TMPDIR, outside $HOME so no local path ends up in public build output.
+  # (app/metro.config.js also keys the cache on EXPO_PUBLIC_*; flavor_require_tmpdir checks this before bundling.)
+  export TMPDIR="/var/tmp/hiui-tmp-$FLAVOR"
+  mkdir -p "$TMPDIR" && chmod 700 "$TMPDIR"
   if [ "$FLAVOR" = personal ]; then
     if [ ! -f "$HUI_PRIVATE_DIR/app/identity.json" ]; then
       echo "FLAVOR=personal needs the private overlay: $HUI_PRIVATE_DIR/app/identity.json (set HUI_PRIVATE_DIR)" >&2
@@ -66,6 +74,19 @@ flavor_load_build_env() {
   if grep -q '^EXPO_PUBLIC_' "$f"; then echo "$f must not contain EXPO_PUBLIC_* values" >&2; return 2; fi
   _flavor_load_env "$f"
 }
+
+# Right before Metro runs (build-web.sh / build-apk.sh inner mode): refuse a TMPDIR that is not this flavor's own, so
+# the transform cache ($TMPDIR/metro-cache) is never shared between flavors (docs/BUILD.md "Flavor mark + Metro cache").
+flavor_require_tmpdir() {
+  [ "${TMPDIR:-}" = "/var/tmp/hiui-tmp-$FLAVOR" ] && [ -d "$TMPDIR" ] && return 0
+  echo "TMPDIR=${TMPDIR:-<unset>} is not the FLAVOR=$FLAVOR build's own /var/tmp/hiui-tmp-$FLAVOR: Metro would share its" \
+    "transform cache with the other flavor. Run the build script itself (flavor_init sets it)." >&2
+  return 1
+}
+
+# Every artifact (APK / AAB / IPA / zipped .app, web dir, web tarball) must carry exactly the flavor mark of $FLAVOR
+# (app/src/flavor.ts FLAVOR_MARK, scripts/verify-flavor-artifact.mjs); call it before the artifact is copied or published.
+flavor_verify_artifact() { node "$FLAVOR_ROOT/scripts/verify-flavor-artifact.mjs" "$1" "${2:-$FLAVOR}"; }
 
 flavor_guard_tree() { [ "$FLAVOR" = hermes ] || return 0; node "$FLAVOR_ROOT/scripts/flavor-guard.mjs" --tree "$1" "${@:2}"; }
 flavor_guard_output() { [ "$FLAVOR" = hermes ] || return 0; node "$FLAVOR_ROOT/scripts/flavor-guard.mjs" --output "$1"; }

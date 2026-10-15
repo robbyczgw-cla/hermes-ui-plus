@@ -168,6 +168,8 @@ export function isResolvedImage(v: unknown): v is ResolvedImage | null {
 type Waiter = { query: string; resolve: (v: ResolvedImage | null) => void; reject: (e: unknown) => void };
 
 export function createImageResolver(opts: ResolverOptions): ImageResolver {
+  // called as a plain function: a browser fetch called as `x.fetch()` throws "Illegal invocation" (wrong `this`)
+  const doFetch = opts.fetch;
   const now = opts.now ?? Date.now;
   const concurrency = Math.max(1, opts.concurrency ?? 3);
   const timeoutMs = opts.timeoutMs ?? 4000;
@@ -214,7 +216,7 @@ export function createImageResolver(opts: ResolverOptions): ImageResolver {
         }, timeoutMs);
       });
       try {
-        const res = await Promise.race([opts.fetch(url, { headers, signal: ctrl?.signal }), timeout]);
+        const res = await Promise.race([doFetch(url, { headers, signal: ctrl?.signal }), timeout]);
         if (res.status === 429 || res.status === 503) {
           const ra = Number(res.headers.get('retry-after'));
           blockedUntil = now() + Math.min(300, Number.isFinite(ra) && ra > 0 ? ra : 30) * 1000;

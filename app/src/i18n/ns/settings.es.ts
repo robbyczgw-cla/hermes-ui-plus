@@ -32,6 +32,7 @@ export const settings = {
     readOnlySave: 'Las conexiones son de solo lectura (versión más reciente de la app o error de lectura). Ver Ajustes → Conexiones.',
   },
   connections: {
+    keywords: 'servidor bridge UI-Bridge Hermes dirección URL token perfil perfiles cuenta vincular',
     add: 'Nueva conexión',
     addQr: 'Añadir conexión con QR',
     addQrSub: 'Vincular Hermes: escanea un código QR o pega un enlace',
@@ -159,9 +160,11 @@ export const settings = {
     chatScopeAllHint: 'La lista muestra los chats de esta app de todos tus dispositivos.',
     chatScopeDeviceHint: 'La lista solo muestra chats iniciados en este dispositivo, aunque ya hayas abierto otro aquí. Los ocultos siguen en Hermes y en tus otros dispositivos. Solo afecta a este dispositivo; los chats de Telegram, CLI y cron siguen los interruptores del perfil.',
     chatScopeKeywords: 'lista de chats dispositivos dispositivo sincronizar otros dispositivos ocultar lista',
+    keywords: 'chats conversaciones conversación mensajes historial',
   },
   media: {
     images: 'Cargar imágenes',
+    imagesKeywords: 'imágenes imagen fotos foto datos móviles wifi ahorro de datos',
     always: 'Siempre',
     wifi: 'Solo Wi-Fi',
     never: 'Nunca',

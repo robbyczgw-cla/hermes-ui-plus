@@ -51,7 +51,8 @@ export type AttachmentDraft = {
   canSend: boolean;
   add(source: PickSource): Promise<void>;
   /** web / desktop app: dropped or pasted files */
-  addFiles(files: readonly File[]): Promise<void>;
+  /** `stillWanted` false → the remaining prepared files are discarded (desktop app lock engaged meanwhile) */
+  addFiles(files: readonly File[], opts?: { stillWanted?: () => boolean }): Promise<void>;
   remove(id: string): void;
   retry(id: string): void;
   /**
@@ -183,13 +184,16 @@ export function useAttachmentDraft(opts: UseAttachmentDraftOptions): AttachmentD
   );
 
   const addFiles = useCallback(
-    async (files: readonly File[]) => {
+    async (files: readonly File[], opts?: { stillWanted?: () => boolean }) => {
       if (!files.length) return;
       setNotice(null);
       setPicking(true);
       try {
-        const res = await importWebFiles(files, remainingSlots(stateRef.current.length), (att) =>
-          accept({ attachments: [att], errors: [], canceled: false })
+        const res = await importWebFiles(
+          files,
+          remainingSlots(stateRef.current.length),
+          (att) => accept({ attachments: [att], errors: [], canceled: false }),
+          opts?.stillWanted
         );
         accept({ ...res, attachments: [] });
       } finally {

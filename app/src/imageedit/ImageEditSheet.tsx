@@ -29,7 +29,7 @@ import { useT } from '../i18n';
 import { SheetGrabber, SheetLayer, useSheetDialog, useTheme } from '../ui';
 import { buildEditRequestText, EDIT_SUGGESTIONS, markEditAttachment, type EditGate, type EditSource } from './core';
 import { centeredCrop, CROP_PRESETS, fitContain, moveRect, presetAspect, resizeRect, toImageRect, type CropPreset, type Rect } from './crop';
-import { applyQuickOp, prepareEditSource, prepareWorkImage, shareImageFile, type QuickOp, type WorkImage } from './prepare';
+import { applyQuickOp, prepareEditSource, prepareWorkImage, shareImageFile, workImageOf, type QuickOp, type WorkImage } from './prepare';
 
 export type ImageEditSheetProps = {
   source: EditSource | null;
@@ -83,7 +83,7 @@ function SheetBody({ source, gate, backendName, history, onSend, onClose, onEnab
         }
         garbage.current.original = att;
         setOriginal(att);
-        setWork({ uri: att.uri, width: att.width ?? 0, height: att.height ?? 0 });
+        setWork(workImageOf(att));
         setBusy(null);
       })
       .catch(() => {
@@ -138,7 +138,7 @@ function SheetBody({ source, gate, backendName, history, onSend, onClose, onEnab
     if (!original) return;
     setCrop(null);
     setEdited(false);
-    setWork({ uri: original.uri, width: original.width ?? 0, height: original.height ?? 0 });
+    setWork(workImageOf(original));
   };
 
   /** the attachment to send: the prepared original, or the quick-edited image prepared like a picked photo */

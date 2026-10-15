@@ -167,6 +167,7 @@ export function answerModelInfo(i: AnswerModelInput): AnswerModelInfo {
 // ---------------------------------------------------------------- items
 
 export type AnswerItemKey =
+  | 'handOff'
   | 'branch'
   | 'retry'
   | 'noWeb'
@@ -194,12 +195,15 @@ export type AnswerMenuState = {
   reported: boolean;
   /** the chat menu can branch (stored conversation) */
   canBranch: boolean;
+  /** a quick answer in the quick thread: "Mit Hermes weitermachen" (app/src/quick) */
+  canHandOff?: boolean;
 };
 
 /** Menu items of one answer, top to bottom ("Melden" last). */
 export function answerMenuItems(s: AnswerMenuState): AnswerItemKey[] {
   const out: AnswerItemKey[] = [];
   const done = !s.streaming && !s.local;
+  if (done && s.canHandOff && !s.failed) out.push('handOff');
   if (done && s.canBranch && !s.failed) out.push('branch');
   if (done && s.isLast && !s.recovering && !s.busy) {
     out.push('retry');

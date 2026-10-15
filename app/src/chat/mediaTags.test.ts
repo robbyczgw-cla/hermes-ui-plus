@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { TAG_RE, extractMedia, hasMediaMarker, maskProtected, mediaMime, mediaRefOf, mediaUrl } from './mediaTags.ts';
+import { TAG_RE, extractMedia, hasMediaMarker, maskProtected, mediaMime, mediaRefOf, mediaUrl, createMediaTagCache, extractMediaCached, type MediaTagCache } from './mediaTags.ts';
 
 const paths = (text: string, streaming = false) => extractMedia(text, streaming).refs.map((r) => r.path);
 
@@ -42,6 +42,9 @@ test('no false positives: fenced code, inline code examples, blockquotes, prose,
   assert.deepEqual(paths(tilde), []);
   const open = 'Code:\n```python\nprint("MEDIA:/tmp/x.png")';
   assert.deepEqual(paths(open), []); // still streaming
+  // the whole body is code, not only its first line (closed and still open)
+  assert.deepEqual(paths('```\nimport x\nprint("MEDIA:/tmp/x.png")\n```\nMEDIA:/tmp/y.png'), ['/tmp/y.png']);
+  assert.deepEqual(paths('Code:\n```sh\ncd /tmp\n\nopen MEDIA:/tmp/x.png\nls'), []);
   assert.deepEqual(paths('Schreibe `MEDIA:` gefolgt vom Pfad'), []);
   assert.deepEqual(paths('Beispiel: `Pfad MEDIA:/tmp/x.png im Text`'), []);
   assert.deepEqual(paths('> MEDIA:/tmp/zitat.png'), []);
@@ -99,7 +102,7 @@ test('mediaRefOf, mediaMime, mediaUrl', () => {
 function maskProtectedReference(text: string): string {
   const blank = (s: string, from: number, to: number) => s.slice(0, from) + s.slice(from, to).replace(/[^\n]/g, ' ') + s.slice(to);
   let out = text;
-  const fence = /^[ \t]{0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n[ \t]{0,3}\1[ \t]*(?=\n|$)|$)/gm;
+  const fence = /^[ \t]{0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n[ \t]{0,3}\1[ \t]*(?=\n|$)|(?![\s\S]))/gm;
   for (const m of text.matchAll(fence)) out = blank(out, m.index ?? 0, (m.index ?? 0) + m[0].length);
   for (const m of text.matchAll(/^[ \t]{0,3}>.*$/gm)) out = blank(out, m.index ?? 0, (m.index ?? 0) + m[0].length);
   const inline = /(`+)([^`\n]|[^`\n][^\n]*?[^`\n])\1(?!`)/g;
@@ -242,4 +245,88 @@ test('extractMedia: same refs and text as the previous full-scan version (fuzz, 
     const got = extractMedia(t, true);
     assert.deepEqual({ refs: got.refs.map((x) => x.path), text: got.text }, extractMediaReference(t, true), JSON.stringify(t));
   }
+});
+
+// ---------------------------------------------------------------- streaming: incremental == full scan
+
+const LINE_PIECES = [
+  ...TAG_PIECES, '\n', '\n', '\n', '```\n', '```js\n', '~~~\n', '````\n', '> ', '> quote MEDIA:/q/a.png\n', '  > ', 'MEDIA:\n', 'MEDIA:\n\n',
+  '/tmp/next.png\n', '`/tmp/code.png`', '[[audio_as_voice]]\n', '[[AUDIO_AS_VOICE]]  \n', '   \n', 'Absatz\n', ' ', '\r\n', ' \n',
+];
+
+const view = (m: { refs: { path: string }[]; text: string }) => ({ refs: m.refs.map((r) => r.path), text: m.text });
+
+function assertSame(cache: MediaTagCache, text: string, streaming: boolean, why: string) {
+  assert.deepEqual(view(extractMediaCached(text, streaming, cache)), view(extractMedia(text, streaming)), JSON.stringify([why, text, streaming]));
+}
+
+test('extractMediaCached: equals extractMedia at every step of a growing answer (fuzz incl. fences, quotes, tags across lines)', () => {
+  const r = rng(31);
+  for (let k = 0; k < 1500; k++) {
+    let text = '';
+    const n = 1 + Math.floor(r() * 40);
+    for (let i = 0; i < n; i++) text += LINE_PIECES[Math.floor(r() * LINE_PIECES.length)];
+    for (const streaming of [true, false]) {
+      const cache = createMediaTagCache();
+      for (let i = 0; i < text.length; ) {
+        i = Math.min(text.length, i + 1 + Math.floor(r() * 12));
+        assertSame(cache, text.slice(0, i), streaming, `grow ${i}`);
+      }
+    }
+  }
+});
+
+test('extractMediaCached: equals extractMedia for every split point (one update before, one after the cut)', () => {
+  const r = rng(47);
+  for (let k = 0; k < 300; k++) {
+    let text = '';
+    const n = 4 + Math.floor(r() * 30);
+    for (let i = 0; i < n; i++) text += LINE_PIECES[Math.floor(r() * LINE_PIECES.length)];
+    for (let cut = 0; cut <= text.length; cut++) {
+      const streaming = cut % 2 === 0;
+      const cache = createMediaTagCache();
+      assertSame(cache, text.slice(0, cut), streaming, `before ${cut}`);
+      assertSame(cache, text, streaming, `after ${cut}`);
+    }
+  }
+});
+
+test('extractMediaCached: constructs across the freeze point', () => {
+  const cases = [
+    // fence opened before the cut, tag-like line inside it after the cut, tag after the fence
+    'Intro\n```sh\ncd /tmp\nopen MEDIA:/tmp/in.png\n```\nHier: MEDIA:/tmp/out.png\nEnde\n',
+    // `MEDIA:` with its path on a later line (the tag regex's `\s*` spans lines), also across a blanked fence
+    'Datei:\nMEDIA:\n\n\n/tmp/later.png\nweiter\n',
+    'MEDIA:\n```\ncode\n```\n/tmp/afterfence.png\nweiter\n',
+    // quote lines on both sides of the cut, voice marker before the cut, blank-line runs across it
+    '> MEDIA:/q.png\n> noch\nMEDIA:/tmp/a.png\n[[audio_as_voice]]\n\n\n\nText\n\n\n\nMEDIA:/tmp/b.png\n',
+    // inline code path whose `MEDIA:` is on the line before
+    'Siehe MEDIA:\n`/tmp/code path.pdf`\nok\n',
+    // a tag alone on the last line while it streams (trim reaches into the frozen part: full-scan fallback)
+    'Erst Text.\n\nMEDIA:/tmp/zuletzt.png',
+  ];
+  for (const text of cases) {
+    for (const streaming of [true, false]) {
+      const cache = createMediaTagCache();
+      for (let i = 1; i <= text.length; i++) assertSame(cache, text.slice(0, i), streaming, 'grow');
+    }
+  }
+});
+
+test('extractMediaCached: a replaced answer (not an extension of the frozen text) starts over', () => {
+  const cache = createMediaTagCache();
+  assertSame(cache, 'Zeile eins\nMEDIA:/tmp/a.png\nZeile drei\nnoch', true, 'first');
+  assert.ok(cache.end > 0);
+  assertSame(cache, 'Ganz anders\nohne Tag\n', true, 'replaced');
+  assertSame(cache, 'Zei', true, 'shorter');
+  assertSame(cache, 'Zeile eins\nMEDIA:/tmp/b.png\nx', true, 'again');
+});
+
+test('extractMediaCached: the frozen part is not scanned again (a long answer only re-scans its last line)', () => {
+  const cache = createMediaTagCache();
+  let text = 'MEDIA:/tmp/first.png\n';
+  for (let i = 0; i < 200; i++) text += `Zeile ${i} mit etwas Text.\n`;
+  extractMediaCached(text + 'letzte Zei', true, cache);
+  assert.equal(cache.end, text.length);
+  assert.deepEqual(cache.refs.map((r) => r.path), ['/tmp/first.png']);
 });

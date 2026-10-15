@@ -2,13 +2,16 @@
  * Pure reducer for the conversation index (no I/O, no React).
  */
 import type { ConversationMeta, HermesChatOptions, IndexState, ProfileKind, ProfileRef } from './types.ts';
+import type { ModelLockState } from '../hermes/modelLock.ts';
 import { DEFAULT_TITLE } from './types.ts';
 import { cleanUserTitle, makeTitle } from './title.ts';
+import { botOf } from '../hermes/bots.ts';
 
 export type IndexAction =
   | { type: 'load'; state: IndexState }
   /** `activate: false` keeps the open conversation (inbox message for a chat that does not exist yet) */
-  | { type: 'create'; id: string; profile: ProfileRef; sessionId: string; now: number; activate?: boolean }
+  /** `bot`: Hermes profile of the new chat (hermes/bots.ts; undefined = default profile) */
+  | { type: 'create'; id: string; profile: ProfileRef; sessionId: string; now: number; activate?: boolean; bot?: string }
   | { type: 'remove'; id: string }
   | { type: 'rename'; id: string; title: string }
   /** generated title (bridge auto-title): replaces only `auto`/`meta` titles and stays replaceable by Hermes titles */
@@ -22,6 +25,11 @@ export type IndexAction =
   /** an EMPTY draft follows the active profile (any kind, fresh session id, no model override); ignored once it has messages */
   | { type: 'rebindDraft'; id: string; profile: ProfileRef; sessionId: string }
   | { type: 'setActive'; id: string | undefined }
+  /**
+   * Hermes bot of an EMPTY Hermes chat (fresh session id; the model override and options of the other bot are
+   * dropped). Ignored once the chat has messages or for remote / non-Hermes chats.
+   */
+  | { type: 'setBot'; id: string; bot?: string; sessionId: string }
   | {
       /** messages were saved: refresh preview/title/updatedAt */
       type: 'saved';
@@ -45,6 +53,7 @@ export type IndexAction =
    */
   | { type: 'remoteLoaded'; id: string; at: number; lastActive?: number }
   | { type: 'setModelOptions'; id: string; options?: HermesChatOptions }
+  | { type: 'setModelLock'; id: string; lock?: ModelLockState }
   // ---- chat menu ----
   /** "Archivieren" / "Wiederherstellen" of one or many chats (local only) */
   | { type: 'archive'; ids: readonly string[]; archived: boolean }
@@ -73,6 +82,8 @@ export function indexReducer(state: IndexState, a: IndexAction): IndexState {
         preview: '',
         messageCount: 0,
       };
+      const bot = a.profile.kind === 'hermes' || a.profile.kind === 'demo' ? botOf(a.bot) : undefined;
+      if (bot) meta.hermesProfile = bot;
       return { ...state, items: [meta, ...state.items], activeId: a.activate === false ? state.activeId : a.id };
     }
     case 'remove':
@@ -132,6 +143,12 @@ export function indexReducer(state: IndexState, a: IndexAction): IndexState {
         if (JSON.stringify(c.modelOptions) === JSON.stringify(o)) return c;
         return o ? { ...rest, modelOptions: o } : rest;
       });
+    case 'setModelLock':
+      return mapOne(state, a.id, (c) => {
+        if (JSON.stringify(c.modelLock) === JSON.stringify(a.lock)) return c;
+        const { modelLock: _old, ...rest } = c;
+        return a.lock ? { ...rest, modelLock: a.lock } : rest;
+      });
     case 'archive': {
       const ids = new Set(a.ids);
       let changed = false;
@@ -185,8 +202,15 @@ export function indexReducer(state: IndexState, a: IndexAction): IndexState {
     case 'rebindDraft':
       return mapOne(state, a.id, (c) => {
         if (!isDraft(c) || c.origin === 'remote' || (c.profileId === a.profile.id && c.profileKind === a.profile.kind)) return c;
-        const { model: _m, modelOptions: _o, ...rest } = c;
+        const { model: _m, modelOptions: _o, hermesProfile: _b, ...rest } = c;
         return { ...rest, profileId: a.profile.id, profileKind: a.profile.kind, hermesSessionId: a.sessionId };
+      });
+    case 'setBot':
+      return mapOne(state, a.id, (c) => {
+        const bot = botOf(a.bot);
+        if (!isDraft(c) || c.origin === 'remote' || (c.profileKind !== 'hermes' && c.profileKind !== 'demo') || c.hermesProfile === bot) return c;
+        const { model: _m, modelOptions: _o, hermesProfile: _b, ...rest } = c;
+        return { ...rest, hermesSessionId: a.sessionId, ...(bot ? { hermesProfile: bot } : {}) };
       });
     case 'setActive':
       return state.activeId === a.id ? state : { ...state, activeId: a.id };

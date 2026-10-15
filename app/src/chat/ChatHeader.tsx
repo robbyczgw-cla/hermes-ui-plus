@@ -6,6 +6,7 @@ import { chatMaxWidth, scaledText } from '../settings/preferences';
 import { usePreferences } from '../settings/PreferencesProvider';
 import { useTheme } from '../ui';
 import { useChatLayout } from './ChatLayoutContext';
+import { headerDetail, type HeaderDetail } from './headerDetail';
 import { Icon } from './icons';
 import type { Health } from './useConnectionHealth';
 
@@ -22,6 +23,8 @@ type Props = {
   canReset: boolean;
   /** short model label next to the title ('' = server default, only the title is shown) */
   modelLabel?: string;
+  /** Hermes v0.22: the model is locked on the chat's Hermes session → lock icon after the model label */
+  modelLocked?: boolean;
   onNewChat(): void;
   onSettings(): void;
   /** opens the conversation drawer */
@@ -49,6 +52,7 @@ export const ChatHeader = memo(function ChatHeader({
   streaming,
   canReset,
   modelLabel,
+  modelLocked,
   onNewChat,
   onSettings,
   onMenu,
@@ -66,7 +70,13 @@ export const ChatHeader = memo(function ChatHeader({
   // subtitle; the status (dot + text) appears only when the backend is not reachable.
   const offline = health === 'offline';
   const offlineText = offlineLabel ?? tr('chat.header.status.unreachable');
-  const detail = [modelLabel, options?.active ? options.label : ''].filter(Boolean).join(' · ');
+  const line = headerDetail({
+    modelLabel,
+    locked: modelLocked,
+    optionsLabel: options?.active ? options.label : '',
+    lockedLabel: (model) => tr('chat.header.modelLocked', { model }),
+  });
+  const detail = line.a11y;
   if (layout.wide) {
     return (
       <WideHeader
@@ -75,8 +85,7 @@ export const ChatHeader = memo(function ChatHeader({
         chatTitle={chatTitle}
         profileName={profileName}
         offlineText={offline ? offlineText : null}
-        modelLabel={modelLabel}
-        detail={detail}
+        line={line}
         sidebarOpen={layout.sidebarOpen}
         onNewChat={onNewChat}
         onSettings={onSettings}
@@ -114,9 +123,19 @@ export const ChatHeader = memo(function ChatHeader({
               {onModel ? <Icon name="chevronDown" size={14} color={t.colors.muted} strokeWidth={2.2} /> : null}
             </View>
             {detail && !offline ? (
-              <Text style={[styles.subtitle, { color: t.colors.subtle }, scaledText(12, 16, t.fontScale)]} numberOfLines={1} maxFontSizeMultiplier={1.6}>
-                {detail}
-              </Text>
+              <View style={styles.detailRow}>
+                {line.model ? (
+                  <Text style={[styles.subtitle, { color: t.colors.subtle }, scaledText(12, 16, t.fontScale)]} numberOfLines={1} maxFontSizeMultiplier={1.6}>
+                    {line.model}
+                  </Text>
+                ) : null}
+                {line.locked ? <LockMark size={11 * Math.min(t.fontScale, 1.6)} color={t.colors.subtle} /> : null}
+                {line.rest ? (
+                  <Text style={[styles.subtitle, styles.noShrink, { color: t.colors.subtle }, scaledText(12, 16, t.fontScale)]} numberOfLines={1} maxFontSizeMultiplier={1.6}>
+                    {line.rest}
+                  </Text>
+                ) : null}
+              </View>
             ) : null}
           </Pressable>
           {offline ? (
@@ -154,8 +173,7 @@ function WideHeader({
   chatTitle,
   profileName,
   offlineText,
-  modelLabel,
-  detail,
+  line,
   sidebarOpen,
   onNewChat,
   onSettings,
@@ -165,9 +183,9 @@ function WideHeader({
   canReset,
   demo,
   onChatMenu,
-}: Pick<Props, 'topInset' | 'title' | 'chatTitle' | 'profileName' | 'modelLabel' | 'onNewChat' | 'onSettings' | 'onMenu' | 'onModel' | 'options' | 'canReset' | 'demo' | 'onChatMenu'> & {
+}: Pick<Props, 'topInset' | 'title' | 'chatTitle' | 'profileName' | 'onNewChat' | 'onSettings' | 'onMenu' | 'onModel' | 'options' | 'canReset' | 'demo' | 'onChatMenu'> & {
   offlineText: string | null;
-  detail: string;
+  line: HeaderDetail;
   sidebarOpen: boolean;
 }) {
   const t = useTheme();
@@ -184,7 +202,9 @@ function WideHeader({
   const sideLeft = titlebarInset > 0 ? titlebarInset - 8 : 8;
   const leftReserve = sidebarOpen ? 16 : sideLeft + 42 + 8;
   const rightReserve = 8 + (options ? 2 : 1) * 42 + 8;
-  const chip = [modelLabel || title, options?.active ? options.label : ''].filter(Boolean).join(' · ');
+  const detail = line.a11y;
+  // no model label (server default): the backend title stands in for it
+  const chipRest = line.model ? line.rest : options?.active ? `· ${options.label}` : '';
   return (
     <View style={{ paddingTop: topInset, backgroundColor: t.colors.bg }}>
       <View style={styles.wideRow} onLayout={(e) => setBarW(Math.round(e.nativeEvent.layout.width))}>
@@ -221,8 +241,14 @@ function WideHeader({
             accessibilityLabel={tr('chat.header.pickModel.a11y', { title: `${title}${detail ? ` ${detail}` : ''}` })}
           >
             <Text style={[styles.chipText, { color: t.colors.muted }]} numberOfLines={1}>
-              {chip}
+              {line.model || title}
             </Text>
+            {line.locked ? <LockMark size={12} color={t.colors.muted} /> : null}
+            {chipRest ? (
+              <Text style={[styles.chipText, styles.noShrink, { color: t.colors.muted }]} numberOfLines={1}>
+                {chipRest}
+              </Text>
+            ) : null}
             {onModel ? <Icon name="chevronDown" size={13} color={t.colors.muted} strokeWidth={2.2} /> : null}
           </Pressable>
           {offlineText ? (
@@ -269,6 +295,15 @@ function DemoStrip({ onConnect }: { onConnect(): void }) {
           </Text>
         </Pressable>
       </View>
+    </View>
+  );
+}
+
+/** lock of a locked model: fixed size, never shrinks, so a long model name is ellipsised before it */
+function LockMark({ size, color }: { size: number; color: string }) {
+  return (
+    <View style={styles.noShrink} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
+      <Icon name="lock" size={size} color={color} strokeWidth={2.2} />
     </View>
   );
 }
@@ -324,6 +359,8 @@ const styles = StyleSheet.create({
   title: { fontSize: 17, fontWeight: '600', letterSpacing: -0.2, flexShrink: 1 },
   subRow: { flexDirection: 'row', alignItems: 'center', gap: 5, maxWidth: '100%', paddingHorizontal: 8 },
   subtitle: { fontSize: 12, flexShrink: 1 },
+  detailRow: { flexDirection: 'row', alignItems: 'center', gap: 3, maxWidth: '100%' },
+  noShrink: { flexShrink: 0 },
   dot: { width: 7, height: 7, borderRadius: 4 },
   badge: { position: 'absolute', top: 9, right: 8, width: 9, height: 9, borderRadius: 5, borderWidth: 1.5 },
   // wide layout

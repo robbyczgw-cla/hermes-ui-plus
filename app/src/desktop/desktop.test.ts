@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { dedupeKey, parseDesktopEvent, sameCommandWithin } from './events.ts';
 import { desktopKeyFor, neighbourChat } from './keys.ts';
 import { menuChats, sidebarOrder } from './order.ts';
-import { lockDue, shouldAttachPaste } from './policy.ts';
+import { ingestAllowed, lockDue, shouldAttachPaste, staysLocked } from './policy.ts';
 
 test('parseDesktopEvent: strings, objects, junk', () => {
   assert.deepEqual(parseDesktopEvent('new-chat'), { cmd: 'new-chat' });
@@ -91,4 +91,24 @@ test('lock after time in the background', () => {
   assert.equal(lockDue(0, 4 * 60_000, 5), false);
   assert.equal(lockDue(0, 5 * 60_000, 5), true);
   assert.equal(lockDue(0, 99 * 60_000, 0), false); // launch only
+});
+
+test('staysLocked: the shell decides on every page load, unreadable = locked', () => {
+  assert.equal(staysLocked({ enabled: true, locked: true }), true);
+  // switched on during the session, never engaged / unlocked: the page shows
+  assert.equal(staysLocked({ enabled: true, locked: false }), false);
+  assert.equal(staysLocked({ enabled: false, locked: false }), false);
+  // IPC failed or junk: fail closed
+  assert.equal(staysLocked(null), true);
+  assert.equal(staysLocked({ enabled: false } as unknown as { enabled: boolean; locked: boolean }), true);
+});
+
+test('ingestAllowed: files never reach the composer through the lock', () => {
+  assert.equal(ingestAllowed(3, { locked: false, epoch: 3 }), true);
+  // dropped on the locked window / the dock icon while locked
+  assert.equal(ingestAllowed(3, { locked: true, epoch: 3 }), false);
+  // dropped while unlocked, the lock engaged before they were read: discarded
+  assert.equal(ingestAllowed(3, { locked: true, epoch: 4 }), false);
+  // ... even when it was unlocked again in the meantime
+  assert.equal(ingestAllowed(3, { locked: false, epoch: 4 }), false);
 });

@@ -29,6 +29,9 @@ export {
 export type { HermesCapabilities, ModelCaps, ModelOptionsCatalog, HermesChatOptions, HermesReasoning, HermesReasoningEffort } from './capabilities';
 export { sessionsSupported } from './support';
 export { useHermesCapabilities } from './useHermesCapabilities';
+export { useHermesModelLock } from './useHermesModelLock';
+export { modelLocked } from './modelLock';
+export type { ModelLockState } from './modelLock';
 export type { UseHermesCapabilities } from './useHermesCapabilities';
 export { HermesOptionsSheet } from './ui/HermesOptionsSheet';
 export type { HermesOptionsSheetProps } from './ui/HermesOptionsSheet';

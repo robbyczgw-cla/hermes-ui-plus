@@ -62,6 +62,13 @@ for (const sections of [4, 16]) {
 }
 growth('message view tick (markdown)', mdRuns[4], mdRuns[16]);
 
+header('streaming tick of the message view: append runs (the app) vs full-text "still extends?" compares');
+for (const [name, text] of [['hui answer', longAnswer(16)], ['markdown-only answer', longMarkdown(16)]]) {
+  const label = `${name} ${(text.length / 1000).toFixed(0)}K chars`;
+  report(`${label}, full compares`, perStep(() => createMessageView({ appendRuns: false }), prefixes(text, TICK)));
+  report(`${label}, append runs`, perStep(createMessageView, prefixes(text, TICK)));
+}
+
 header('streaming tick: one long block (worst case for the markdown tail)');
 const single = [
   ['list 50 items', bulletList(50, 1), 'list 200 items', bulletList(200, 1)],

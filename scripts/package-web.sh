@@ -10,6 +10,7 @@
 #   SOURCE_DATE_EPOCH  mtime of all archive entries [2026-01-01]
 # Refuses to package when
 #   - WEB_DIR or its .build-info is missing, or the build was not FLAVOR=hermes (the personal flavor never ships)
+#   - the bundle or the finished archive does not carry the hermes flavor mark (scripts/verify-flavor-artifact.mjs)
 #   - scripts/flavor-guard.mjs --output or the release gate scripts/scan-artifact.sh (leak-guard + gitleaks) fail
 # Archive: top-level folder hermes-ui-plus-web/, entries sorted, fixed owner/mtime/modes, gzip without a timestamp
 #   (same bundle -> same bytes). The precompressed .br / .gz files of the build are kept.
@@ -49,6 +50,7 @@ export FLAVOR=hermes EXPO_PUBLIC_FLAVOR=hermes
 # shellcheck source=lib/flavor.sh
 . "$ROOT/scripts/lib/flavor.sh"
 flavor_init
+flavor_verify_artifact "$WEB_DIR" hermes || die "$WEB_DIR is not hermes JS (flavor mark); nothing packaged"
 flavor_guard_output "$WEB_DIR" || die "flavor-guard rejected $WEB_DIR (private content); nothing packaged"
 release_gate "$WEB_DIR" || die "release gate (scripts/scan-artifact.sh) failed for $WEB_DIR; nothing packaged"
 
@@ -62,6 +64,7 @@ DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(date -u -d '2026-01-01 00:00:00' +%s)}"
 # "." becomes "hermes-ui-plus-web"; names are sorted, owner/group 0, modes normalized (dirs 755, files 644)
 tar -C "$WEB_DIR" --sort=name --mtime="@$DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
     --mode='u+rwX,go+rX,go-w' --format=gnu --transform "s,^\.,$TOP," -cf - . | gzip -n -9 > "$TMP"
+flavor_verify_artifact "$TMP" hermes || die "the archive does not carry the hermes flavor mark; nothing packaged"
 mv "$TMP" "$ARCHIVE"
 trap - EXIT
 

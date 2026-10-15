@@ -15,16 +15,35 @@
  * - "Send" while attachment uploads still run (`send(text, atts, pending)`): the user message shows at once with
  *   per-attachment progress, the turn starts by itself when every upload is done; a failed upload offers retry /
  *   remove on the bubble; stop() / newSession() / unmount cancel it (pendingSend.ts, attachments/pendingUploads.ts).
- *   It counts as a running turn meanwhile (no second send, the session stays mounted when the chat is switched)
+ *   It counts as a running turn meanwhile (no second send, the session stays mounted when the chat is switched).
+ *   Persisted meanwhile (app killed, reload) it comes back as a queued message (`sendQueued`): never sent by itself;
+ *   "Erneut senden" checks the stored Hermes session first (the turn may have started before the kill), then uploads
+ *   what is missing and starts the turn; "Verwerfen" removes it (`queuedSend`, pendingSend.ts queuedReduce)
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { buildHermesContent } from '../attachments/encodeHermes';
 import { deleteAttachmentFiles, fileReader } from '../attachments/store';
-import { toSent } from '../attachments/draft';
-import type { PendingUploads } from '../attachments/pendingUploads';
-import type { Attachment } from '../attachments/types';
-import { dropPending, patchPendingAttachments, pendingIsEmpty, releasePending } from './pendingSend';
+import { needsUpload, toSent } from '../attachments/draft';
+import { createPendingUploads, startUploadTask, type PendingUploads, type UploadTask } from '../attachments/pendingUploads';
+import { queuedFiles } from '../attachments/queuedFiles';
+import { AttachmentError, type Attachment, type AttachmentTarget } from '../attachments/types';
+import { uploadAttachment } from '../attachments/upload';
+import {
+  ackSend,
+  adoptQueued,
+  checkQueued,
+  dropPending,
+  isQueued,
+  patchPendingAttachments,
+  pendingIsEmpty,
+  QUEUED_INITIAL,
+  queuedReduce,
+  releasePending,
+  unackedUser,
+  type QueuedEvent,
+  type QueuedState,
+} from './pendingSend';
 import { answerApproval, fetchRunStatus, hermesSessions, stopBridgeTurn, streamChat, isHermesError } from './client';
 import type { HermesChatOptions } from './capabilities';
 import { mapRemoteMessages, needsDetails } from './sessionMapping';
@@ -34,11 +53,13 @@ import { isNotFoundError, isUnsupportedError } from './sessions';
 import { sessionsSupported, setSessionsSupported } from './support';
 import { applyEvent, createAssistantMessage, createUserMessage, errorTextOf, finalize, newId } from './chatState';
 import { abortableDelay, autoRetryDelayMs, hasVisibleOutput, retryAfterErrorText } from './retryPolicy';
-import { createRecovery, isRecoverable, markInterrupted, resumeCutOff, resumeRecovering, type InboxAnswer } from './recovery';
+import { applyRemoteAnswer, createRecovery, isRecoverable, markInterrupted, resumeCutOff, resumeRecovering, type InboxAnswer } from './recovery';
 import { approvalMayHaveArrived, keyedHermesError } from './stream';
 import { branchSeedText, withContextSeed, withTurnNote, type TurnOverride } from './turnOverride';
 import { createThrottle, streamIntervalFor } from './throttle';
 import { checkTicket, takeTicket } from './turnTicket';
+import { answerInSession, newSendKey, reusableSendKey, sendKeyAfterFailure } from './idempotency';
+import { serverRootOf } from './bots';
 import {
   allPending,
   applyRunStatus,
@@ -62,6 +83,23 @@ import type {
   HermesConn,
 } from './types';
 
+/** longest wait for the transcript write before a turn request (storage stuck: send anyway, the debounced save follows) */
+const PERSIST_BEFORE_SEND_MS = 1500;
+
+/** resolves when `fn()` settled or after `ms`, never rejects */
+function settleWithin(fn: () => Promise<unknown> | undefined, ms: number): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    const done = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    Promise.resolve()
+      .then(fn)
+      .then(done, done);
+  });
+}
+
 export type UseHermesChatOptions = {
   /** continue an existing session (e.g. restored from storage); default: fresh generated id */
   sessionId?: string;
@@ -73,6 +111,11 @@ export type UseHermesChatOptions = {
   onSessionChange?: (sessionId: string) => void;
   /** called when a turn is sent – persist the session id now, so a killed app still finds the session */
   onTurnStart?: (sessionId: string) => void;
+  /**
+   * write the transcript to storage now (not debounced) and resolve once written. Called with the unacknowledged user
+   * message before its turn request starts and again when the server accepted it (durable send, pendingSend.ts).
+   */
+  persistNow?: (messages: ChatMessage[]) => Promise<void>;
   /** UI update interval during streaming, default 33 ms (~30 fps) */
   updateIntervalMs?: number;
   // ---- additions (sessions workstream) ----
@@ -104,6 +147,16 @@ export type PendingSendActions = {
   cancel(): string;
 };
 
+/** Bubble actions of user messages queued when the app stopped (`sendQueued`, never sent by themselves). */
+export type QueuedSendActions = {
+  /** restore UI state of one queued message (pendingSend.ts queuedReduce) */
+  state(messageId: string): QueuedState;
+  /** check Hermes (already sent? → shown as sent), else upload what is missing and start the turn */
+  resend(messageId: string): void;
+  /** remove it and its files; returns its text (back into the composer) */
+  discard(messageId: string): string;
+};
+
 export type UseHermesChat = {
   messages: ChatMessage[];
   /**
@@ -114,6 +167,8 @@ export type UseHermesChat = {
   send: (text: string, attachments?: Attachment[], pending?: PendingUploads) => boolean;
   /** the user message waiting for its uploads, if any (Hermes only) */
   pendingSend?: PendingSendActions | null;
+  /** messages queued when the app stopped (Hermes only) */
+  queuedSend?: QueuedSendActions;
   /** abort the running turn (keeps the partial answer, status `stopped`) */
   stop: () => void;
   /**
@@ -205,6 +260,9 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
   /** the send waiting for its uploads (sendPending message), see send() */
   const pendingRef = useRef<{ message: ChatMessage; text: string; uploads: PendingUploads } | null>(null);
   const [pendingSend, setPendingSend] = useState<PendingSendActions | null>(null);
+  /** restore UI state of queued messages by id (absent = QUEUED_INITIAL) */
+  const queuedRef = useRef(new Map<string, QueuedState>());
+  const [queuedVersion, setQueuedVersion] = useState(0);
   connRef.current = conn;
   optsRef.current = options;
 
@@ -220,10 +278,11 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
       mountedRef.current = false;
       throttle.cancel();
       abortRef.current?.abort();
-      // chat closed / deleted while its uploads ran (a switch keeps the session mounted: it counts as running)
+      // chat closed / deleted while its uploads ran (a switch keeps the session mounted: it counts as running). The
+      // files stay: the stored transcript keeps the message as queued (re-send later); deleting the chat removes them
       const p = pendingRef.current;
       pendingRef.current = null;
-      if (p) void deleteAttachmentFiles(p.uploads.cancel());
+      p?.uploads.cancel();
     };
   }, [throttle]);
 
@@ -258,6 +317,25 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
     [throttle]
   );
 
+  /** the stored Hermes session, mapped; null = no session API; throws when the fetch failed (refs only: stable) */
+  const fetchStoredSession = async (): Promise<ChatMessage[] | null> => {
+    const c = connRef.current;
+    const sid = sessionRef.current;
+    if (sessionsSupported(c) === false) return null;
+    try {
+      const page = await hermesSessions(c, 12000).messages(sid, { order: 'latest', limit: 120 });
+      setSessionsSupported(c, true);
+      return sessionRef.current === sid ? mapRemoteMessages(page.messages) : [];
+    } catch (e) {
+      if (isUnsupportedError(e)) {
+        setSessionsSupported(c, false);
+        return null;
+      }
+      if (isNotFoundError(e)) return []; // not stored yet
+      throw e;
+    }
+  };
+
   const recovery = useMemo(
     () =>
       createRecovery({
@@ -275,23 +353,7 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
             return null;
           }
         },
-        fetchRemote: async () => {
-          const c = connRef.current;
-          const sid = sessionRef.current;
-          if (sessionsSupported(c) === false) return null;
-          try {
-            const page = await hermesSessions(c, 12000).messages(sid, { order: 'latest', limit: 120 });
-            setSessionsSupported(c, true);
-            return sessionRef.current === sid ? mapRemoteMessages(page.messages) : [];
-          } catch (e) {
-            if (isUnsupportedError(e)) {
-              setSessionsSupported(c, false);
-              return null;
-            }
-            if (isNotFoundError(e)) return []; // not stored yet
-            throw e;
-          }
-        },
+        fetchRemote: () => fetchStoredSession(),
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
@@ -310,7 +372,7 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
 
 
   const run = useCallback(
-    async (text: string, attachments: Attachment[] = [], override?: TurnOverride) => {
+    async (text: string, attachments: Attachment[] = [], override?: TurnOverride, sendKey?: string) => {
       runningRef.current = true;
       userStopRef.current = false;
       const ctrl = new AbortController();
@@ -330,7 +392,17 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
       const seed = seedN > 0 ? branchSeedText(messagesRef.current.slice(0, Math.min(seedN, messagesRef.current.length - 2))) : '';
       const sendText = withTurnNote(withContextSeed(seed, text), override?.note);
       const turnConn = override?.model ? { ...connRef.current, model: override.model } : connRef.current;
+      // Idempotency-Key of this send (also for the automatic 429/503 retry below: the bridge only keeps a turn Hermes took)
+      const idempotencyKey = sendKey ?? newSendKey();
+      updateLast((m) => (m.role === 'assistant' ? { ...m, sendKey: idempotencyKey } : m));
       try {
+        // durable send (pendingSend.ts): the user message is in storage – queued, with its key – before the request
+        // starts, so a kill before the server took the turn restores it as "Nicht gesendet" instead of losing it
+        const persist = optsRef.current.persistNow;
+        if (persist && messagesRef.current.some((m) => m.sendUnacked)) {
+          await settleWithin(() => persist(messagesRef.current), PERSIST_BEFORE_SEND_MS);
+          if (!current()) return;
+        }
         // attachments → OpenAI content parts (images inline, bridge files as path references);
         // an AttachmentError (file gone, too large) lands in the catch below as a turn error
         const content = attachments.length
@@ -348,9 +420,17 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
               signal: ctrl.signal,
               modelOptions: optsRef.current.modelOptions,
               followups: optsRef.current.followups,
+              idempotencyKey,
               onAccepted: () => {
                 accepted = true;
                 if (seed) optsRef.current.onBranchSeedUsed?.();
+                // the server has the turn: a normal sent message from now on (a kill now recovers its answer)
+                if (current() && messagesRef.current.some((m) => m.sendUnacked)) {
+                  messagesRef.current = ackSend(messagesRef.current);
+                  throttle.call();
+                  const persist = optsRef.current.persistNow;
+                  if (persist) void settleWithin(() => persist(messagesRef.current), PERSIST_BEFORE_SEND_MS);
+                }
               },
               onEvent: (ev) => {
                 if (abortRef.current !== ctrl) return;
@@ -396,17 +476,25 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
           // superseded by newSession()
         } else if (isHermesError(e) && e.kind === 'aborted') {
           updateLast((m) => finalize(m, 'stopped', undefined, Date.now()));
-        } else if (isHermesError(e) && e.accepted && canRecover()) {
-          // connection lost after Hermes took the turn: it keeps running server-side → wait for the answer
+        } else if (isHermesError(e) && answerInSession(e) && canRecover()) {
+          // connection lost after Hermes took the turn: it keeps running server-side → wait for the answer.
+          // turn_unrecorded: a retry whose earlier attempt ran on the bridge without a recording – same, never twice
           interrupted = true;
           updateLast((m) => markInterrupted(m, Date.now()));
         } else {
           failure = e instanceof Error ? e.message : String(e);
           const key = retryAfterErrorText(e) ?? errorTextOf(e);
-          updateLast((m) => finalize(m, 'error', failure, Date.now(), key));
+          // the bridge refused this key for good: the next "Erneut" needs a fresh one (idempotency.ts)
+          const nextKey = sendKeyAfterFailure(idempotencyKey, isHermesError(e) ? e.code : undefined);
+          updateLast((m) => {
+            const done = finalize(m, 'error', failure, Date.now(), key);
+            return done.role === 'assistant' && done.sendKey === idempotencyKey ? { ...done, sendKey: nextKey } : done;
+          });
         }
       } finally {
         if (current()) {
+          // ended before the server took it (error / stop): a sent message with a failed answer ("Erneut" re-uses the key)
+          messagesRef.current = ackSend(messagesRef.current);
           runningRef.current = false;
           abortRef.current = null;
           throttle.cancel();
@@ -483,27 +571,37 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
       const p = pendingRef.current;
       if (!p) return '';
       pendingRef.current = null;
-      void deleteAttachmentFiles(p.uploads.cancel());
+      const gone = p.uploads.cancel();
+      void deleteAttachmentFiles(gone);
+      void queuedFiles.drop(gone.map((a) => a.id));
       messagesRef.current = dropPending(messagesRef.current, p.message.id);
       runningRef.current = false;
       throttle.cancel();
       setMessages(messagesRef.current);
       setPendingSend(null);
       setStatus('idle');
+      // the bubble was stored as queued: persist its removal explicitly (an empty list is not saved by the
+      // new-message effect, so the cancelled first message of a chat would come back on restart, Sol F08)
+      optsRef.current.onTurnEnd?.(messagesRef.current, sessionRef.current);
       return p.text;
     },
     [throttle, setPendingSend]
   );
 
   const send = useCallback(
-    (text: string, attachments: Attachment[] = [], pending?: PendingUploads) => {
+    /** `sendKey`: Idempotency-Key of an earlier attempt of this message ("Erneut senden" of a queued message) */
+    (text: string, attachments: Attachment[] = [], pending?: PendingUploads, sendKey?: string) => {
       const t = text.trim();
       if ((!t && !attachments.length) || runningRef.current || !mountedRef.current) return false;
       const now = Date.now();
+      // the key of this message's turn; the message is stored (queued, with it) before the request starts
+      const key = sendKey ?? newSendKey();
       if (pending && pending.state() !== 'ready') {
         // uploads still running: the bubble now, the turn once they are done
         const message: ChatMessage = { ...createUserMessage(t, now, pending.snapshot()), sendPending: true };
         pendingRef.current = { message, text: t, uploads: pending };
+        // web: the bytes outlive a reload while the message waits (stored as queued, attachments/queuedFiles.ts)
+        void queuedFiles.stash(message.attachments ?? []);
         messagesRef.current = [...messagesRef.current, message];
         runningRef.current = true; // no second send / retry meanwhile
         throttle.cancel();
@@ -519,7 +617,10 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
           remove: (id) => {
             if (!own()) return;
             const gone = pending.remove(id);
-            if (gone) void deleteAttachmentFiles([gone]);
+            if (gone) {
+              void deleteAttachmentFiles([gone]);
+              void queuedFiles.drop([gone.id]);
+            }
             if (own() && pendingIsEmpty(t, pending.snapshot())) cancelPending();
           },
           cancel: () => (own() ? cancelPending() : ''),
@@ -539,6 +640,7 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
             if (!p || p.uploads !== pending) return;
             pendingRef.current = null;
             setPendingSend(null);
+            void queuedFiles.drop((p.message.attachments ?? []).map((a) => a.id));
             if (pendingIsEmpty(t, sent)) {
               // every attachment was removed and there is no text: nothing to send
               messagesRef.current = dropPending(messagesRef.current, p.message.id);
@@ -546,21 +648,22 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
               throttle.cancel();
               setMessages(messagesRef.current);
               setStatus('idle');
+              optsRef.current.onTurnEnd?.(messagesRef.current, sessionRef.current); // as in cancelPending
               return;
             }
-            messagesRef.current = releasePending(messagesRef.current, p.message, sent, Date.now());
+            messagesRef.current = releasePending(messagesRef.current, p.message, sent, Date.now(), key);
             throttle.cancel();
             setMessages(messagesRef.current);
-            void run(t, sent);
+            void run(t, sent, undefined, key);
           },
         });
         return true;
       }
       const atts = pending ? pending.snapshot().map(toSent) : attachments;
-      messagesRef.current = [...messagesRef.current, createUserMessage(t, now, atts), createAssistantMessage(now)];
+      messagesRef.current = [...messagesRef.current, unackedUser(createUserMessage(t, now, atts), key), createAssistantMessage(now)];
       throttle.cancel();
       setMessages(messagesRef.current);
-      void run(t, atts);
+      void run(t, atts, undefined, key);
       return true;
     },
     [run, throttle, cancelPending, setPendingSend]
@@ -585,10 +688,11 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
   const retry = useCallback((override?: TurnOverride) => {
     if (runningRef.current || !mountedRef.current) return false;
     const list = messagesRef.current;
-    // last user message
+    // last user message (a queued one at the end is not sent: re-sending the turn before it would drop it)
     let ui = -1;
     for (let i = list.length - 1; i >= 0; i--) {
       if (list[i].role === 'user') {
+        if (isQueued(list[i])) return false;
         ui = i;
         break;
       }
@@ -597,14 +701,16 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
     const text = list[ui].text;
     // bridge files keep their remoteRef (the bridge keeps uploads for 7 days)
     const attachments = list[ui].attachments ?? [];
+    const answer = list[ui + 1];
+    // a send that failed before any answer arrived may still have reached the bridge: same key → never a second turn
+    const sendKey = reusableSendKey(answer, override);
     const resend = () => {
       // keep everything up to and including that user message, add a fresh assistant placeholder
       messagesRef.current = [...messagesRef.current.slice(0, ui + 1), createAssistantMessage(Date.now())];
       throttle.cancel();
       setMessages(messagesRef.current);
-      void run(text, attachments, override);
+      void run(text, attachments, override, sendKey);
     };
-    const answer = list[ui + 1];
     if (!isRecoverable(answer) || sessionsSupported(connRef.current) === false) {
       resend();
       return true;
@@ -687,6 +793,118 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
       optsRef.current.onTurnEnd?.(next, sessionRef.current);
     },
     [throttle]
+  );
+
+  // ---------------------------------------------------------------- queued after a restart (sendQueued)
+
+  const stepQueued = useCallback((id: string, e: QueuedEvent): QueuedState => {
+    const prev = queuedRef.current.get(id) ?? QUEUED_INITIAL;
+    const next = queuedReduce(prev, e);
+    if (next !== prev) {
+      queuedRef.current.set(id, next);
+      setQueuedVersion((v) => v + 1);
+    }
+    return next;
+  }, []);
+  const forgetQueued = useCallback((id: string) => {
+    if (queuedRef.current.delete(id)) setQueuedVersion((v) => v + 1);
+  }, []);
+
+  /**
+   * "Erneut senden": never blind. The stored Hermes session is checked first (killed after the turn started but
+   * before the transcript was saved → shown as sent, its answer recovered); otherwise the queued copy becomes a live
+   * pending send: missing uploads start again, the turn starts when they are done (send()).
+   */
+  const resendQueued = useCallback(
+    async (id: string) => {
+      const m = messagesRef.current.find((x) => x.id === id);
+      if (!m || !isQueued(m) || !mountedRef.current) return;
+      // claim: only the call that moves it from queued to checking owns this resend. A second tap before the
+      // re-render gets the unchanged `checking` state back and must not start another check / send (Sol F07)
+      const claimed = queuedRef.current.get(id) ?? QUEUED_INITIAL;
+      if (claimed.phase !== 'queued' || stepQueued(id, { type: 'resend', busy: runningRef.current }).phase !== 'checking') return;
+      runningRef.current = true; // no send / retry / transcript replace while this runs
+      const sid = sessionRef.current;
+      const gen = turnGenRef.current;
+      const alive = () => mountedRef.current && sessionRef.current === sid && turnGenRef.current === gen;
+      let remote: ChatMessage[] | null | 'error';
+      try {
+        remote = await fetchStoredSession();
+      } catch {
+        remote = 'error';
+      }
+      if (!alive()) {
+        if (mountedRef.current && sessionRef.current === sid) runningRef.current = false;
+        forgetQueued(id);
+        return;
+      }
+      const st = stepQueued(id, { type: 'checked', result: checkQueued(messagesRef.current, id, remote) });
+      if (st.phase !== 'sending') {
+        runningRef.current = false;
+        if (st.phase !== 'adopted') return; // check failed: stays queued, the bubble says why
+        forgetQueued(id);
+        void queuedFiles.drop((m.attachments ?? []).map((a) => a.id));
+        let next = adoptQueued(messagesRef.current, id, Date.now());
+        const at = next.findIndex((x) => x.id === id) + 1;
+        if (Array.isArray(remote)) next = applyRemoteAnswer(next, remote, at) ?? next;
+        commitRecovered(next);
+        recovery.start();
+        return;
+      }
+      const cur = messagesRef.current.find((x) => x.id === id) ?? m;
+      const atts = await queuedFiles.restore(cur.attachments ?? []);
+      forgetQueued(id);
+      if (!alive()) {
+        if (mountedRef.current && sessionRef.current === sid) runningRef.current = false;
+        return;
+      }
+      const c = connRef.current;
+      const target: AttachmentTarget = { kind: 'hermes', bridge: !!c.bridge };
+      // uploads are a bridge route: server root, never under a bot's /p/<bot> prefix (hermes/bots.ts)
+      const bridge = c.bridge ? { baseUrl: serverRootOf(c.baseUrl), apiKey: c.apiKey } : null;
+      const start = (a: Attachment): UploadTask =>
+        startUploadTask(a, (x, o) => (bridge ? uploadAttachment(x, bridge, o) : Promise.reject(new AttachmentError('no_bridge', { key: 'attachments.upload.noBridge' }, x.id))));
+      const tasks = new Map<string, UploadTask>();
+      for (const a of atts) if (a.status !== 'error' && needsUpload(a, target)) tasks.set(a.id, start(a));
+      const pending = createPendingUploads(atts, tasks, { target, start });
+      // the queued copy goes; send() appends the live message (fresh id + time: the turn starts now)
+      const before = messagesRef.current;
+      messagesRef.current = before.filter((x) => x.id !== id);
+      runningRef.current = false;
+      // the same Idempotency-Key as the attempt the app was killed in: a turn the bridge already started is re-attached
+      if (!send(cur.text, atts, pending, cur.sendKey)) {
+        pending.cancel();
+        messagesRef.current = before;
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [stepQueued, forgetQueued, commitRecovered, recovery, send]
+  );
+
+  const discardQueued = useCallback(
+    (id: string): string => {
+      const m = messagesRef.current.find((x) => x.id === id);
+      if (!m || !isQueued(m)) return '';
+      if (stepQueued(id, { type: 'discard' }).phase !== 'discarded') return '';
+      forgetQueued(id);
+      const atts = m.attachments ?? [];
+      void deleteAttachmentFiles(atts);
+      void queuedFiles.drop(atts.map((a) => a.id));
+      patchMessages((list) => list.filter((x) => x.id !== id));
+      return m.text;
+    },
+    [stepQueued, forgetQueued, patchMessages]
+  );
+
+  const queuedSend = useMemo<QueuedSendActions>(
+    () => ({
+      state: (id) => queuedRef.current.get(id) ?? QUEUED_INITIAL,
+      resend: (id) => void resendQueued(id),
+      discard: discardQueued,
+    }),
+    // a new object per state change: the bubbles re-render
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [resendQueued, discardQueued, queuedVersion]
   );
 
   const patchApproval = useCallback(
@@ -828,6 +1046,7 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
     messages,
     send,
     pendingSend,
+    queuedSend,
     stop,
     retry,
     newSession,

@@ -73,6 +73,56 @@ export function numericCellMinWidth(texts: string[], fontScale = 1): number {
   return Math.ceil(longest * 8.2 * normScale(fontScale)) + CELL_PADDING_PX;
 }
 
+/** Cells up to this many characters never wrap ("Ja", "Mittel", "Robo X1"). */
+export const SHORT_CELL_CHARS = 12;
+/** Cells with a digit up to this many characters never wrap: numbers, ranges, years, amounts ("c. 1011–1021", "1.299 €"). */
+export const NUMERIC_CELL_CHARS = 18;
+
+/**
+ * A cell that must stay on one line: short, or a short number / range / date / amount (at most 3 words).
+ * Android otherwise breaks such a cell anywhere once the column gets narrow ("c. 1011–1 / 021").
+ */
+export function isUnbreakableCell(text: string): boolean {
+  const s = text.trim();
+  const n = [...s].length;
+  if (n === 0) return false;
+  if (n <= SHORT_CELL_CHARS) return true;
+  return n <= NUMERIC_CELL_CHARS && /\d/.test(s) && s.split(/\s+/).length <= 3;
+}
+
+/** Characters of `text` that must fit on one line: the whole cell when unbreakable, else its longest word. */
+export function unbreakableChars(text: string): number {
+  return isUnbreakableCell(text) ? [...text.trim()].length : longestWordLength(text);
+}
+
+/**
+ * Smallest column width in which no cell breaks inside a number/range or a word (`charPx` = average glyph width at
+ * font scale 1, `padding` = horizontal cell padding). Glyphs grow with `fontScale`, padding does not.
+ */
+export function cellMinWidth(texts: readonly string[], fontScale = 1, charPx = 8, padding = CELL_PADDING_PX): number {
+  const chars = texts.reduce((m, t) => Math.max(m, unbreakableChars(t)), 0);
+  return chars > 0 ? Math.ceil(chars * charPx * normScale(fontScale)) + padding : 0;
+}
+
+/**
+ * The same text with its line-break opportunities glued (spaces → no-break space, a dash or slash between word
+ * joiners), for unbreakable cells only; a safety net when the width estimate is a little short.
+ */
+export function keepTogether(text: string): string {
+  // links / code / URLs keep their syntax untouched
+  if (!isUnbreakableCell(text) || /\]\(|`|:\/\//.test(text)) return text;
+  return text.replace(/ /g, '\u00a0').replace(/([–—\-/])/g, '\u2060$1\u2060');
+}
+
+/** Markdown pipe-table column width: wide enough for its content up to a cap, never narrower than its unbreakable cells. */
+export function markdownColumnWidth(cells: readonly string[], fontScale = 1): number {
+  const plain = cells.map((c) => c.replace(/[*_`]/g, ''));
+  const scale = normScale(fontScale);
+  const max = plain.reduce((m, c) => Math.max(m, [...c].length), 3);
+  const want = Math.min(Math.round(260 * scale), Math.max(72, Math.round(max * 8 * scale) + 22));
+  return Math.max(want, cellMinWidth(plain, scale, 8, 22));
+}
+
 /** Tables up to this many rows are never collapsed ("Alle N zeigen" for two hidden rows is silly, UX7). */
 export const TABLE_COLLAPSE_ABOVE = 10;
 /** Rows shown while a longer table is collapsed (hides at least 3). */
@@ -100,16 +150,21 @@ export const TEXT_COLUMN_FIT_MIN = 110;
  * Fit-to-width: when every column fits at its minimum (numbers never clipped, text ≥ TEXT_COLUMN_FIT_MIN and never
  * narrower than its longest header word), the table fills the viewport and text WRAPS instead of scrolling sideways.
  */
-export function canFitTable(viewport: number, widths: readonly number[], numeric: readonly boolean[], headers: readonly string[], fontScale = 1): boolean {
+export function canFitTable(viewport: number, widths: readonly number[], numeric: readonly boolean[], headers: readonly string[], fontScale = 1, keep?: readonly number[]): boolean {
   if (viewport <= 0) return false;
-  const min = widths.reduce((sum, _w, ci) => sum + fitMinWidth(widths, numeric, headers, ci, fontScale), 0);
+  const min = widths.reduce((sum, _w, ci) => sum + fitMinWidth(widths, numeric, headers, ci, fontScale, keep), 0);
   return min <= viewport;
 }
 
-/** Minimum width of column `ci` in fit-to-width mode (the cell's `minWidth`; `canFitTable` sums these). */
-export function fitMinWidth(widths: readonly number[], numeric: readonly boolean[], headers: readonly string[], ci: number, fontScale = 1): number {
+/**
+ * Minimum width of column `ci` in fit-to-width mode (the cell's `minWidth`; `canFitTable` sums these). `keep[ci]` is
+ * the column's unbreakable content width (cellMinWidth): a text column never squeezes a number/range below it.
+ */
+export function fitMinWidth(widths: readonly number[], numeric: readonly boolean[], headers: readonly string[], ci: number, fontScale = 1, keep?: readonly number[]): number {
   const w = widths[ci] ?? 0;
-  return numeric[ci] ? w : Math.min(w, Math.max(Math.round(TEXT_COLUMN_FIT_MIN * normScale(fontScale)), headerMinWidth(headers[ci] ?? '', fontScale)));
+  if (numeric[ci]) return w;
+  const textMin = Math.max(Math.round(TEXT_COLUMN_FIT_MIN * normScale(fontScale)), headerMinWidth(headers[ci] ?? '', fontScale));
+  return Math.min(w, Math.max(textMin, keep?.[ci] ?? 0));
 }
 
 /** Below this viewport width a table that cannot fit becomes a stack of row cards instead of a sideways-scrolling grid. */
@@ -148,10 +203,11 @@ export function tableLayoutMode(
   headers: readonly string[],
   pref: TableLayoutPref,
   fontScale = 1,
+  keep?: readonly number[],
 ): TableLayoutMode {
   if (!(viewport > 0)) return 'measuring';
   const totalW = widths.reduce((a, b) => a + b, 0);
-  const fits = totalW <= viewport || canFitTable(viewport, widths, numeric, headers, fontScale);
+  const fits = totalW <= viewport || canFitTable(viewport, widths, numeric, headers, fontScale, keep);
   if (fits) return 'fill';
   return tableCardMode(viewport, false, widths.length, pref) ? 'cards' : 'scroll';
 }

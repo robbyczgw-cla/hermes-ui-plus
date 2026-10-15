@@ -1,16 +1,20 @@
 import * as Clipboard from 'expo-clipboard';
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useImagesAllowed } from '../images';
-import { ImageLightbox, Photo, type LightboxItem } from '../ui/components/imageParts';
+import { ImageLightbox, Photo, useNaturalAspect, type LightboxItem } from '../ui/components/imageParts';
 import { resolveImageUrl } from './imageUrl';
 import { useMarkdownImageBase } from './MarkdownImageContext';
-import { Linking, Pressable, ScrollView, StyleSheet, Text, View, type TextStyle } from 'react-native';
+import { Linking, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions, type TextStyle } from 'react-native';
+import { keepTogether, markdownColumnWidth } from '../ui/lib/tableMath';
+import { NARROW_TEXT_PROPS } from '../ui/lib/textWrap';
 import { useT } from '../i18n';
 import { FadeIn, haptic, scaleFont, useCopiedFlash, useMotionReduced, useTheme, type Theme } from '../ui';
 import { usePreferences } from '../settings/PreferencesProvider';
 import { Icon } from './icons';
 import { dropFinalNewline, inlineToPlain, parseInline, parseMarkdownIncremental, safeHref, type Align, type Inline, type MdBlock, type MdListItem, type MdParseState } from './markdown';
+import { enterBlockPropsEqual, enterDelay } from './enterBlock';
 import { useToast } from './Toast';
+import type { AppendRun } from '../protocol/appendRun';
 import { Highlighted, useFindHighlight } from './findContext';
 import { AnswerIcon } from './answers/answerIcons';
 import { useAnswerScope } from './answers/AnswerScope';
@@ -28,17 +32,15 @@ type Props = {
    * `'section'` for long researched answers with sources (B3) – after the first section
    */
   collapse?: boolean | 'section';
+  /** append run of `text` (protocol/appendRun.ts: stream parser segments), lets the incremental parse skip a compare */
+  run?: AppendRun;
 };
-
-/** A5: stagger between blocks that appear in the same update */
-const ENTER_STAGGER_MS = 40;
-const ENTER_STAGGER_MAX_MS = 200;
 
 /**
  * Renders assistant Markdown. Parsing is incremental (stable prefix blocks are reused, only the tail
  * is re-parsed) and blocks are memoized by their source → only the tail re-renders while streaming.
  */
-export const Markdown = memo(function Markdown({ text, streaming = false, collapse = false }: Props) {
+export const Markdown = memo(function Markdown({ text, streaming = false, collapse = false, run }: Props) {
   const t = useTheme();
   const tr = useT();
   const s = useMdStyles(t);
@@ -47,10 +49,10 @@ export const Markdown = memo(function Markdown({ text, streaming = false, collap
   const parsed = useRef<MdParseState | null>(null);
   const blocks = useMemo(() => {
     // finished text: shared with every other mount of it (parse cache); streaming: only the tail is re-parsed
-    const st = streaming ? parseMarkdownIncremental(text, parsed.current) : finishedMarkdown(text, parsed.current);
+    const st = streaming ? parseMarkdownIncremental(text, parsed.current, run) : finishedMarkdown(text, parsed.current);
     parsed.current = st;
     return st.blocks;
-  }, [text, streaming]);
+  }, [text, streaming, run]);
   // Settings → Antworten: footnote pills / entity chips (one context value per switch combination)
   const footnotes = prefs['answers.footnotes'];
   const entities = prefs['answers.entities'];
@@ -98,15 +100,10 @@ export const Markdown = memo(function Markdown({ text, streaming = false, collap
     <MdFeaturesContext.Provider value={features}>
       <View>
         {blocks.slice(0, visible).map((b, i) => {
-          const last = i === blocks.length - 1;
-          const view = <BlockView key={i} block={b} s={s} first={i === 0} live={streaming && last} />;
-          if (!motion || i < (mountedWith.current ?? 0)) return view;
-          const delay = Math.min(ENTER_STAGGER_MAX_MS, Math.max(0, i - prevRendered) * ENTER_STAGGER_MS);
-          return (
-            <FadeIn key={`e${i}`} delay={delay}>
-              {view}
-            </FadeIn>
-          );
+          const live = streaming && i === blocks.length - 1;
+          // memoized per block: a streaming tick re-renders only the changed tail block, not every wrapper
+          const enter = motion && i >= (mountedWith.current ?? 0);
+          return <EnterBlock key={enter ? `e${i}` : i} block={b} s={s} first={i === 0} live={live} enter={enter} delay={enter ? enterDelay(i, prevRendered) : 0} />;
         })}
         {folded ? (
           <Pressable
@@ -207,6 +204,16 @@ function makeStyles(t: Theme) {
 }
 
 type BlockProps = { block: MdBlock; s: MdStyles; first: boolean; live: boolean };
+
+/**
+ * One top-level block, with the A5 entrance fade when `enter`. Memoized (chat/enterBlock.ts): unchanged blocks skip
+ * the wrapper's re-render on a streaming tick; the stagger `delay` is taken on mount only.
+ */
+const EnterBlock = memo(function EnterBlock({ block, s, first, live, enter, delay }: BlockProps & { enter: boolean; delay: number }) {
+  const [mountDelay] = useState(delay);
+  const view = <BlockView block={block} s={s} first={first} live={live} />;
+  return enter ? <FadeIn delay={mountDelay}>{view}</FadeIn> : view;
+}, enterBlockPropsEqual);
 
 const BlockView = memo(
   function BlockView({ block, s, first, live }: BlockProps) {
@@ -402,11 +409,12 @@ function ImagesView({ items }: { items: { alt: string; href: string }[] }) {
   const allowed = useImagesAllowed();
   const [forced, setForced] = useState(false);
   const [viewer, setViewer] = useState<number | null>(null);
-  const [aspect, setAspect] = useState(4 / 3);
   const imgs = useMemo(
     () => items.map((it) => ({ alt: it.alt, url: resolveImageUrl(it.href, base) })).filter((x): x is { alt: string; url: string } => !!x.url),
     [items, base],
   );
+  // a single image keeps the ratio it had when it was last shown (no 4:3 → real-size jump on reopen)
+  const [aspect, onNaturalSize] = useNaturalAspect(imgs.length === 1 ? imgs[0].url : null);
   if (!imgs.length) {
     // unresolvable (no base / unsafe scheme): keep the alt text instead of a broken box
     const text = items.map((i) => i.alt).filter(Boolean).join(' · ');
@@ -436,7 +444,7 @@ function ImagesView({ items }: { items: { alt: string; href: string }[] }) {
     const one = imgs[0];
     return (
       <View style={{ maxWidth: SINGLE_MAX_WIDTH }}>
-        <Photo uri={one.url} aspect={Math.min(2.4, Math.max(0.6, aspect))} fit="contain" label={one.alt || undefined} onPress={() => setViewer(0)} onNaturalSize={(w, h) => setAspect(w / h)} />
+        <Photo uri={one.url} aspect={Math.min(2.4, Math.max(0.6, aspect))} fit="contain" label={one.alt || undefined} onPress={() => setViewer(0)} onNaturalSize={onNaturalSize} />
         {box}
       </View>
     );
@@ -576,11 +584,6 @@ const CodeChunk = memo(function CodeChunk({ text, s }: { text: string; s: MdStyl
   );
 });
 
-function colWidth(cells: string[]): number {
-  const max = Math.max(...cells.map((c) => c.replace(/[*_`]/g, '').length), 3);
-  return Math.min(260, Math.max(72, max * 8 + 22));
-}
-
 type TableRowProps = { row: string[]; widths: number[]; align: Align[]; s: MdStyles };
 
 /** rows are re-created by every parse of a live table: compare by content (and column widths) */
@@ -590,8 +593,8 @@ const TableRow = memo(
       <View style={s.tr}>
         {row.map((cell, ci) => (
           <View key={ci} style={[s.td, { width: widths[ci] }, ci === widths.length - 1 && { borderRightWidth: 0 }]}>
-            <Text style={[s.tdText, { textAlign: align[ci] ?? 'left' }]} selectable>
-              <InlineText text={cell} s={s} />
+            <Text {...NARROW_TEXT_PROPS} style={[s.tdText, { textAlign: align[ci] ?? 'left' }]} selectable>
+              <InlineText text={keepTogether(cell)} s={s} />
             </Text>
           </View>
         ))}
@@ -611,7 +614,13 @@ function sameNumbers(a: number[], b: number[]): boolean {
 }
 
 function TableView({ block, s }: { block: Extract<MdBlock, { type: 'table' }>; s: MdStyles }) {
-  const widths = useMemo(() => block.header.map((h, ci) => colWidth([h, ...block.rows.map((r) => r[ci] ?? '')])), [block]);
+  // the text grows with the app setting AND the OS font scale (RN applies it on top): so must the columns,
+  // or numbers and ranges break mid-digit at 1.3 ("c. 1011–1 / 021")
+  const fontScale = useTheme().fontScale * (useWindowDimensions().fontScale || 1);
+  const widths = useMemo(
+    () => block.header.map((h, ci) => markdownColumnWidth([h, ...block.rows.map((r) => r[ci] ?? '')], fontScale)),
+    [block, fontScale],
+  );
   const alignStyle = (ci: number): TextStyle => ({ textAlign: block.align[ci] ?? 'left' });
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} bounces={false}>
@@ -619,7 +628,7 @@ function TableView({ block, s }: { block: Extract<MdBlock, { type: 'table' }>; s
         <View style={[s.tr, s.th]}>
           {block.header.map((h, ci) => (
             <View key={ci} style={[s.td, { width: widths[ci], borderTopWidth: 0 }, ci === widths.length - 1 && { borderRightWidth: 0 }]}>
-              <Text style={[s.thText, alignStyle(ci)]}>
+              <Text {...NARROW_TEXT_PROPS} style={[s.thText, alignStyle(ci)]}>
                 <InlineText text={h} s={s} />
               </Text>
             </View>

@@ -21,6 +21,23 @@ export const SEGMENTS = [
   { id: 'umformen', from: 14, len: 5.0, speed: 1.5, kicker: 'One tap', title: '“As a table”', sub: 'Reshape any answer: shorter, simpler, a list, a table.' },
   { id: 'orte', from: 11.5, len: 5.2, speed: 1.6, kicker: 'Places', title: 'Place cards', sub: 'Photos, ratings, opening hours – and all of them on a map.' },
 ];
+/**
+ * Highlight trailer of 2026-10-15 (`DEMO_TRAILER_SET=1015`): the best moments of the clips since the consumer set plus a few
+ * older favourites. `mark` = interaction mark of the recorded timeline (+ `offset` seconds), so a changed prompt or answer
+ * never shifts the excerpt.
+ */
+export const SEGMENTS_1015 = [
+  { id: 'freigabe', mark: 'card', offset: -2.4, len: 4.8, speed: 1.3, kicker: 'Approvals', title: 'Approve from your phone', sub: 'See the command and the risk, then allow once.' },
+  { id: 'schnell', mark: 'answer1', offset: -0.3, len: 6.0, speed: 2.0, kicker: 'New · Quick answers ⚡', title: 'Answers in seconds', sub: 'Need real data? Continue with Hermes in one tap.' },
+  { id: 'bots', mark: 'picker', offset: -0.4, len: 4.6, speed: 1.4, kicker: 'New · Bots', title: 'A bot for every job', sub: 'Pick a Hermes profile in the model menu.' },
+  { id: 'wege', mark: 'rows', offset: 0.2, len: 5.0, speed: 1.6, kicker: 'New · Paths', title: 'Compare your options', sub: 'Chains with a verdict – one tap picks.' },
+  { id: 'bausteine', mark: 'blocks', offset: -0.6, len: 4.2, speed: 1.1, kicker: 'New · Blocks', title: 'Setups at a glance', sub: 'A diagram instead of a wall of text.' },
+  { id: 'orte', mark: 'cards', offset: 0, len: 4.8, speed: 1.6, kicker: 'Places', title: 'Place cards', sub: 'Photos, ratings, opening hours – all on a map.' },
+  { id: 'bilder', mark: 'loading', offset: -1.2, len: 4.8, speed: 1.2, kicker: 'Improved · Products', title: 'Photos that stay put', sub: 'Cards keep their size while images load.' },
+  { id: 'rezept', mark: 'timer', offset: -3.0, len: 4.4, speed: 1.4, kicker: 'Cook along', title: 'Timers and a shopping list', sub: 'Scale servings, start a timer, tick off the list.' },
+  { id: 'fluessig', mark: 'start', offset: -0.6, len: 5.4, speed: 1.5, kicker: 'New · Smooth', title: 'Long answers, no stutter', sub: 'Live text, cards fading in – at 60 frames per second.' },
+  { id: 'nichtgesendet', mark: 'notsent', offset: -1.6, len: 4.8, speed: 1.3, kicker: 'New · Safe', title: 'Nothing gets lost', sub: 'Closed mid-send? “Send again” brings it back.' },
+];
 // Use actual interaction marks so translated prompts and streaming never shift the montage into typing.
 const MOMENTS = {
   orte: ['cards', 0], produkte: ['picked', -2], umformen: ['table', -5], befehle: ['palette', -1], freigabe: ['card', -2.2],
@@ -29,10 +46,11 @@ const MOMENTS = {
 function markedStart(seg, duration) {
   const file = join(WORK, seg.id, 'timeline.json');
   if (!existsSync(file)) return seg.from;
-  const [name, offset] = MOMENTS[seg.id];
+  const [name, offset] = seg.mark ? [seg.mark, seg.offset ?? 0] : MOMENTS[seg.id];
   const mark = JSON.parse(readFileSync(file, 'utf8')).find((m) => m.name === name);
   return mark ? Math.max(0, Math.min(mark.seconds + offset, duration - seg.len * (seg.speed ?? 1))) : seg.from;
 }
+const TRAILER_SEGMENTS = process.env.DEMO_TRAILER_SET === '1015' ? SEGMENTS_1015 : SEGMENTS;
 const XF = 0.45;
 const TITLE_LEN = 3.6;
 const END_LEN = 5.2;
@@ -83,7 +101,7 @@ async function build(name, L, { withMusic }) {
   parts.push({ f: title, len: TITLE_LEN, tr: 'fade' });
   const transitions = ['smoothleft', 'smoothup', 'smoothleft', 'slideleft'];
   let i = 0;
-  for (const seg of SEGMENTS) {
+  for (const seg of TRAILER_SEGMENTS) {
     if (!existsSync(join(WORK, seg.id, 'raw.mp4'))) {
       console.log(`  trailer: skip ${seg.id} (not recorded)`);
       continue;

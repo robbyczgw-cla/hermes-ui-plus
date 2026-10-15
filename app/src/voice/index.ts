@@ -24,6 +24,7 @@ export { SpeakButton } from './components/SpeakButton';
 export type { SpeakButtonProps } from './components/SpeakButton';
 export { VoiceSettingsSection } from './components/VoiceSettingsSection';
 export type { VoiceSettingsSectionProps } from './components/VoiceSettingsSection';
+export { voiceSearchTexts } from './searchTexts';
 export { VoiceIcon } from './components/icons';
 export type { VoiceIconName } from './components/icons';
 

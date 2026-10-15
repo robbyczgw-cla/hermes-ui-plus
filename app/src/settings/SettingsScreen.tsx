@@ -18,7 +18,7 @@ import { useTitlebarInset } from '../desktop/chrome';
 import { useDesktopSettingsSection } from '../desktop/DesktopSettings';
 import { useTheme } from '../ui';
 import { useEscapeToClose } from '../ui/lib/useEscapeToClose';
-import { VoiceSettingsSection, voiceConnFromProfile } from '../voice';
+import { VoiceSettingsSection, voiceConnFromProfile, voiceSearchTexts } from '../voice';
 import { PushSettingsSection, pushSearchTexts } from '../push';
 import { HAS_DEV_PROFILES, useConnection } from './ConnectionProvider';
 import { ProfileEditor } from './ProfileEditor';
@@ -32,6 +32,8 @@ import { LangRetry } from './LangRetry';
 import { Button as SettingsButton, Footnote, Group, NavRow, SearchField, Segmented, SubLabel } from './ui';
 import type { ProfilesStorageState } from './storage';
 import { confirmAsync } from '../chat/commands/confirm';
+import { useQuickAvailability } from '../quick/hooks';
+import { QuickSettingsSection } from '../quick/QuickSettings';
 
 type Page = { name: 'list' } | { name: 'pickKind' } | { name: 'edit'; profile: ConnectionProfile; isNew: boolean } | { name: 'pair' } | { name: 'check' };
 
@@ -252,6 +254,8 @@ function MainList({
   const desktop = useDesktopSettingsSection(); // macOS app only
   const convs = useConversations();
   const [deleteAll, setDeleteAll] = useState(false);
+  // Schnellfrage: only when the active connection offers quick answers (bridge + Hermes plugin, or the demo)
+  const quickAvail = useQuickAvailability(active);
 
   const langOpts: { value: LangSetting; label: string }[] = [
     { value: 'system', label: t('settings.appearance.system') },
@@ -266,7 +270,7 @@ function MainList({
     rows: [
       {
         key: 'profiles',
-        texts: [...profiles.map((p) => p.name), t('settings.connections.add'), t('settings.connections.addQr'), t('onboarding.diag.settings.row'), t('settings.connections.restart'), 'QR'],
+        texts: [...profiles.map((p) => p.name), t('settings.connections.add'), t('settings.connections.addQr'), t('onboarding.diag.settings.row'), t('settings.connections.restart'), 'QR', t('settings.connections.keywords')],
         render: () => (
           <>
             {storageState !== 'ok' ? <StorageNotice state={storageState} onUnlock={unlockProfiles} /> : null}
@@ -289,6 +293,21 @@ function MainList({
     ],
   };
 
+  const quick: SettingsSection | null =
+    active && quickAvail.available
+      ? {
+          id: 'quick',
+          title: t('quick.settings.section'),
+          rows: [
+            {
+              key: 'quick',
+              texts: [t('quick.settings.model'), t('quick.settings.show'), t('quick.settings.clear'), t('quick.thread.title'), 'Quick'],
+              render: () => <QuickSettingsSection profile={active} config={quickAvail.config} />,
+            },
+          ],
+        }
+      : null;
+
   const notifications: SettingsSection = {
     id: 'notifications',
     title: t('push.title'),
@@ -310,7 +329,7 @@ function MainList({
           </>
         ),
       },
-      { key: 'voice', texts: [t('settings.sections.voice')], render: () => <VoiceSettingsSection conn={voiceConn} /> },
+      { key: 'voice', texts: voiceSearchTexts(t), render: () => <VoiceSettingsSection conn={voiceConn} /> },
     ],
   };
 
@@ -370,7 +389,7 @@ function MainList({
   };
 
   const match = makeMatcher(query);
-  const sections = [connections, notifications, ...(desktop ? [desktop] : []), ...custom, language, data, about].map((s) => ({ s, rows: visibleRows(s, match) })).filter((x) => x.rows.length > 0);
+  const sections = [connections, ...(quick ? [quick] : []), notifications, ...(desktop ? [desktop] : []), ...custom, language, data, about].map((s) => ({ s, rows: visibleRows(s, match) })).filter((x) => x.rows.length > 0);
 
   return (
     <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: bottomInset + 24 }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">

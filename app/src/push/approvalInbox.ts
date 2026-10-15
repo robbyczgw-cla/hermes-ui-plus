@@ -9,6 +9,7 @@
  */
 import type { ConversationMeta } from '../conversations/types.ts';
 import { pickConversation, type PushProfile } from './model.ts';
+import { botOf } from '../hermes/bots.ts';
 
 export type ApprovalNotice = {
   /** `a_<requestId>` */
@@ -24,9 +25,11 @@ export type ApprovalNotice = {
   /** epoch ms; an ESTIMATE (Hermes sends no deadline) */
   expiresAt?: number;
   timestamp: number;
+  /** Hermes profile ("bot") of the session (undefined = default): the chat answers under /p/<bot>/ */
+  hermesProfile?: string;
 };
 
-export type ApprovalResolved = { requestId: string; runId?: string; sessionId?: string | null; reason?: string; choice?: string };
+export type ApprovalResolved = { requestId: string; runId?: string; sessionId?: string | null; reason?: string; choice?: string; hermesProfile?: string };
 
 const str = (v: unknown, max = 512) => (typeof v === 'string' && v ? v.slice(0, max) : undefined);
 
@@ -46,6 +49,7 @@ export function parseApprovalNotice(data: string): ApprovalNotice | null {
       ...(o.risk === 'high' ? { risk: 'high' as const } : {}),
       ...(typeof o.expiresAt === 'number' ? { expiresAt: o.expiresAt } : {}),
       timestamp: typeof o.timestamp === 'number' ? o.timestamp : Date.now(),
+      ...(botOf(str(o.hermesProfile, 64)) ? { hermesProfile: botOf(str(o.hermesProfile, 64)) } : {}),
     };
   } catch {
     return null;
@@ -57,7 +61,8 @@ export function parseApprovalResolved(data: string): ApprovalResolved | null {
     const o = JSON.parse(data) as Record<string, unknown>;
     const requestId = str(o.requestId, 256);
     if (!requestId) return null;
-    return { requestId, runId: str(o.runId, 256) ?? str(o.completionId, 256), sessionId: str(o.sessionId, 128) ?? null, reason: str(o.reason, 32), choice: str(o.choice, 16) };
+    const bot = botOf(str(o.hermesProfile, 64));
+    return { requestId, runId: str(o.runId, 256) ?? str(o.completionId, 256), sessionId: str(o.sessionId, 128) ?? null, reason: str(o.reason, 32), choice: str(o.choice, 16), ...(bot ? { hermesProfile: bot } : {}) };
   } catch {
     return null;
   }
@@ -124,7 +129,7 @@ export type ApprovalRoute = 'open-chat' | 'banner' | 'ignored';
  */
 export function routeApproval(deps: ApprovalRouteDeps, p: Pick<PushProfile, 'id' | 'kind' | 'model'>, n: ApprovalNotice, now = Date.now()): ApprovalRoute {
   if (n.expiresAt && n.expiresAt + 30_000 < now) return 'ignored';
-  const conv = n.sessionId ? pickConversation(deps.controller.list(), p, { sessionId: n.sessionId }) : null;
+  const conv = n.sessionId ? pickConversation(deps.controller.list(), p, { sessionId: n.sessionId, hermesProfile: n.hermesProfile }) : null;
   if (conv && conv.id === deps.activeId()) {
     deps.openPending(conv.id, n.runId);
     return 'open-chat';
@@ -136,6 +141,6 @@ export function routeApproval(deps: ApprovalRouteDeps, p: Pick<PushProfile, 'id'
 /** `approval_resolved`: other devices dismiss – banner away, the owning open chat re-checks its card. */
 export function routeApprovalResolved(deps: ApprovalRouteDeps, p: Pick<PushProfile, 'id' | 'kind' | 'model'>, r: ApprovalResolved): void {
   deps.clearBanner(r.requestId);
-  const conv = r.sessionId ? pickConversation(deps.controller.list(), p, { sessionId: r.sessionId }) : null;
+  const conv = r.sessionId ? pickConversation(deps.controller.list(), p, { sessionId: r.sessionId, hermesProfile: r.hermesProfile }) : null;
   if (conv) deps.checkPending(conv.id, r.runId);
 }

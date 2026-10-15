@@ -160,17 +160,18 @@ test('bootstrap system message prepended once; stateless multi-turn gets no hint
     await rawRequest(base, '/v1/chat/completions', { body: chat([{ role: 'user', content: 'Zeig das als Balkendiagramm: A 1, B 2, C 3' }]) });
     const m1 = seen[0].body.messages;
     assert.match(m1[0].content, /^\[hermes-ui-app\]/);
-    assert.match(m1[1].content, /^UI-ROUTER-HINT: format=chart component=bar/);
-    assert.equal(m1[2].role, 'user');
+    assert.match(m1[1].content, /^\[hermes-ui-skill\] /); // skill core inline right after the bootstrap (src/skillInline.mjs)
+    assert.match(m1[2].content, /^UI-ROUTER-HINT: format=chart component=bar/);
+    assert.equal(m1[3].role, 'user');
     // Header-less client resending history: Hermes derives the session id from the system
     // prompt, so the bridge must not vary it -> bootstrap only, no hint.
     await rawRequest(base, '/v1/chat/completions', { body: chat([{ role: 'user', content: 'Hi' }, { role: 'assistant', content: 'Hallo' }, { role: 'user', content: 'Zeig das als Tabelle' }]) });
     const m2 = seen[1].body.messages;
-    assert.equal(m2.filter((m) => m.role === 'system').length, 1);
-    assert.ok(!m2.some((m) => /UI-ROUTER-HINT/.test(m.content)));
+    assert.equal(m2.filter((m) => m.role === 'system').length, 2); // bootstrap + skill core, both constant
+    assert.ok(!m2.some((m) => /^UI-ROUTER-HINT/.test(m.content)));
     // Client already sends the marker -> not duplicated.
     await rawRequest(base, '/v1/chat/completions', { headers: { 'x-hermes-session-id': 's1' }, body: chat([{ role: 'system', content: '[hermes-ui-app] Client: own' }, { role: 'user', content: 'Hallo' }]) });
-    assert.equal(seen[2].body.messages.filter((m) => /\[hermes-ui-app\]/.test(m.content)).length, 1);
+    assert.equal(seen[2].body.messages.filter((m) => /^\[hermes-ui-app\]/.test(m.content)).length, 1);
     // App notice "follow-ups off" (also marker-prefixed) is NOT a bootstrap: kept as sent, bootstrap still injected before it.
     const notice = '[hermes-ui-app] Follow-up suggestions are switched off in the app: do not add a suggestions block.';
     await rawRequest(base, '/v1/chat/completions', { headers: { 'x-hermes-session-id': 's1' }, body: chat([{ role: 'system', content: notice }, { role: 'user', content: 'Hallo' }]) });
@@ -227,9 +228,9 @@ function captureLogger() {
 }
 
 /** POST a streaming chat, read the first bytes, then drop the connection (phone switches WiFi → LTE). */
-function startAndDrop(base, headers = {}) {
+function startAndDrop(base, headers = {}, prefix = '') {
   return new Promise((resolve, reject) => {
-    const req = http.request(`${base}/v1/chat/completions`, { method: 'POST', headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json', ...headers } }, (res) => {
+    const req = http.request(`${base}${prefix}/v1/chat/completions`, { method: 'POST', headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json', ...headers } }, (res) => {
       res.once('data', () => { req.destroy(); resolve(); });
     });
     req.on('error', () => {});
@@ -299,6 +300,51 @@ test('POST /bridge/chat/stop ends the kept run of that session (the app\'s stop 
     assert.deepEqual(JSON.parse(r.body.toString()), { stopped: 1 });
     await Promise.race([closed, new Promise((_r, rej) => setTimeout(() => rej(new Error('upstream not stopped')), 2000))]);
     assert.equal((await rawRequest(base, '/bridge/chat/stop', { headers: { authorization: 'Bearer nope' }, body: { sessionId: 'hui-stop' } })).status, 401);
+  } finally {
+    server.close(); server.closeAllConnections();
+  }
+});
+
+test('POST /bridge/chat/stop is scoped to the profile: the same session id in another profile keeps running', async () => {
+  seen = [];
+  /** @type {Set<string>} upstream paths of the runs still streaming */
+  const running = new Set();
+  behaviour = (req, res) => {
+    const url = String(req.url);
+    running.add(url);
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.write(SSE_PARTS[0]);
+    const iv = setInterval(() => res.write(': keepalive\n\n'), 10);
+    res.on('close', () => { clearInterval(iv); running.delete(url); });
+  };
+  const { server, base } = await startBridge({ BRIDGE_PROFILES: 'writer,reader', HERMES_HOME: '/nonexistent-hermes-home-test' });
+  const settle = () => new Promise((r) => setTimeout(r, 50));
+  const stop = async (body) => {
+    const r = await rawRequest(base, '/bridge/chat/stop', { body });
+    return { status: r.status, body: JSON.parse(r.body.toString()) };
+  };
+  try {
+    const sid = { 'x-hermes-session-id': 'hui-same' };
+    await startAndDrop(base, sid);
+    await startAndDrop(base, sid, '/p/writer');
+    await startAndDrop(base, sid, '/p/reader');
+    await settle();
+    assert.deepEqual([...running].sort(), ['/p/reader/v1/chat/completions', '/p/writer/v1/chat/completions', '/v1/chat/completions']);
+
+    assert.deepEqual(await stop({ sessionId: 'hui-same', profile: 'writer' }), { status: 200, body: { stopped: 1 } });
+    await settle();
+    assert.deepEqual([...running].sort(), ['/p/reader/v1/chat/completions', '/v1/chat/completions'], 'only the writer run stopped');
+
+    assert.deepEqual(await stop({ sessionId: 'hui-same' }), { status: 200, body: { stopped: 1 } }, 'no profile = the default profile');
+    await settle();
+    assert.deepEqual([...running], ['/p/reader/v1/chat/completions']);
+
+    assert.deepEqual(await stop({ sessionId: 'hui-same', profile: 'nope' }), { status: 200, body: { stopped: 0 } });
+    assert.equal((await stop({ sessionId: 'hui-same', profile: 'Bad/Name' })).status, 400);
+    assert.equal((await stop({ sessionId: 'hui-same', profile: 7 })).status, 400);
+    assert.deepEqual(await stop({ sessionId: 'hui-same', profile: 'reader' }), { status: 200, body: { stopped: 1 } });
+    await settle();
+    assert.equal(running.size, 0);
   } finally {
     server.close(); server.closeAllConnections();
   }

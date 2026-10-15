@@ -33,6 +33,8 @@ export function sessionOptions(conv: UseConversation): UseHermesChatOptions {
     onTurnStart: (sid) => {
       if (sid && sid !== conv.meta?.hermesSessionId) conv.setSessionId(sid);
     },
+    // durable send: the user message is in storage before its turn request starts (hermes/pendingSend.ts)
+    persistNow: (messages) => conv.saveNow(messages),
   };
 }
 

@@ -6,6 +6,7 @@ import {
   buildTimeline,
   cachePercent,
   footerParts,
+  knownDuration,
   liveStatus,
   formatElapsed,
   formatTokens,
@@ -18,6 +19,7 @@ import {
   truncateText,
 } from './toolTimeline.ts';
 import { applyEvent, createAssistantMessage } from '../hermes/chatState.ts';
+import { mapRemoteMessages } from '../hermes/sessionMapping.ts';
 import { approvalKey, resolveApproval } from '../hermes/approvals.ts';
 import type { ChatMessage, HermesEvent } from '../hermes/types.ts';
 import { makeT } from '../i18n/core.ts';
@@ -202,4 +204,26 @@ test('smartApproved: Hermes guardian auto-approval in a terminal result', () => 
   assert.equal(smartApproved({ approval: 'approved by user' }), false);
   assert.equal(smartApproved('auto-approved by smart approval'), false);
   assert.equal(smartApproved(undefined), false);
+});
+
+test('server chat from another device: no "0 ms" in the footer, detail sheet or thinking row', () => {
+  assert.equal(knownDuration(1000, undefined), undefined);
+  assert.equal(knownDuration(1000, 1000), undefined);
+  assert.equal(knownDuration(1000, 900), undefined);
+  assert.equal(knownDuration(1000, 1850), 850);
+  // one stored assistant row: createdAt = endedAt = its timestamp, the real duration is unknown
+  const [, a] = mapRemoteMessages([
+    { id: '1', role: 'user', content: 'Hallo', timestamp: 5000 },
+    { id: '2', role: 'assistant', content: '<think>kurz</think>Hallo!', finishReason: 'stop', timestamp: 5000 },
+  ]);
+  assert.equal(a.metrics?.endedAt, a.createdAt);
+  assert.deepEqual(footerParts(a, de), []);
+  const sheet = rowDetail(a, 'turn', de)!;
+  assert.ok(!sheet.meta.some((x) => /ms$/.test(x.value)), JSON.stringify(sheet.meta));
+  const thinking = buildTimeline(a, de.t, 99_999).find((r) => r.kind === 'thinking');
+  assert.ok(thinking);
+  assert.equal(thinking.durationMs, undefined);
+  // with tools the count stays, only the duration goes
+  const withTool = { ...a, tools: [{ id: 'c1', name: 'web_search', status: 'done' as const, startedAt: 5000, endedAt: 5000 }] };
+  assert.deepEqual(footerParts(withTool as typeof a, de), ['1 Werkzeug']);
 });

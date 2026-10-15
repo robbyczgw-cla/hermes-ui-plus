@@ -3,6 +3,7 @@
  */
 import type { ChatMessage } from '../hermes/types';
 import type { HermesChatOptions } from '../hermes/capabilities';
+import type { ModelLockState } from '../hermes/modelLock';
 
 export type { ChatMessage, HermesChatOptions };
 
@@ -26,6 +27,11 @@ export type ConversationMeta = {
   profileKind: ProfileKind;
   /** X-Hermes-Session-Id of this chat (hermes) / local session id (claude) */
   hermesSessionId?: string;
+  /**
+   * Hermes profile ("bot") of this chat (hermes/bots.ts): its requests go to `/p/<bot>/…`; undefined = the default
+   * profile. Fixed once the chat has messages (the session lives in that bot).
+   */
+  hermesProfile?: string;
   createdAt: number;
   updatedAt: number;
   pinned?: boolean;
@@ -38,6 +44,8 @@ export type ConversationMeta = {
   // ---- additions (Hermes session sync, per-chat options) ----
   /** Hermes reasoning/fast options for this chat (HermesOptionsSheet); undefined = server defaults */
   modelOptions?: HermesChatOptions;
+  /** Hermes v0.22: outcome of locking `model` on the Hermes session (hermes/modelLock.ts); stale when `model` changed */
+  modelLock?: ModelLockState;
   /** `remote` = created from the Hermes session list (started on Telegram/CLI/another device), not in this app */
   origin?: 'remote';
   /** last known server-side state of `hermesSessionId` (set by the session sync) */

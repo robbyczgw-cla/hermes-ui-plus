@@ -3,7 +3,7 @@
  * close, share button. Gesture handler + reanimated (worklets); the Modal needs its own
  * GestureHandlerRootView on Android.
  */
-import { Image } from 'expo-image';
+import { AttachmentImage } from './AttachmentImage';
 import { Modal, Pressable, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
@@ -103,7 +103,7 @@ function ViewerContent({ attachment, onClose, onEdit }: { attachment: Attachment
       <Animated.View style={[StyleSheet.absoluteFill, styles.bg, bgStyle]} />
       <GestureDetector gesture={gesture}>
         <Animated.View style={[styles.fill, imageStyle]} accessibilityLabel={attachment.name} accessible>
-          <Image source={{ uri: attachment.uri }} style={styles.fill} contentFit="contain" transition={150} />
+          <AttachmentImage uri={attachment.uri} style={styles.fill} contentFit="contain" transition={150} />
         </Animated.View>
       </GestureDetector>
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]} pointerEvents="box-none">

@@ -629,30 +629,77 @@ function normChoice(x: Rec, base: Rec): void {
   put(base, 'submitLabel', line(x.submitLabel, 60));
 }
 
+// model variants written from memory: `label`/`title`/`name` instead of `text`, `done` instead of
+// `checked`, the list under another key, or grouped (`sections`/`groups` with nested items, or a
+// `{category: [items]}` map) instead of flat items with `category`
+const CHECKLIST_LIST_KEYS = ['items', 'entries', 'tasks', 'todos', 'list', 'checklist'] as const;
+const CHECKLIST_GROUP_KEYS = ['sections', 'groups', 'categories'] as const;
+const CHECKLIST_TEXT_KEYS = ['text', 'label', 'title', 'name', 'item', 'task', 'content'] as const;
+const CHECKLIST_GROUP_TITLE_KEYS = ['title', 'name', 'label', 'category', 'heading'] as const;
+
+function firstLine(r: Rec, keys: readonly string[], max: number): string | undefined {
+  for (const k of keys) {
+    const v = line(r[k], max);
+    if (v) return v;
+  }
+  return undefined;
+}
+
+/** flat checklist entries `{it, category?}`: groups (array of `{title, items}` or a `{category: [...]}` map) are flattened */
+function checklistEntries(x: Rec): { it: unknown; category?: string }[] {
+  const out: { it: unknown; category?: string }[] = [];
+  const add = (list: unknown, category: string | undefined, depth: number) => {
+    if (isRec(list) && depth < 2) {
+      // {"Kleidung": ["T-Shirts", …], "Hygiene": [...]}
+      for (const [k, v] of Object.entries(list)) if (Array.isArray(v) && !isProtoName(k)) add(v, line(k, 60), depth + 1);
+      return;
+    }
+    for (const it of arr(list)) {
+      if (out.length >= MAX_CHECKLIST_ITEMS) return;
+      if (isRec(it) && depth < 2) {
+        const nested = firstArray(it, CHECKLIST_LIST_KEYS);
+        // a group, not an item: it carries a nested list (and no own text besides its title)
+        if (nested.length && line(it.text, 300) === undefined) {
+          add(nested, firstLine(it, CHECKLIST_GROUP_TITLE_KEYS, 60) ?? category, depth + 1);
+          continue;
+        }
+      }
+      out.push({ it, category });
+    }
+  };
+  const list = CHECKLIST_LIST_KEYS.map((k) => x[k]).find((v) => Array.isArray(v) && v.length > 0);
+  if (list) add(list, undefined, 0);
+  else {
+    const group = [...CHECKLIST_GROUP_KEYS, ...CHECKLIST_LIST_KEYS].map((k) => x[k]).find((v) => (Array.isArray(v) && v.length > 0) || isRec(v));
+    if (group) add(group, undefined, 0);
+  }
+  return out;
+}
+
 function normChecklist(x: Rec, base: Rec): void {
   const used = new Set<string>();
-  put(base, 'title', line(x.title, 200));
+  put(base, 'title', line(x.title, 200) ?? line(x.name, 200));
   put(base, 'kind', oneOf(x.kind, ['shopping', 'todo', 'packing', 'generic'] as const));
   put(base, 'groupBy', oneOf(x.groupBy, ['category', 'none'] as const));
   put(base, 'editable', bool(x.editable));
-  const items = arr(x.items);
+  const entries = checklistEntries(x);
   const out: Rec[] = [];
-  for (let i = 0; i < items.length && out.length < MAX_CHECKLIST_ITEMS; i++) {
-    const it = items[i];
+  for (let i = 0; i < entries.length && out.length < MAX_CHECKLIST_ITEMS; i++) {
+    const { it, category } = entries[i];
     let text: string | undefined;
     let r: Rec = {};
     if (typeof it === 'string' || typeof it === 'number') text = line(it, 300);
     else if (isRec(it)) {
-      text = line(it.text, 300);
+      text = firstLine(it, CHECKLIST_TEXT_KEYS, 300);
       r = it;
     }
     if (!text) continue;
     const o: Rec = { id: itemId(r.id, 'i', i, used), text };
     const qty = typeof r.qty === 'number' ? (Number.isFinite(r.qty) ? r.qty : undefined) : line(r.qty, 20);
-    put(o, 'qty', qty);
+    put(o, 'qty', qty ?? (typeof r.quantity === 'number' && Number.isFinite(r.quantity) ? r.quantity : line(r.quantity, 20)));
     put(o, 'unit', line(r.unit, 20));
-    put(o, 'category', line(r.category, 60));
-    put(o, 'checked', bool(r.checked));
+    put(o, 'category', line(r.category, 60) ?? line(r.group, 60) ?? line(r.section, 60) ?? category);
+    put(o, 'checked', bool(r.checked) ?? bool(r.done) ?? bool(r.completed));
     put(o, 'note', line(r.note, 300));
     out.push(o);
   }
@@ -1956,7 +2003,7 @@ function norm(x: unknown, depth: number, ctx: Ctx, path: string): HuiNode | null
       base.items = arr(x.items).slice(0, MAX_LIST_ITEMS).flatMap((it) => {
         if (typeof it === 'string') return [{ title: it }];
         if (!isRec(it)) return [];
-        const title = str(it.title);
+        const title = str(it.title) ?? str(it.text) ?? str(it.label) ?? str(it.name);
         if (title === undefined) return [];
         const o: Rec = { title };
         put(o, 'subtitle', str(it.subtitle));
@@ -1970,22 +2017,23 @@ function norm(x: unknown, depth: number, ctx: Ctx, path: string): HuiNode | null
       base.items = arr(x.items).slice(0, MAX_LIST_ITEMS).flatMap((it) => {
         if (typeof it === 'string') return [{ title: it }];
         if (!isRec(it)) return [];
-        const title = str(it.title);
+        const title = str(it.title) ?? str(it.text) ?? str(it.label) ?? str(it.name) ?? str(it.step);
         if (title === undefined) return [];
         const o: Rec = { title };
-        put(o, 'detail', str(it.detail));
+        put(o, 'detail', str(it.detail) ?? str(it.description));
         put(o, 'imageQuery', normalizeImageQuery(it.imageQuery));
         return [o];
       });
       put(base, 'current', num(x.current));
       break;
     case 'timeline':
-      base.items = arr(x.items).slice(0, MAX_LIST_ITEMS).flatMap((it) => {
+      base.items = arr(x.items ?? x.events).slice(0, MAX_LIST_ITEMS).flatMap((it) => {
+        if (typeof it === 'string') return [{ time: '', title: it }];
         if (!isRec(it)) return [];
-        const title = str(it.title);
+        const title = str(it.title) ?? str(it.event) ?? str(it.label) ?? str(it.text) ?? str(it.name);
         if (title === undefined) return [];
-        const o: Rec = { time: str(it.time) ?? '', title };
-        put(o, 'detail', str(it.detail));
+        const o: Rec = { time: str(it.time) ?? str(it.date) ?? str(it.year) ?? str(it.when) ?? str(it.period) ?? '', title };
+        put(o, 'detail', str(it.detail) ?? str(it.description));
         put(o, 'imageQuery', normalizeImageQuery(it.imageQuery));
         return [o];
       });
@@ -2393,6 +2441,38 @@ export function coerceRoot(x: unknown, depth = 0): unknown {
     }
   }
   return x;
+}
+
+/** the list a list-like node exists to show (an empty one renders as an empty card) */
+const COLLECTION_FIELD: Readonly<Record<string, string>> = {
+  checklist: 'items',
+  steps: 'items',
+  timeline: 'items',
+  list: 'items',
+  stats: 'items',
+  sources: 'items',
+  gallery: 'items',
+  paths: 'items',
+  compare: 'columns',
+  blocks: 'columns',
+  products: 'products',
+  places: 'places',
+  quiz: 'questions',
+  flashcards: 'cards',
+};
+
+/** a list-like node whose list came out empty (`checklist` with no items, `products` with no products …) */
+export function isEmptyCollection(node: unknown): boolean {
+  if (!isRec(node) || typeof node.type !== 'string') return false;
+  const f = COLLECTION_FIELD[node.type];
+  return f !== undefined && Array.isArray(node[f]) && node[f].length === 0;
+}
+
+/** the raw value carries readable list content somewhere (an array with a readable entry, depth ≤ 3) */
+export function hasListContent(x: unknown, depth = 0): boolean {
+  if (Array.isArray(x)) return x.some((v) => valueText(v) !== undefined);
+  if (!isRec(x) || depth > 3) return false;
+  return Object.values(x).some((v) => hasListContent(v, depth + 1));
 }
 
 // ───────────────────────── readable fallback ─────────────────────────

@@ -15,6 +15,7 @@ import {
   type ConnectionProfile,
   type ProfileKind,
 } from './profiles.ts';
+import { parseBotList } from '../hermes/bots.ts';
 
 export const PROFILES_SCHEMA_VERSION = 2;
 
@@ -82,6 +83,8 @@ export function sanitizeStoredProfile(raw: unknown, legacy = false): StoredProfi
       if (raw.syncSessions === false) p.syncSessions = false;
       if (raw.showForeignChats === true) p.showForeignChats = true;
       if (raw.showCronReports === true) p.showCronReports = true;
+      const bots = Array.isArray(raw.hermesBots) ? parseBotList(raw.hermesBots.filter((b): b is string => typeof b === 'string').join(',')) : [];
+      if (bots.length) p.hermesBots = bots;
       break;
     }
   }

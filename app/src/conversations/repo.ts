@@ -13,13 +13,15 @@
  * Transcripts are never swept while that backup exists (they are the only way to recover the lost chats), and
  * an index that could not be READ (I/O error, retried) blocks all index writes for this run: an empty fallback
  * state must never overwrite the real index. `trustedIndex()` tells callers (attachment prune) the same.
+ * Likewise a transcript that could not be READ opens as an empty chat but refuses saves until a read succeeds;
+ * a corrupt one is copied to `hui.conv.corrupt.<id>` first (a failed copy refuses saves the same way).
  *
  * Writes are throttled (default 400 ms) and strictly serialised.
  * No React / react-native imports so it runs under node:test with an in-memory storage.
  */
 import type { ChatMessage } from '../hermes/types.ts';
 import { migrateIndex, migrateMessages } from './migrate.ts';
-import { attachmentUris, prepareForStorage, searchTextOf } from './messages.ts';
+import { attachmentUris, messagesFileJson, prepareForStorage, searchTextOf } from './messages.ts';
 import { SCHEMA_VERSION } from './types.ts';
 import type { IndexFile, IndexState, MessagesFile } from './types.ts';
 
@@ -33,6 +35,8 @@ export type StorageLike = {
 export const INDEX_KEY = 'hui.conv.index';
 export const MSGS_PREFIX = 'hui.conv.msgs.';
 export const msgsKey = (id: string) => MSGS_PREFIX + id;
+/** copy of a transcript that could not be parsed (kept for recovery; not under MSGS_PREFIX, so never swept) */
+export const CORRUPT_PREFIX = 'hui.conv.corrupt.';
 
 export type RepoOptions = {
   debounceMs?: number;
@@ -84,6 +88,8 @@ export function createRepo(storage: StorageLike, options: RepoOptions = {}) {
    * empty without another read and without taking an LRU slot; a save / removal forgets it
    */
   const knownEmpty = new Set<string>();
+  /** ids whose stored transcript could not be read (I/O error after retries, or corrupt and not quarantined) */
+  const unreadable = new Set<string>();
   /** every id known since start (startup index, every saved index, every saved transcript): never swept */
   const liveIds = new Set<string>();
   /** false: the index was unreadable (empty fallback) → no index writes, no sweeps this run */
@@ -228,26 +234,55 @@ export function createRepo(storage: StorageLike, options: RepoOptions = {}) {
     // saved/removed while the read was in flight: the stored copy is older than what the app has now
     const raced = () => (gen.get(id) ?? 0) !== g;
     const newer = () => pendingMessages.get(id) ?? cache.get(id) ?? [];
-    try {
-      const raw = await blobs.getItem(msgsKey(id));
-      if (raced()) return newer();
-      if (!raw) {
-        knownEmpty.add(id);
-        searchText.set(id, '');
+    let raw: string | null;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        raw = await blobs.getItem(msgsKey(id));
+        break;
+      } catch (e) {
+        if (raced()) return newer();
+        if (attempt < 2) continue; // transient I/O error: try again
+        onError(e, 'loadMessages');
+        // NOT "no messages": the chat opens empty, but nothing may be saved over the real transcript (Sol F01)
+        unreadable.add(id);
         return [];
       }
+    }
+    if (raced()) return newer();
+    if (!raw) {
+      unreadable.delete(id);
+      knownEmpty.add(id);
+      searchText.set(id, '');
+      return [];
+    }
+    try {
       const f: MessagesFile = migrateMessages(JSON.parse(raw));
+      unreadable.delete(id);
       remember(id, f.messages);
       return f.messages;
     } catch (e) {
-      if (raced()) return newer();
       onError(e, 'loadMessages');
-      return [];
+      // corrupt: keep a copy first; only then may the (empty) chat be saved over it
+      unreadable.add(id);
+      try {
+        await blobs.setItem(CORRUPT_PREFIX + id, raw);
+        unreadable.delete(id);
+      } catch (e2) {
+        onError(e2, 'quarantine');
+      }
+      return raced() ? newer() : [];
     }
   }
 
-  /** Queue a (debounced) write. Returns what will actually be stored (stripped + capped). */
-  function saveMessages(id: string, messages: ChatMessage[]): ChatMessage[] {
+  /**
+   * Queue a (debounced) write. Returns what will actually be stored (stripped + capped), or null when refused: the
+   * stored transcript exists but could not be read, so `messages` grew from an empty fallback (Sol F01).
+   */
+  function saveMessages(id: string, messages: ChatMessage[]): ChatMessage[] | null {
+    if (unreadable.has(id)) {
+      onError(new Error('transcript unreadable'), 'saveMessages blocked');
+      return null;
+    }
     const prepared = prepareForStorage(messages);
     bump(id);
     liveIds.add(id);
@@ -268,6 +303,7 @@ export function createRepo(storage: StorageLike, options: RepoOptions = {}) {
 
   function removeMessages(id: string) {
     bump(id);
+    unreadable.delete(id); // deleting the chat is explicit
     pendingMessages.delete(id);
     failedAt.delete(id);
     cache.delete(id);
@@ -305,8 +341,8 @@ export function createRepo(storage: StorageLike, options: RepoOptions = {}) {
         continue;
       }
       try {
-        const file: MessagesFile = { v: SCHEMA_VERSION, messages: list };
-        await blobs.setItem(msgsKey(id), JSON.stringify(file));
+        // = JSON.stringify({ v, messages }) with the JSON of unchanged messages reused (messages.ts)
+        await blobs.setItem(msgsKey(id), messagesFileJson(SCHEMA_VERSION, list));
         if (pendingMessages.get(id) === list) pendingMessages.delete(id);
         failedAt.delete(id);
       } catch (e) {

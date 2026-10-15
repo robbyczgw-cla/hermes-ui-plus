@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import type { ChatMessage } from '../hermes/types';
 import { conversations as convDe } from '../i18n/ns/conversations.de.ts';
 import { conversations as convEn } from '../i18n/ns/conversations.en.ts';
-import { localizePreview, attachmentMarker, attachmentUris, capMessages, firstUserText, messagesSignature, previewOf, prepareForStorage, searchTextOf, stripMessage, capStoredText, STORED_TEXT_MAX, STORED_TEXT_MARKER } from './messages.ts';
+import { localizePreview, attachmentMarker, attachmentUris, capMessages, firstUserText, messagesSignature, previewOf, messagesFileJson, prepareForStorage, searchTextOf, stripMessage, capStoredText, STORED_TEXT_MAX, STORED_TEXT_MARKER } from './messages.ts';
 
 function msg(i: number, over: Partial<ChatMessage> = {}): ChatMessage {
   return { id: `m${i}`, role: i % 2 ? 'assistant' : 'user', text: `text ${i}`, tools: [], status: 'done', createdAt: i, ...over };
@@ -203,4 +203,25 @@ test('prepareForStorage / searchTextOf: cached per message object, same results 
   const big = Array.from({ length: 8 }, (_, i) => msg(i, { text: 'x'.repeat(200_000) }));
   assert.deepEqual(prepareForStorage(big), capMessages(big.map(stripMessage)));
   assert.ok(prepareForStorage(big).length < big.length);
+});
+
+test('messagesFileJson: JSON.stringify({ v, messages }) byte for byte, each stored message serialized once', () => {
+  const list = prepareForStorage([
+    { id: 'a', role: 'user', text: 'Hallo "du" \\   😀', tools: [], status: 'done', createdAt: 1 },
+    { id: 'b', role: 'assistant', text: 'x'.repeat(50), tools: [], status: 'streaming', createdAt: 2, error: undefined },
+  ] as ChatMessage[]);
+  assert.equal(messagesFileJson(1, list), JSON.stringify({ v: 1, messages: list }));
+  assert.equal(messagesFileJson(1, []), JSON.stringify({ v: 1, messages: [] }));
+  // the cache is per object: a message object passed again is not serialized again
+  let calls = 0;
+  const counted = { id: 'c', toJSON: () => (calls++, { id: 'c' }) } as unknown as ChatMessage;
+  const withCounted = [...list, counted];
+  assert.equal(messagesFileJson(1, withCounted), JSON.stringify({ v: 1, messages: withCounted }));
+  calls = 0;
+  messagesFileJson(1, withCounted);
+  messagesFileJson(1, withCounted);
+  assert.equal(calls, 0);
+  // array element semantics for holes / undefined
+  const holes = [undefined, list[0]] as unknown as ChatMessage[];
+  assert.equal(messagesFileJson(1, holes), JSON.stringify({ v: 1, messages: holes }));
 });

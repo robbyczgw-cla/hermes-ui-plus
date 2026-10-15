@@ -17,6 +17,10 @@ export type AnswerActions = {
   retry(variant: RetryVariant): void;
   /** header line: model + reasoning effort of this answer's turn */
   modelInfo(message: ChatMessage): AnswerModelInfo;
+  /** the quick thread (app/src/quick): no "mit anderem Modell" retry (quick has its own model setting) */
+  quick?: boolean;
+  /** quick thread: "Mit Hermes weitermachen" from this answer (new Hermes chat with the Q&A as context) */
+  handOff?(messageId: string): void;
 };
 
 export const AnswerActionsContext = createContext<AnswerActions | null>(null);

@@ -440,6 +440,257 @@ export const CLIPS = [
       await a.mark('table');
     },
   },
+  // ---- 2026-10-15: what is new since the consumer set (paths, blocks, steady product images, bots, ⚡, fluid streaming) ----
+  {
+    id: 'wege',
+    file: '14-wege',
+    title: 'Wege vergleichen',
+    titleEn: 'Compare your options',
+    caption: 'Vier Wege, ein Tipp: dein Favorit',
+    captionEn: 'Four ways, one tap: your pick',
+    blurb: 'Wo sollen die Familienfotos liegen? Vier Wege als Ketten mit Urteil, ein Tipp wählt – Hermes antwortet mit einem Plan.',
+    blurbEn: 'Where should the family photos live? Four ways as chains with a verdict; one tap picks, and Hermes answers with a plan.',
+    music: 'bed-bright',
+    gif: true,
+    speed: 1.2,
+    async run({ page, a, chat }) {
+      await chat.send('What is the safest way to back up my family photos?');
+      await chat.done();
+      await show(a, page.getByText('Where should your family photos live?').first(), 0.1);
+      await a.wait(1300);
+      await a.mark('rows');
+      await a.scroll(300, { ms: 900 });
+      await a.wait(1100);
+      await a.tap(page.getByText('Encrypted cloud copy', { exact: true }).first(), { after: 700 });
+      await a.mark('picked');
+      await a.wait(1700);
+      await chat.done();
+      await a.wait(600);
+      await show(a, page.getByText('Your backup plan').first(), 0.15);
+      await a.wait(900);
+      await a.tap(page.getByRole('checkbox', { name: /Turn on automatic upload/ }).first(), { after: 700 });
+      await a.tap(page.getByRole('checkbox', { name: /Pick a cloud service/ }).first(), { after: 1200 });
+      await a.mark('plan');
+    },
+  },
+  {
+    id: 'bausteine',
+    file: '15-bausteine',
+    title: 'Aufbau auf einen Blick',
+    titleEn: 'Setup at a glance',
+    caption: 'Ein Router oder Mesh? Als Bild',
+    captionEn: 'One router or a mesh? As a picture',
+    blurb: 'Eine Frage zum WLAN – die Antwort kommt als Bausteine-Diagramm: Spalten, Geräte, gemeinsame Basis.',
+    blurbEn: 'A question about home Wi-Fi: the answer arrives as a building-blocks diagram with columns, devices and a shared base.',
+    music: 'bed-calm',
+    gif: true,
+    speed: 1.2,
+    async run({ page, a, chat }) {
+      await chat.send('Do I need a mesh Wi-Fi at home?');
+      await chat.done();
+      await show(a, page.getByText('Wi-Fi at home: one router or a mesh?').first(), 0.1);
+      await a.wait(2200);
+      await a.mark('blocks');
+      await a.scroll(260, { ms: 1000 });
+      await a.wait(2400);
+      await a.mark('caption');
+    },
+  },
+  {
+    id: 'bilder',
+    file: '16-bilder',
+    title: 'Produktkarten ohne Springen',
+    titleEn: 'Product cards that stay put',
+    caption: 'Bilder laden – nichts springt',
+    captionEn: 'Photos load in – nothing jumps',
+    blurb: 'Auch bei langsamem Netz behalten Produktkarten ihre Größe: Bilder blenden ein, der Text darunter bleibt, wo er ist – und beim Wiederöffnen sofort.',
+    blurbEn: 'Even on a slow connection, product cards keep their size: photos fade in, the text below stays where it is, and reopening the chat is instant.',
+    music: 'bed-bright',
+    speed: 1.3,
+    setup: { imageDelay: 1800 },
+    async run({ page, a, chat }) {
+      await chat.send('Best noise-canceling headphones under €350? Top 5, please!');
+      await chat.done();
+      await show(a, page.getByText('Top 5: noise-canceling headphones under €350'), 0.1);
+      await a.mark('loading');
+      await a.wait(3200);
+      await a.mark('loaded');
+      await a.scroll(520, { ms: 1100 });
+      await a.wait(1500);
+      await a.scroll(520, { ms: 1100 });
+      await a.wait(1300);
+      await a.mark('scrolled');
+      // away and back: the cards come back at their size, no reflow
+      await a.tapXY(24, 26, { after: 1100 });
+      await a.tap(page.getByText('New chat', { exact: true }).last(), { after: 1400 });
+      await a.mark('away');
+      await a.tapXY(24, 26, { after: 1100 });
+      await a.tap(page.getByText(/Best noise-canceling headphones/).first(), { after: 1500 });
+      await a.mark('back');
+      await a.wait(1800);
+    },
+  },
+  {
+    id: 'bots',
+    file: '17-bots',
+    title: 'Bots für jede Aufgabe',
+    titleEn: 'A bot for every job',
+    caption: 'Der Bot-Wechsel im Modell-Menü',
+    captionEn: 'Switch bots in the model menu',
+    blurb: 'Jeder Hermes-Bot hat sein eigenes Modell, Gedächtnis und Können. Im Modell-Menü wählst du ihn pro Chat – hier der Küchen-Bot.',
+    blurbEn: 'Each Hermes bot has its own model, memory and skills. Pick one per chat in the model menu: here, the Kitchen bot.',
+    music: 'bed-calm',
+    gif: true,
+    speed: 1.2,
+    async run({ page, a, chat }) {
+      await a.wait(600);
+      await a.tap(page.getByRole('button', { name: /choose model/ }).first(), { after: 1300 });
+      await a.mark('picker');
+      await a.wait(900);
+      await a.tap(page.getByRole('radio', { name: /^Kitchen/ }).first(), { after: 1500 });
+      await a.mark('kitchen');
+      await a.tap(page.getByRole('button', { name: 'Close' }).last(), { after: 1000 });
+      await a.mark('closed');
+      await chat.send('What can I cook with eggs and spinach?');
+      await chat.done();
+      await a.wait(1400);
+      await a.mark('answer');
+      await a.tapXY(24, 26, { after: 1300 });
+      await a.mark('drawer');
+      await a.wait(1500);
+    },
+  },
+  {
+    id: 'schnell',
+    file: '18-schnellfrage',
+    title: 'Schnellfrage ⚡',
+    titleEn: 'Quick answers ⚡',
+    caption: 'Antwort in Sekunden – oder weiter mit Hermes',
+    captionEn: 'Answers in seconds, then hand off to Hermes',
+    blurb: 'Das ⚡ im Eingabefeld: ein schnelles Modell antwortet in ein paar Sekunden. Braucht es echte Daten, geht es mit einem Tipp als normaler Hermes-Chat weiter.',
+    blurbEn: 'The ⚡ in the composer: a fast model answers in a couple of seconds. When it needs real data, one tap continues as a normal Hermes chat.',
+    music: 'bed-bright',
+    gif: true,
+    speed: 1.1,
+    setup: { bindFetch: true },
+    async run({ page, a }) {
+      // the chat and the quick thread both keep a composer mounted → address them by placeholder
+      const say = async (placeholder, text, { enter = false } = {}) => {
+        const box = page.getByPlaceholder(placeholder).filter({ visible: true }).first();
+        await a.tap(box, { after: 250 });
+        await box.focus();
+        await a.type(text);
+        await a.wait(350);
+        // right after the hand-off the "New Hermes chat" toast still covers the screen for taps → Enter sends
+        if (enter) await page.keyboard.press('Enter');
+        else await a.tap(page.getByLabel('Send', { exact: true }).filter({ visible: true }).first(), { after: 200 });
+      };
+      const idle = async () => {
+        await page.getByLabel('Stop answer').filter({ visible: true }).first().waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
+        await page.getByLabel('Stop answer').filter({ visible: true }).first().waitFor({ state: 'hidden', timeout: 60000 });
+      };
+      await a.wait(500);
+      await a.tap(page.getByRole('button', { name: /^Ask a quick question/ }).first(), { after: 1500 });
+      await a.mark('empty');
+      await a.tap(page.getByRole('button', { name: /^Ask quickly: What is 72/ }).first(), { after: 300 });
+      await page.getByText(/22\.2 °C/).first().waitFor({ timeout: 30000 });
+      await idle();
+      await a.wait(1300);
+      await a.mark('answer1');
+      await say('Ask a quick question …', 'Is it going to rain in Rome this weekend?');
+      await page.getByText(/Continue with Hermes/).last().waitFor({ timeout: 30000 });
+      await idle();
+      await a.wait(1200);
+      await a.mark('answer2');
+      await a.tap(page.getByText(/Continue with Hermes/).last(), { after: 1600 });
+      await a.mark('handoff');
+      await say('Message Hermes', 'Yes, please check it for real', { enter: true });
+      await a.wait(3500);
+      await a.mark('agent');
+      await idle();
+      await a.wait(900);
+      await show(a, page.getByText('Rome', { exact: true }).first(), 0.2).catch(() => {});
+      await a.wait(1800);
+      await a.mark('forecast');
+    },
+  },
+  {
+    id: 'fluessig',
+    file: '19-fluessig',
+    title: 'Streaming ohne Ruckeln',
+    titleEn: 'Fluid streaming',
+    caption: 'Lange Antwort, butterweich',
+    captionEn: 'A long answer, perfectly smooth',
+    blurb: 'Auch lange Antworten laufen flüssig mit 60 Bildern pro Sekunde: Text erscheint live, Karten blenden sanft ein.',
+    blurbEn: 'Even long answers stream at a steady 60 frames per second: text appears live and cards fade in softly.',
+    music: 'bed-bright',
+    speed: 1.1,
+    async run({ page, a, chat }) {
+      await chat.send('Plan a relaxed long weekend in Lisbon for me.');
+      await a.wait(3500);
+      await a.mark('start');
+      await chat.done(90000);
+      await a.wait(900);
+      await a.mark('done');
+      await a.scroll(-900, { ms: 1400 });
+      await a.wait(900);
+      await a.scroll(700, { ms: 1400 });
+      await a.wait(1200);
+      await a.mark('scrolled');
+    },
+  },
+  {
+    id: 'sperre',
+    file: '20-modellsperre',
+    title: 'Modell pro Chat, gesichert',
+    titleEn: 'A model per chat, locked in',
+    caption: 'Modell wählen – der Chat merkt es sich',
+    captionEn: 'Pick a model: the chat remembers it',
+    blurb: 'Das gewählte Modell wird beim Hermes-Server für den Chat festgehalten; die Kopfzeile zeigt das Schloss.',
+    blurbEn: 'The model you pick is locked on the Hermes session for that chat; the header shows a lock.',
+    music: 'bed-calm',
+    speed: 1.15,
+    async run({ page, a, chat }) {
+      await a.wait(500);
+      await a.tap(page.getByRole('button', { name: /choose model/ }).first(), { after: 1300 });
+      await a.mark('picker');
+      await a.tap(page.getByRole('button', { name: /^Model hermes-4-70b/ }).first(), { after: 1400 });
+      await a.mark('picked');
+      await chat.send('Hi!');
+      await chat.done();
+      await a.wait(2200);
+      await a.mark('locked');
+      await a.wait(1200);
+    },
+  },
+  {
+    id: 'nichtgesendet',
+    file: '21-nichtgesendet',
+    title: 'Nichts geht verloren',
+    titleEn: 'Nothing gets lost',
+    caption: 'App beendet? „Erneut senden“',
+    captionEn: 'App closed mid-send? “Send again”',
+    blurb: 'Wird die App beendet, bevor der Server die Nachricht bestätigt hat, bleibt sie erhalten: „Nicht gesendet“ mit „Erneut senden“.',
+    blurbEn: 'If the app closes before the server confirmed a message, it is kept: “Not sent”, with “Send again”.',
+    music: 'bed-calm',
+    speed: 1.1,
+    async run({ page, a, chat }) {
+      await chat.send('When does the bus timetable change this winter?');
+      await a.wait(2600);
+      await a.mark('sent');
+      // the app is closed before the server answers
+      await page.reload({ waitUntil: 'load' });
+      await page.getByText(/Not sent/).first().waitFor({ timeout: 60000 });
+      await a.wait(900);
+      await a.mark('notsent');
+      await a.wait(1500);
+      await a.tap(page.getByText('Send again', { exact: true }).first(), { after: 800 });
+      await a.mark('resent');
+      await chat.done();
+      await a.wait(1500);
+      await a.mark('answer');
+    },
+  },
   {
     id: 'designs',
     file: '11-designs',

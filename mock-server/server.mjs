@@ -14,6 +14,9 @@ const PORT = Number(opt('port', process.env.PORT || 8787));
 const HOST = opt('host', '0.0.0.0');
 const WITH_ROUTE = args.includes('--route');
 const FAST = args.includes('--fast'); // no delays (tests)
+// Hermes profiles ("bots"): the gateway mirrors every path under /p/<profile>/ (docs/HERMES-API.md "Profiles (bots)").
+// --profiles a,b (default: research); an unknown profile → 404 like Hermes.
+const PROFILES = String(opt('profiles', 'research')).split(',').map((x) => x.trim()).filter(Boolean);
 /** --slow-ms N: fixed per-token delay for `langsam`/`slow` requests (default random 220-420 ms) */
 const SLOW_MS = Number(opt('slow-ms', 0)) || 0;
 const KEEPALIVE_MS = FAST ? 200 : 10000; // Hermes: 10 s
@@ -292,7 +295,13 @@ async function handleApproval(req, res, runId) {
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://x');
-    const path = url.pathname.replace(/\/+$/, '') || '/';
+    let path = url.pathname.replace(/\/+$/, '') || '/';
+    const pm = /^\/p\/([^/]+)(\/.*)$/.exec(path);
+    const profile = pm ? pm[1] : null;
+    if (pm) {
+      if (!PROFILES.includes(profile)) return err(req, res, 404, `Unknown profile: ${profile}`, 'invalid_request_error', 'profile_not_found');
+      path = pm[2];
+    }
     if (req.method === 'OPTIONS') {
       res.writeHead(200, cors(req));
       return res.end();
@@ -304,7 +313,8 @@ const server = http.createServer(async (req, res) => {
       if (!authOk(req)) return err(req, res, 401, 'Invalid gateway API key (API_SERVER_KEY)', 'gateway_auth_error', 'gateway_auth_failed');
       const now = Math.floor(Date.now() / 1000);
       const m = (id, parent) => ({ id, object: 'model', created: now, owned_by: 'hermes', permission: [], root: id, parent });
-      return json(req, res, 200, { object: 'list', data: [m(MODEL, null), m('grok-4.5', MODEL)] });
+      // each profile has its own model routes
+      return json(req, res, 200, { object: 'list', data: profile ? [m(MODEL, null), m(`${profile}-model`, MODEL)] : [m(MODEL, null), m('grok-4.5', MODEL)] });
     }
     if (req.method === 'POST' && path === '/v1/chat/completions') return await handleChat(req, res);
     const am = path.match(/^\/v1\/runs\/([^/]+)\/approval$/);

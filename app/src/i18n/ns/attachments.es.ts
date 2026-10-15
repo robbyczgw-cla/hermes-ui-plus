@@ -32,10 +32,10 @@ export const attachments = {
   validate: {
     unsupportedType: '“{name}”: tipo de archivo no admitido.',
     unsupportedImage: '“{name}”: formato de imagen no admitido.',
-    tooLarge: '“{name}” es demasiado grande ({size}, máx. {max}).',
+    tooLarge: '“{name}” es demasiado grande ({size}, máx. {max} por archivo).',
     needsBridge: 'Los archivos necesitan la UI-Bridge. Sin ella, solo son posibles imágenes y archivos de texto pequeños (≤ {limit}).',
     tooLargeInline: '“{name}” es demasiado grande para incrustarlo ({size}, máx. {max}). Los archivos más grandes necesitan la UI-Bridge.',
-    tooLargeText: '“{name}” es demasiado grande ({size}, máx. {max} para archivos de texto).',
+    tooLargeText: '“{name}” es demasiado grande ({size}, máx. {max} por archivo de texto).',
     tooMany: 'Como máximo {max} adjuntos por mensaje.',
     defective: '“{name}” tiene un error. Quítalo, por favor.',
     payloadTooLarge: 'Adjuntos demasiado grandes: {size} (máx. {max} por mensaje). Adjunta menos imágenes, por favor.',
@@ -47,7 +47,7 @@ export const attachments = {
   upload: {
     unauthorized: 'Subida rechazada: token del bridge no válido. Revisa la clave de API en los ajustes.',
     notSupported: 'Esta conexión no admite subidas de archivos. ¿La UI-Bridge está actualizada?',
-    tooLarge: '“{name}” es demasiado grande para subirlo (máx. {max}).',
+    tooLarge: '“{name}” es demasiado grande para subirlo (máx. {max} por archivo).',
     unsupportedType: '“{name}”: el servidor no acepta este tipo de archivo.',
     failedWithReason: 'La subida de “{name}” ha fallado: {reason}',
     failed: 'La subida de “{name}” ha fallado.',
@@ -61,6 +61,7 @@ export const attachments = {
   file: {
     prepareFailed: '“{name}” no se pudo procesar.',
     openFailed: '“{name}” no se pudo abrir.',
+    missingAfterRestart: '“{name}” ya no está en este dispositivo: quítalo o descarta el mensaje.',
   },
   encode: {
     readFailed: '“{name}” no se pudo leer.',

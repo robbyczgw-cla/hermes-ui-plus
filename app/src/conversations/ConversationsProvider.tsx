@@ -39,6 +39,7 @@ import { attachmentUris } from './messages';
 import { sortByRecency } from './group';
 import { afterIdle } from './idle';
 import type { ConversationMeta, HermesChatOptions, ProfileRef, SearchHit } from './types';
+import type { ModelLockState } from '../hermes/modelLock';
 
 export type ConversationsApi = {
   /** index loaded from storage */
@@ -48,8 +49,13 @@ export type ConversationsApi = {
   /** conversation that was open last / is open now (persisted) */
   activeId: string | undefined;
   setActiveId: (id: string | undefined) => void;
-  /** start a new conversation for this profile (re-uses an existing empty draft of the same profile) and make it active */
-  create: (profile: ProfileRef) => ConversationMeta;
+  /**
+   * start a new conversation for this profile (re-uses an existing empty draft of the same profile) and make it
+   * active; `bot` = Hermes profile ("bot") of the new chat (hermes/bots.ts)
+   */
+  create: (profile: ProfileRef, opts?: { bot?: string }) => ConversationMeta;
+  /** Hermes bot of an EMPTY chat (picker "Bot" section; ignored once it has messages) */
+  setBot: (id: string, bot: string | undefined) => void;
   remove: (id: string) => void;
   rename: (id: string, title: string) => void;
   /** generated title (bridge auto-title): replaces only automatic titles; Hermes titles may replace it later */
@@ -363,7 +369,8 @@ export function useConversations(): ConversationsApi {
       list,
       activeId: state.activeId,
       setActiveId: controller.setActive,
-      create: controller.create,
+      create: (profile: ProfileRef, opts?: { bot?: string }) => controller.create(profile, { bot: opts?.bot }),
+      setBot: controller.setBot,
       remove: controller.remove,
       rename: controller.rename,
       setAutoTitle: controller.setAutoTitle,
@@ -394,11 +401,15 @@ export type UseConversation = {
    * the chat keeps its place in the list (a fetched Hermes transcript is not activity, remoteSync SNAPSHOT_SAVE)
    */
   save: (messages: ChatMessage[], opts?: { keepOrder?: boolean }) => void;
+  /** `save` + write to storage now; resolves once written (before a turn request starts: durable send) */
+  saveNow: (messages: ChatMessage[]) => Promise<void>;
   setSessionId: (sessionId: string) => void;
   /** per-conversation model override (undefined = profile default) */
   setModel: (model: string | undefined) => void;
   /** per-conversation Hermes reasoning/fast options (persisted; pass `meta.modelOptions` to useHermesChat) */
   setModelOptions: (options: HermesChatOptions | undefined) => void;
+  /** outcome of the Hermes session model lock (hermes/modelLock.ts) */
+  setModelLock: (lock: ModelLockState | undefined) => void;
 };
 
 const EMPTY: ChatMessage[] = [];
@@ -432,6 +443,7 @@ export function useConversation(id: string | null | undefined): UseConversation 
 
   const meta = useMemo(() => (id ? state.items.find((c) => c.id === id) : undefined), [id, state.items]);
   const save = useCallback((messages: ChatMessage[], opts?: { keepOrder?: boolean }) => (id ? controller.save(id, messages, opts) : undefined), [id, controller]);
+  const saveNow = useCallback((messages: ChatMessage[]) => (id ? controller.saveNow(id, messages) : Promise.resolve()), [id, controller]);
   const setSessionId = useCallback(
     (sessionId: string) => {
       if (id) controller.setSessionId(id, sessionId);
@@ -453,14 +465,23 @@ export function useConversation(id: string | null | undefined): UseConversation 
     [id, controller]
   );
 
+  const setModelLock = useCallback(
+    (lock: ModelLockState | undefined) => {
+      if (id) controller.setModelLock(id, lock);
+    },
+    [id, controller]
+  );
+
   const isLoaded = !!id && loaded?.id === id;
   return {
     ready: indexReady && isLoaded,
     messages: isLoaded ? loaded.messages : EMPTY,
     meta,
     save,
+    saveNow,
     setSessionId,
     setModel,
     setModelOptions,
+    setModelLock,
   };
 }

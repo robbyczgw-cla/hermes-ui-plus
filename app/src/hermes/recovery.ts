@@ -155,7 +155,7 @@ export function matchRemoteTurn(list: readonly ChatMessage[], idx: number, remot
   const candidates: (ChatMessage | null)[] = [];
   for (let ri = 0; ri < remote.length; ri++) {
     const r = remote[ri];
-    if (r.role !== 'user' || !sameUserTurn(user, r.text)) continue;
+    if (r.role !== 'user' || !sameUserTurn(user, r)) continue;
     if (!inWindow(r.createdAt)) continue; // an older run of the same question
     const ra = remote[ri + 1]?.role === 'assistant' ? remote[ri + 1] : undefined;
     if (ra && ids.size && ra.tools.some((t) => ids.has(t.id))) return { stored: true, answer: isFinalAnswer(ra) ? ra : null };

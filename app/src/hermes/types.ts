@@ -149,6 +149,9 @@ export type Usage = { promptTokens: number; completionTokens: number; totalToken
 
 export type MessageStatus = 'streaming' | 'done' | 'error' | 'stopped';
 
+/** quick answer marker on an assistant message (see ChatMessage.quick) */
+export type QuickStamp = { model?: string; ms?: number };
+
 export type ChatMessage = {
   id: string;
   role: 'user' | 'assistant';
@@ -184,9 +187,20 @@ export type ChatMessage = {
   attachments?: Attachment[];
   /**
    * user messages only: sent while attachment uploads were still running (hermes/pendingSend.ts). The bubble shows
-   * per-attachment progress; the turn starts when every upload is done. Runtime only: never persisted.
+   * per-attachment progress; the turn starts when every upload is done. Runtime only: persisted as `sendQueued`.
    */
   sendPending?: boolean;
+  /**
+   * user messages only: a send that was still waiting for its uploads when the app stopped (persisted form of
+   * `sendPending`, hermes/pendingSend.ts). Not sent: the bubble offers "Erneut senden" / "Verwerfen", never automatic.
+   */
+  sendQueued?: boolean;
+  /**
+   * user messages only: the turn request of this message has started but the bridge / Hermes has not accepted it yet
+   * (runtime, hermes/pendingSend.ts "durable send"). Persisted as `sendQueued` with its `sendKey`, without the answer
+   * placeholder: a kill before the acknowledgement restores it as "Nicht gesendet".
+   */
+  sendUnacked?: boolean;
   /** non-tool timeline steps (route, status, approval, thinking, fallback, continuation) */
   trace?: TraceStep[];
   /** timing / token numbers of this turn */
@@ -208,6 +222,12 @@ export type ChatMessage = {
    */
   interrupted?: number;
   /**
+   * Hermes assistant messages: `Idempotency-Key` the turn was sent with (hermes/idempotency.ts). A retry of a send
+   * that never showed an answer re-uses it, so the UI bridge never runs the same message twice. Also on a user
+   * message while its turn is unacknowledged (`sendUnacked`) and on its stored queued form: "Erneut senden" re-uses it.
+   */
+  sendKey?: string;
+  /**
    * direct backends (no server-side run): ms when the stream died while the app was in the
    * background. Shown as a calm notice with "Fortsetzen" / "Neu starten" instead of a red error (background/cut.ts).
    */
@@ -220,6 +240,11 @@ export type ChatMessage = {
   pendingApprovals?: ApprovalRequest[];
   /** persistent history of this turn's approvals (answered / expired / cancelled) */
   approvalLog?: ApprovalRecord[];
+  /**
+   * quick answers (app/src/quick): the answer came from the fast quick model, not from the Hermes agent. Drives the
+   * "⚡ model · 1,6 s" meta line and the context label when it is handed to a Hermes chat. `ms` = time to first token.
+   */
+  quick?: QuickStamp;
 };
 
 export type HermesConn = {
@@ -256,6 +281,9 @@ export type HermesErrorKind =
 export type HermesEvent =
   | { type: 'start'; completionId: string; model?: string }
   | { type: 'text'; text: string }
+  /** the answer text so far is replaced as a whole (`event: hermes.text.replace`, e.g. a final message that differs
+   *  from the live draft streamed before it) */
+  | { type: 'textReplace'; text: string }
   | { type: 'reasoning'; text: string }
   | {
       type: 'tool';

@@ -161,6 +161,65 @@ const SERVER_TABLE = {
   type: 'table', caption: 'Disk and logs (sample server)', basis: 'illustrative', columns: ['Item', 'Size', 'Status'],
   rows: [['Disk /', '49 of 80 GB', 'OK'], ['app.log', '2.1 GB', 'No rotation'], ['syslog', '640 MB', 'Weekly'], ['journal', '410 MB', 'Capped']],
 };
+
+// ---- additions 2026-10-15: paths, blocks, bots, quick answers, long streamed answer ----
+const PATHS_PHOTOS = {
+  type: 'paths', id: 'photo-backup', title: 'Where should your family photos live?', select: true, basis: 'illustrative',
+  items: [
+    { id: 'phone', title: 'Only on your phone', badge: { text: 'Avoid', tone: 'bad' },
+      path: [{ label: 'Phone', icon: 'phone' }, { label: 'Gallery', icon: 'folder' }],
+      note: 'One lost or broken phone and the memories are gone.' },
+    { id: 'drive', title: 'External hard drive', badge: { text: 'Baseline', tone: 'neutral' },
+      path: [{ label: 'Phone', icon: 'phone' }, { label: 'Laptop', icon: 'laptop' }, { label: 'Hard drive', icon: 'disk' }],
+      note: 'Simple, but it sits in the same room as the originals.' },
+    { id: 'nas', title: 'Home storage box', badge: { text: 'Interesting', tone: 'good' },
+      path: [{ label: 'Phone', icon: 'phone' }, { label: 'Home Wi-Fi', icon: 'network' }, { label: 'Storage box', icon: 'disk' }],
+      note: 'Backs up by itself at home. Needs a little setup.' },
+    { id: 'cloud', title: 'Encrypted cloud copy', badge: { text: 'Recommended', tone: 'good' },
+      path: [{ label: 'Phone', icon: 'phone' }, { label: 'Your key', icon: 'lock' }, { label: 'Cloud', icon: 'cloud' }],
+      note: 'A copy far from home, locked with a key only you hold.' },
+  ],
+};
+const PATHS_PLAN = {
+  type: 'checklist', id: 'photo-plan', title: 'Your backup plan', basis: 'illustrative',
+  items: [
+    { id: 'a', text: 'Pick a cloud service with end-to-end encryption' },
+    { id: 'b', text: 'Turn on automatic upload over Wi-Fi' },
+    { id: 'c', text: 'Write your recovery key on paper and store it safely' },
+    { id: 'd', text: 'Check once a month that new photos arrived' },
+  ],
+};
+const BLOCKS_WIFI = {
+  type: 'blocks', id: 'wifi-setup', title: 'Wi-Fi at home: one router or a mesh?',
+  columns: [
+    { title: 'One router', grid: 2,
+      items: [{ label: 'Phone', icon: 'phone' }, { label: 'Laptop', icon: 'laptop' }, { label: 'TV', icon: 'desktop' }, { label: 'Speaker', icon: 'app' }],
+      base: { label: 'Router', sub: 'Living room', icon: 'network' } },
+    { title: 'Mesh system', grid: 2,
+      items: [{ label: 'Phone', icon: 'phone', tone: 'good' }, { label: 'Laptop', icon: 'laptop', tone: 'good' }, { label: 'TV', icon: 'desktop', tone: 'good' }, { label: 'Speaker', icon: 'app', tone: 'good' }],
+      base: { label: 'Router + 2 satellites', sub: 'One network name', icon: 'network' } },
+  ],
+  caption: 'Simplified – a mesh adds extra access points, so the signal reaches every room.',
+};
+const TRIP_STATS = { type: 'stats', items: [{ label: 'Days', value: '3' }, { label: 'Budget', value: '≈ €420' }, { label: 'Walking', value: '≈ 9 km/day' }] };
+const TRIP_FOOD = {
+  type: 'table', caption: 'Where to eat (fictional examples)', basis: 'illustrative', columns: ['Meal', 'Spot', 'Price'],
+  rows: [['Breakfast', 'Blue Tile Bakery', '€'], ['Lunch', 'Harbor Grill', '€€'], ['Dinner', 'Little Lantern', '€€']],
+};
+const TRIP_PACK = {
+  type: 'checklist', id: 'trip-pack', title: 'Pack list', basis: 'illustrative',
+  items: [{ id: 'a', text: 'Comfortable walking shoes' }, { id: 'b', text: 'Light rain jacket' }, { id: 'c', text: 'Phone charger and adapter' }, { id: 'd', text: 'Reusable water bottle' }],
+};
+const WEATHER_ROME = {
+  type: 'weather', location: 'Rome', unit: 'C', basis: 'illustrative',
+  current: { temp: 21, condition: 'partly', feelsLike: 20, wind: 12, humidity: 58, precip: 20 },
+  daily: [
+    { date: '2026-10-17', min: 14, max: 22, condition: 'sunny', precip: 5 },
+    { date: '2026-10-18', min: 15, max: 21, condition: 'partly', precip: 20 },
+    { date: '2026-10-19', min: 13, max: 18, condition: 'rain', precip: 70 },
+  ],
+};
+
 export const SCENARIOS = {
   research: { format: 'text', steps: () => [
     { reasoning: 'Search for self-hosted RSS readers, read the best candidates, save notes to a file, then summarize with sources.' },
@@ -235,10 +294,52 @@ export const SCENARIOS = {
   },
   recipe: { format: 'recipe', steps: () => [{ wait: 300 }, { text: 'One skillet, two happy people. Here’s a quick shakshuka:\n\n' }, { text: hui(RECIPE) }, { text: '\nEnjoy! Tap “Add ingredients to shopping list” to make your grocery run easy.' }] },
   theme: { format: 'text', steps: () => [{ text: 'Open **Settings → Appearance** to find your favorite light or dark theme:\n\n' }, { text: hui({ type: 'suggestions', items: ['Paper', 'OLED black', 'Standard', 'Nord'] }) }] },
+
+  pathsPhotos: { format: 'paths', steps: () => [{ text: 'There are four common ways. Tap the one that fits you best:\n\n' }, { text: hui(PATHS_PHOTOS) }] },
+  pathsPick: { format: 'text', steps: (c) => [
+    { text: 'Good choice: **an encrypted cloud copy** keeps your photos safe even if your phone and your home are not. Here is a simple plan:\n\n' },
+    { text: hui(PATHS_PLAN) }, { text: '\nWant me to walk you through the first step?' },
+  ] },
+  blocksWifi: { format: 'blocks', steps: () => [{ text: 'Here is the difference at a glance:\n\n' }, { text: hui(BLOCKS_WIFI) }, { text: '\nIn a house with thick walls, a **mesh** is usually worth it.' }] },
+  tripLong: { format: 'text', steps: () => [
+    { text: 'A long weekend in Lisbon is very doable on foot, by tram and with a few good meals. Here is a relaxed plan you can follow or bend to your taste.\n\n', fast: 0.7 },
+    { text: hui(TRIP_STATS), fast: 0.7 },
+    { text: '\n**Day 1: the old town.** Start with a coffee and a custard tart, then wander uphill through the narrow streets.\n\n- Take the yellow tram to the castle viewpoint\n- Linger over lunch in a small family-run place\n- Watch the sunset from a hilltop terrace\n\n', fast: 0.7 },
+    { text: '**Day 2: by the river.** Walk the waterfront, visit the old tower, and leave time for the museum of tiles.\n\n- Rent a bike for the riverside path\n- Stop for fresh fish at the harbor\n- End with a short ferry ride at golden hour\n\n', fast: 0.7 },
+    { text: hui(TRIP_FOOD), fast: 0.7 },
+    { text: '\n**Day 3: a day trip.** Take the morning train to the seaside town with the colorful palace, and be back for a slow dinner.\n\n', fast: 0.7 },
+    { text: hui({ type: 'callout', tone: 'info', title: 'Good to know', text: 'Streets are steep and the stones can be slippery after rain. Comfortable shoes beat stylish ones here.' }), fast: 0.7 },
+    { text: '\nOne last thing: pack light.\n\n', fast: 0.7 },
+    { text: hui(TRIP_PACK), fast: 0.7 },
+    { text: '\nWant me to turn this into a day-by-day schedule?', fast: 0.7 },
+  ] },
+  weatherRome: { format: 'text', steps: () => [
+    { reasoning: 'The user wants the real forecast for Rome this weekend. Search for it, then show it as a weather card.' },
+    { tool: { name: 'web_search', label: 'Rome weather forecast this weekend', emoji: '🔍', ms: 1800 } },
+    { tool: { name: 'web_extract', label: 'example.com/weather/rome', emoji: '📄', ms: 1500 } },
+    { text: 'Here is the real forecast. **Saturday and Sunday look dry**, rain arrives on Monday:\n\n' },
+    { text: hui(WEATHER_ROME) },
+    { text: '\nPack a light jacket for the evenings.' },
+  ] },
+  botKitchen: { format: 'text', steps: () => [
+    { text: 'Kitchen here! 🍳 With eggs and spinach you are ten minutes from dinner:\n\n' },
+    { text: '1. **Wilt** a big handful of spinach in a hot pan with garlic.\n2. **Crack** in two eggs per person and cover for 3 minutes.\n3. **Finish** with lemon, pepper and a pinch of chili.\n\n' },
+    { text: 'Have feta in the fridge? Crumble it over the top.' },
+  ] },
+  botResearch: { format: 'text', steps: () => [
+    { text: 'Research bot here. I will look at independent tests first and report back with sources.' },
+  ] },
+  busTimetable: { format: 'text', steps: () => [{ text: 'The winter timetable starts on **December 14**. Lines 12 and 40 run a little earlier on weekdays; the rest stay as they are.' }] },
   hello: { format: 'text', steps: () => [{ text: 'Hi! I’m Hermes. Ask me something: I can answer with cards, lists, timers and more when they help.' }] },
 };
 export function pickV4(text) {
   const t = text.toLowerCase();
+  if (/^\[paths:/.test(t)) return 'pathsPick';
+  if (/back\s?up/.test(t) && /photo/.test(t)) return 'pathsPhotos';
+  if (/wi-?fi|mesh/.test(t) && !/^\[/.test(t)) return 'blocksWifi';
+  if (/lisbon/.test(t)) return 'tripLong';
+  if (/bus timetable/.test(t)) return 'busTimetable';
+  if (/forecast|real weather|check it for real/.test(t)) return 'weatherRome';
   if (/^\[products:/.test(t)) return 'productsPick';
   if (/^\[guide:/.test(t)) return 'guideStuck';
   if (/^\[workout:/.test(t)) return 'workoutDone';

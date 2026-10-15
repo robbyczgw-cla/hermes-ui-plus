@@ -124,6 +124,11 @@ export function mapFrame(frame: Frame): HermesEvent[] {
         },
       ];
     }
+    case 'hermes.text.replace': {
+      // the server's answer text so far, as a whole (a streamed draft was corrected); empty = cleared
+      const text = str(json.text);
+      return text === undefined ? [] : [{ type: 'textReplace', text }];
+    }
     case 'hermes.status': {
       const text = str(json.text);
       return text ? [{ type: 'status', kind: str(json.kind) ?? 'status', text }] : [];
@@ -154,6 +159,8 @@ function mapChunk(json: Json): HermesEvent[] {
   const choice = Array.isArray(json.choices) && isObj(json.choices[0]) ? json.choices[0] : undefined;
   if (!choice) return out;
   const delta = isObj(choice.delta) ? choice.delta : {};
+  // text for clients without `hermes.text.replace` support; the replace event before it already carries it
+  if (isObj(json.hermes) && json.hermes.replace_fallback === true) return out;
 
   if (delta.role === 'assistant') {
     out.push({ type: 'start', completionId: str(json.id) ?? '', model: str(json.model) });

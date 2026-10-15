@@ -10,6 +10,8 @@ import { useConversations } from '../conversations';
 import { renameUnique, uniqueTitle } from '../conversations/title';
 import type { ChatMessage, UseHermesChat } from '../hermes';
 import { useHermesCapabilities } from '../hermes/useHermesCapabilities';
+import { useHermesBots } from '../hermes/useHermesBots';
+import { botBadge, botOf, withBot } from '../hermes/bots';
 import type { HermesChatOptions } from '../hermes/capabilities';
 import type { TurnOverride } from '../hermes/turnOverride';
 import { shellState } from '../background/noticeState';
@@ -32,7 +34,13 @@ import { ChatHeader } from './ChatHeader';
 import { useChatShell } from './ChatShellContext';
 import { MarkdownImageContext } from './MarkdownImageContext';
 import { crashTestChat } from './crashTest';
-import { Composer, type ComposerHandle } from './Composer';
+import { Composer, type ComposerHandle, type ComposerQuick } from './Composer';
+import { refreshQuickAvailability, useQuickAvailability } from '../quick/hooks';
+import { quickProfileFor } from '../quick/core';
+import { closeQuick, openQuick, takeDraft, useQuickNavVersion } from '../quick/nav';
+import { useQuickSettings } from '../quick/store';
+import { QuickHeader } from '../quick/QuickHeader';
+import { QuickEmptyState } from '../quick/QuickEmptyState';
 import { useSlashCommands, type ChatOptionsControl } from './commands';
 import { consumeComposerFocus, onComposerFocusRequest } from '../desktop/bridge';
 import { useDesktopChatCommands } from '../desktop/chatCommands';
@@ -41,9 +49,9 @@ import { HistoryPlaceholder } from './HistoryPlaceholder';
 import { messageAreaFor } from './messageArea';
 import { isLocalMessage, localChecklistMessage, type CreateListEvent } from './localMessages';
 import { MessageList, type MessageListHandle } from './MessageList';
-import { PendingSendContext, type PendingBubble } from './pendingSendContext';
+import { PendingSendContext, QueuedSendContext, type PendingBubble, type QueuedBubble } from './pendingSendContext';
 import { ModelPicker } from './ModelPicker';
-import { modelLabel } from './models';
+import { headerModelLabel } from './models';
 import { useToast } from './Toast';
 import { TurnActionsContext } from './turnActions';
 import type { Health } from './useConnectionHealth';
@@ -69,6 +77,8 @@ type Props = {
   model: string | undefined;
   /** store the picked model on the conversation */
   onPickModel(model: string | undefined): void;
+  /** Hermes v0.22: the chat's model is locked on its Hermes session (header shows it, hermes/modelLock.ts) */
+  modelLocked?: boolean;
   /** "Neuer Chat": the shell creates a new conversation (remounts this view) */
   onNewChat(): void;
   onOpenDrawer(): void;
@@ -87,6 +97,11 @@ type Props = {
    * there, the message area shows a placeholder and a send waits (it would be merged against a missing history)
    */
   historyPending?: boolean;
+  /**
+   * the quick thread of this connection (app/src/quick, QuickSession): own header + empty state, ⚡ on in the
+   * composer, no titles / follow-ups / slash commands / branching; answers offer "Mit Hermes weitermachen"
+   */
+  quick?: { handOff(messageId: string): void; onClear(): void; /** answering model (empty thread) */ model?: string };
 };
 
 /** header title per backend (session components may override via `title`) */
@@ -152,6 +167,7 @@ function ChatViewInner({
   offlineHint,
   model,
   onPickModel,
+  modelLocked = false,
   onNewChat,
   onOpenDrawer,
   options,
@@ -160,6 +176,7 @@ function ChatViewInner({
   title,
   placeholder,
   historyPending = false,
+  quick,
   sendRef,
   prefillRef,
 }: Props & { sendRef: MutableRefObject<(text: string) => boolean>; prefillRef: MutableRefObject<(text: string) => void> }) {
@@ -177,8 +194,11 @@ function ChatViewInner({
   const keyboardVisible = useKeyboardVisible();
   const listRef = useRef<MessageListHandle>(null);
   const composerRef = useRef<ComposerHandle>(null);
+  const quickMode = !!quick;
+  // the open chat while the quick thread is shown on top of it (display: none, stays mounted)
+  const covered = !!shell?.covered;
   // desktop app: focus requests (new chat via shortcut / tray / ⌘N); hidden background sessions do not take them
-  const hiddenSession = !!shell?.hidden;
+  const hiddenSession = !!shell?.hidden || covered;
   useEffect(() => {
     if (hiddenSession) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -231,6 +251,24 @@ function ChatViewInner({
     () => (uploadWait ? { messageId: uploadWait.messageId, retry: uploadWait.retry, remove: uploadWait.remove, cancel: stop } : null),
     [uploadWait, stop],
   );
+  // a send queued when the app stopped during its uploads: "Erneut senden" / "Verwerfen" (text back into the composer)
+  const queued = chat.queuedSend;
+  const turnRunning = chat.status === 'streaming';
+  const queuedBubble = useMemo<QueuedBubble | null>(
+    () =>
+      queued
+        ? {
+            state: queued.state,
+            busy: turnRunning,
+            resend: queued.resend,
+            discard: (id) => {
+              const text = queued.discard(id);
+              if (text) composerRef.current?.restoreText(text, true);
+            },
+          }
+        : null,
+    [queued, turnRunning],
+  );
 
   // ---- sending (reports whether it actually sent → interactive nodes lock only on success)
   const sendMessage = useCallback(
@@ -250,6 +288,13 @@ function ChatViewInner({
     },
     [send, isBusy, toast, tr],
   );
+  // a send that fails (instantly, offline: E2E round 12 F2): the error card comes into view unless the user
+  // scrolled away since the send (MessageList revealLatest)
+  const last = messages[messages.length - 1];
+  const failedAnswer = last?.role === 'assistant' && last.status === 'error' ? last : null;
+  useEffect(() => {
+    if (failedAnswer) requestAnimationFrame(() => listRef.current?.revealLatest());
+  }, [failedAnswer]);
   // ---- AI data-sharing consent (compliance/consent.ts, Apple 5.1.2(i)): asked before the first message to a
   // non-demo backend and again after a text version bump. A refused send is parked and goes out on "weiter".
   const consent = useAiConsent();
@@ -393,7 +438,7 @@ function ChatViewInner({
   // Settings → Chat → Auto-Titel / Folgefragen (off: no meta request at all)
   const { prefs } = usePreferences();
   useAutoTitle(messages, {
-    enabled: prefs.autoTitles,
+    enabled: prefs.autoTitles && !quickMode,
     bridge: metaConn,
     conversationKey: conversationId,
     hasTitle: !!meta && meta.titleSource !== 'auto',
@@ -414,7 +459,7 @@ function ChatViewInner({
       });
     },
   });
-  const followups = useFollowups(messages, { bridge: metaConn, conversationKey: conversationId, enabled: prefs.showFollowups });
+  const followups = useFollowups(messages, { bridge: metaConn, conversationKey: conversationId, enabled: prefs.showFollowups && !quickMode });
 
   // ---- add_to_list without a checklist → insert a LOCAL checklist message (never sent to the model)
   const pendingLists = useRef<CreateListEvent[]>([]);
@@ -447,7 +492,8 @@ function ChatViewInner({
 
   // Approval sheet (Hermes only). Hidden locally via "Schließen" (e.g. after a 409); a chip re-opens it.
   // Approval cards (Hermes; demo/other backends only have the single `approval`). Queue, hide chip, expiry: ApprovalStack.
-  const approvals = useMemo(() => chat.approvals ?? (chat.approval ? [chat.approval] : []), [chat.approvals, chat.approval]);
+  // same requests → same array: useHermesChat derives them from `messages`, i.e. a new array on every streaming update
+  const approvals = useStableList(useMemo(() => chat.approvals ?? (chat.approval ? [chat.approval] : []), [chat.approvals, chat.approval]));
   const respondApprovalFor = chat.respondApprovalFor;
   const respondSingle = chat.respondApproval;
   const onApprovalRespond = useCallback(
@@ -466,7 +512,29 @@ function ChatViewInner({
 
   const onTimerDone = useCallback((tm: { label: string }) => toast(tr('chat.timerDone', { label: tm.label })), [toast, tr]);
   const kindTitle = KIND_TITLES[profile.kind] ?? 'Hermes';
-  const shownTitle = title ?? kindTitle;
+  // Hermes profiles ("bots", hermes/bots.ts): a non-default bot names the chat (header, composer); the model
+  // picker gets a compact "Bot" section when the connection has more than the default profile
+  const chatBot = meta?.hermesProfile;
+  const { bots } = useHermesBots(profile.kind === 'hermes' || profile.kind === 'demo' ? profile : undefined, chatBot);
+  const botName = botBadge(chatBot, bots);
+  const shownTitle = title ?? botName ?? kindTitle;
+  const showBots = bots.length > 1 && !retryPick;
+  const pickBot = useCallback(
+    (bot: string | undefined) => {
+      if (!conversationId || botOf(bot) === botOf(chatBot)) return;
+      // an empty chat switches its bot; a chat with messages stays on its bot (its session lives there) → new chat
+      if (!live.current.messages.length && live.current.status !== 'streaming') {
+        convs.setBot(conversationId, bot);
+        return;
+      }
+      setModelOpen(false);
+      stopSpeaking();
+      lightHaptic();
+      convs.create({ id: profile.id, kind: profile.kind }, { bot });
+      toast(tr('bots.picker.newChat', { name: botBadge(bot, bots) ?? tr('bots.picker.default') }));
+    },
+    [conversationId, chatBot, convs, profile.id, profile.kind, toast, tr, bots],
+  );
 
   // approval cards line up with the message column on wide windows (Settings → Chatbreite)
   const columnMax = columnMaxWidth(chatMaxWidth(prefs), 12);
@@ -477,7 +545,7 @@ function ChatViewInner({
 
   // slash palette (commands/)
   const slash = useSlashCommands({
-    enabled: true,
+    enabled: !quickMode,
     chat,
     profile,
     backendName: shownTitle,
@@ -495,7 +563,10 @@ function ChatViewInner({
   });
 
   // ---- answer "⋯" menu (MessageItem): branch, retry variants, model line of the header
-  const hermesConn = useMemo(() => (profile.kind === 'hermes' ? { baseUrl: profile.baseUrl, apiKey: profile.apiKey } : undefined), [profile.kind, profile.baseUrl, profile.apiKey]);
+  const hermesConn = useMemo(
+    () => (profile.kind === 'hermes' ? withBot({ baseUrl: profile.baseUrl, apiKey: profile.apiKey }, chatBot) : undefined),
+    [profile.kind, profile.baseUrl, profile.apiKey, chatBot],
+  );
   const serverDefault = useHermesCapabilities(hermesConn).catalog?.currentModel;
   const getMessages = useCallback(() => live.current.messages, []);
   const branchFrom = useAnswerBranch({ conversationId, profile, messages: getMessages, sessionId: chat.sessionId });
@@ -503,8 +574,10 @@ function ChatViewInner({
   const answerActions = useMemo<AnswerActions>(
     () => ({
       kind: profile.kind,
-      canBranch: !!conversationId,
+      canBranch: !!conversationId && !quickMode,
       branchFrom: (id) => void branchFrom(id),
+      quick: quickMode,
+      handOff: quick?.handOff,
       retry: (variant: RetryVariant) => {
         if (isBusy()) {
           toast(tr('chat.busy'));
@@ -522,7 +595,7 @@ function ChatViewInner({
       modelInfo: (m) =>
         answerModelInfo({ kind: profile.kind, reported: m.metrics?.model ?? (m as { model?: string }).model, selected: model, serverDefault, effort }),
     }),
-    [profile.kind, conversationId, branchFrom, isBusy, toast, tr, retryWith, sendText, model, serverDefault, effort],
+    [profile.kind, conversationId, quickMode, quick?.handOff, branchFrom, isBusy, toast, tr, retryWith, sendText, model, serverDefault, effort],
   );
 
   // ---- "Im Chat suchen" (chat menu, ⌘/Ctrl+F): find bar, highlighted matches, scroll to the current one
@@ -537,7 +610,9 @@ function ChatViewInner({
   const [findSel, setFindSel] = useState<{ key: string; idx: number }>({ key: '', idx: -1 });
   const findIdx = findSel.key === findKey ? findSel.idx : findTotal - 1;
   const findPos = findIdx >= findTotal ? findTotal - 1 : findIdx;
-  const stepFind = (dir: 1 | -1) => setFindSel({ key: findKey, idx: stepMatch(findPos, findTotal, dir) });
+  const stepFind = useCallback((dir: 1 | -1) => setFindSel({ key: findKey, idx: stepMatch(findPos, findTotal, dir) }), [findKey, findPos, findTotal]);
+  const findPrev = useCallback(() => stepFind(-1), [stepFind]);
+  const findNext = useCallback(() => stepFind(1), [stepFind]);
   const currentMatch = findPos >= 0 ? found.matches[findPos] : undefined;
   const findActive = findOpen && !!normalizeQuery(findTerm);
   const findState = useMemo<FindState | null>(
@@ -557,11 +632,56 @@ function ChatViewInner({
     setFindQuery('');
   }, []);
   useKeyboardShortcuts((cmd) => {
-    if (cmd !== 'find' || !shellState.chatFocused || !live.current.messages.length) return false;
+    if (cmd !== 'find' || !shellState.chatFocused || covered || !live.current.messages.length) return false;
     openFind();
   });
   // desktop app: ⇧⌘C "Letzte Antwort kopieren" (desktop/chatCommands.ts)
   useDesktopChatCommands(() => live.current.messages);
+
+  // ---- quick answers (app/src/quick): ⚡ in the composer of a bridge Hermes chat (or the demo), the start-screen
+  // pill, long-press on Send; in the quick thread ⚡ leads back. Drafts move along with the switch (quick/nav.ts).
+  // not in a bot (profile) chat: the plugin has one quick model for the whole gateway (quick/core.ts quickProfileFor)
+  const quickAvail = useQuickAvailability(quickMode ? null : quickProfileFor(profile, chatBot));
+  const quickSettings = useQuickSettings();
+  const composerQuick = useMemo<ComposerQuick | undefined>(() => {
+    if (quickMode) return { active: true, showToggle: true, onToggle: (text) => closeQuick({ text }) };
+    if (!quickAvail.available) return undefined;
+    return {
+      active: false,
+      showToggle: quickSettings.showInComposer,
+      onToggle: (text) => openQuick({ text }),
+      onSendQuick: (text) => openQuick({ text, send: true }),
+    };
+  }, [quickMode, quickAvail.available, quickSettings.showInComposer]);
+  const openQuickEmpty = useMemo(() => (quickAvail.available ? () => openQuick() : undefined), [quickAvail.available]);
+  const navVersion = useQuickNavVersion();
+  const sendGatedRef = useRef(sendGated);
+  useEffect(() => {
+    sendGatedRef.current = sendGated;
+  }, [sendGated]);
+  useEffect(() => {
+    if (covered || hiddenSession) return;
+    const d = takeDraft(quickMode ? 'quick' : 'chat');
+    if (!d) {
+      // ⚡ / the start-screen pill opened the thread: ready to type
+      if (quickMode) composerRef.current?.focus();
+      return;
+    }
+    if (d.send && quickMode) {
+      // "Als Schnellfrage senden": straight out; the consent sheet may park it (sent after "weiter")
+      const parked = blockedRef.current;
+      if (sendGatedRef.current(d.text) || parked) return;
+      // refused (an answer is still running): into the composer instead
+    }
+    composerRef.current?.setText(d.text);
+  }, [navVersion, covered, hiddenSession, quickMode]);
+  // the connection is back: the plugin may have come (or gone) meanwhile
+  const prevHealth = useRef(health);
+  useEffect(() => {
+    if (prevHealth.current !== 'online' && health === 'online' && !quickMode) refreshQuickAvailability(profile, prevHealth.current === 'offline');
+    prevHealth.current = health;
+  }, [health, quickMode, profile]);
+  const leaveQuick = useCallback(() => closeQuick({ text: composerRef.current?.takeText() }), []);
 
   // ---- chat menu (header ⋯ / wide title): find, export, pin, rename, archive, delete
   const [chatMenuOpen, setChatMenuOpen] = useState(false);
@@ -569,35 +689,43 @@ function ChatViewInner({
     Keyboard.dismiss();
     setChatMenuOpen(true);
   }, []);
-  const chatMenu = (
-    <ChatMenu
-      open={chatMenuOpen}
-      onClose={() => setChatMenuOpen(false)}
-      meta={meta}
-      hasMessages={messages.length > 0}
-      onFind={openFind}
-      onExport={() => slash.run('export')}
-      onPin={() => {
-        if (!meta) return;
-        convs.pin(meta.id);
-        toast(meta.pinned ? tr('menus.chat.unpinned') : tr('menus.chat.pinned'));
-      }}
-      onRename={(title) => slash.run('title', title)}
-      onArchive={() => {
-        if (!meta) return;
-        const next = !meta.archived;
-        convs.archive(meta.id, next);
-        toast(next ? tr('menus.chat.archived') : tr('menus.chat.unarchived'));
+  // handlers read the latest values: stable props, so the memoized menu does not re-render per streaming update
+  const menuLive = useRef({ meta, convs, slash, toast, tr, onNewChat });
+  useEffect(() => {
+    menuLive.current = { meta, convs, slash, toast, tr, onNewChat };
+  });
+  const menuHandlers = useMemo(
+    () => ({
+      onClose: () => setChatMenuOpen(false),
+      onExport: () => menuLive.current.slash.run('export'),
+      onPin: () => {
+        const { meta: m, convs: c, toast: say, tr: tx } = menuLive.current;
+        if (!m) return;
+        c.pin(m.id);
+        say(m.pinned ? tx('menus.chat.unpinned') : tx('menus.chat.pinned'));
+      },
+      onRename: (title: string) => menuLive.current.slash.run('title', title),
+      onArchive: () => {
+        const { meta: m, convs: c, toast: say, tr: tx, onNewChat: fresh } = menuLive.current;
+        if (!m) return;
+        const next = !m.archived;
+        c.archive(m.id, next);
+        say(next ? tx('menus.chat.archived') : tx('menus.chat.unarchived'));
         // archived chats leave the main list: continue in a fresh chat (a running turn keeps going in the background)
-        if (next) onNewChat();
-      }}
-      onDelete={() => slash.run('delete')}
-    />
+        if (next) fresh();
+      },
+      onDelete: () => menuLive.current.slash.run('delete'),
+    }),
+    [],
   );
+  const chatMenu = <ChatMenu open={chatMenuOpen} meta={meta} hasMessages={messages.length > 0} onFind={openFind} {...menuHandlers} />;
 
   return (
     <ImageEditProvider profile={profile} backendName={shownTitle} history={history} send={sendGated} onSent={onEditSent}>
     <View style={[styles.flex, { backgroundColor: t.colors.bg }]}>
+      {quick ? (
+        <QuickHeader topInset={insets.top} canClear={messages.length > 0} onBack={leaveQuick} onClear={quick.onClear} />
+      ) : (
       <ChatHeader
         topInset={insets.top}
         title={shownTitle}
@@ -607,7 +735,8 @@ function ChatViewInner({
         offlineLabel={offlineHint}
         streaming={streaming}
         canReset={messages.length > 0 || profile.id !== activeProfileId}
-        modelLabel={modelLabel(profile.kind, model)}
+        modelLabel={headerModelLabel(profile, model)}
+        modelLocked={modelLocked}
         onNewChat={newChat}
         onSettings={openSettings}
         onMenu={openDrawer}
@@ -616,6 +745,7 @@ function ChatViewInner({
         demo={profile.kind === 'demo' ? DEMO_HEADER : undefined}
         onChatMenu={!conversationId ? undefined : openChatMenu}
       />
+      )}
       {findOpen ? (
         <FindBar
           query={findQuery}
@@ -623,8 +753,8 @@ function ChatViewInner({
           total={findTotal}
           current={findPos}
           active={findActive}
-          onPrev={() => stepFind(-1)}
-          onNext={() => stepFind(1)}
+          onPrev={findPrev}
+          onNext={findNext}
           onClose={closeFind}
           focusKey={findFocus}
         />
@@ -648,6 +778,7 @@ function ChatViewInner({
           <AnswerActionsContext.Provider value={answerActions}>
             <FindContext.Provider value={findState}>
               <PendingSendContext.Provider value={pendingBubble}>
+              <QueuedSendContext.Provider value={queuedBubble}>
               <MessageList
                 ref={listRef}
                 messages={messages}
@@ -658,11 +789,14 @@ function ChatViewInner({
                 followups={followups}
                 historyTruncated={!!meta?.historyTruncated}
               />
+              </QueuedSendContext.Provider>
               </PendingSendContext.Provider>
             </FindContext.Provider>
           </AnswerActionsContext.Provider>
         ) : area === 'placeholder' ? (
           <HistoryPlaceholder />
+        ) : quick ? (
+          <QuickEmptyState onPick={sendText} model={quick.model} />
         ) : (
           <EmptyState
             onPick={sendText}
@@ -671,6 +805,7 @@ function ChatViewInner({
             offline={health === 'offline'}
             offlineHint={offlineHint}
             onOpenSettings={openSettings}
+            onQuick={openQuickEmpty}
           />
         )}
         <TimersBar onTimerDone={onTimerDone} />
@@ -680,7 +815,7 @@ function ChatViewInner({
         <Composer
           ref={composerRef}
           streaming={streaming}
-          placeholder={placeholder ?? tr('chat.composer.placeholderFor', { name: shownTitle })}
+          placeholder={quickMode ? tr('quick.composer.placeholder') : (placeholder ?? tr('chat.composer.placeholderFor', { name: shownTitle }))}
           onSend={composerSend}
           onStop={stop}
           sendWhileUploading={uploadWait !== undefined}
@@ -688,6 +823,7 @@ function ChatViewInner({
           profile={profile}
           history={history}
           slash={slash.binding}
+          quick={composerQuick}
         />
       </KeyboardAvoidingView>
       <ModelPicker
@@ -696,6 +832,9 @@ function ChatViewInner({
         profile={profile}
         current={model}
         onPick={pickModel}
+        bot={chatBot}
+        bots={showBots ? bots : undefined}
+        onPickBot={pickBot}
         initialQuery={modelQuery}
         title={retryPick ? tr('menus.answer.retryModelTitle') : undefined}
       />
@@ -737,7 +876,7 @@ export function ChatViewPending({ profile, model, onNewChat, onOpenDrawer, title
         health="checking"
         streaming={false}
         canReset={false}
-        modelLabel={modelLabel(profile.kind, model)}
+        modelLabel={headerModelLabel(profile, model)}
         onNewChat={onNewChat}
         onSettings={openSettings}
         onMenu={onOpenDrawer}
@@ -802,10 +941,10 @@ function chatEffort(profile: ConnectionProfile, options: HermesChatOptions | und
 
 /**
  * Same items (by identity) as last render → the previous array. `messages` changes on every streaming
- * update, but the user attachments derived from it don't: keeps memo'd consumers (Composer,
- * ImageEditProvider) from re-rendering.
+ * update, but the user attachments / pending approvals derived from it don't: keeps memo'd consumers (Composer,
+ * ImageEditProvider, ApprovalStack) from re-rendering.
  */
-function useStableList<T>(list: readonly T[] | undefined): readonly T[] | undefined {
+function useStableList<L extends readonly unknown[] | undefined>(list: L): L {
   const ref = useRef(list);
   const prev = ref.current;
   if (prev !== list && !(prev && list && prev.length === list.length && prev.every((x, i) => x === list[i]))) ref.current = list;

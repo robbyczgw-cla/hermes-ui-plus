@@ -14,12 +14,14 @@ import { createPairing } from './pair.mjs'; // QR pairing (docs/ROUTER.md, "Inst
 import { createImages } from './images.mjs'; // web image search (docs/ROUTER.md, "Image search")
 import { createImageProxy } from './image-proxy.mjs'; // GET /bridge/img?u=: images Hermes' tools returned (docs/BRIDGE.md, "Image proxy")
 import { createMeta } from './meta.mjs'; // titles & follow-ups (docs/ROUTER.md, "Meta (titles & follow-ups)")
+import { createQuick } from './quick.mjs'; // quick answers via the optional Hermes plugin (docs/HERMES-PLUGIN.md)
 import { createHermesPush } from './push-hermes.mjs'; // push + live inbox (docs/SELF-HOSTING.md "Push notifications")
 import { createAuth } from './auth.mjs'; // BRIDGE_TOKEN (admin) + per-device tokens
 import { createDeviceStore } from './devices.mjs';
 import { createDeviceAdmin } from './device-admin.mjs';
 import { checkRequestPath } from './paths.mjs';
 import { createStatic } from './static.mjs'; // optional web app: BRIDGE_WEB_DIR (src/static.mjs)
+import { createProfiles } from './profiles.mjs'; // Hermes profiles under /p/<name>/ (BRIDGE_PROFILES)
 
 /** Where device tokens live: BRIDGE_STATE_DIR, else systemd's $STATE_DIRECTORY (first entry), else none. */
 export function deviceStateDir(env) {
@@ -36,6 +38,10 @@ export function createServer(env = process.env, o = {}) {
       + 'npm/git installs: reinstall or run `npm run bundle-skill`; Docker: run `npm run bundle-skill` before `docker build`. '
       + 'Set BRIDGE_BOOTSTRAP=off to silence this on purpose.', { file: config.bootstrapMissing });
   }
+  if (config.skillInlineMissing) { // src/skillInline.mjs: chat works, but models that skip skill_view lose the components
+    logger.warn('hermes-ui SKILL.md not found: app turns get the bootstrap message without the inline skill core. '
+      + 'Run `npm run bundle-skill`, set BRIDGE_SKILL_FILE, or BRIDGE_SKILL_INLINE=off to silence this on purpose.', { file: config.skillInlineMissing });
+  }
   // --- auth: every module checks Bearer tokens through config.auth (src/auth.mjs). Device tokens need a state dir.
   const stateDir = deviceStateDir(env);
   const devices = config.token && stateDir ? createDeviceStore({ dir: stateDir, logger, now: o.now, lockWaitMs: 0 }) : null;
@@ -50,8 +56,10 @@ export function createServer(env = process.env, o = {}) {
     logger,
   });
   // --- push hook-in: /bridge/push/*, GET /bridge/inbox/stream, POST /bridge/hermes-hook (src/push-hermes.mjs, own auth).
-  const push = createHermesPush(config, { env, logger, fetch: o.fetch, senders: o.pushSenders, now: o.now });
-  const bridgeHandler = createBridgeHandler(config, { router, logger, turns: push.turns, approvals: push.approvals });
+  // --- Hermes profiles ("bots"): `/p/<name>/…` allow-list, GET /bridge/profiles, push watcher per profile
+  const profiles = o.profiles ?? createProfiles(env);
+  const push = createHermesPush(config, { env, logger, fetch: o.fetch, senders: o.pushSenders, now: o.now, profiles });
+  const bridgeHandler = createBridgeHandler(config, { router, logger, turns: push.turns, approvals: push.approvals, profiles });
   // --- uploads hook-in: POST /bridge/uploads is handled by src/uploads.mjs (own auth check, streamed
   // to disk, not subject to BRIDGE_MAX_BODY_BYTES); every other request goes to the bridge unchanged.
   const uploads = createUploads(config, { env, logger });
@@ -60,6 +68,9 @@ export function createServer(env = process.env, o = {}) {
   const voice = createVoice(config, { env, logger, fetch: o.fetch });
   // --- meta hook-in: POST /bridge/meta, GET /bridge/meta/config (src/meta.mjs, own auth check; 404 unless BRIDGE_META=on + ANTHROPIC_API_KEY).
   const meta = createMeta(config, { env, logger, backend: o.metaBackend });
+  // --- quick hook-in: POST /bridge/quick[/v1/chat/completions], GET /bridge/quick/config (src/quick.mjs, own auth
+  // check; 404 feature_off unless the hermes-ui-plus plugin answers on BRIDGE_HERMES_PLUGIN_URL).
+  const quick = createQuick(config, { env, logger, fetch: o.quickFetch, now: o.now });
   // --- pairing hook-in: GET /bridge/pair[.svg|.png] (src/pair.mjs; loopback or one-time page code with BRIDGE_PAIRING=1)
   // and POST /bridge/pair/redeem (one-time pair code → device token, unauthenticated, rate limited).
   const pairing = createPairing(config, { env, logger, devices, now: o.now });
@@ -87,6 +98,7 @@ export function createServer(env = process.env, o = {}) {
     if (deviceAdmin.matches(req)) return void deviceAdmin.handle(req, res).catch((e) => { logger.error('devices failed', { err: e.message }); if (!res.headersSent) res.writeHead(500); res.end(); });
     if (pairing.matches(req)) return pairing.handle(req, res).catch((e) => { logger.error('pairing failed', { err: e.message }); if (!res.headersSent) res.writeHead(500); res.end(); });
     if (meta.matches(req)) return meta.handle(req, res);
+    if (quick.matches(req)) return void quick.handle(req, res).catch((e) => { logger.error('quick failed', { err: e.name }); if (!res.headersSent) res.writeHead(500); res.end(); });
     if (uploads.matches(req)) return uploads.handle(req, res);
     if (media.matches(req)) return void media.handle(req, res).catch(() => { if (!res.headersSent) res.writeHead(500); res.end(); });
     if (imageProxy.matches(req)) return void imageProxy.handle(req, res).catch((e) => { logger.error('image proxy failed', { err: String(e?.message ?? e).slice(0, 120) }); if (!res.headersSent) res.writeHead(500); res.end(); });
@@ -122,7 +134,7 @@ export function createServer(env = process.env, o = {}) {
       })]);
     } finally { clearTimeout(timer); devices?.close(); }
   })();
-  return { server, close, config, logger, router, uploads, media, voice, meta, pairing, images, imageProxy, push, devices, web };
+  return { server, close, config, logger, router, uploads, media, voice, meta, quick, pairing, images, imageProxy, push, devices, web, profiles };
 }
 
 /**
@@ -151,7 +163,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     logger.info('listening', {
       host: config.host, port: config.port, upstream: new URL(config.upstream.baseUrl).host,
       router: config.router.kind, routerModel: config.router.model || undefined, timeoutMs: config.router.timeoutMs,
-      hint: config.hint.mode, bootstrap: Boolean(config.bootstrap), auth: config.token ? 'token' : 'none',
+      hint: config.hint.mode, bootstrap: Boolean(config.bootstrap), skillInline: Boolean(config.skillInline), auth: config.token ? 'token' : 'none',
+      profiles: ctx.profiles.mode,
     });
   });
   installShutdownHandlers(ctx, stopServices);

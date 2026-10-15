@@ -11,6 +11,7 @@ import { useLocale, useT } from '../i18n';
 import { useVoiceSettings } from './settingsStore';
 import { speak, speakLive, stopSpeaking } from './speaker';
 import type { LiveSpeech } from './speaker';
+import { createStatusTrack, stepStatuses } from './statusTrack';
 import { createLiveReader } from './streamRead';
 import type { LiveReader } from './streamRead';
 import type { VoiceConn } from './types';
@@ -25,7 +26,7 @@ export function useAutoRead(messages: readonly SpeakableMessage[], conn: VoiceCo
   const t = useT();
   const { locale } = useLocale();
   const enabled = opts.enabled ?? settings.autoRead;
-  const seen = useRef(new Map<string, string>());
+  const track = useRef(createStatusTrack<SpeakableMessage>());
   const connRef = useRef(conn);
   useEffect(() => {
     connRef.current = conn;
@@ -34,22 +35,17 @@ export function useAutoRead(messages: readonly SpeakableMessage[], conn: VoiceCo
   const live = useRef<{ id: string; reader: LiveReader; speech: LiveSpeech | null } | null>(null);
 
   useEffect(() => {
-    const prev = seen.current;
-    const next = new Map<string, string>();
-    let toRead: SpeakableMessage | null = null;
-    for (const m of messages) {
-      next.set(m.id, m.status);
-      if (m.role === 'assistant' && m.status === 'done' && prev.get(m.id) === 'streaming' && m.text.trim()) toRead = m;
-    }
-    seen.current = next;
+    // streaming updates only look at the changed messages (statusTrack.ts)
+    const step = stepStatuses(track.current, messages);
+    let toRead = step.finished;
 
     // read-aloud while streaming: only answers whose start we saw (a new turn begins with an empty placeholder)
     const last = messages[messages.length - 1];
-    if (enabled && last?.role === 'assistant' && last.status === 'streaming' && live.current?.id !== last.id && !prev.has(last.id) && last.text.length < LIVE_JOIN_MAX) {
+    if (enabled && last?.role === 'assistant' && last.status === 'streaming' && live.current?.id !== last.id && !step.lastWasKnown && last.text.length < LIVE_JOIN_MAX) {
       live.current = { id: last.id, reader: createLiveReader(), speech: null };
     }
     const cur = live.current;
-    const lm = cur ? messages.find((m) => m.id === cur.id) : undefined;
+    const lm = cur ? (last?.id === cur.id ? last : messages.find((m) => m.id === cur.id)) : undefined;
     if (cur && lm && enabled) {
       // stopped / failed turn: what plays already finishes, the rest is not added
       const pieces = lm.status === 'streaming' || lm.status === 'done' ? cur.reader.push(lm) : [];

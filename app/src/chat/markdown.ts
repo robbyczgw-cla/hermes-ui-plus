@@ -11,6 +11,7 @@
  *
  * Pure TS (erasable syntax only) so `node --test` can run it.
  */
+import { extendsText, type AppendRun } from '../protocol/appendRun.ts';
 
 export type Inline =
   | { t: 'text'; s: string }
@@ -119,6 +120,10 @@ export type MdParseState = {
   stable: number;
   /** char offset in `text` where blocks[stable] starts (re-parse from here) */
   stableOffset: number;
+  /** append run of `text` from its producer (protocol/appendRun.ts), if any */
+  run?: AppendRun;
+  /** `text` contains a CR (unset: not known) */
+  cr?: boolean;
 };
 
 /**
@@ -131,10 +136,13 @@ export type MdParseState = {
  * k+1. Lines before the last one are complete (more text can only extend the last line), so a block
  * is final once `start(k+1) + 1` is a complete line.
  */
-export function parseMarkdownIncremental(text: string, prev?: MdParseState | null): MdParseState {
+export function parseMarkdownIncremental(text: string, prev?: MdParseState | null, run?: AppendRun): MdParseState {
   if (prev && prev.text === text) return prev;
+  // `run`: the producer's append run – the same as prev's means `text` extends it (no full-text compare / CR scan)
+  const grown = !!prev && extendsText(prev.text, text, prev.run, run);
+  const cr = grown ? (prev!.cr ?? prev!.text.includes('\r')) || text.indexOf('\r', prev!.text.length) !== -1 : text.includes('\r');
   // CR normalisation could merge across the old end ("\r" + "\n"): rare, take the full path
-  const reuse = !!prev && !text.includes('\r') && text.startsWith(prev.text);
+  const reuse = grown && !cr;
   const head = reuse ? prev!.blocks.slice(0, prev!.stable) : [];
   const offset = reuse ? prev!.stableOffset : 0;
   const lines = splitLines(offset ? text.slice(offset) : text);
@@ -145,7 +153,7 @@ export function parseMarkdownIncremental(text: string, prev?: MdParseState | nul
   while (m < tail.length - 1 && starts[m + 1] + 1 <= lastComplete) m++;
   let off = 0;
   if (m > 0) for (let l = 0; l < starts[m]; l++) off += lines[l].length + 1;
-  return { text, blocks: head.length ? head.concat(tail) : tail, stable: head.length + m, stableOffset: offset + off };
+  return { text, blocks: head.length ? head.concat(tail) : tail, stable: head.length + m, stableOffset: offset + off, run, cr };
 }
 
 /** `starts` (optional out): line index where each returned block starts. */

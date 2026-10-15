@@ -7,6 +7,7 @@ import type { ChildProcess } from 'node:child_process';
 import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { streamChatCore, respondApprovalCore } from './stream.ts';
+import { withBot } from './bots.ts';
 import { normalizeNode } from '../protocol/validate.ts';
 import type { FetchLike } from './stream.ts';
 import type { HermesConn, HermesEvent } from './types';
@@ -80,6 +81,20 @@ test('health + models + 401 for key "bad"', async () => {
   await assert.rejects(
     streamChatCore(fetchImpl, { conn: { baseUrl: base, apiKey: 'bad' }, text: 'x', sessionId: 's', onEvent: () => {} }),
     (x: { kind: string }) => x.kind === 'auth'
+  );
+});
+
+test('Hermes profiles (bots): a bot chat streams under /p/<bot>/, has its own models; an unknown bot is a 404', async () => {
+  const bot = withBot(conn(base), 'research');
+  assert.equal(bot.baseUrl, base.replace(/\/v1$/, '/p/research/v1'));
+  const events: HermesEvent[] = [];
+  const result = await streamChatCore(fetchImpl, { conn: bot, text: 'hi', sessionId: 's-bot', onEvent: (e) => events.push(e) });
+  assert.ok(result.text.length > 0);
+  const models = (await (await fetch(bot.baseUrl + '/models', { headers: { Authorization: 'Bearer ok' } })).json()) as { data: { id: string }[] };
+  assert.ok(models.data.some((m) => m.id === 'research-model'));
+  await assert.rejects(
+    streamChatCore(fetchImpl, { conn: withBot(conn(base), 'nobody'), text: 'x', sessionId: 's', onEvent: () => {} }),
+    (x: { status?: number }) => x.status === 404
   );
 });
 

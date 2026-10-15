@@ -18,6 +18,14 @@ export function parseFlavor(raw: string | null | undefined): Flavor {
 /** Must be read with static dot access so Expo inlines it. */
 export const FLAVOR: Flavor = parseFlavor(process.env.EXPO_PUBLIC_FLAVOR);
 
+/**
+ * Flavor sentinel of the built artifact: Metro inlines the env value and constant-folds the comparison, so a bundle
+ * holds exactly one of the strings. The build scripts read it back (scripts/verify-flavor-artifact.mjs) and refuse an
+ * artifact whose mark is not the FLAVOR it was built for (a stale Metro cache once shipped hermes JS in a personal
+ * APK). Kept alive by the global in app/_layout.tsx. Same exact-match rule as flavor_init (scripts/lib/flavor.sh).
+ */
+export const FLAVOR_MARK: string = 'hui-flavor:hermes';
+
 /** Profile kinds (settings/profiles.ts ProfileKind) a build may create, show or connect to. */
 const KINDS: Record<Flavor, readonly string[]> = {
   hermes: ['hermes', 'demo'],

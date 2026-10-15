@@ -1,4 +1,5 @@
 import { useRef } from 'react';
+import type { AppendRun } from '../protocol/appendRun';
 import type { Segment } from '../protocol/types';
 import { advanceSegments, type SegmentsState } from './parseCache';
 
@@ -10,9 +11,9 @@ import { advanceSegments, type SegmentsState } from './parseCache';
  * `cacheKey` (the message id): a finished answer's final segments are kept in the parse cache, so the next mount
  * of the same answer (chat reopened, scrolled back into view) skips the parse (parseCache.advanceSegments).
  */
-export function useSegments(text: string, complete: boolean, cacheKey?: string): Segment[] {
+export function useSegments(text: string, complete: boolean, cacheKey?: string, run?: AppendRun): Segment[] {
   const ref = useRef<SegmentsState | null>(null);
-  const st = advanceSegments(ref.current, text, complete, cacheKey);
+  const st = advanceSegments(ref.current, text, complete, cacheKey, run);
   ref.current = st;
   return st.segs;
 }

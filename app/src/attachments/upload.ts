@@ -9,6 +9,7 @@ import { Platform } from 'react-native';
 import { healthUrl, isBridgeHeader, parseUploadResponse, uploadHeaders, uploadUrl } from './uploadCore';
 import { AttachmentError, isAttachmentError } from './types';
 import type { Attachment, RemoteRef } from './types';
+import { webAttachments } from './webStore';
 
 export type BridgeConn = { baseUrl: string; apiKey: string };
 
@@ -24,7 +25,7 @@ export async function uploadAttachment(att: Attachment, conn: BridgeConn, opts: 
   try {
     if (Platform.OS === 'web') {
       opts.onProgress?.(undefined);
-      const blob = await (await fetch(att.uri)).blob();
+      const blob = await webAttachments().blob(att.uri);
       const res = await fetch(url, { method: 'POST', headers, body: blob, signal: opts.signal });
       return parseUploadResponse(res.status, await res.text(), att);
     }

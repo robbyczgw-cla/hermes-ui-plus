@@ -113,8 +113,11 @@ export function parseVoiceConfig(input: unknown): VoiceConfig {
     throw new VoiceError('bad_response', 'voice.errors.badConfigResponse');
   }
   const o = j as Record<string, unknown>;
-  const sttRaw = o.stt && typeof o.stt === 'object' ? (o.stt as Record<string, unknown>) : null;
-  const ttsRaw = o.tts && typeof o.tts === 'object' ? (o.tts as Record<string, unknown>) : null;
+  // `available: false` = the bridge names its provider but has no key for it (POST answers *_not_configured):
+  // same as no STT / TTS, so settings and the mic agree. Older bridges without the flag count as available.
+  const part = (v: unknown) => (v && typeof v === 'object' && (v as Record<string, unknown>).available !== false ? (v as Record<string, unknown>) : null);
+  const sttRaw = part(o.stt);
+  const ttsRaw = part(o.tts);
 
   const stt = sttRaw && (str(sttRaw.provider) || str(sttRaw.model)) ? { provider: str(sttRaw.provider), model: str(sttRaw.model) } : null;
 

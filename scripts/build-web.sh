@@ -14,6 +14,8 @@
 #         <out>.build-info (flavor / sw / sha, next to the bundle; checked by build-desktop-mac.sh SKIP_WEB=1)
 #         dist/build-web-<timestamp>.log
 # hermes: the bundle is promoted only after flavor-guard AND the release gate (scripts/scan-artifact.sh) passed.
+# Both flavors: the bundle must carry the flavor mark of FLAVOR (scripts/verify-flavor-artifact.mjs), and Metro runs
+# with the flavor's own TMPDIR (docs/BUILD.md "Flavor mark + Metro cache").
 #
 # Same safety model as scripts/build-apk.sh (docs/BUILD.md): this machine has NO swap and hosts other
 # sessions, so `expo export` runs inside a transient systemd user scope with MemoryMax / MemorySwapMax=0,
@@ -68,6 +70,7 @@ if [ "${HERMES_WEB_INNER:-0}" = 1 ]; then
     npm ci --no-audit --no-fund
     echo "$LOCK_HASH" > node_modules/.lock-hash
   fi
+  flavor_require_tmpdir   # Metro's transform cache must be this flavor's own ($TMPDIR/metro-cache)
   t "expo export -p web (max-workers=$MAX_WORKERS)"
   rm -rf dist-web
   nice -n 10 npx expo export -p web --output-dir dist-web --max-workers "$MAX_WORKERS" --clear
@@ -164,6 +167,11 @@ if [ "$rc" -ne 0 ]; then
   exit "$rc"
 fi
 
+# the JS must be this flavor's (app/src/flavor.ts FLAVOR_MARK): a bundle of the other flavor is never promoted
+if ! flavor_verify_artifact "$BUILD_DIR/app/dist-web"; then
+  echo "WEB BUILD REJECTED: the bundle does not carry the FLAVOR=$FLAVOR mark (see above); $WEB_OUT left unchanged."
+  exit 1
+fi
 if ! flavor_guard_output "$BUILD_DIR/app/dist-web"; then
   echo "WEB BUILD REJECTED: the hermes bundle contains private content (see above); $WEB_OUT left unchanged."
   exit 1

@@ -63,6 +63,32 @@ The mock supports `fast` on text steps (token pacing factor) so long answers str
 Raw footage, interaction timelines and encoding intermediates live under `/tmp/hermes-demo-videos`
 (or `DEMO_WORK`). Use a separate `DEMO_WORK` for a new language to avoid mixing raw footage.
 
+## 2026-10-15 set: what is new
+
+Clips `wege` (`14-wege`, the `paths` card with a selectable row), `bausteine` (`15-bausteine`, the `blocks` card),
+`bilder` (`16-bilder`, product cards while photos arrive slowly, clip option `setup.imageDelay`), `bots` (`17-bots`, the
+"Bot" section of the model menu, `/p/<profile>/`), `schnell` (`18-schnellfrage`, ⚡ quick answers and the hand-off to a
+Hermes chat), `fluessig` (`19-fluessig`, one long answer with cards), `sperre` (`20-modellsperre`, the per-chat model lock in
+the header) and `nichtgesendet` (`21-nichtgesendet`, a message restored as "Not sent" after a reload, then "Send again").
+
+The mock now also serves `GET /bridge/profiles` and every path under `/p/<profile>/`, `GET /bridge/quick/config` and
+`POST /bridge/quick/v1/chat/completions` (the hermes-ui-plus plugin's bridge contract, docs/BRIDGE.md "Quick answers"), the
+`session_model_lock` capability with `POST /api/sessions/{id}/model`, and holds the first reply to a text matching
+`bus timetable` for 12 s (the Not-sent clip). The seed pre-accepts the data-sharing notice (`hui.aiConsent`), otherwise its
+sheet covers the first taps. Clips with `setup.bindFetch` wrap `window.fetch`: on web `expo/fetch` is `globalThis.fetch`,
+and `quick/availability.ts` calls it as a method (`o.fetch(...)`) → "Illegal invocation" → the web build never shows ⚡. The
+workaround is recording-only; the app is unchanged.
+
+```bash
+export DEMO_WORK=/tmp/hermes-demo-videos-1015 DEMO_OUT=dist/share/demos-20261015 DEMO_MUSIC_DIR=dist/share/demos-20261015/music
+export DEMO_GALLERY=new DEMO_TRAILER_SET=1015 DEMO_NO_DOCS=1   # new-only gallery, 2026-10-15 trailer, no docs/media copy
+node scripts/demo-videos/record.mjs schnell bots wege bausteine bilder fluessig sperre nichtgesendet --no-encode
+node scripts/demo-videos/record.mjs freigabe orte rezept --no-encode   # older favourites for the trailer (English footage)
+node scripts/demo-videos/encode.mjs --with-music --clips schnell,bots,wege,bausteine,bilder,fluessig,nichtgesendet,sperre
+```
+
+The trailer set is `SEGMENTS_1015` in `trailer.mjs` (excerpts follow interaction marks). Run everything inside the memory scope above.
+
 | File | Purpose |
 |---|---|
 | `scenarios.mjs` | English prompts/responses, interactive cards, image lookup keys and scenario routing. |

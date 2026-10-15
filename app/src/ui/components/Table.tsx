@@ -8,7 +8,7 @@ import { Icon } from '../primitives/Icon';
 import { Skeleton } from '../primitives/Skeleton';
 import { TableSkeleton } from '../skeletons';
 import { asArray, asOptString, asString, clamp, isNumericCell, parseCellNumber } from '../lib/format';
-import { NUMERIC_COLUMN_SHARE, TABLE_COLLAPSED_ROWS as COLLAPSED_ROWS, fitMinWidth, headerMinWidth, keepArrayIdentity, numericCellMinWidth, scrollEdges, sortTableRows, tableCardMode, tableLayoutMode, visibleTableRows, type ScrollEdges, type TableLayoutPref } from '../lib/tableMath';
+import { NUMERIC_COLUMN_SHARE, TABLE_COLLAPSED_ROWS as COLLAPSED_ROWS, cellMinWidth, fitMinWidth, headerMinWidth, keepArrayIdentity, keepTogether, numericCellMinWidth, scrollEdges, sortTableRows, tableCardMode, tableLayoutMode, visibleTableRows, type ScrollEdges, type TableLayoutPref } from '../lib/tableMath';
 import { NARROW_TEXT_PROPS } from '../lib/textWrap';
 import type { HuiTable } from '../types';
 import type { NodeProps } from './content';
@@ -80,6 +80,17 @@ export function Table({ node, bare }: NodeProps<HuiTable> & { bare?: boolean }) 
     [rows, ncols],
   );
 
+  // per column: the width its unbreakable cells (numbers, ranges, short labels, longest word) need on one line
+  const keepRef = useRef<number[] | undefined>(undefined);
+  const keep = useMemo(
+    () =>
+      (keepRef.current = keepArrayIdentity(
+        keepRef.current,
+        Array.from({ length: ncols }, (_, ci) => cellMinWidth(rows.slice(0, 50).map((r) => cellText(r[ci])), fontScale)),
+      )),
+    [rows, ncols, fontScale],
+  );
+
   const widthsRef = useRef<number[] | undefined>(undefined);
   const widths = useMemo(
     () =>
@@ -91,12 +102,12 @@ export function Table({ node, bare }: NodeProps<HuiTable> & { bare?: boolean }) 
           const maxLen = Math.max(headLen * 1.05, ...lens, 3);
           const base = clamp(Math.round(maxLen * 7.4 * fontScale + 28), numeric[ci] ? 72 : 88, Math.round(220 * fontScale));
           // never narrower than the longest header word + sort arrow (no mid-word wrapping)
-          const minW = Math.max(base, headerMinWidth(columns[ci] ?? '', fontScale));
+          const minW = Math.max(base, headerMinWidth(columns[ci] ?? '', fontScale), keep[ci] ?? 0);
           // numbers are never clipped: the column is at least as wide as its widest value
           return numeric[ci] ? Math.max(minW, numericCellMinWidth(rows.map((r) => cellText(r[ci])), fontScale)) : minW;
         }),
       )),
-    [rows, columns, ncols, numeric, fontScale],
+    [rows, columns, ncols, numeric, keep, fontScale],
   );
 
   const sorted = useMemo(() => {
@@ -111,7 +122,7 @@ export function Table({ node, bare }: NodeProps<HuiTable> & { bare?: boolean }) 
   // Decided from the OUTER width (onLayout of the wrapper, never inside the horizontal ScrollView):
   // fill the viewport (text wraps) whenever all columns fit at their minimum; a phone grid that cannot fit
   // becomes a stack of row cards (toggle back via "Als Tabelle"); scroll sideways only beyond that.
-  const mode = tableLayoutMode(viewport, widths, numeric, columns, layoutPref, fontScale);
+  const mode = tableLayoutMode(viewport, widths, numeric, columns, layoutPref, fontScale, keep);
   const fill = mode === 'fill' || mode === 'measuring';
   const cards = mode === 'cards';
   const cardsAvailable = cards || (mode === 'scroll' && tableCardMode(viewport, false, ncols, 'cards'));
@@ -124,7 +135,7 @@ export function Table({ node, bare }: NodeProps<HuiTable> & { bare?: boolean }) 
 
   // Fill mode: explicit basis 0 so every row splits the width by `widths` alone. With bare
   // `flex: n`, Android sized cells from their content, so columns drifted from row to row.
-  const cellStyle = (ci: number) => tableCellStyle(t.spacing, fill, widths, numeric, columns, ci, fontScale);
+  const cellStyle = (ci: number) => tableCellStyle(t.spacing, fill, widths, numeric, columns, ci, fontScale, keep);
 
   const header = (
     <View style={{ flexDirection: 'row', backgroundColor: t.colors.surfaceAlt, borderBottomWidth: 1, borderColor: t.colors.border }}>
@@ -169,6 +180,7 @@ export function Table({ node, bare }: NodeProps<HuiTable> & { bare?: boolean }) 
           numeric={numeric}
           columns={columns}
           fontScale={fontScale}
+          keep={keep}
           skeletonTail={streaming && !sort && ri === visible.length - 1}
         />
       ))}
@@ -346,23 +358,23 @@ export function Table({ node, bare }: NodeProps<HuiTable> & { bare?: boolean }) 
   );
 }
 
-function tableCellStyle(spacing: { m: number; s: number }, fill: boolean, widths: readonly number[], numeric: readonly boolean[], columns: readonly string[], ci: number, fontScale: number) {
+function tableCellStyle(spacing: { m: number; s: number }, fill: boolean, widths: readonly number[], numeric: readonly boolean[], columns: readonly string[], ci: number, fontScale: number, keep: readonly number[]) {
   return {
     // fill: basis 0 + grow by the width estimate; only valid because a fill table is never inside a horizontal
     // ScrollView (there the row has no definite width and Yoga sizes each cell to its one-line content)
-    ...(fill ? { flexGrow: widths[ci], flexShrink: 1, flexBasis: 0, minWidth: fitMinWidth(widths, numeric, columns, ci, fontScale) } : { width: widths[ci] }),
+    ...(fill ? { flexGrow: widths[ci], flexShrink: 1, flexBasis: 0, minWidth: fitMinWidth(widths, numeric, columns, ci, fontScale, keep) } : { width: widths[ci] }),
     paddingHorizontal: spacing.m,
     paddingVertical: spacing.s + 2,
   };
 }
 
 /** One body row; memoised so scrolling / sibling-row streaming updates skip unchanged rows. */
-const TableRow = memo(function TableRow({ r, first, ncols, fill, widths, numeric, columns, fontScale, skeletonTail }: { r: Cell[]; first: boolean; ncols: number; fill: boolean; widths: number[]; numeric: boolean[]; columns: string[]; fontScale: number; skeletonTail: boolean }) {
+const TableRow = memo(function TableRow({ r, first, ncols, fill, widths, numeric, columns, fontScale, keep, skeletonTail }: { r: Cell[]; first: boolean; ncols: number; fill: boolean; widths: number[]; numeric: boolean[]; columns: string[]; fontScale: number; keep: number[]; skeletonTail: boolean }) {
   const t = useTheme();
   return (
     <View style={{ flexDirection: 'row', borderTopWidth: first ? 0 : StyleSheet.hairlineWidth, borderColor: t.colors.borderStrong }}>
       {Array.from({ length: ncols }, (_, ci) => (
-        <View key={ci} style={tableCellStyle(t.spacing, fill, widths, numeric, columns, ci, fontScale)}>
+        <View key={ci} style={tableCellStyle(t.spacing, fill, widths, numeric, columns, ci, fontScale, keep)}>
           {skeletonTail && r[ci] === undefined ? (
             <Skeleton height={10} width="60%" style={{ marginVertical: 5, alignSelf: numeric[ci] ? 'flex-end' : 'flex-start' }} />
           ) : (
@@ -373,7 +385,7 @@ const TableRow = memo(function TableRow({ r, first, ncols, fill, widths, numeric
               weight={ci === 0 && !numeric[0] ? '500' : undefined}
               color={r[ci] === null || r[ci] === undefined ? 'subtle' : 'text'}
               style={{ flexShrink: 1, textAlign: numeric[ci] ? 'right' : 'left' }}
-              text={cellText(r[ci])}
+              text={keepTogether(cellText(r[ci]))}
             />
           )}
         </View>
@@ -391,7 +403,7 @@ const TableCard = memo(function TableCard({ r, ncols, numeric, columns, skeleton
         {skeletonTail && r[0] === undefined ? (
           <Skeleton height={12} width="70%" />
         ) : (
-          <InlineText {...NARROW_TEXT_PROPS} variant="bodyStrong" tabular={numeric[0]} color={missing(0) ? 'subtle' : 'text'} text={cellText(r[0])} />
+          <InlineText {...NARROW_TEXT_PROPS} variant="bodyStrong" tabular={numeric[0]} color={missing(0) ? 'subtle' : 'text'} text={keepTogether(cellText(r[0]))} />
         )}
         {Array.from({ length: Math.max(0, ncols - 1) }, (_, k) => {
           const ci = k + 1;
@@ -407,7 +419,7 @@ const TableCard = memo(function TableCard({ r, ncols, numeric, columns, skeleton
                       {`${head}:`}
                     </HText>
                   ) : null}
-                  <InlineText {...NARROW_TEXT_PROPS} variant="callout" tabular={numeric[ci]} color={missing(ci) ? 'subtle' : 'text'} style={{ flex: 1, minWidth: 0 }} text={cellText(r[ci])} />
+                  <InlineText {...NARROW_TEXT_PROPS} variant="callout" tabular={numeric[ci]} color={missing(ci) ? 'subtle' : 'text'} style={{ flex: 1, minWidth: 0 }} text={keepTogether(cellText(r[ci]))} />
                 </>
               )}
             </View>

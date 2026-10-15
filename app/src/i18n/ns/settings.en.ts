@@ -32,6 +32,7 @@ export const settings = {
     readOnlySave: 'Connections are read-only (newer app version or read error). See Settings → Connections.',
   },
   connections: {
+    keywords: 'server bridge UI bridge Hermes address URL token profile profiles account pair',
     add: 'New connection',
     addQr: 'Add connection via QR',
     addQrSub: 'Pair Hermes: scan a QR code or paste a link',
@@ -159,9 +160,11 @@ export const settings = {
     chatScopeAllHint: 'The list shows this app\'s chats from all your devices.',
     chatScopeDeviceHint: 'The list only shows chats started on this device – even if you already opened another one here. Hidden chats stay in Hermes and on your other devices. Applies to this device only; Telegram, CLI and cron chats still follow the profile switches.',
     chatScopeKeywords: 'chat list devices device sync other devices hide list',
+    keywords: 'chats conversations conversation messages history',
   },
   media: {
     images: 'Load images',
+    imagesKeywords: 'images image photos photo pictures mobile data Wi-Fi WiFi data saver',
     always: 'Always',
     wifi: 'Wi-Fi only',
     never: 'Never',

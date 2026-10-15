@@ -57,3 +57,15 @@ test('branchSeedText: labelled turns, attachments by name, newest kept when too 
   assert.match(long, /User: neu$/);
   assert.match(long, /\n…\n/);
 });
+
+test('branchSeedText: a handed-over quick answer is labelled with its model and gets the quick intro', () => {
+  const seed = branchSeedText([msg('user', 'Wie viel sind 72 °F?'), msg('assistant', 'Etwa 22,2 °C.', { quick: { model: 'flash-1', ms: 900 } })]);
+  assert.match(seed, /^This chat continues a quick answer/);
+  assert.match(seed, /User: Wie viel sind 72 °F\?/);
+  assert.match(seed, /Quick answer \(flash-1\): Etwa 22,2 °C\./);
+  assert.doesNotMatch(seed, /Assistant:/);
+  // unknown model: no empty parentheses
+  assert.match(branchSeedText([msg('user', 'q'), msg('assistant', 'a', { quick: {} })]), /Quick answer: a/);
+  // normal branches keep the old wording
+  assert.match(branchSeedText([msg('user', 'q'), msg('assistant', 'a')]), /^This chat continues an earlier conversation/);
+});

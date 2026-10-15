@@ -10,10 +10,12 @@ import type { ChatMessage } from '../hermes/types.ts';
 import type { RemoteSession } from '../hermes/sessions.ts';
 import { createUserTurnMatcher, isRemoteMessageId, mergeAssistantDetails, normText } from '../hermes/sessionMapping.ts';
 import { isFinalAnswer, isRecoverable, recoveredMessage } from '../hermes/recovery.ts';
+import { queuedMayMatch, sentFromQueued } from '../hermes/pendingSend.ts';
 import type { ConversationMeta, ProfileRef, RemoteInfo } from './types.ts';
 import { DEFAULT_TITLE, PREVIEW_MAX, TITLE_MAX } from './types.ts';
 import { makeTitle } from './title.ts';
 import { messagesSignature } from './messages.ts';
+import { botOf } from '../hermes/bots.ts';
 
 /**
  * Which Hermes sessions the app shows (per Hermes profile, settings `showForeignChats` / `showCronReports`).
@@ -176,6 +178,11 @@ export type MergeInput = {
    * Profiles sharing one server keep deduplicating. Default: every profile counts as the same server (legacy).
    */
   sameServer?: (profileId: string) => boolean;
+  /**
+   * Hermes profile ("bot") the sessions were listed from (`/p/<bot>/api/sessions`; undefined = default). Sessions are
+   * namespaced per bot: only conversations of the same bot are matched / pruned, new entries are bound to it.
+   */
+  bot?: string;
 };
 
 export type MergeResult = { items: ConversationMeta[]; added: string[]; removed: string[]; changed: boolean };
@@ -193,10 +200,12 @@ export function mergeRemoteSessions(items: ConversationMeta[], input: MergeInput
   const filter = input.filter ?? {};
   const hidden = input.hidden ?? [];
   const sameServer = (pid: string) => pid === input.profile.id || (input.sameServer ? input.sameServer(pid) : true);
+  const bot = botOf(input.bot);
+  const sameBot = (c: ConversationMeta) => botOf(c.hermesProfile) === bot;
   const bySession = new Map<string, number>();
   items.forEach((c, i) => {
     if (c.profileKind !== 'hermes' || !c.hermesSessionId || bySession.has(c.hermesSessionId)) return;
-    if (!sameServer(c.profileId)) return; // same id on another server: a different session
+    if (!sameServer(c.profileId) || !sameBot(c)) return; // same id on another server / bot: a different session
     bySession.set(c.hermesSessionId, i);
   });
   const next = items.slice();
@@ -233,7 +242,7 @@ export function mergeRemoteSessions(items: ConversationMeta[], input: MergeInput
     if (!listable(s, filter) || isHiddenSession(hidden, s.id, sameServer)) continue;
     let id = remoteConversationId(s.id);
     // taken by another server's session with the same id, or a sanitising collision: namespaced id
-    if (next.some((c) => c.id === id)) id = scopedRemoteConversationId(s.id, input.profile.id);
+    if (next.some((c) => c.id === id)) id = scopedRemoteConversationId(s.id, bot ? `${input.profile.id}/${bot}` : input.profile.id);
     if (next.some((c) => c.id === id)) continue;
     const title = cleanRemoteTitle(s.title) ?? (s.preview ? makeTitle(s.preview) : DEFAULT_TITLE);
     const meta: ConversationMeta = {
@@ -250,6 +259,7 @@ export function mergeRemoteSessions(items: ConversationMeta[], input: MergeInput
       messageCount: Math.max(1, s.messageCount),
       origin: 'remote',
       remote: { source: s.source, lastActive, remoteCount: s.messageCount, ...(cleanRemoteTitle(s.title) ? { title: cleanRemoteTitle(s.title) } : {}) },
+      ...(bot ? { hermesProfile: bot } : {}),
     };
     if (s.pinned) meta.pinned = true;
     next.push(meta);
@@ -275,7 +285,7 @@ export function mergeRemoteSessions(items: ConversationMeta[], input: MergeInput
     for (let i = next.length - 1; i >= 0; i--) {
       const c = next[i];
       if (c.origin !== 'remote' || !c.remote || !c.hermesSessionId || c.id === input.activeId) continue;
-      if (c.profileId !== input.profile.id || !complete.has(c.remote.source) || seen.has(c.hermesSessionId)) continue;
+      if (c.profileId !== input.profile.id || !sameBot(c) || !complete.has(c.remote.source) || seen.has(c.hermesSessionId)) continue;
       // continued in this app since → keep the local copy
       if (c.remote.loadedAt && c.updatedAt > (c.remote.lastActive ?? 0) + 1000) continue;
       removed.push(c.id);
@@ -324,7 +334,13 @@ export function needsRemoteLoad(meta: ConversationMeta | undefined): boolean {
  *   transcript has no second copy, is a superseded run: it is skipped and the local turn aligns with the last run
  * - remote turns after the last aligned one (continued on Telegram/CLI/another device) are appended, except a
  *   user turn + answer that repeats an existing local user turn AND answer (a run the app already shows)
+ * - remote turns BETWEEN two aligned ones (sent from another device while this one still showed its cached
+ *   history, Sol F06) are inserted right before the later aligned turn, same exceptions; superseded runs are not.
+ *   Turns before the first aligned one are not (the local history may be capped at its head)
  * - nothing aligns: remote-only conversations take the remote transcript, app conversations keep the local one
+ * - a message queued when the app stopped (`sendQueued`, hermes/pendingSend.ts) that Hermes already has (the turn
+ *   started before the transcript was saved) aligns with that stored turn (only one newer than the tap on Send):
+ *   it becomes a normal sent message with the stored answer after it – never offered for sending again
  * Returns `local` itself when nothing changed.
  */
 export function reconcileTranscript(local: ChatMessage[], remote: ChatMessage[], origin?: 'remote'): ChatMessage[] {
@@ -340,12 +356,16 @@ export function reconcileTranscript(local: ChatMessage[], remote: ChatMessage[],
   let changed = false;
   let li = 0;
   let lastRemoteUser = -1;
+  /** first remote index after the last aligned turn and its answer (-1: nothing aligned yet) */
+  let gapFrom = -1;
+  /** remote indices of superseded runs (never merged in) */
+  let superseded: Set<number> | null = null;
   for (let ri = 0; ri < remote.length; ri++) {
     const r = remote[ri];
     if (r.role !== 'user') continue;
     let found = -1;
     for (let j = li; j < out.length; j++) {
-      if (out[j].role === 'user' && sameUserTurn(out[j], r.text)) {
+      if (out[j].role === 'user' && sameUserTurn(out[j], r) && (!out[j].sendQueued || queuedMayMatch(out[j], r.createdAt))) {
         found = j;
         break;
       }
@@ -354,10 +374,29 @@ export function reconcileTranscript(local: ChatMessage[], remote: ChatMessage[],
     const nr = nextUserIndex(remote, ri + 1);
     if (nr !== -1 && normText(remote[nr].text) === normText(r.text)) {
       const nl = nextUserIndex(out, found + 1);
-      if (nl === -1 || !sameUserTurn(out[nl], remote[nr].text)) continue; // superseded run (see above)
+      if (nl === -1 || !sameUserTurn(out[nl], remote[nr])) {
+        // superseded run (see above)
+        superseded ??= new Set();
+        for (let k = ri; k < nr; k++) superseded.add(k);
+        continue;
+      }
+    }
+    if (gapFrom !== -1 && gapFrom < ri) {
+      const gap = missingRemote(out, remote, gapFrom, ri, superseded, sameUserTurn);
+      if (gap.length) {
+        out.splice(found, 0, ...gap);
+        found += gap.length;
+        changed = true;
+      }
     }
     lastRemoteUser = ri;
+    gapFrom = remote[ri + 1]?.role === 'assistant' ? ri + 2 : ri + 1;
     li = found + 1;
+    const wasQueued = !!out[found].sendQueued;
+    if (wasQueued) {
+      out[found] = sentFromQueued(out[found]);
+      changed = true;
+    }
     const ra = remote[ri + 1]?.role === 'assistant' ? remote[ri + 1] : undefined;
     const la = out[found + 1]?.role === 'assistant' ? out[found + 1] : undefined;
     if (ra && la) {
@@ -374,32 +413,53 @@ export function reconcileTranscript(local: ChatMessage[], remote: ChatMessage[],
         changed = true;
       }
       li = found + 2;
-    } else if (ra && !la && found === out.length - 1) {
-      out.push(ra);
+    } else if (ra && !la && (found === out.length - 1 || wasQueued)) {
+      out.splice(found + 1, 0, ra);
       changed = true;
-      li = out.length;
+      li = found + 2;
     }
   }
   if (lastRemoteUser === -1) return origin === 'remote' ? remote : local;
   // remote turns after the last aligned user turn (skip its answer)
-  let tail = lastRemoteUser + 1;
-  if (remote[tail]?.role === 'assistant') tail++;
-  if (tail < remote.length) {
-    const known = new Set(out.map((m) => m.id));
-    const answers = new Set(out.filter((m) => m.role === 'assistant' && m.text.trim()).map((m) => normText(m.text)));
-    for (let k = tail; k < remote.length; k++) {
-      const m = remote[k];
-      const next = remote[k + 1];
-      if (m.role === 'user' && next?.role === 'assistant' && next.text.trim() && answers.has(normText(next.text)) && out.some((u) => u.role === 'user' && sameUserTurn(u, m.text))) {
-        k++; // the same question with the same answer is already shown
-        continue;
-      }
-      if (known.has(m.id)) continue;
-      out.push(m);
+  if (gapFrom < remote.length) {
+    const tail = missingRemote(out, remote, gapFrom, remote.length, superseded, sameUserTurn);
+    if (tail.length) {
+      out.push(...tail);
       changed = true;
     }
   }
   return changed ? out : local;
+}
+
+/**
+ * remote[from, to) that the local transcript does not show yet: not superseded, not a known id, and not a user
+ * turn + answer that repeats an existing local user turn AND answer (a run the app already shows)
+ */
+function missingRemote(
+  out: ChatMessage[],
+  remote: ChatMessage[],
+  from: number,
+  to: number,
+  superseded: Set<number> | null,
+  sameUserTurn: ReturnType<typeof createUserTurnMatcher>
+): ChatMessage[] {
+  const add: ChatMessage[] = [];
+  let known: Set<string> | null = null;
+  let answers: Set<string> | null = null;
+  for (let k = from; k < to; k++) {
+    if (superseded?.has(k)) continue;
+    known ??= new Set(out.map((m) => m.id));
+    answers ??= new Set(out.filter((m) => m.role === 'assistant' && m.text.trim()).map((m) => normText(m.text)));
+    const m = remote[k];
+    const next = k + 1 < to ? remote[k + 1] : undefined;
+    if (m.role === 'user' && next?.role === 'assistant' && next.text.trim() && answers.has(normText(next.text)) && out.some((u) => u.role === 'user' && sameUserTurn(u, m))) {
+      k++; // the same question with the same answer is already shown
+      continue;
+    }
+    if (known.has(m.id)) continue;
+    add.push(m);
+  }
+  return add;
 }
 
 /** persisted while still streaming (app killed): `stopped` without the end time every finalised message has */

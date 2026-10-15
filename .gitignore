@@ -21,3 +21,7 @@ docs/media/*.mp4
 docs/media/demo-*.gif
 # website demo videos: copied in at deploy time (website/README.md); the poster JPGs are committed
 website/media/*.mp4
+
+# python bytecode (hermes-plugin/)
+__pycache__/
+*.pyc

@@ -84,4 +84,8 @@ test('menu items: order, last-answer retry, web item, report last', () => {
   assert.deepEqual(answerMenuItems({ ...s, local: true, usedWeb: false, shareImage: false }), ['copy', 'copyMarkdown', 'share']);
   assert.deepEqual(answerMenuItems({ ...s, reported: true, usedWeb: false, shareImage: false, busy: true }), ['branch', 'copy', 'copyMarkdown', 'share', 'undoReport']);
   assert.deepEqual(answerMenuItems({ ...s, streaming: true }), []);
+  // quick thread: "Mit Hermes weitermachen" first, no branch; not for a failed answer
+  const q = { ...s, canBranch: false, canHandOff: true, usedWeb: false, shareImage: false };
+  assert.deepEqual(answerMenuItems(q), ['handOff', 'retry', 'copy', 'copyMarkdown', 'share', 'report']);
+  assert.deepEqual(answerMenuItems({ ...q, failed: true, hasText: false }), ['retry']);
 });

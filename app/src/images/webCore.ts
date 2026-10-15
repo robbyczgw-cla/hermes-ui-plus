@@ -131,6 +131,8 @@ export function parseImagesConfig(raw: unknown): boolean {
 }
 
 export function createWebImageSearch(opts: WebSearchOptions): WebImageSearch {
+  // called as a plain function: a browser fetch called as `x.fetch()` throws "Illegal invocation" (wrong `this`)
+  const doFetch = opts.fetch;
   const now = opts.now ?? Date.now;
   const cache = createLruCache<ResolvedImage | null>(opts.maxEntries ?? 300, now);
   const inflight = new Map<string, Promise<ResolvedImage | null>>();
@@ -207,7 +209,7 @@ export function createWebImageSearch(opts: WebSearchOptions): WebImageSearch {
         const timer = setTimeout(() => ctrl?.abort(), opts.timeoutMs ?? 6000);
         try {
           const base = c.baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '');
-          const res = await opts.fetch(`${base}/bridge/images/config`, { headers: { Accept: 'application/json', ...(c.apiKey ? { Authorization: `Bearer ${c.apiKey}` } : {}) }, signal: ctrl?.signal });
+          const res = await doFetch(`${base}/bridge/images/config`, { headers: { Accept: 'application/json', ...(c.apiKey ? { Authorization: `Bearer ${c.apiKey}` } : {}) }, signal: ctrl?.signal });
           if (conn !== c) return; // connection changed meanwhile
           if (res.status === 404 || res.status === 503 || res.status === 401) {
             unavailableUntil = now() + 10 * 60_000;
@@ -272,7 +274,7 @@ export function createWebImageSearch(opts: WebSearchOptions): WebImageSearch {
         try {
           const base = c.baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '');
           const url = `${base}/bridge/images?q=${encodeURIComponent(q)}&n=5&lang=${encodeURIComponent(l)}`;
-          const res = await opts.fetch(url, { headers: { Accept: 'application/json', ...(c.apiKey ? { Authorization: `Bearer ${c.apiKey}` } : {}) }, signal: ctrl?.signal });
+          const res = await doFetch(url, { headers: { Accept: 'application/json', ...(c.apiKey ? { Authorization: `Bearer ${c.apiKey}` } : {}) }, signal: ctrl?.signal });
           if (res.status === 404 || res.status === 503 || res.status === 401) {
             // older bridge / no provider keys / wrong token: stop trying for a while
             unavailableUntil = now() + 10 * 60_000;

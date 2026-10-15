@@ -10,13 +10,12 @@
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import { Linking, Platform } from 'react-native';
-import { classifyFile, DOCUMENT_PICKER_TYPES, formatBytes, normalizeMime } from './mime';
-import { importFile, prepareImage } from './store';
+import { classifyFile, DOCUMENT_PICKER_TYPES, formatSizeOverLimit, normalizeMime } from './mime';
+import { deleteAttachmentFiles, importFile, prepareImage } from './store';
 import { prepareEach } from './prepareEach';
+import { importWebFileList } from './webFiles';
 import { LIMITS } from './types';
 import type { Attachment, AttachmentMsg } from './types';
-
-const size = (n: number) => formatBytes(n);
 
 export type PickSource = 'camera' | 'library' | 'document';
 
@@ -82,6 +81,22 @@ export async function recoverPendingPick(): Promise<PickResult | null> {
 
 type PickedFile = { uri: string; name: string; mimeType?: string | null; size?: number | null };
 
+/** why a picked / dropped file is not taken (type, size), or null */
+function refusal(name: string, mime: string, bytes: number | null | undefined): AttachmentMsg | null {
+  if (!classifyFile(mime)) return { key: 'attachments.picker.unsupportedType', vars: { name } };
+  if (typeof bytes === 'number' && bytes > LIMITS.maxUploadBytes) {
+    return { key: 'attachments.validate.tooLarge', vars: { name, ...formatSizeOverLimit(bytes, LIMITS.maxUploadBytes) } };
+  }
+  return null;
+}
+
+/** one accepted file (normalized mime) → attachment: images prepared like photos, other files copied */
+function prepareOne(a: PickedFile & { mimeType: string }): Promise<Attachment> {
+  return classifyFile(a.mimeType) === 'image'
+    ? prepareImage({ uri: a.uri, mimeType: a.mimeType, name: a.name, size: a.size }, a.name)
+    : importFile({ uri: a.uri, name: a.name, mimeType: a.mimeType, size: a.size ?? undefined });
+}
+
 /** picked / dropped files → attachments (images prepared like photos), at most `remaining`, each reported when ready */
 async function importPickedFiles(files: readonly PickedFile[], remaining: number, onPrepared?: (att: Attachment) => void): Promise<PickResult> {
   const errors: AttachmentMsg[] = [];
@@ -91,35 +106,43 @@ async function importPickedFiles(files: readonly PickedFile[], remaining: number
     assets,
     async (a): Promise<Attachment | { skip: AttachmentMsg }> => {
       const mime = normalizeMime(a.mimeType, a.name);
-      const cls = classifyFile(mime);
-      if (!cls) return { skip: { key: 'attachments.picker.unsupportedType', vars: { name: a.name } } };
-      if (typeof a.size === 'number' && a.size > LIMITS.maxUploadBytes) {
-        return { skip: { key: 'attachments.validate.tooLarge', vars: { name: a.name, size: size(a.size), max: size(LIMITS.maxUploadBytes) } } };
-      }
-      return cls === 'image'
-        ? prepareImage({ uri: a.uri, mimeType: mime, name: a.name, size: a.size }, a.name)
-        : importFile({ uri: a.uri, name: a.name, mimeType: mime, size: a.size ?? undefined });
+      const refused = refusal(a.name, mime, a.size);
+      return refused ? { skip: refused } : prepareOne({ ...a, mimeType: mime });
     },
     { onPrepared, fallbackError: (a) => ({ key: 'attachments.file.openFailed', vars: { name: a.name } }) }
   );
   return { attachments: prepared.attachments, errors: [...errors, ...prepared.errors], canceled: false };
 }
 
-/** Web / desktop app: files from drag & drop or the clipboard (blob URLs, like the web document picker's). */
-export async function importWebFiles(files: readonly File[], remaining: number, onPrepared?: (att: Attachment) => void): Promise<PickResult> {
+/**
+ * Web / desktop app: files from drag & drop or the clipboard. Object URLs only for accepted files and only while each
+ * is prepared (webFiles.ts); the bytes end up in IndexedDB (webBlobs.ts).
+ * `stillWanted` false (the desktop app lock engaged meanwhile) → the prepared file is deleted, the rest not read.
+ */
+export async function importWebFiles(
+  files: readonly File[],
+  remaining: number,
+  onPrepared?: (att: Attachment) => void,
+  stillWanted: () => boolean = () => true
+): Promise<PickResult> {
   if (remaining <= 0) {
     return { ...EMPTY, canceled: false, errors: [{ key: 'attachments.validate.tooMany', vars: { max: LIMITS.maxAttachments } }] };
   }
   const at = stamp();
-  const picked = files.map((f, i) => ({
-    uri: URL.createObjectURL(f),
-    // pasted screenshots come as "image.png"
-    name: f.name && f.name !== 'image.png' ? f.name : `Bild ${at}${files.length > 1 ? `-${i + 1}` : ''}.${(f.type.split('/')[1] || 'png').replace('jpeg', 'jpg')}`,
-    mimeType: f.type || null,
-    size: f.size,
-  }));
   try {
-    return await importPickedFiles(picked, remaining, onPrepared);
+    const r = await importWebFileList(files, {
+      remaining,
+      urls: { create: (b) => URL.createObjectURL(b), revoke: (u) => URL.revokeObjectURL(u) },
+      // pasted screenshots come as "image.png"
+      nameOf: (f, i) =>
+        f.name && f.name !== 'image.png' ? f.name : `Bild ${at}${files.length > 1 ? `-${i + 1}` : ''}.${(f.type.split('/')[1] || 'png').replace('jpeg', 'jpg')}`,
+      check: (p) => refusal(p.name, normalizeMime(p.mimeType, p.name), p.size),
+      prepare: (p) => prepareOne({ ...p, mimeType: normalizeMime(p.mimeType, p.name) }),
+      discard: (att) => deleteAttachmentFiles([att]),
+      stillWanted,
+      onPrepared,
+    });
+    return { ...r, canceled: false };
   } catch {
     return { ...EMPTY, canceled: false, errors: [{ key: 'attachments.picker.failedDocument' }] };
   }

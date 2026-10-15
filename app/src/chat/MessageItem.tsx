@@ -3,8 +3,8 @@ import { LayoutAnimation, Platform, Pressable, ScrollView, StyleSheet, Text, Vie
 import { ApprovalHistory } from '../approvals/ApprovalHistory';
 import { AttachmentTray, MessageAttachments } from '../attachments';
 import type { ChatMessage } from '../hermes';
-import { messageErrorText } from '../hermes/chatState';
 import { isRecovering } from '../hermes/recovery.ts';
+import { textAppendRun } from '../hermes/chatState.ts';
 import { AUTH_DENIED_KEY, isAuthErrorMessage } from '../hermes/authError.ts';
 import { router } from 'expo-router';
 import { isCut } from '../background/cut.ts';
@@ -12,6 +12,7 @@ import { useLocale, useT } from '../i18n';
 import { NodeScope } from '../nodestate';
 import type { HuiAction, HuiNode, Segment } from '../protocol/types';
 import { skeletonShapeForRoute } from '../protocol/streamPlaceholder.ts';
+import { segmentAppendRun } from '../protocol/streamParser.ts';
 import {
   HuiView,
   WaitingIndicator,
@@ -50,12 +51,14 @@ import { useToast } from './Toast';
 import { ToolChips } from './ToolChips';
 import { ContextDivider, MediaFiles, MemoryNotes, ReminderCards } from './HermesExtras';
 import { memoryNotes, shouldShowCompactionDivider } from './hermesTools';
-import { extractMedia } from './mediaTags';
+import { createMediaTagCache, extractMedia, extractMediaCached, type MediaTagCache } from './mediaTags';
 import { parseReminders } from './reminder';
 import { CutNotice, LateMark } from './TurnNotices';
+import { FailureText } from './FailureText';
 import { ProgressNotesDisclosure, ToolDetailSheet, ToolTimelinePanel, TurnFooter } from './ToolTimeline';
 import { useSegments } from './useSegments';
-import { usePendingBubble, type PendingBubble } from './pendingSendContext';
+import { usePendingBubble, useQueuedBubble, type PendingBubble } from './pendingSendContext';
+import { queuedNotice } from '../hermes/pendingSend';
 import { AnswerScope } from './answers/AnswerScope';
 import { summaryBefore } from './answers/collapse';
 import { withCitationSources } from './answers/citations';
@@ -69,6 +72,8 @@ import { ActionMenu, MenuHeader, type MenuItem } from './ActionMenu';
 import { useAnswerActions } from './answerActions';
 import { answerMenuItems, usedWebSearch, type AnswerModelInfo } from './answerMenu';
 import { FindScope, Highlighted, useMessageHighlight } from './findContext';
+import { HandOffButton, QuickMetaLine } from '../quick/QuickMeta';
+import { shortModel } from '../quick/core';
 import type { TFn, TKey } from '../i18n';
 
 /**
@@ -136,10 +141,56 @@ export const UserMessage = memo(function UserMessage({ message }: { message: Cha
             </Pressable>
           ))
         : null}
+      {message.sendQueued ? <QueuedActions message={message} /> : null}
       {prefs.showTimestamps ? <Timestamp at={message.createdAt} /> : null}
     </View>
   );
 });
+
+/**
+ * A user message that was still waiting for its uploads – or for the server to accept its turn – when the app stopped
+ * (`sendQueued`, hermes/pendingSend.ts): not sent. "Erneut senden" checks Hermes first, uploads what is missing and starts the turn; "Verwerfen" puts the
+ * text back into the composer. Never sent without this tap (the conversation may have moved on).
+ */
+function QueuedActions({ message }: { message: ChatMessage }) {
+  const t = useTheme();
+  const tr = useT();
+  const q = useQueuedBubble();
+  const st = q?.state(message.id);
+  const checking = st?.phase === 'checking';
+  const notSent = queuedNotice(message) === 'request' ? 'chat.message.queuedNotSentRequest' : 'chat.message.queuedNotSent';
+  const note = checking ? 'chat.message.queuedChecking' : st?.notice === 'checkFailed' ? 'chat.message.queuedCheckFailed' : notSent;
+  const canResend = !!q && !checking && !q.busy;
+  return (
+    <View style={styles.pendingWrap}>
+      <Text style={[styles.pendingText, styles.queuedNote, { color: checking ? t.colors.muted : t.colors.danger }]} accessibilityLiveRegion="polite" accessibilityRole={checking ? undefined : 'alert'}>
+        {tr(note)}
+      </Text>
+      {q && !checking ? (
+        <View style={styles.pendingRow}>
+          <Pressable
+            onPress={() => q.discard(message.id)}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={tr('chat.message.queuedDiscardA11y')}
+          >
+            <Text style={[styles.pendingText, { color: t.colors.muted, fontWeight: '600' }]}>{tr('chat.message.queuedDiscard')}</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => q.resend(message.id)}
+            disabled={!canResend}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !canResend }}
+            accessibilityLabel={tr('chat.message.queuedResendA11y')}
+          >
+            <Text style={[styles.pendingText, { color: canResend ? t.colors.accent : t.colors.muted, fontWeight: '600' }]}>{tr('chat.message.queuedResend')}</Text>
+          </Pressable>
+        </View>
+      ) : null}
+    </View>
+  );
+}
 
 /**
  * A user message sent while its uploads still run (hermes/pendingSend.ts): the attachments with their progress
@@ -233,12 +284,20 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
   const notesKey = split?.notes.length ? split.notes.map((n) => `${n.toolId}\u0000${n.at}\u0000${n.text}`).join('\u0001') : '';
   const progressNotes = useMemo(() => (split?.notes.length ? split.notes : NO_NOTES), [notesKey]); // eslint-disable-line react-hooks/exhaustive-deps
   // Hermes `MEDIA:<path>` tags become file chips / inline images below the answer; the raw path is not shown
+  // while streaming only the tail after the last complete line is scanned again (per-message memo, mediaTags.ts; it
+  // checks that the text still extends what it froze, so a discarded render or a replaced answer cannot corrupt it)
+  const mediaCaches = useMemo<[MediaTagCache, MediaTagCache]>(() => [createMediaTagCache(), createMediaTagCache()], []);
+  // the answer text's append run (chatState.ts): parsers skip their full-text "still the same start?" compare
+  const textRun = textAppendRun(message);
+  const shownRun = shownText === message.text ? textRun : undefined;
   const media = useMemo(() => {
-    const m = extractMedia(shownText, streaming);
+    const extract = (text: string, i: 0 | 1) =>
+      streaming ? extractMediaCached(text, true, mediaCaches[i], i === 0 ? shownRun : textRun) : extractMedia(text, false);
+    const m = extract(shownText, 0);
     // tags inside interim notes still become file chips
-    return shownText === message.text ? m : { ...m, refs: extractMedia(message.text, streaming).refs };
-  }, [shownText, message.text, streaming]);
-  const rawSegments = useSegments(media.text, !streaming, message.id);
+    return shownText === message.text ? m : { ...m, refs: extract(message.text, 1).refs };
+  }, [shownText, message.text, streaming, mediaCaches, shownRun, textRun]);
+  const rawSegments = useSegments(media.text, !streaming, message.id, media.text === shownText ? shownRun : undefined);
   // finished answers: B3 closing `[n]` sources list → sources block + numeric pills; UX8 duplicated translation text
   const cited = useMemo(
     () => (streaming ? { segments: rawSegments, cites: 0, research: false } : withCitationSources(dedupeTranslations(rawSegments))),
@@ -310,10 +369,14 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
       shareImage: SHARE_IMAGE_SUPPORTED && uiPrefs['answers.shareImage'],
       reported: !!report.report,
       canBranch: !!actions?.canBranch,
+      canHandOff: !!actions?.handOff && !!message.quick,
     });
     const items: MenuItem[] = [];
     for (const k of keys) {
       switch (k) {
+        case 'handOff':
+          if (actions?.handOff) items.push({ key: k, icon: 'branch', label: tr('quick.handOff.action'), hint: tr('quick.handOff.a11y'), onPress: () => actions.handOff?.(id) });
+          break;
         case 'branch':
           if (actions) items.push({ key: k, icon: 'branch', label: tr('menus.answer.branch'), onPress: () => actions.branchFrom(id) });
           break;
@@ -325,7 +388,8 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
             label: tr('menus.answer.retry'),
             submenu: [
               { key: 'same', icon: 'retry', label: tr('menus.answer.retrySame'), onPress: () => actions.retry('same') },
-              { key: 'model', icon: 'spark', label: tr('menus.answer.retryModel'), hint: tr('menus.answer.retryModelHint'), onPress: () => actions.retry('model') },
+              // quick answers have their own model setting (Settings → Schnellfrage)
+              ...(actions.quick ? [] : [{ key: 'model', icon: 'spark' as const, label: tr('menus.answer.retryModel'), hint: tr('menus.answer.retryModelHint'), onPress: () => actions.retry('model') }]),
               { key: 'longer', icon: 'plus', label: tr('menus.answer.retryLonger'), onPress: () => actions.retry('longer') },
               { key: 'shorter', icon: 'compress', label: tr('menus.answer.retryShorter'), onPress: () => actions.retry('shorter') },
             ],
@@ -365,7 +429,8 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
       const absolute = formatDate(at, today ? { timeStyle: 'short' } : { dateStyle: 'medium', timeStyle: 'short' });
       lines.push(tr('menus.answer.time', { relative: formatRelative(at), absolute }));
     }
-    if (actions && !local) lines.push(modelLine(actions.modelInfo(message), tr));
+    if (message.quick) lines.push(tr('quick.meta.menuLine', { model: shortModel(message.quick.model) ?? '–' }));
+    else if (actions && !local) lines.push(modelLine(actions.modelInfo(message), tr));
     return <MenuHeader lines={lines} />;
   }, [menuOpen, message, actions, local, tr, formatDate, formatRelative]);
   const openMenu = !streaming ? () => setMenuOpen(true) : undefined;
@@ -484,11 +549,7 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
           <Icon name="alert" size={18} color={t.colors.danger} />
           <View style={{ flex: 1, gap: 2 }}>
             <Text style={[styles.errorTitle, fs(14, 19), { color: t.colors.danger }]}>{tr('chat.message.failed')}</Text>
-            {message.error ? (
-              <Text style={[styles.errorText, fs(13, 18), { color: t.colors.text }]} numberOfLines={4}>
-                {authError && !message.errorText ? tr(AUTH_DENIED_KEY) : messageErrorText(message, tr)}
-              </Text>
-            ) : null}
+            {message.error ? <FailureText message={message} override={authError && !message.errorText ? tr(AUTH_DENIED_KEY) : undefined} /> : null}
           </View>
           {isLast && authError && profile ? (
             // rejected key / token: retrying is pointless – open the profile editor of this connection
@@ -520,8 +581,15 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
       ) : message.status === 'done' ? (
         <LateMark message={message} />
       ) : null}
-      {verbose && !streaming ? <TurnFooter message={message} onOpen={setSheetKey} /> : null}
-      {mode === 'compact' && !streaming ? <TurnFooter message={message} tokens={false} /> : null}
+      {message.quick && !streaming ? (
+        // quick answer: "⚡ model · 1,6 s" in place of the turn footer (no tools to show)
+        message.status === 'done' ? <QuickMetaLine stamp={message.quick} /> : null
+      ) : (
+        <>
+          {verbose && !streaming ? <TurnFooter message={message} onOpen={setSheetKey} /> : null}
+          {mode === 'compact' && !streaming ? <TurnFooter message={message} tokens={false} /> : null}
+        </>
+      )}
       {verbose && sheetKey ? <ToolDetailSheet message={message} rowKey={sheetKey} onClose={() => setSheetKey(null)} /> : null}
       {/* N5: no action row under an answer that is still being fetched (stream lost, recovery running) */}
       {!streaming && !recovering && message.status !== 'error' && (hasCopy || reportable) ? (
@@ -532,13 +600,15 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
           {hasCopy ? <IconButton icon="share" label={tr('actions.share')} onPress={() => void share(copyText())} /> : null}
           {openMenu ? <IconButton icon="more" label={tr('menus.answer.more')} onPress={openMenu} /> : null}
           {showTime ? <Timestamp at={message.createdAt} inline /> : null}
+          {/* quick thread, newest answer: the way on to the full agent */}
+          {actions?.handOff && message.quick && isLast && !local ? <HandOffButton onPress={() => actions.handOff?.(id)} /> : null}
         </View>
       ) : showTime && !streaming ? (
         <Timestamp at={message.createdAt} />
       ) : null}
       {reformatted && !streaming ? <ReformattedMarker /> : null}
-      {/* A1 "Umformen" chips: last finished answer only (the tag reformats "the last answer") */}
-      {isLast && !local && message.status !== 'stopped' ? <TransformBar message={message} onAction={onAction} segments={segments} text={media.text} /> : null}
+      {/* A1 "Umformen" chips: last finished answer only (the tag reformats "the last answer"); not under quick answers */}
+      {isLast && !local && !actions?.quick && message.status !== 'stopped' ? <TransformBar message={message} onAction={onAction} segments={segments} text={media.text} /> : null}
       {followups && isLast && !streaming && uiPrefs.showFollowups && !ownSuggestions ? (
         <View style={styles.followups}>
           {/* follow-ups: vertical list of full questions (Suggestions layout "row") */}
@@ -643,7 +713,7 @@ const SegmentView = memo(function SegmentView({
       if (!seg.text.trim()) return null;
       return (
         <View style={gap}>
-          <Markdown text={seg.text} streaming={live} collapse={collapse} />
+          <Markdown text={seg.text} streaming={live} collapse={collapse} run={segmentAppendRun(seg)} />
         </View>
       );
     case 'hui':
@@ -764,6 +834,7 @@ const styles = StyleSheet.create({
   pendingWrap: { alignSelf: 'flex-end', alignItems: 'flex-end', maxWidth: '100%' },
   pendingRow: { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end' },
   pendingText: { fontSize: 13 },
+  queuedNote: { textAlign: 'right', marginBottom: 4 },
   userBubble: { paddingHorizontal: 16, paddingVertical: 10, maxWidth: '100%' },
   userText: { fontSize: 16, lineHeight: 23 },
   userPlain: { borderRightWidth: 2, paddingRight: 12, paddingLeft: 0, paddingVertical: 2, borderRadius: 0 },
@@ -779,7 +850,6 @@ const styles = StyleSheet.create({
   rawBody: { marginTop: 6, maxHeight: 320 },
   rawText: { fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }), fontSize: 12, lineHeight: 17 },
   errorTitle: { fontSize: 14, fontWeight: '600' },
-  errorText: { fontSize: 13, lineHeight: 18 },
   retryBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 6 },
   retryText: { fontSize: 13, fontWeight: '500' },
   stopped: { fontSize: 12.5, marginTop: 6 },

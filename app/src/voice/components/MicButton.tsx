@@ -8,6 +8,7 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { runOnJS } from 'react-native-reanimated';
 import { useT } from '../../i18n';
 import { bestOn, haptic, useTheme } from '../../ui';
 import { createHoldController } from '../holdPress';
@@ -41,25 +42,37 @@ export function MicButton({ dictation, size = 36, disabled, holdToTalk = true, h
 
   // RNGH manual gesture (root GestureHandlerRootView exists in app/_layout): raw touches, activated on
   // touch-down so nothing else steals the finger while holding; a plain tap without movement works too.
+  // The callbacks are UI-thread worklets: the state manager `m` (activate/end/fail) goes through Reanimated's
+  // setGestureState, which only works on the UI runtime. With `.runOnJS(true)` every m.* call was a no-op that
+  // only logged "[Reanimated] You can not use setGestureState in non-worklet function" (gestureGuard.test.ts).
+  // The hold controller is plain JS (timers, dictation, React state), so it is reached via runOnJS.
+  const touchDown = (x: number) => void ctl.begin(x);
+  const touchMove = (x: number) => ctl.move(x);
+  const touchEnd = (success: boolean) => ctl.end(success);
   const gesture = Gesture.Manual()
-    .runOnJS(true)
     .enabled(!disabled)
     .hitSlop(6)
     .onTouchesDown((e, m) => {
-      const x = e.allTouches[0]?.absoluteX ?? 0;
-      if (ctl.begin(x)) m.activate();
+      'worklet';
+      // activating unconditionally is equivalent to the old `if (ctl.begin(x)) m.activate()`: begin() only
+      // refuses a second finger, and then the gesture is already active (ACTIVE -> ACTIVE is a no-op)
+      m.activate();
+      runOnJS(touchDown)(e.allTouches[0]?.absoluteX ?? 0);
     })
     .onTouchesMove((e) => {
+      'worklet';
       const x = e.allTouches[0]?.absoluteX;
-      if (typeof x === 'number') ctl.move(x);
+      if (typeof x === 'number') runOnJS(touchMove)(x);
     })
     .onTouchesUp((_e, m) => {
-      ctl.end(true);
+      'worklet';
       m.end();
+      runOnJS(touchEnd)(true);
     })
     .onTouchesCancelled((_e, m) => {
-      ctl.end(false);
+      'worklet';
       m.fail();
+      runOnJS(touchEnd)(false);
     });
 
   const { phase, mode, available } = dictation;

@@ -11,6 +11,24 @@ function run(evs: HermesEvent[], t0 = 1000): ChatMessage {
   return m;
 }
 
+test('textReplace replaces the whole answer text; later text appends to it', () => {
+  const m = run([
+    { type: 'status', kind: 'typing', text: 'arbeitet' },
+    { type: 'text', text: 'Entwurf' },
+    { type: 'textReplace', text: 'Endgültig' },
+    { type: 'text', text: '!' },
+  ]);
+  assert.equal(m.text, 'Endgültig!');
+  assert.equal(m.statusNote, undefined);
+  assert.equal(run([{ type: 'text', text: 'weg' }, { type: 'textReplace', text: '' }]).text, '');
+  // a replace lifts an earlier cap (the new text is measured on its own)
+  const capped = run([{ type: 'text', text: 'x'.repeat(MAX_MESSAGE_TEXT + 1) }]);
+  assert.equal(capped.textCapped, true);
+  const fresh = applyEvent(capped, { type: 'textReplace', text: 'kurz' }, 5000);
+  assert.equal(fresh.text, 'kurz');
+  assert.equal(fresh.textCapped, undefined);
+});
+
 test('text and reasoning accumulate; status note clears when text resumes', () => {
   const m = run([
     { type: 'status', kind: 'lifecycle', text: 'wait' },

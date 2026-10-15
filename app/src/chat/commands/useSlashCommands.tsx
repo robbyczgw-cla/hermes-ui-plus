@@ -11,6 +11,7 @@ import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useConversations, useConversationsInternals } from '../../conversations/ConversationsProvider';
 import { chatOptionsSummary, type HermesChatOptions } from '../../hermes/capabilities';
 import { createJsonRequest, isNotFoundError, sessionErrorText } from '../../hermes/sessions';
+import { withBot } from '../../hermes/bots';
 import type { FetchLike } from '../../hermes/stream';
 import { sessionsSupported } from '../../hermes/support';
 import type { UseHermesChat } from '../../hermes';
@@ -80,7 +81,7 @@ export function useSlashCommands(a: UseSlashCommandsArgs): SlashCommands {
     kind: profile.kind,
     bridge: hermes && !!profile.bridge,
     noPalette: !a.enabled,
-    sessionsApi: hermes ? sessionsSupported({ baseUrl: profile.baseUrl, apiKey: profile.apiKey }) : false,
+    sessionsApi: hermes ? sessionsSupported(withBot({ baseUrl: profile.baseUrl, apiKey: profile.apiKey }, meta?.hermesProfile)) : false,
     hasRemoteSession: hermes && hasUser && !!sessionId,
     streaming,
     messageCount: messages.length,
@@ -93,7 +94,9 @@ export function useSlashCommands(a: UseSlashCommandsArgs): SlashCommands {
   const live = useRef({ ctx, a, meta, sessionId, pending, pendingAll });
   live.current = { ctx, a, meta, sessionId, pending, pendingAll };
 
-  const request = useMemo(() => createJsonRequest(nativeFetch, { baseUrl: profile.baseUrl, apiKey: profile.apiKey }), [profile.baseUrl, profile.apiKey]);
+  // the chat's Hermes bot (/p/<bot>/api/…): usage, skills, fork of THIS chat's session
+  const bot = meta?.hermesProfile;
+  const request = useMemo(() => createJsonRequest(nativeFetch, withBot({ baseUrl: profile.baseUrl, apiKey: profile.apiKey }, bot)), [profile.baseUrl, profile.apiKey, bot]);
 
   const reasonText = useCallback(
     (def: CommandDef, key: string): string => {
@@ -264,7 +267,7 @@ export function useSlashCommands(a: UseSlashCommandsArgs): SlashCommands {
             // a NEW, fully initialised conversation that then becomes the open chat (never a mounted draft, M5)
             controller.createBranch(
               { id: cur.profile.id, kind: cur.profile.kind },
-              { messages: msgs, sessionId: fork.id, model: m.model, modelOptions: m.modelOptions, title }
+              { messages: msgs, sessionId: fork.id, model: m.model, modelOptions: m.modelOptions, title, bot: m.hermesProfile }
             );
             toast(tr('slash.branch.done', { title: title || fork.id }));
           } catch (e) {

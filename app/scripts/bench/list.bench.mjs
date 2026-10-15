@@ -2,7 +2,7 @@
 // Run from app/: scripts/bench/run.sh list
 import { createListDerive, createReversedList } from '../../src/chat/listDerive.ts';
 import { appendCapped } from '../../src/hermes/chatState.ts';
-import { firstUserText, messagesSignature, prepareForStorage, previewOf, searchTextOf } from '../../src/conversations/messages.ts';
+import { firstUserText, messagesFileJson, messagesSignature, prepareForStorage, previewOf, searchTextOf } from '../../src/conversations/messages.ts';
 import { header, perStep, report } from './lib.mjs';
 import { chatMessage, longAnswer, longChat } from './fixtures.mjs';
 
@@ -99,4 +99,8 @@ header('partial save of a streaming 500-message chat (usePersistOnNewMessage →
   );
   const stored = prepareForStorage(lists[lists.length - 1]);
   report('repo flush: JSON.stringify of the stored transcript', perStep(() => (l) => JSON.stringify({ v: 1, messages: l }), [stored]));
+  // what the repo writes since the per-message JSON cache: one flush per partial save of the streaming answer
+  const storedLists = longLists.map((l) => prepareForStorage(l));
+  report('repo flush per partial save: JSON.stringify of the file', perStep(() => (l) => JSON.stringify({ v: 1, messages: l }), storedLists));
+  report('repo flush per partial save: messagesFileJson (unchanged messages reused)', perStep(() => (l) => messagesFileJson(1, l), storedLists));
 }

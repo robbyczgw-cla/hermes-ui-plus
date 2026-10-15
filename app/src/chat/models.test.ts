@@ -4,6 +4,7 @@ import {
   cacheIsStale,
   cacheMatches,
   effectiveModel,
+  headerModelLabel,
   modelLabel,
   modelOptions,
   overrideFor,
@@ -52,4 +53,5 @@ test('model cache parse / match / stale', () => {
   assert.equal(cacheIsStale(e, 1000 + 11 * 60_000), true);
   assert.equal(cacheIsStale(null, 0), true);
 });
+
 

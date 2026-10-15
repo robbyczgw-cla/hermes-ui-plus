@@ -36,6 +36,7 @@ export type IconName =
   | 'eye'
   | 'globe'
   | 'bolt'
+  | 'boltFilled'
   | 'spark'
   | 'server'
   | 'play'
@@ -56,6 +57,7 @@ export type IconName =
   | 'archive'
   | 'branch'
   | 'pin'
+  | 'lock'
   | 'chevronLeft';
 
 type Props = { name: IconName; size?: number; color: string; strokeWidth?: number };
@@ -179,7 +181,8 @@ function render(name: IconName, p: object, color: string) {
         </>
       );
     case 'bolt':
-      return <Path d="M13 3 5.5 13.5H12L11 21l7.5-10.5H12L13 3z" {...p} />;
+    case 'boltFilled':
+      return <Path d="M13 3 5.5 13.5H12L11 21l7.5-10.5H12L13 3z" {...p} fill={name === 'boltFilled' ? color : 'none'} />;
     case 'spark':
       return <Path d="M12 3.5c.6 4.3 2.2 5.9 6.5 6.5-4.3.6-5.9 2.2-6.5 6.5-.6-4.3-2.2-5.9-6.5-6.5 4.3-.6 5.9-2.2 6.5-6.5zM18.5 16.5c.25 1.6.9 2.25 2.5 2.5-1.6.25-2.25.9-2.5 2.5-.25-1.6-.9-2.25-2.5-2.5 1.6-.25 2.25-.9 2.5-2.5z" {...p} />;
     // connection kinds
@@ -331,6 +334,13 @@ function render(name: IconName, p: object, color: string) {
       );
     case 'pin':
       return <Path d="M12 17v4.5M9 3h6l-1 6 3 3.5V14H7v-1.5L10 9z" {...p} />;
+    case 'lock':
+      return (
+        <>
+          <Rect x="5.5" y="10.5" width="13" height="9.5" rx="2" {...p} />
+          <Path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5" {...p} />
+        </>
+      );
     case 'chevronLeft':
       return <Path d="M14.5 6 8.5 12l6 6" {...p} />;
   }

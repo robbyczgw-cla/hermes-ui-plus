@@ -17,6 +17,8 @@ type Props = {
   offline: boolean;
   offlineHint?: string;
   onOpenSettings(): void;
+  /** quick answers are available on this connection: "⚡ Schnellfrage" under the greeting (app/src/quick) */
+  onQuick?: () => void;
 };
 
 
@@ -30,7 +32,7 @@ const MAX_WIDTH = 720;
  * card it produces. Settings → Chat → "Vorschläge auf dem Startbildschirm" hides the grid; the greeting then
  * sits a little lower (upper half, not top third) so the screen still reads as composed.
  */
-export const EmptyState = memo(function EmptyState({ onPick, profileName, assistantName, offline, offlineHint, onOpenSettings }: Props) {
+export const EmptyState = memo(function EmptyState({ onPick, profileName, assistantName, offline, offlineHint, onOpenSettings, onQuick }: Props) {
   const t = useTheme();
   const tr = useT();
   const showStarters = usePreferences().prefs.showStarters;
@@ -71,6 +73,26 @@ export const EmptyState = memo(function EmptyState({ onPick, profileName, assist
               <Icon name="alert" size={16} color={t.colors.danger} />
               <Text style={[styles.offlineText, { color: t.colors.danger }, scaledText(13.5, 18, fs)]}>
                 {tr('chat.empty.offline', { profile: profileName, hint: offlineHint ?? tr('chat.header.status.unreachable') })}
+              </Text>
+            </Pressable>
+          ) : onQuick ? (
+            <Pressable
+              onPress={() => {
+                lightHaptic();
+                onQuick();
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={tr('quick.start.a11y')}
+              style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
+                styles.quick,
+                { borderColor: t.colors.border },
+                (pressed || hovered) && { backgroundColor: pressed ? t.colors.surfacePressed : t.colors.surfaceAlt },
+              ]}
+            >
+              <Icon name="boltFilled" size={14} color={t.colors.accent} strokeWidth={1.4} />
+              <Text style={[styles.quickText, { color: t.colors.text }, scaledText(14, 18, fs)]} numberOfLines={1}>
+                {tr('quick.start.pill')}
+                <Text style={{ color: t.colors.subtle, fontWeight: '400' }}>{`  ·  ${tr('quick.start.pillSub')}`}</Text>
               </Text>
             </Pressable>
           ) : null}
@@ -141,6 +163,8 @@ const styles = StyleSheet.create({
   headline: { fontSize: 30, lineHeight: 36, fontWeight: '600', letterSpacing: -0.8 },
   offline: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 8, paddingHorizontal: 12, paddingVertical: 9, minHeight: 44, borderRadius: 12 },
   offlineText: { fontSize: 13.5, fontWeight: '500', flexShrink: 1 },
+  quick: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 7, minHeight: 40, paddingLeft: 12, paddingRight: 15, borderRadius: 999, borderWidth: StyleSheet.hairlineWidth },
+  quickText: { fontSize: 14, fontWeight: '600', flexShrink: 1 },
   starters: { paddingHorizontal: 12, gap: 10 },
   label: { fontSize: 12.5, fontWeight: '600', letterSpacing: 0.2, paddingHorizontal: 12 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },

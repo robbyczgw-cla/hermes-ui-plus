@@ -94,11 +94,16 @@ const mb = (f) => (statSync(f).size / 1e6).toFixed(1);
 /** gallery order: Hermes Agent strengths first, then "answers that look great"; recipe/vocab/workout/mind map last */
 const AGENT_IDS = ['freigabe', 'langtask', 'toolsteps', 'befehle'];
 const ANSWER_IDS = ['produkte', 'umformen', 'orte', 'anleitung', 'designs', 'training', 'vokabeln', 'mindmap', 'rezept'];
+// 2026-10-15 "what's new" gallery (DEMO_GALLERY=new): only the clips recorded since the consumer set, one grid
+const NEW_IDS = ['schnell', 'bots', 'wege', 'bausteine', 'bilder', 'fluessig', 'nichtgesendet', 'sperre'];
+const NEW_GALLERY = process.env.DEMO_GALLERY === 'new';
 const INTRO_EN = 'The mobile app for your Hermes Agent: approvals, live tool steps, the finished answer waiting when you’re back (web app: push when it’s done), and answers that aren’t walls of text.';
+const NEWS_EN = 'What’s new since 13 October: quick answers ⚡ with hand-off to Hermes, bots in the model menu, paths and blocks cards, product photos that stay put, smoother streaming and a safety net for unsent messages.';
+const NEWS_DE = 'Neu seit dem 13. Oktober: Schnellfragen ⚡ mit Übergabe an Hermes, Bots im Modell-Menü, die Karten „Wege“ und „Bausteine“, ruhige Produktbilder, flüssigeres Streaming und ein Netz für nicht gesendete Nachrichten.';
 const INTRO_DE = 'Die mobile App für deinen Hermes Agent: Freigaben, Werkzeug-Schritte live, die fertige Antwort wartet auf dich (Web-App: Push, wenn sie fertig ist) – und Antworten, die keine Textwände sind.';
 
 export function gallery() {
-  const order = [...AGENT_IDS, ...ANSWER_IDS];
+  const order = NEW_GALLERY ? NEW_IDS : [...AGENT_IDS, ...ANSWER_IDS];
   const rank = (c) => (order.includes(c.id) ? order.indexOf(c.id) : order.length);
   const items = CLIPS.filter((c) => existsSync(join(OUT, `${c.file}.mp4`))).sort((x, y) => rank(x) - rank(y));
   const trailer = join(OUT, 'trailer.mp4');
@@ -114,8 +119,8 @@ export function gallery() {
     <small>${probeDuration(f).toFixed(0)} s · ${mb(f)} MB · ${extra}</small></figcaption>
 </figure>`;
   };
-  const agentCards = items.filter((c) => AGENT_IDS.includes(c.id)).map(card).join('\n');
-  const answerCards = items.filter((c) => !AGENT_IDS.includes(c.id)).map(card).join('\n');
+  const agentCards = NEW_GALLERY ? items.map(card).join('\n') : items.filter((c) => AGENT_IDS.includes(c.id)).map(card).join('\n');
+  const answerCards = NEW_GALLERY ? '' : items.filter((c) => !AGENT_IDS.includes(c.id)).map(card).join('\n');
   const tr = existsSync(trailer)
     ? `<section class="trailer">
   <video src="trailer.mp4" controls playsinline preload="metadata" poster="trailer-poster.jpg"></video>
@@ -126,7 +131,7 @@ export function gallery() {
     : '';
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(BRAND.name)} – Demos</title>
-<meta name="description" content="${esc(INTRO_EN)}">
+<meta name="description" content="${esc(NEW_GALLERY ? NEWS_EN : INTRO_EN)}">
 <style>
 :root{color-scheme:light dark;--bg:#f4f6fb;--card:#fff;--muted:#5b6476;--text:#111827;--accent:#4f46e5;--ring:rgba(79,70,229,.18)}
 @media(prefers-color-scheme:dark){:root{--bg:#0d1020;--card:#161a2e;--muted:#9aa4b8;--text:#eef1f7;--accent:#8b8cf8;--ring:rgba(139,140,248,.25)}}
@@ -149,20 +154,19 @@ figcaption{display:flex;flex-direction:column;gap:4px;padding:12px 4px 2px}figca
 a{color:var(--accent)}footer{margin-top:44px;color:var(--muted);font-size:13px}
 </style></head><body class="en"><main>
 <header><div><h1>${esc(BRAND.name)}</h1>
-<p><span lang="de">${esc(INTRO_DE)}</span><span lang="en">${esc(INTRO_EN)}</span></p>
+<p><span lang="de">${esc(NEW_GALLERY ? NEWS_DE : INTRO_DE)}</span><span lang="en">${esc(NEW_GALLERY ? NEWS_EN : INTRO_EN)}</span></p>
 <p class="sub"><span lang="de">Kurze Aufnahmen der App (Web-Build, iPhone-Größe). Alle Inhalte sind vorbereitete Beispiele, keine echten Daten.</span><span lang="en">Short recordings of the app (web build, iPhone size). All content is prepared sample data, nothing real.</span></p>
 <p class="sub">${esc(BRAND.disclaimer)}</p></div>
 <div class="lang" role="group" aria-label="Language"><button data-l="en">English</button><button data-l="de">Deutsch</button></div></header>
 ${tr}
-<p><a href="../demos-de/index.html">Original German recordings / Deutsche Aufnahmen</a></p>
-<h3><span lang="de">Für deinen Hermes Agent</span><span lang="en">For your Hermes Agent</span></h3>
+${NEW_GALLERY ? '<p><a href="../demos/index.html">Earlier demos</a> · <a href="../demos-consumer-20261013/index.html">Everyday-use demos (13 Oct)</a></p>\n<h3><span lang="de">Neu</span><span lang="en">New</span></h3>' : '<p><a href="../demos-de/index.html">Original German recordings / Deutsche Aufnahmen</a></p>\n<h3><span lang="de">Für deinen Hermes Agent</span><span lang="en">For your Hermes Agent</span></h3>'}
 <div class="grid">
 ${agentCards}
 </div>
-<h3 class="next"><span lang="de">Und Antworten, die gut aussehen</span><span lang="en">And answers that look great</span></h3>
+${NEW_GALLERY ? '' : `<h3 class="next"><span lang="de">Und Antworten, die gut aussehen</span><span lang="en">And answers that look great</span></h3>
 <div class="grid">
 ${answerCards}
-</div>
+</div>`}
 <footer><p>${esc(BRAND.disclaimer)}. <span lang="de">Fotos: CC0 (Wikimedia Commons), Produktbilder generiert; Musik: ElevenLabs Music. Details in music/music.json und CREDITS.json.</span><span lang="en">Photos: CC0 (Wikimedia Commons), product images generated; music: ElevenLabs Music. Details in music/music.json and CREDITS.json.</span></p></footer>
 </main><script>
 const set=(l)=>{document.body.classList.toggle('en',l==='en');document.documentElement.lang=l;document.querySelectorAll('.lang button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.l===l)));try{localStorage.setItem('demo-lang',l)}catch{}};
@@ -185,7 +189,11 @@ export async function finalizeAll({ withMusic = true, trailer = true } = {}) {
   gallery();
   chmodSync(OUT, 0o755);
   for (const f of readdirSync(OUT)) if (statSync(join(OUT, f)).isFile()) chmodSync(join(OUT, f), 0o644);
-  // docs/media: small GIF previews + the trailer (≤ 15 MB)
+  // docs/media: small GIF previews + the trailer (≤ 15 MB); DEMO_NO_DOCS=1 leaves the tracked docs untouched
+  if (process.env.DEMO_NO_DOCS === '1') {
+    console.log(`\nGallery: ${join(OUT, 'index.html')}`);
+    return;
+  }
   mkdir(DOCS_MEDIA);
   for (const c of CLIPS.filter((x) => x.gif)) {
     const g = join(OUT, `${c.file}.gif`);

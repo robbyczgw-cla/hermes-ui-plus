@@ -59,6 +59,8 @@ export const chat = {
     status: {
       unreachable: 'nicht erreichbar',
     },
+    /** Hermes v0.22: the chat's model is locked on its Hermes session */
+    modelLocked: '{model} · fixiert',
     pickModel: {
       a11y: '{title}, Modell wählen',
     },
@@ -196,12 +198,33 @@ export const chat = {
     pendingFailed: 'Upload fehlgeschlagen – erneut versuchen oder Datei entfernen.',
     pendingCancel: 'Abbrechen',
     pendingCancelA11y: 'Senden abbrechen (der Text kommt zurück ins Eingabefeld)',
+    queuedNotSent: 'Nicht gesendet – die App wurde beendet, bevor der Upload fertig war.',
+    /** the turn request had started, the server had not confirmed it (durable send, hermes/pendingSend.ts) */
+    queuedNotSentRequest: 'Nicht gesendet – die App wurde beendet, bevor der Server die Nachricht bestätigt hat.',
+    queuedChecking: 'Prüfe, ob die Nachricht schon angekommen ist …',
+    queuedCheckFailed: 'Konnte nicht prüfen, ob die Nachricht schon angekommen ist – später erneut versuchen.',
+    queuedResend: 'Erneut senden',
+    queuedResendA11y: 'Nachricht erneut senden (fehlende Dateien werden zuerst hochgeladen)',
+    queuedDiscard: 'Verwerfen',
+    queuedDiscardA11y: 'Nachricht verwerfen (der Text kommt zurück ins Eingabefeld)',
     formSent: '📝 Formular gesendet',
     truncated: 'Antwort wurde wegen Längenlimit abgeschnitten.',
     capped: 'Sehr lange Antwort: in der App gekürzt (Ende mit […] markiert).',
     failed: 'Antwort fehlgeschlagen',
     editConnection: 'Verbindung bearbeiten',
     retry: 'Erneut',
+    /** failure card: transport failures (hermes/networkFailure.ts); the raw detail sits behind "Details" */
+    network: {
+      dns: 'Server nicht erreichbar – Verbindung prüfen (z. B. Tailscale). Der Servername ließ sich nicht auflösen.',
+      timeout: 'Der Server antwortet nicht (Zeitüberschreitung) – Verbindung prüfen (z. B. Tailscale) und erneut versuchen.',
+      refused: 'Server nicht erreichbar: Verbindung abgelehnt. Läuft Hermes bzw. die UI-Bridge auf dem Server?',
+      reset: 'Die Verbindung zum Server wurde unterbrochen – bitte erneut versuchen.',
+      tls: 'Sichere Verbindung fehlgeschlagen (Zertifikat/TLS) – Adresse und Zertifikat des Servers prüfen.',
+      offline: 'Keine Internetverbindung – Netzwerk prüfen und erneut versuchen.',
+      unreachable: 'Server nicht erreichbar – Verbindung prüfen (z. B. Tailscale).',
+    },
+    showDetails: 'Details',
+    hideDetails: 'Details ausblenden',
     stopped: 'Gestoppt',
     recovering: 'Verbindung unterbrochen – Antwort wird nachgeladen…',
     recovered: 'nachgeladen',

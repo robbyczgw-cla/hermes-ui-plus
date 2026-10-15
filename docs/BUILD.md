@@ -103,6 +103,40 @@ FLAVOR=personal scripts/install-apk.sh                   # installs dist/latest-
 FLAVOR=personal node scripts/make-pair-link.mjs --preset <name> --token <TOKEN>
 ```
 
+### Flavor mark + Metro cache: an artifact of the wrong flavor cannot ship
+`EXPO_PUBLIC_FLAVOR` is inlined when Metro *transforms* a module, and Metro's transform cache (`$TMPDIR/metro-cache`)
+was not keyed on it: a personal APK built right after a hermes build of the same source tree reused the cached hermes
+modules and ran as the hermes flavor. Three layers now prevent that:
+- **Cache key** (`app/metro.config.js`): `cacheVersion` carries a hash of all `EXPO_PUBLIC_*` values, and Metro puts
+  `cacheVersion` into every transform cache key. A change of flavor (or app name, theme colour …) never hits the
+  other build's entries, wherever Metro runs: build machine, Gradle's bundle task, Xcode's bundle phase on the Mac, the
+  dev server. This is the primary guard; it needs no cooperation from the build scripts.
+- **Per-flavor TMPDIR** (`scripts/lib/flavor.sh` `flavor_init`): `TMPDIR=/var/tmp/hiui-tmp-$FLAVOR`, so the two
+  flavors don't even share a cache directory on the build machine. `build-web.sh` and `build-apk.sh` call
+  `flavor_require_tmpdir` in their memory-capped inner mode right before Metro runs and stop when `TMPDIR` is not that
+  directory. (The iOS build bundles on the Mac with the Mac's own temp dir; the cache key covers it.)
+- **Flavor mark in every artifact** (`app/src/flavor.ts` `FLAVOR_MARK`, kept alive by a global in
+  `app/src/app/_layout.tsx`): `process.env.EXPO_PUBLIC_FLAVOR === 'personal' ? … : …` is inlined and constant-folded by
+  Metro, so each bundle holds exactly one `hui-flavor:<flavor>` string, as plain text in minified JS and in the string
+  table of Hermes bytecode. `scripts/verify-flavor-artifact.mjs <artifact|dir> <flavor>` (`flavor_verify_artifact` in
+  the scripts) fails when the expected mark is missing, another flavor's mark is present, one file holds both (the
+  comparison was not folded) or an unknown mark shows up. It reads zips (APK, AAB, IPA, zipped `.app`: their
+  `index.android.bundle` / `main.jsbundle` must carry the mark), tarballs, web directories (incl. the precompressed
+  `.gz` / `.br` siblings; source maps are skipped) and single bundle files; `--list` prints the marks per file.
+
+| script | checked before |
+|---|---|
+| `build-apk.sh` | Gradle's APK / AAB is copied anywhere (inner mode), and again before it is collected into `dist/` |
+| `build-web.sh` | the export is staged / promoted to `dist/web*` |
+| `package-web.sh` | the bundle is archived, and the finished `.tar.gz` before it gets its final name |
+| `build-desktop-mac.sh` / `build-desktop-linux.sh` | the web bundle (built or reused with `SKIP_WEB=1`) is uploaded to the build host |
+| `build-ios.sh` | the copied-back `.ipa` / simulator zip leaves staging (`dist/`, install page, App Store upload) |
+
+A failed check removes the artifact (or leaves the previous output untouched) and fails the build. Artifacts built
+before the mark existed fail the check: rebuild them. Tests: `node --test scripts/verify-flavor-artifact.test.mjs`
+(also runs the production transform of `flavor.ts` to prove the comparison folds, and checks the Metro cache key).
+This source tree knows only the hermes mark: `FLAVOR_MARK` is that constant and the check expects it for both flavors.
+
 
 ## Why hard limits
 The scripts are written for a Linux build machine without swap that also runs other work. An unbounded Gradle + Kotlin daemon + Metro + up to 10 parallel clang processes can exceed 12 GB easily and take such a machine down, so everything heavy runs under these limits:

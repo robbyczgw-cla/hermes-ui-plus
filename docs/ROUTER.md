@@ -34,7 +34,9 @@ Per `POST /v1/chat/completions`:
    If the model returns no component and the heuristic agrees on the format, its component is used.
 4. System messages (see Hermes findings): the constant skill **bootstrap** message
    (`hermes-skill/bootstrap-system-message.txt`, marker `[hermes-ui-app]`) is prepended first unless
-   the client already sent the marker; the **hint** goes after all leading system messages:
+   the client already sent the marker; right after it the constant **skill core** (`hermes-ui/SKILL.md`
+   without front matter, `src/skillInline.mjs`, docs/BRIDGE.md "Skill core inline"); the **hint** goes after all
+   leading system messages:
    `UI-ROUTER-HINT: format=<f> [component=<c>] confidence=<0.6|0.9>`.
    No hint for low confidence (< 0.5; text < 0.75) and none for header-less multi-turn clients.
 5. Upstream request (Node `http`, keep-alive, `accept-encoding: identity`). When Hermes answers
@@ -51,8 +53,9 @@ Per `POST /v1/chat/completions`:
    the bridge logs one line (`http … status: client_closed, ms`, no content), drains the rest of the
    stream and marks the turn detached, so the push watcher delivers the answer via live inbox / push and
    the app completes the interrupted message (app/src/hermes/recovery.ts). A deliberate stop is
-   `POST /bridge/chat/stop {"sessionId": "<X-Hermes-Session-Id>"}` → `{stopped: n}`; it closes the
-   upstream connection(s) of that session, which makes Hermes interrupt the agent
+   `POST /bridge/chat/stop {"sessionId": "<X-Hermes-Session-Id>", "profile": "<bot>"|null}` → `{stopped: n}`; it
+   closes the upstream connection(s) of that session in that profile (none / `default` = the unprefixed one; session
+   ids are only unique per profile), which makes Hermes interrupt the agent
    (`_write_sse_chat_completion`).
 
 Other endpoints: `GET /health` and `/v1/health` (no auth, proxied), `GET /bridge/status` (auth;
@@ -106,7 +109,8 @@ the bridge answers CORS itself if `BRIDGE_CORS_ORIGINS` is set (only needed for 
 - **Prompt-cache cost:** the ephemeral prompt is appended at the *end* of the system prompt, i.e. before
   the whole conversation. Any change in its bytes between turns invalidates the provider prompt cache
   for the history on that turn. Therefore the hint text is deterministic per (format, component,
-  confidence bucket), contains no reason by default, and the bootstrap is byte-identical on every request.
+  confidence bucket), contains no reason by default, and the bootstrap and the inline skill core are
+  byte-identical on every request.
   Remaining cost: a cache miss on turns where the hint changes (e.g. text → chart). Text turns below
   0.75 confidence get no hint.
 - SSE: Hermes writes `: keepalive\n\n` every 0.5 s idle check (10 s cadence), frames via `_sse_frame`
@@ -510,6 +514,7 @@ real Hermes for `/health` and `/v1/models` only (no real chat turn was sent thro
 | `BRIDGE_HINT_MIN_CONFIDENCE` / `BRIDGE_HINT_TEXT_MIN_CONFIDENCE` | 0.5 / 0.75 | hint thresholds |
 | `BRIDGE_HINT_REASON` | `0` | append `- <reason>` to the hint |
 | `BRIDGE_BOOTSTRAP` / `BRIDGE_BOOTSTRAP_FILE` | on / `../hermes-skill/bootstrap-system-message.txt` | skill bootstrap system message (`off` disables) |
+| `BRIDGE_SKILL_INLINE` / `BRIDGE_SKILL_FILE` | on / `hermes-ui/SKILL.md` next to the bootstrap file, repo `hermes-skill/`, bundled `skill/` | skill core as a system message after the bootstrap on app turns (`off` disables; missing file: warning, no injection) |
 | `BRIDGE_CONTEXT_MEMORY`, `BRIDGE_CONTEXT_MAX_SESSIONS`, `BRIDGE_CONTEXT_TTL_MS`, `BRIDGE_CONTEXT_MAX_CHARS` | 1, 500, 86400000, 2000 | per-session routing context (in memory only) |
 | `BRIDGE_CORS_ORIGINS` | – | comma list or `*` (web dev only) |
 | `BRIDGE_WEB_DIR` | – | serve a built web app at `/` (same origin; `src/static.mjs`, see bridge/README.md "Serving the web app") |
@@ -519,6 +524,7 @@ real Hermes for `/health` and `/v1/models` only (no real chat turn was sent thro
 | `BRIDGE_UPLOAD_ALLOWED_MIME` / `BRIDGE_UPLOAD_PUBLIC_DIR` | built-in list / – | comma list (`type` or `prefix/*`), path prefix reported to the client |
 | `BRIDGE_MEDIA_DIRS` / `BRIDGE_MEDIA_MAX_BYTES` | – (endpoint off) / 100 MB | Hermes media files for the app, see "Media files" |
 | `BRIDGE_LOG_LEVEL` | `info` | `debug` adds model reasons |
+| `BRIDGE_PROFILES` | `auto` if the Hermes home is readable, else any valid name | Hermes profiles (bots) reachable under `/p/<name>/`: `auto` (`HERMES_HOME/profiles/`), comma list (`research,work=Label`) or `off`; listed at `GET /bridge/profiles` |
 
 ## Media files (`GET /bridge/media?path=`)
 
@@ -742,6 +748,7 @@ GET /api/sessions/{id}/messages            POST /api/sessions/{id}/fork         
 - `{id}`: `[A-Za-z0-9._:-]{1,128}`, no `..`, no percent-encoding; anything else under `/api/` -> 404 (never forwarded). Wrong method -> 405 + `Allow`.
 - Query string forwarded verbatim; PATCH body max 64 KB (else 413); upstream status and body piped back, hop-by-hop headers stripped; 30 s upstream timeout -> 504, unreachable -> 502. Bodies are not logged.
 - CORS preflight now also advertises `PATCH`. Tests: `test/sessions-proxy.test.mjs`.
+- Hermes profiles: `/p/<profile>/<path>` gets exactly the same allow-list as `<path>` and is forwarded with the prefix (profile name `[a-z0-9][a-z0-9_-]{0,63}`, literal in the raw path, known per `BRIDGE_PROFILES`; unknown → 404 after the token check). Bridge routes (`/bridge/*`) have no profile form. Tests: `test/profiles.test.mjs`.
 
 ## Meta (titles & follow-ups)
 

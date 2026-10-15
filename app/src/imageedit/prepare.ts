@@ -13,6 +13,7 @@ import * as Sharing from 'expo-sharing';
 import { Linking, Platform } from 'react-native';
 import { prepareImage } from '../attachments/store';
 import type { Attachment } from '../attachments/types';
+import { webAttachments } from '../attachments/webStore';
 import type { EditSource } from './core';
 
 const IS_WEB = Platform.OS === 'web';
@@ -20,7 +21,8 @@ const IS_WEB = Platform.OS === 'web';
 export type WorkImage = { uri: string; width: number; height: number };
 
 function isLocal(uri: string): boolean {
-  return /^(file|content|blob|ph|assets-library):/i.test(uri);
+  // hui-att: = a stored web / desktop attachment (attachments/webBlobs.ts): prepareImage reads it itself
+  return /^(file|content|blob|ph|assets-library|hui-att):/i.test(uri);
 }
 
 function nameFor(src: EditSource): string {
@@ -29,14 +31,22 @@ function nameFor(src: EditSource): string {
   return /\.(jpe?g|png|webp|gif|heic)$/i.test(tail) ? tail : 'Bild.jpg';
 }
 
-/** Remote/data URL → local file (native) or blob URL (web). Returns the uri + a cleanup function. */
-async function fetchLocal(src: EditSource): Promise<{ uri: string; mimeType?: string; size?: number; cleanup(): void }> {
+/** Remote/data URL → local file (native) or blob URL (web). Returns the uri + a cleanup function (`kept`: the uri the
+ * prepared attachment kept – not deleted / revoked then). */
+async function fetchLocal(src: EditSource): Promise<{ uri: string; mimeType?: string; size?: number; cleanup(kept?: string): void }> {
   if (isLocal(src.uri)) return { uri: src.uri, mimeType: src.mimeType, size: src.size, cleanup: () => {} };
   if (IS_WEB) {
     const blob = await (await fetch(src.uri)).blob();
-    // not revoked: the prepared attachment may keep this blob URL (web lives as long as the tab)
     const uri = URL.createObjectURL(blob);
-    return { uri, mimeType: blob.type || undefined, size: blob.size, cleanup: () => {} };
+    // revoked once the prepared copy is stored (kept only when it had to keep this URL: no IndexedDB)
+    return {
+      uri,
+      mimeType: blob.type || undefined,
+      size: blob.size,
+      cleanup: (kept) => {
+        if (kept !== uri) URL.revokeObjectURL(uri);
+      },
+    };
   }
   const dir = new Directory(Paths.cache, 'imageedit');
   if (!dir.exists) dir.create({ intermediates: true, idempotent: true });
@@ -67,15 +77,25 @@ async function fetchLocal(src: EditSource): Promise<{ uri: string; mimeType?: st
  */
 export async function prepareEditSource(src: EditSource): Promise<Attachment> {
   const local = await fetchLocal(src);
+  let kept: string | undefined;
   try {
     // keep path of prepareImage needs the size + byte count; unknown → it decodes + re-encodes natively
-    return await prepareImage(
+    const att = await prepareImage(
       { uri: local.uri, width: src.width, height: src.height, mimeType: local.mimeType ?? src.mimeType ?? null, name: nameFor(src), size: local.size ?? src.size ?? null },
       nameFor(src),
     );
+    // web: the working image needs a session URL of the stored copy (workImageOf)
+    if (IS_WEB) await webAttachments().resolve(att.uri);
+    kept = att.uri;
+    return att;
   } finally {
-    local.cleanup();
+    local.cleanup(kept);
   }
+}
+
+/** the prepared copy as the working image (web: its session URL; prepareEditSource made it) */
+export function workImageOf(att: Attachment): WorkImage {
+  return { uri: webAttachments().peek(att.uri) ?? att.uri, width: att.width ?? 0, height: att.height ?? 0 };
 }
 
 export type QuickOp = { type: 'rotate' } | { type: 'flip' } | { type: 'crop'; rect: { originX: number; originY: number; width: number; height: number } };

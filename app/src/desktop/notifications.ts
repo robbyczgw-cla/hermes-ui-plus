@@ -3,12 +3,13 @@
  * - click → the window comes to the front (shell) and the chat opens (PushHost's notification routing, registered
  *   with `onDesktopNotificationOpen`; same data shape as a push tap, push/model.ts `parseTarget`)
  * - "Erlauben (einmal)" / "Ablehnen" on an approval → answered right here through the existing approval endpoint
- *   (`POST /v1/runs/{runId}/approval`, hermes/client.ts) without showing the window. The bridge then reports
- *   `approval_resolved` like for any other device, so an open approval card updates itself. A failure (expired,
- *   offline) shows a notification that opens the chat.
+ *   (`POST /v1/runs/{runId}/approval`, under `/p/<bot>/` for a bot's chat, hermes/client.ts) without showing the
+ *   window. The bridge then reports `approval_resolved` like for any other device, so an open approval card updates
+ *   itself. A failure (expired, offline) shows a notification that opens the chat.
  */
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import { respondApproval } from '../hermes';
+import { withBot } from '../hermes/bots';
 import type { ApprovalChoice } from '../hermes/types';
 import { useT } from '../i18n';
 import { parseTarget } from '../push/model';
@@ -45,7 +46,7 @@ export function useDesktopNotifications(): void {
       const p = ps.find((x) => x.id === target.profileId && x.kind === 'hermes');
       if (!p) return;
       try {
-        await respondApproval({ baseUrl: p.baseUrl, apiKey: p.apiKey }, { runId: target.runId, requestId: target.requestId }, choice);
+        await respondApproval(withBot({ baseUrl: p.baseUrl, apiKey: p.apiKey }, target.hermesProfile), { runId: target.runId, requestId: target.requestId }, choice);
       } catch {
         await desktopNotify(t('desktop.approval.failedTitle'), t('desktop.approval.failedBody'), {
           data: data && typeof data === 'object' ? (data as Record<string, string>) : undefined,

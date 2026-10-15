@@ -45,6 +45,7 @@ export function createApprovalWatcher(o) {
       kind: 'approval_resolved',
       id: `ar_${requestId}`,
       sessionId: p.sessionId,
+      ...(p.profile ? { hermesProfile: p.profile } : {}),
       runId: p.runId,
       completionId: p.runId,
       requestId,
@@ -65,12 +66,15 @@ export function createApprovalWatcher(o) {
     const expiresAt = at + timeoutMs;
     const timer = setTimeout(() => resolve(r.requestId, 'timeout'), timeoutMs + (o.graceMs ?? GRACE_MS));
     timer.unref?.();
-    pending.set(r.requestId, { runId: r.runId, sessionId: r.sessionId ?? null, timer });
+    const profile = typeof r.profile === 'string' && r.profile ? r.profile : null;
+    pending.set(r.requestId, { runId: r.runId, sessionId: r.sessionId ?? null, profile, timer });
     const command = String(r.command ?? '').replace(/\s+/g, ' ').trim();
     o.onRequest({
       kind: 'approval',
       id: `a_${r.requestId}`,
       sessionId: r.sessionId ?? null,
+      // Hermes profile ("bot") of the session; absent = default profile. The app answers under /p/<profile>/
+      ...(profile ? { hermesProfile: profile } : {}),
       runId: r.runId,
       completionId: r.runId,
       requestId: r.requestId,
@@ -85,13 +89,13 @@ export function createApprovalWatcher(o) {
     return true;
   }
 
-  /** The answer POST passed through the bridge and Hermes accepted it. */
-  function answered(runId, body) {
+  /** The answer POST passed through the bridge (under `/p/<profile>/` for a non-default profile) and Hermes accepted it. */
+  function answered(runId, body, profile = null) {
     const choice = str(body?.choice, 16);
     const extra = choice ? { choice } : {};
     const rid = str(body?.request_id);
     if (rid) return resolve(rid, 'answered', extra);
-    const mine = [...pending].filter(([, p]) => p.runId === runId).map(([id]) => id);
+    const mine = [...pending].filter(([, p]) => p.runId === runId && (p.profile ?? null) === (profile ?? null)).map(([id]) => id);
     const targets = body?.all === true || body?.resolve_all === true ? mine : mine.slice(0, 1); // no request_id: Hermes resolves the oldest
     return targets.map((id) => resolve(id, 'answered', extra)).some(Boolean);
   }
@@ -102,7 +106,8 @@ export function createApprovalWatcher(o) {
 
   /**
    * Side-channel for one upstream chat SSE (bytes are forwarded elsewhere, untouched). `ctx.sessionId` is read when
-   * a request arrives (response header or the client's X-Hermes-Session-Id).
+   * a request arrives (response header or the client's X-Hermes-Session-Id); `ctx.profile` = Hermes profile of the
+   * turn (`/p/<profile>/v1/chat/completions`, null = default).
    */
   function observe(ctx) {
     const runs = new Set();
@@ -115,7 +120,7 @@ export function createApprovalWatcher(o) {
         if (!runId || !requestId) return;
         runs.add(runId);
         request({
-          runId, requestId, sessionId: str(ctx.sessionId() ?? j?.session_id, 128), command: j.command, description: str(j.description, 200),
+          runId, requestId, sessionId: str(ctx.sessionId() ?? j?.session_id, 128), profile: ctx.profile ?? null, command: j.command, description: str(j.description, 200),
           smartDenied: j.smart_denied === true, choices: Array.isArray(j.choices) ? j.choices.filter((c) => typeof c === 'string').slice(0, 5) : undefined,
         });
       } else if (event === APPROVAL_RESPONDED_EVENT) {

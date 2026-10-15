@@ -1,6 +1,10 @@
 # Schnellfrage (quick question): design summary
 
-Status: design only, not implemented. Target: one-off questions answered in roughly 1-3 s by a fast model
+> **Superseded (backend):** quick answers are now prototyped as the Hermes plugin `hermes-ui-plus`, which uses
+> Hermes' own providers. See [HERMES-PLUGIN.md](HERMES-PLUGIN.md) and ADR 0001. The bridge-side endpoint, limits and
+> app/UX sections below still describe the target behaviour; the "own provider keys in the bridge" parts do not.
+
+Status: implemented as Schnellfrage (⚡) with the Hermes plugin backend above. Target: one-off questions answered in roughly 1-3 s by a fast model
 **without** the Hermes agent context (no memory, no tools, no session, about 20k fewer system tokens per call),
 while still rendering interactive `hui` components through a short presentation prompt.
 
@@ -77,6 +81,11 @@ Single source of truth: generate the examples from the skill references and add 
 compact prompt passes the existing `hui` validators.
 
 ## App side
+
+> **Implemented differently (0.2):** see [HERMES-PLUGIN.md, "App side"](HERMES-PLUGIN.md#app-side-02-appsrcquick):
+> ⚡ is a switch between the chat and one local quick thread per connection (not a chat type in the drawer), with
+> long-press on Send and a start-screen pill. The slash command below is not built yet.
+
 
 - **Composer toggle** (bolt icon): off / one-shot / sticky. Only shown when `/bridge/quick/config` reports Quick enabled.
 - **Slash command** `/quick <question>` (aliases `/schnell`, `/q`), sends the text to a quick conversation.

@@ -1,7 +1,8 @@
 /**
  * Native file handling: image preparation (downscale + JPEG), persistent copies in
  * `<documents>/attachments/` (needed for thumbnails and for Claude history replay after restarts),
- * the AttachmentReader used by the encoders, and cleanup.
+ * the AttachmentReader used by the encoders, and cleanup. Web / desktop app: the copies live in IndexedDB and the
+ * attachment's uri is `hui-att:<id>.<ext>` (webBlobs.ts / webStore.ts; show it with useAttachmentUri).
  *
  * Memory: the original image is never loaded into JS (no picker base64). It is decoded natively by
  * expo-image-manipulator, written to disk, and the native ImageRefs are released immediately.
@@ -15,6 +16,8 @@ import { newAttachmentId } from './draft';
 import { extOf, MIME, normalizeMime, withExt } from './mime';
 import { AttachmentError, LIMITS } from './types';
 import type { Attachment, AttachmentReader } from './types';
+import { isStoredWebUri } from './webBlobs';
+import { webAttachments } from './webStore';
 
 const IS_WEB = Platform.OS === 'web';
 const DIR_NAME = 'attachments';
@@ -28,9 +31,11 @@ function attachmentsDir(): Directory {
 /** Move/copy a local file into the attachments dir as `<id>.<ext>`; returns the new uri + size. */
 async function persist(srcUri: string, id: string, ext: string, move: boolean): Promise<{ uri: string; size: number }> {
   if (IS_WEB) {
-    // web preview: no document dir; keep the blob:/data: URL (lives as long as the tab)
-    const blob = await (await fetch(srcUri)).blob();
-    return { uri: srcUri, size: blob.size };
+    // no document dir: the bytes go to IndexedDB, the uri is `hui-att:<id>.<ext>` (a blob: URL dies with the page)
+    const r = await webAttachments().save(srcUri, `${id}.${ext || 'bin'}`);
+    // a render output (resized JPEG) is replaced by its stored copy: its object URL goes
+    if (move && r.uri !== srcUri && srcUri.startsWith('blob:')) URL.revokeObjectURL(srcUri);
+    return r;
   }
   const src = new File(srcUri);
   const dest = new File(attachmentsDir(), `${id}.${ext || 'bin'}`);
@@ -69,6 +74,8 @@ async function renderJpeg(source: string | ImageRef, w: number, h: number, quali
  * originals within the limits are kept byte-identical (no re-compression, PNG transparency kept).
  */
 export async function prepareImage(src: ImageSource, fallbackName: string): Promise<Attachment> {
+  // web: a stored attachment (image edit of a sent image) is decoded from its session URL
+  if (IS_WEB && isStoredWebUri(src.uri)) src = { ...src, uri: (await webAttachments().resolve(src.uri)) ?? src.uri };
   const id = newAttachmentId();
   const rawName = src.name || fallbackName;
   const mime = normalizeMime(src.mimeType, rawName);
@@ -138,7 +145,7 @@ export async function importFile(src: FileSource): Promise<Attachment> {
 }
 
 async function webBlob(uri: string): Promise<Blob> {
-  return (await fetch(uri)).blob();
+  return webAttachments().blob(uri);
 }
 
 function blobToBase64(blob: Blob): Promise<string> {
@@ -150,7 +157,7 @@ function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
-/** Reads attachment files on demand (native: expo-file-system File; web: fetch the blob URL). */
+/** Reads attachment files on demand (native: expo-file-system File; web: the stored bytes / the blob URL). */
 export const fileReader: AttachmentReader = {
   async base64(att) {
     if (IS_WEB) return blobToBase64(await webBlob(att.uri));
@@ -163,7 +170,12 @@ export const fileReader: AttachmentReader = {
 };
 
 export async function deleteUri(uri: string): Promise<void> {
-  if (IS_WEB) return;
+  if (IS_WEB) {
+    await webAttachments()
+      .remove(uri)
+      .catch(() => undefined);
+    return;
+  }
   try {
     const f = new File(uri);
     if (f.exists) f.delete();

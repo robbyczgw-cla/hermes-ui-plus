@@ -72,7 +72,9 @@ function ToastView({ text, onDone }: { text: string; onDone: () => void }) {
   }, [anim, native, resume, text]);
 
   return (
-    <View style={[StyleSheet.absoluteFill, { justifyContent: 'flex-end', alignItems: 'center', pointerEvents: 'box-none' }]}>
+    // full-screen layout box: only the toast itself may take touches/clicks. pointerEvents as a PROP (react-native-web
+    // turns an inline-style 'box-none' into invalid CSS, so the overlay swallowed every click, e.g. on the composer)
+    <View style={[StyleSheet.absoluteFill, { justifyContent: 'flex-end', alignItems: 'center' }]} pointerEvents="box-none">
       <Animated.View
         accessibilityLiveRegion="polite"
         role="status"

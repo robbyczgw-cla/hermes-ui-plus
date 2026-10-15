@@ -3,7 +3,14 @@
 //! (`window.__HERMES_DESKTOP__.prefs`) and changes them with `desktop_set_prefs`.
 //! "Launch at login" is not stored here: the login item registration (SMAppService) is the source of truth.
 
-use std::{fs, path::PathBuf, sync::Mutex};
+use std::{
+    fs,
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex,
+    },
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -70,6 +77,47 @@ impl PrefsStore {
     }
 }
 
+/// The app lock as the shell knows it. The source of truth for every page load: the web app's init script only has
+/// the prefs of the moment the window was created, so a page that loads later (View → Reload, a WebContent crash)
+/// asks `desktop_lock_state` before it shows anything. Locked from launch when the lock is on; only a successful
+/// `desktop_unlock` opens it again.
+pub struct LockState(AtomicBool);
+
+impl LockState {
+    pub fn new(prefs: &DesktopPrefs) -> Self {
+        LockState(AtomicBool::new(prefs.lock_enabled))
+    }
+
+    pub fn locked(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
+
+    /// the web app engaged the lock (launch, time in the background); a no-op while the lock is off
+    pub fn lock(&self, prefs: &DesktopPrefs) -> bool {
+        if prefs.lock_enabled {
+            self.0.store(true, Ordering::SeqCst);
+        }
+        self.locked()
+    }
+
+    /// Touch ID / password succeeded
+    pub fn unlocked(&self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+
+    /// prefs may only change while unlocked (switching the lock off must not open a locked app); switching it off
+    /// leaves nothing locked
+    pub fn check_prefs_change(&self, next: &DesktopPrefs) -> Result<(), String> {
+        if self.locked() {
+            return Err("locked".into());
+        }
+        if !next.lock_enabled {
+            self.unlocked();
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -82,5 +130,28 @@ mod tests {
         assert_eq!(p.lock_minutes, 5);
         let p = DesktopPrefs { lock_minutes: 99_999, ..Default::default() }.sanitized();
         assert_eq!(p.lock_minutes, 1440);
+    }
+
+    #[test]
+    fn lock_state_follows_the_prefs_and_only_opens_on_unlock() {
+        let on = DesktopPrefs { lock_enabled: true, ..Default::default() };
+        let off = DesktopPrefs::default();
+        // launch: locked when the lock is on
+        assert!(LockState::new(&on).locked());
+        assert!(!LockState::new(&off).locked());
+        // engaging it while the lock is off does nothing
+        let s = LockState::new(&off);
+        assert!(!s.lock(&off));
+        // switched on during the session, then engaged: stays locked until unlocked
+        assert!(s.check_prefs_change(&on).is_ok());
+        assert!(s.lock(&on));
+        assert!(s.locked());
+        // prefs (switching the lock off included) cannot change while locked
+        assert!(s.check_prefs_change(&off).is_err());
+        assert!(s.locked());
+        s.unlocked();
+        assert!(!s.locked());
+        assert!(s.check_prefs_change(&off).is_ok());
+        assert!(!s.lock(&off));
     }
 }

@@ -9,6 +9,7 @@ import type { ChatMessage, HermesEvent, MessageStatus, ToolEvent, Usage } from '
 import { appendRaw, markFirstToken, pushTrace, traceReasoning, withMetrics } from './trace.ts';
 import { addApproval, closePending } from './approvals.ts';
 import { authErrorText } from './authError.ts';
+import type { AppendRun } from '../protocol/appendRun.ts';
 
 export type ErrorText = NonNullable<ChatMessage['errorText']>;
 
@@ -105,7 +106,29 @@ function closeRunningTools(tools: ToolEvent[], now: number): ToolEvent[] {
   return tools.map((t) => (t.status === 'running' ? { ...t, status: 'done', endedAt: now } : t));
 }
 
+/** message object → its append run (protocol/appendRun.ts): set by `applyEvent` only */
+const appendRuns = new WeakMap<ChatMessage, AppendRun>();
+
+/**
+ * The append run of a message's text: two message objects with the same run have texts where the longer one extends
+ * the shorter one (`applyEvent` appended to it or left it alone). Undefined for objects made anywhere else.
+ */
+export function textAppendRun(m: ChatMessage): AppendRun | undefined {
+  return appendRuns.get(m);
+}
+
 export function applyEvent(msg: ChatMessage, ev: HermesEvent, now: number): ChatMessage {
+  const next = applyEventTo(msg, ev, now);
+  if (next !== msg) {
+    const run = appendRuns.get(msg);
+    // a text delta continues the run (or starts one); `textReplace` ends it; other events keep it if the text stayed
+    if (ev.type === 'text') appendRuns.set(next, run ?? {});
+    else if (run && ev.type !== 'textReplace' && next.text === msg.text) appendRuns.set(next, run);
+  }
+  return next;
+}
+
+function applyEventTo(msg: ChatMessage, ev: HermesEvent, now: number): ChatMessage {
   switch (ev.type) {
     case 'start': {
       const m = ev.completionId ? { ...msg, completionId: ev.completionId } : msg;
@@ -115,6 +138,13 @@ export function applyEvent(msg: ChatMessage, ev: HermesEvent, now: number): Chat
       if (msg.textCapped) return msg; // over the cap: the rest of the stream is dropped
       const r = appendCapped(msg.text, ev.text, MAX_MESSAGE_TEXT);
       return markFirstToken({ ...msg, text: r.text, statusNote: undefined, ...(r.capped ? { textCapped: true } : {}) }, now);
+    }
+    case 'textReplace': {
+      // the whole answer text so far is new (a corrected live draft); tool cuts past its end are ignored by progressNotes
+      const r = appendCapped('', ev.text, MAX_MESSAGE_TEXT);
+      const { textCapped: _capped, ...rest } = msg;
+      const next = { ...rest, text: r.text, statusNote: undefined, ...(r.capped ? { textCapped: true } : {}) };
+      return r.text ? markFirstToken(next, now) : next;
     }
     case 'reasoning': {
       const prev = msg.reasoning ?? '';

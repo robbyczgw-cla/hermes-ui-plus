@@ -16,8 +16,9 @@
  */
 import type { HuiNode, Segment } from './types.ts';
 import { createPartialJsonParser, parseLenientJson, parsePartialJson, prunePartialItems } from './partialJson.ts';
-import { collectInteractiveIds, isPartialTypeName, normalizeNode, readableFallback } from './validate.ts';
+import { collectInteractiveIds, hasListContent, isEmptyCollection, isPartialTypeName, normalizeNode, readableFallback } from './validate.ts';
 import { shareStructure } from './structuralShare.ts';
+import type { AppendRun } from './appendRun.ts';
 
 export interface StreamParser {
   /** feed a text delta; returns the current segments */
@@ -146,11 +147,15 @@ function buildHuiUnsafe(key: string, raw: string, complete: boolean, reserved: r
     if (value === undefined) return { key, kind: 'hui', complete: true, raw, node: null, error };
     value = withFenceType(value, fenceType);
     // normalizeNode also maps harmless variants (top-level arrays, envelopes, wrappers, type aliases)
-    const node = normalizeNode(value, opts);
+    let node = normalizeNode(value, opts);
+    // a list-like node whose entries all failed to normalise (shape written from memory) would
+    // render as an empty card: show the block's content readably instead
+    const lost = !!node && isEmptyCollection(node) && hasListContent(value);
+    if (lost) node = null;
     if (node) return error ? { key, kind: 'hui', complete: true, raw, node, error } : { key, kind: 'hui', complete: true, raw, node };
     // still no node: show the content readably instead of only an error line
     const fb = readableFallback(value, opts);
-    const why = error ?? 'Ungültiger hui-Block: erwartet ein Objekt mit "type"';
+    const why = error ?? (lost ? 'hui-Block ohne verwendbare Einträge' : 'Ungültiger hui-Block: erwartet ein Objekt mit "type"');
     return fb
       ? { key, kind: 'hui', complete: true, raw, node: fb, error: why, fallback: true }
       : { key, kind: 'hui', complete: true, raw, node: null, error: why };
@@ -186,6 +191,9 @@ export function createStreamParser(opts: StreamParserOptions = {}): StreamParser
   // the open block's raw text only grows: its partial JSON is scanned incrementally (one parser per open block)
   let huiPartial: PartialParse | null = null;
   let lastMd: Segment | null = null;
+  // what `lastMd` was built from: `mdText` up to this length + this visible pending text (appendRun.ts)
+  let lastMdLen = 0;
+  let lastMdPending = '';
 
   const nextKey = () => `seg-${committed.length}`;
   const usedIds: string[] = []; // interactive ids of committed hui segments
@@ -204,13 +212,34 @@ export function createStreamParser(opts: StreamParserOptions = {}): StreamParser
     return PARTIAL_HEAD_RE.test(p) ? '' : p;
   }
 
-  function mdSegment(key: string, visible: string): Segment | null {
+  /**
+   * The markdown segment of `mdText` + the visible pending text `vp`. Its text continues the append run of the previous
+   * one (same key) when `mdText + vp` extends what that one was built from: `mdText` itself only grows until
+   * closeMarkdown resets it (and `lastMd`), so only the old pending part needs a compare (one line). Dropping leading
+   * blank lines and trailing whitespace keeps the extension (fuzz-tested in streamParser.test.ts).
+   */
+  function mdSegment(key: string, md: string, vp = ''): Segment | null {
+    const visible = vp ? md + vp : md;
     if (visible.trim() === '') return null;
     const text = visible.replace(/^(?:[ \t]*\r?\n)+/, '').trimEnd();
     if (text === '') return null;
-    if (lastMd && lastMd.kind === 'markdown' && lastMd.key === key && lastMd.text === text) return lastMd;
-    lastMd = { key, kind: 'markdown', text };
-    return lastMd;
+    const prev = lastMd && lastMd.kind === 'markdown' && lastMd.key === key ? lastMd : null;
+    const grew = !!prev && md.length >= lastMdLen && pendingContinues(md, vp);
+    lastMdLen = md.length;
+    lastMdPending = vp;
+    if (prev && prev.text === text) return prev;
+    const seg: Segment = { key, kind: 'markdown', text };
+    mdRuns.set(seg, (grew && prev && mdRuns.get(prev)) || {});
+    lastMd = seg;
+    return seg;
+  }
+
+  /** `md.slice(lastMdLen) + vp` starts with `lastMdPending` */
+  function pendingContinues(md: string, vp: string): boolean {
+    const old = lastMdPending;
+    const added = md.length - lastMdLen;
+    if (added >= old.length) return md.startsWith(old, lastMdLen);
+    return md.startsWith(old.slice(0, added), lastMdLen) && vp.startsWith(old.slice(added));
   }
 
   function closeMarkdown() {
@@ -355,7 +384,7 @@ export function createStreamParser(opts: StreamParserOptions = {}): StreamParser
     const out = committed.slice();
     const vp = visiblePending();
     if (mode === 'md' || mode === 'typed') {
-      const seg = mdSegment(nextKey(), vp ? mdText + vp : mdText);
+      const seg = mdSegment(nextKey(), mdText, vp);
       if (seg) out.push(seg);
     } else {
       // (no `/\n$/` regex: the Hermes interpreter would visit every char of the open block on every update)
@@ -411,6 +440,17 @@ export function createStreamParser(opts: StreamParserOptions = {}): StreamParser
       return cache ?? (cache = build());
     },
   };
+}
+
+/** markdown segment → its append run (appendRun.ts), see mdSegment */
+const mdRuns = new WeakMap<Segment, AppendRun>();
+
+/**
+ * The append run of a markdown segment from a stream parser: two segments with the same run (same key) have texts
+ * where the longer one extends the shorter one. Undefined for segments made anywhere else.
+ */
+export function segmentAppendRun(seg: Segment): AppendRun | undefined {
+  return mdRuns.get(seg);
 }
 
 export function parseMessage(text: string): Segment[] {

@@ -89,6 +89,10 @@ lock screen follow the app language (de/en/es, namespace `desktop` in `app/src/i
 | ⇧⌘C | copy the last answer | ⌘L | focus the message field |
 | Esc | close sheets / dialogs | ⌥Space | Hermes from anywhere (global) |
 
+"The sidebar" is what the drawer lists, in its order (`app/src/conversations/drawerFilter.ts`: kinds of this build,
+Settings → Chat → "Chats"); the Chat menu, the dock menu, ⌘1–9 and ⌥⌘↑/↓ never show or open a chat the
+drawer hides.
+
 Menu accelerators and the page's own key handler (`app/src/desktop/keys.ts`) may both see a press; the bridge
 acts once per press. Right-click on an answer opens a native menu (Copy, Copy as Markdown, Retry, Read Aloud,
 Share…, Continue in New Chat – the same availability as the in-app "⋯" menu); with text selected the system menu
@@ -96,7 +100,8 @@ Share…, Continue in New Chat – the same availability as the in-app "⋯" men
 
 **Dock and notifications**
 - Dock badge = chats with an unread answer; a small accent dot on the icon while an answer is being written.
-- Dock menu (right-click): New Chat and the 5 most recent chats.
+- Dock menu (right-click): New Chat and the 5 most recent chats. While the app lock is on, the dock menu and the
+  "Chat" menu list no chats (⌘1–9 do nothing); they come back after unlocking.
 - Notifications go through UserNotifications. A click brings the window up and opens the chat (answer ready,
   inbox, approval). Approval requests that arrive while the window is not in front carry **Erlauben (einmal)**
   (needs an unlocked Mac) and **Ablehnen**: the app answers through the regular approval endpoint
@@ -110,10 +115,16 @@ Share…, Continue in New Chat – the same availability as the in-app "⋯" men
 - Menu bar only: no dock icon (`ActivationPolicy::Accessory`), applied at launch before the window shows.
 - Lock with Touch ID (default off): at launch and after 1/5/15/60 min in the background (or launch only) an opaque
   cover hides the app until Touch ID / Apple Watch / the login password succeeds (LocalAuthentication). Switching
-  it on or off asks too. Notification actions and opened files wait until unlocked. It is a privacy screen for
-  the UI, not encryption of the stored chats.
+  it on or off asks too. Notification actions and opened files wait until unlocked. The shell holds the lock
+  state: every page load starts covered and asks it (`desktop_lock_state`, unreadable = locked), View → Reload / ⌘R
+  do nothing while locked and the prefs cannot change then. It is a privacy screen for the UI, not encryption of
+  the stored chats.
 - Files: drop them on the window or on the dock icon ("Open With" works too, rank Alternate) → attachments of
   the open chat; ⌘V with an image or copied files attaches them (rich text from Word/Pages still pastes as text).
+  Attachments keep their bytes in IndexedDB (`hui-att:` uris, `app/src/attachments/webBlobs.ts`), so thumbnails,
+  opening and upload retries still work after a reload or restart.
+  Nothing gets in through the app lock: drops and pastes on the locked window are refused, dock drops wait for the
+  unlock, and files still being read / prepared when the lock engages are discarded (never uploaded).
 - Prefs the shell needs early live in `~/Library/Application Support/<bundle id>/desktop-prefs.json`.
 
 **Checking it on a Mac**: the shell's behaviour (traffic lights, vibrancy, dock, notification buttons, Touch ID,

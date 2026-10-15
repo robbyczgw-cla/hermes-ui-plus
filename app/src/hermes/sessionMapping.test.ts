@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseMessages } from './sessions.ts';
-import { argsPreview, contentText, createUserTurnMatcher, enrichTurn, mapRemoteMessages, mergeAssistantDetails, needsDetails, resultSummary, sameUserText, sameUserTurn, splitThink, userTextCore } from './sessionMapping.ts';
+import { argsPreview, contentText, createUserTurnMatcher, enrichTurn, mapRemoteMessages, mergeAssistantDetails, needsDetails, resultSummary, sameUserText, sameUserTurn, splitAttachmentMarkers, splitThink, userTextCore } from './sessionMapping.ts';
 import type { ChatMessage } from './types';
 import { isFinalAnswer } from './recovery.ts';
 import { MESSAGES_FIXTURE } from './sessions.fixtures.ts';
@@ -188,4 +188,65 @@ test('stored failed answers retain their error state, including empty failures',
     assert.equal(mapped[0].errorText?.key, 'backends.hermes.errors.agentFailed');
     assert.equal(mapped[0].text, content);
   }
+});
+
+// B3: server-restored user messages carry the model-facing attachment text (encodeHermes: German only); the app
+// shows attachment chips instead and never the server path. Fake names / paths.
+const REF_PDF = '[Datei angehängt: bericht (final).pdf (application/pdf, 1,2 MB) – Pfad auf dem Server: /srv/fake-uploads/2026-10-10/ab12-bericht.pdf]';
+const REF_XLSX = '[Datei angehängt: zahlen.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, 830 KB) – Pfad auf dem Server: /srv/fake-uploads/cd34-zahlen.xlsx]';
+const INLINE_CSV = '[Datei angehängt: test.csv (text/csv, 12 B) – Inhalt:]\n```csv\na,b\n1,2\n```';
+
+test('splitAttachmentMarkers: file references and inlined text files become attachments, text stays', () => {
+  const r = splitAttachmentMarkers(`Bitte zusammenfassen\n${REF_PDF}\n${REF_XLSX}`, 'hu-1');
+  assert.equal(r.text, 'Bitte zusammenfassen');
+  assert.deepEqual(r.attachments.map((a) => [a.id, a.kind, a.name, a.mimeType, a.size, a.status, a.uri]), [
+    ['hu-1-att-0', 'file', 'bericht (final).pdf', 'application/pdf', 1_200_000, 'ready', ''],
+    ['hu-1-att-1', 'file', 'zahlen.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 830_000, 'ready', ''],
+  ]);
+  // the path is never shown (text, chip name); it stays only in remoteRef so a regenerate sends the same reference
+  assert.doesNotMatch(JSON.stringify([r.text, r.attachments.map((a) => [a.name, a.mimeType])]), /fake-uploads|Pfad auf dem Server/);
+  assert.equal(r.attachments[0].remoteRef?.path, '/srv/fake-uploads/2026-10-10/ab12-bericht.pdf');
+  const inl = splitAttachmentMarkers(`Was steht da?\n${INLINE_CSV}`, 'hu-2');
+  assert.equal(inl.text, 'Was steht da?');
+  assert.deepEqual(inl.attachments.map((a) => [a.name, a.mimeType, a.size, a.remoteRef]), [['test.csv', 'text/csv', 12, undefined]]);
+  // a longer inlined file: the fence of the block is longer than any backtick run inside
+  const fenced = splitAttachmentMarkers('[Datei angehängt: a.md (text/markdown, 1 KB) – Inhalt:]\n````md\n```js\nx\n```\n````\nnoch etwas', 'hu-3');
+  assert.equal(fenced.text, 'noch etwas');
+  assert.equal(fenced.attachments.length, 1);
+  // nothing to parse: same text, no attachments
+  assert.deepEqual(splitAttachmentMarkers('[Datei angehängt: ohne Klammern]', 'x'), { text: '[Datei angehängt: ohne Klammern]', attachments: [] });
+  assert.deepEqual(splitAttachmentMarkers('nur Text', 'x'), { text: 'nur Text', attachments: [] });
+});
+
+test('mapRemoteMessages: restored user turns show attachment chips instead of the marker text', () => {
+  const m = mapRemoteMessages([
+    { id: '1', role: 'user', content: `Bitte zusammenfassen\n${REF_PDF}`, timestamp: 1 },
+    { id: '2', role: 'assistant', content: 'Zusammenfassung', timestamp: 2, finishReason: 'stop' },
+    // content-part array (Hermes keeps multimodal user messages as parts), attachment-only
+    { id: '3', role: 'user', content: [{ type: 'text', text: REF_XLSX }, { type: 'text', text: INLINE_CSV }], timestamp: 3 },
+  ]);
+  assert.deepEqual(m.map((x) => [x.id, x.role, x.text, x.attachments?.map((a) => a.name)]), [
+    ['hu-1', 'user', 'Bitte zusammenfassen', ['bericht (final).pdf']],
+    ['ha-2', 'assistant', 'Zusammenfassung', undefined],
+    ['hu-3', 'user', '', ['zahlen.xlsx', 'test.csv']],
+  ]);
+  assert.doesNotMatch(JSON.stringify(m.map((x) => [x.text, x.attachments?.map((a) => a.name)])), /fake-uploads|Pfad auf dem Server/);
+  assert.equal(m[2].attachments?.[1].remoteRef, undefined); // inlined text file: no upload
+});
+
+test('matching a local turn against a restored one with parsed attachments', () => {
+  const [withText, , onlyFiles] = mapRemoteMessages([
+    { id: '1', role: 'user', content: `Bitte zusammenfassen\n${REF_PDF}`, timestamp: 1 },
+    { id: '2', role: 'assistant', content: 'ok', timestamp: 2 },
+    { id: '3', role: 'user', content: REF_XLSX, timestamp: 3 },
+  ]);
+  const file = { id: 'l', kind: 'file' as const, name: 'zahlen.xlsx', mimeType: 'application/pdf', size: 1, uri: 'file:///fake/zahlen.xlsx', status: 'ready' as const };
+  assert.equal(sameUserTurn({ text: 'Bitte zusammenfassen', attachments: [file] }, withText), true);
+  assert.equal(sameUserTurn({ text: '', attachments: [file] }, onlyFiles), true);
+  assert.equal(sameUserTurn({ text: '' }, onlyFiles), false);
+  const match = createUserTurnMatcher();
+  assert.equal(match({ text: '', attachments: [file] }, onlyFiles), true);
+  assert.equal(match({ text: '', attachments: [file] }, { text: '' }), false);
+  // raw stored text still works the same
+  assert.equal(match({ text: '', attachments: [file] }, REF_XLSX), true);
 });

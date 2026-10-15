@@ -50,6 +50,8 @@ export interface OwnImageSearch {
 }
 
 export function createOwnImageSearch(opts: OwnOptions): OwnImageSearch {
+  // called as a plain function: a browser fetch called as `x.fetch()` throws "Illegal invocation" (wrong `this`)
+  const doFetch = opts.fetch;
   const now = opts.now ?? Date.now;
   const cache = createLruCache<ResolvedImage | null>(300, now);
   const inflight = new Map<string, Promise<ResolvedImage | null>>();
@@ -76,7 +78,7 @@ export function createOwnImageSearch(opts: OwnOptions): OwnImageSearch {
     try {
       let res;
       try {
-        res = await opts.fetch(req.url, { ...req.init, signal: ctrl?.signal });
+        res = await doFetch(req.url, { ...req.init, signal: ctrl?.signal });
       } catch {
         throw new OwnError('network');
       }

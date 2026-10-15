@@ -1,5 +1,6 @@
 // AI data-sharing consent UI (consent.ts): the text block, a sheet for existing installs / first send, and the
 // onboarding step.
+import { memo } from 'react';
 import * as WebBrowser from 'expo-web-browser';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { brand } from '../brand';
@@ -33,7 +34,7 @@ export function ConsentText() {
 }
 
 /** Sheet shown before the first message of a non-demo chat (also after a text version bump). */
-export function ConsentSheet({ visible, onAccept, onLater }: { visible: boolean; onAccept: () => void; onLater: () => void }) {
+export const ConsentSheet = memo(function ConsentSheet({ visible, onAccept, onLater }: { visible: boolean; onAccept: () => void; onLater: () => void }) {
   const t = useTheme();
   const tr = useT();
   const title = tr('compliance.consent.title');
@@ -72,7 +73,7 @@ export function ConsentSheet({ visible, onAccept, onLater }: { visible: boolean;
       </View>
     </SheetModal>
   );
-}
+});
 
 /** Onboarding step (after the connection is saved, before the first message can go out). */
 export function ConsentStep({ onAccept, onBack, step, total }: { onAccept: () => void; onBack?: () => void; step?: number; total?: number }) {

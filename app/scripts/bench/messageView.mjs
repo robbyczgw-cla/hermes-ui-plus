@@ -1,7 +1,7 @@
 // Emulation of the per-update work of the streaming message view, shared by the benchmarks.
-import { createStreamParser, parseMessage } from '../../src/protocol/streamParser.ts';
+import { parseMessage, segmentAppendRun } from '../../src/protocol/streamParser.ts';
 import { dropFinalNewline, parseInline, parseMarkdownIncremental } from '../../src/chat/markdown.ts';
-import { extractMedia } from '../../src/chat/mediaTags.ts';
+import { createMediaTagCache, extractMediaCached } from '../../src/chat/mediaTags.ts';
 import { detectEntities } from '../../src/chat/answers/entities.ts';
 import { advanceSegments, detectEntitiesCached, finishedInline, finishedMarkdown } from '../../src/chat/parseCache.ts';
 
@@ -11,9 +11,11 @@ import { advanceSegments, detectEntitiesCached, finishedInline, finishedMarkdown
  * markdown segment whose text changed, and inline parsing / entity detection of every block whose `src`
  * changed (BlockView memo), list items / table rows by content (ListItemView / TableRow memo).
  */
-export function createMessageView() {
-  const parser = createStreamParser({ now: () => 0 });
-  let fed = '';
+export function createMessageView({ appendRuns = true } = {}) {
+  // the answer text only grows here: one append run (hermes/chatState.ts) unless `appendRuns` is off (full compares)
+  const run = appendRuns ? {} : undefined;
+  let segState = null; // useSegments
+  const mediaCache = createMediaTagCache(); // MessageItem: per-message memo while streaming
   const md = new Map(); // seg key → { text, st, srcs }
   const inlineMemo = new Map(); // `${partial}|${text}` → nodes (InlineText useMemo per mounted text, approximated)
   const detectMemo = new Map();
@@ -66,10 +68,10 @@ export function createMessageView() {
     }
   };
   return (text) => {
-    const media = extractMedia(text, true);
+    const media = extractMediaCached(text, true, mediaCache, run);
     const t = media.text;
-    const segs = t.length > fed.length ? parser.push(t.slice(fed.length)) : parser.segments();
-    fed = t;
+    segState = advanceSegments(segState, t, false, undefined, t === text ? run : undefined);
+    const segs = segState.segs;
     // AssistantBody per render
     segs.some((s) => s.kind !== 'markdown');
     segs.some((s) => s.kind === 'markdown');
@@ -78,7 +80,7 @@ export function createMessageView() {
       const live = i === segs.length - 1;
       const cur = md.get(s.key);
       if (cur && cur.text === s.text && cur.live === live) return; // SegmentView / Markdown memo
-      const st = parseMarkdownIncremental(s.text, cur?.st);
+      const st = parseMarkdownIncremental(s.text, cur?.st, appendRuns ? segmentAppendRun(s) : undefined);
       const srcs = cur?.blocks ?? [];
       st.blocks.forEach((b, bi) => {
         const prev = srcs[bi];

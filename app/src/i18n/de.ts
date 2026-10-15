@@ -17,6 +17,8 @@ import { slash as slashNS } from './ns/slash.de.ts';
 import { compliance as complianceNS } from './ns/compliance.de.ts';
 import { menus as menusNS } from './ns/menus.de.ts';
 import { desktop as desktopNS } from './ns/desktop.de.ts';
+import { bots as botsNS } from './ns/bots.de.ts';
+import { quick as quickNS } from './ns/quick.de.ts';
 
 // German dictionary = source of truth for keys. en.ts must satisfy `typeof de`.
 // Plural syntax inside values: {count, plural, one {# Minute} other {# Minuten}}  (see README).
@@ -40,6 +42,8 @@ export const de = {
   compliance: complianceNS,
   menus: menusNS,
   desktop: desktopNS,
+  bots: botsNS,
+  quick: quickNS,
   actions: {
     send: 'Senden',
     cancel: 'Abbrechen',

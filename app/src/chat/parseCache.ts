@@ -5,6 +5,7 @@
 // Bounded LRUs (entry count + total text length). Values are shared between mounts and must be treated as
 // immutable (they are: the renderers only read them). Every lookup checks the full text, so a different text under
 // the same message id (edited / regenerated answer, progress-notes switch) is a miss, never a stale hit.
+import { extendsText, type AppendRun } from '../protocol/appendRun.ts';
 import { createStreamParser, type StreamParser } from '../protocol/streamParser.ts';
 import type { Segment } from '../protocol/types.ts';
 import { detectEntities, type DetectedPart } from './answers/entities.ts';
@@ -84,7 +85,7 @@ export function storeSegments(key: string, text: string, segs: Segment[]): void 
 }
 
 /** useSegments state; `parser` is null for an answer whose final segments came from the cache (nothing to feed). */
-export type SegmentsState = { parser: StreamParser | null; text: string; segs: Segment[]; ended: boolean };
+export type SegmentsState = { parser: StreamParser | null; text: string; segs: Segment[]; ended: boolean; run?: AppendRun };
 
 /**
  * One render of useSegments: feeds only the delta of a growing text to the stream parser (closed segments keep
@@ -92,14 +93,16 @@ export type SegmentsState = { parser: StreamParser | null; text: string; segs: S
  * and a fresh mount of a finished answer takes them from the cache instead of parsing. Idempotent per
  * (text, complete); returns the state to keep (the same object, updated, or a new one).
  */
-export function advanceSegments(prev: SegmentsState | null, text: string, complete: boolean, cacheKey?: string): SegmentsState {
+export function advanceSegments(prev: SegmentsState | null, text: string, complete: boolean, cacheKey?: string, run?: AppendRun): SegmentsState {
   let st = prev;
-  if (!st || !text.startsWith(st.text) || (st.ended && text.length !== st.text.length)) {
+  // `run` (protocol/appendRun.ts): the same as last time → `text` extends it, no full-text compare
+  if (!st || !extendsText(st.text, text, st.run, run) || (st.ended && text.length !== st.text.length)) {
     const hit = complete && cacheKey ? cachedSegments(cacheKey, text) : undefined;
-    if (hit) return { parser: null, text, segs: hit, ended: true };
+    if (hit) return { parser: null, text, segs: hit, ended: true, run };
     const parser = createStreamParser();
     st = { parser, text: '', segs: parser.segments(), ended: false };
   }
+  st.run = run;
   if (st.parser && text.length > st.text.length) {
     st.segs = st.parser.push(text.slice(st.text.length));
     st.text = text;

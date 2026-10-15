@@ -60,8 +60,20 @@ denylist, not a git repo ...). Suppress one line with the marker `leak-guard:all
 `.leak-guard-allow`. Test fixtures: write obviously fake tokens (`nca_alice_test_token_0000...`); the gitleaks
 allow-list only accepts them inside test paths *and* when the token text itself looks fake.
 
-Binary files are scanned like `strings` (printable ASCII/UTF-8 runs plus UTF-16LE runs, so `resources.arsc`, `classes.dex`,
-Hermes bytecode and `.so` files are covered). Compressed media skips the e-mail check (random bytes look like addresses).
+Binary files are scanned like `strings` (printable ASCII runs plus UTF-16LE runs, so `resources.arsc`, `classes.dex` and
+`.so` files are covered), plus UTF-8 and UTF-16LE runs with non-ASCII characters (UTF-16 limited to Latin, Greek and
+Cyrillic letters; only matches that contain a non-ASCII character count there).
+
+**Hermes bytecode** (`index.android.bundle` in APK/AAB, `main.jsbundle` in IPA, recognized by its magic) gets more: the
+compiler packs all strings into one storage blob without separators (strings even share bytes) and stores non-ASCII
+strings as UTF-16, so a `strings` scan misses a name glued to its neighbour (word boundary) and every non-ASCII name.
+`hermesStrings` decodes the string table (small and overflow entries, 8-bit and UTF-16) and every string is scanned on
+its own, with the text rules of a plain JS bundle. A file with the Hermes magic whose layout does not validate is a
+scan error (exit 2), never clean. `--expect-hermes` (set by `scan-artifact.sh` whenever the artifact contains a JS bundle)
+additionally fails when a bundle is not Hermes bytecode; an AAB or IPA without a bundle fails the gate. Tests use a real
+bytecode fixture (`scripts/fixtures/hermes/`, compiled with the hermesc from `app/node_modules`; a second test
+recompiles it with the installed hermesc to catch layout changes on Hermes upgrades) and synthetic pre-v98 layouts.
+`scan-artifact.sh` always uses the repository's `.leak-guard-allow`, whatever directory it is called from. Compressed media skips the e-mail check (random bytes look like addresses).
 For structurally valid MP4 A/V files with recognized compressed codecs, isolated four-byte ASCII runs inside
 `mdat` are treated as compression noise. Metadata, longer readable payloads and UTF-16 strings still scan.
 Subtitle tracks, unknown codecs and malformed/truncated containers receive the full scan. This is format-aware

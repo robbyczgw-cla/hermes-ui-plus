@@ -4,6 +4,7 @@
 import type { ChatMessage } from '../hermes/types.ts';
 import { compactDetails } from '../hermes/trace.ts';
 import { answerText } from '../hermes/progressNotes.ts';
+import { queuedForStorage, withoutUnackedAnswers } from '../hermes/pendingSend.ts';
 import { MESSAGES_MAX_BYTES, MESSAGE_CAP, PREVIEW_MAX } from './types.ts';
 
 /** Max stored reasoning per message (the "Gedankengang" row after reload / offline). */
@@ -35,8 +36,13 @@ export function capStoredText(text: string, max = STORED_TEXT_MAX): { text: stri
  * capped to REASONING_STORE_MAX chars (stored Hermes sessions and offline viewing need it). Tool details /
  * trace (Werkzeug-Details) are kept but capped (each payload ≤ 4 KB, see hermes/trace.ts). Text over STORED_TEXT_MAX is
  * cut with a visible marker (`textCapped`).
+ * A user message still waiting for its uploads (`sendPending`, not sent yet) is stored as `sendQueued` with its
+ * attachment refs (hermes/pendingSend.ts queuedForStorage): restored, the user re-sends or discards it. So is one
+ * whose turn request the server has not accepted yet (`sendUnacked`, with its `sendKey`); prepareForStorage leaves
+ * out its answer placeholder.
  */
-export function stripMessage(m: ChatMessage): ChatMessage {
+export function stripMessage(src: ChatMessage): ChatMessage {
+  const m = src.sendPending || src.sendUnacked ? queuedForStorage(src) : src;
   const { reasoning, statusNote, approval, pendingApprovals, ...rest } = compactDetails(m);
   const out: ChatMessage = { ...rest };
   if (reasoning) {
@@ -77,9 +83,10 @@ export function prepareForStorage(messages: ChatMessage[]): ChatMessage[] {
   // same as capMessages(messages.map(stripMessage)), with the stripped form and its JSON size cached per message
   // object: a streaming answer is saved every ~2.5 s and only it changed – not every message re-stripped and
   // re-serialized each time (React state is immutable; hashOfPersisted relies on the same)
-  // a message still waiting for its uploads (hermes/pendingSend.ts) was not sent: never stored
-  const sent = messages.some((m) => m.sendPending) ? messages.filter((m) => !m.sendPending) : messages;
-  const list = sent.length > MESSAGE_CAP ? sent.slice(sent.length - MESSAGE_CAP) : sent;
+  // a message still waiting for its uploads is kept (stored as `sendQueued`, see stripMessage); so is one whose turn
+  // was not accepted yet, without its answer placeholder (hermes/pendingSend.ts "durable send")
+  const all = withoutUnackedAnswers(messages);
+  const list = all.length > MESSAGE_CAP ? all.slice(all.length - MESSAGE_CAP) : all;
   const stored = list.map(storedForm);
   let total = 0;
   for (const e of stored) total += e.size;
@@ -94,10 +101,35 @@ function storedForm(m: ChatMessage): { message: ChatMessage; size: number } {
   let e = storedForms.get(m);
   if (!e) {
     const message = stripMessage(m);
-    e = { message, size: JSON.stringify(message).length };
+    const json = JSON.stringify(message);
+    storedJsons.set(message, json);
+    e = { message, size: json.length };
     storedForms.set(m, e);
   }
   return e;
+}
+
+/** per stored message object (prepareForStorage output, never mutated): its JSON */
+const storedJsons = new WeakMap<ChatMessage, string>();
+
+/** `JSON.stringify(m)` of a stored message, computed once per object (array element form: `null` for undefined). */
+export function storedJson(m: ChatMessage): string {
+  let json = storedJsons.get(m);
+  if (json === undefined) {
+    json = JSON.stringify(m) ?? 'null';
+    if (m && typeof m === 'object') storedJsons.set(m, json);
+  }
+  return json;
+}
+
+/**
+ * `JSON.stringify({ v, messages })`, byte for byte, assembled from the per-message JSON: a streaming chat is saved
+ * every few seconds and only its last message changed – the whole transcript was serialized again each time.
+ */
+export function messagesFileJson(v: number, messages: ChatMessage[]): string {
+  const parts = new Array<string>(messages.length);
+  for (let i = 0; i < messages.length; i++) parts[i] = storedJson(messages[i]);
+  return `{"v":${JSON.stringify(v)},"messages":[${parts.join(',')}]}`;
 }
 
 /** per message object (React state is immutable): hash of its persisted form, computed once */

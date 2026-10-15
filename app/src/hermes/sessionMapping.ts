@@ -8,6 +8,7 @@
  *   assistant {content:"answer", reasoning?, finish_reason:"stop"}
  * The `tool_calls[].id` equals the `toolCallId` of the live `hermes.tool.progress` events.
  */
+import type { Attachment } from '../attachments/types';
 import type { ChatMessage, ToolEvent, ToolDetail, TraceStep } from './types';
 import type { RemoteMessage, RemoteToolCall } from './sessions';
 import { DETAIL_MAX_BYTES, LINKS_MAX, capPayload, sanitize } from './trace.ts';
@@ -176,9 +177,11 @@ export function mapRemoteMessages(rows: RemoteMessage[]): ChatMessage[] {
     lastTs = ts;
     if (r.role === 'user') {
       close();
-      const text = contentText(r.content).trim();
-      if (!text) continue;
-      out.push({ id: remoteMessageId(r.id, 'user'), role: 'user', text, tools: [], status: 'done', createdAt: ts });
+      const id = remoteMessageId(r.id, 'user');
+      // attachment references (`[Datei angehängt: …]`) → attachment chips, like the live message (no server path)
+      const { text, attachments } = splitAttachmentMarkers(contentText(r.content).trim(), id);
+      if (!text && !attachments.length) continue;
+      out.push({ id, role: 'user', text, ...(attachments.length ? { attachments } : {}), tools: [], status: 'done', createdAt: ts });
       continue;
     }
     if (r.role === 'assistant') {
@@ -216,6 +219,64 @@ export function mapRemoteMessages(rows: RemoteMessage[]): ChatMessage[] {
   }
   close();
   return out;
+}
+
+/**
+ * Attachment text of a file in a stored user message (attachments/encodeHermes.ts; model-facing, German only):
+ *   `[Datei angehängt: <name> (<mime>, <size>) – Pfad auf dem Server: <path>]`   (UI bridge upload)
+ *   `[Datei angehängt: <name> (<mime>, <size>) – Inhalt:]` + a fenced block       (small text file, inlined)
+ */
+const FILE_MARKER_RE = /\[Datei angehängt: ([^\n]+?) \(([\w.+-]+\/[\w.+-]+), ([^()\n]+?)\) – (?:Pfad auf dem Server: ([^\n]*)\]|(Inhalt:)\])/g;
+const SIZE_UNITS: Record<string, number> = { B: 1, KB: 1000, MB: 1_000_000 };
+
+/** "1,2 MB" / "830 KB" / "12 B" (formatBytes) → bytes (approximate), 0 when unreadable */
+function parseShownSize(s: string): number {
+  const m = /^([\d.,]+)\s*(B|KB|MB)$/.exec(s.trim());
+  const n = m ? Number(m[1].replace(',', '.')) : NaN;
+  return m && Number.isFinite(n) ? Math.round(n * SIZE_UNITS[m[2]]) : 0;
+}
+
+/** end of the fenced block that follows an inlined file's marker (at `from`), or `from` when there is none */
+function inlineBlockEnd(text: string, from: number): number {
+  const open = /^\n(`{3,})[^\n]*\n/.exec(text.slice(from));
+  if (!open) return from;
+  const fence = open[1];
+  // the fence is longer than any backtick run inside the content (fenceFor), so the first "\n<fence>" not followed
+  // by another backtick closes the block
+  for (let i = from + open[0].length - 1; ; ) {
+    const k = text.indexOf(`\n${fence}`, i);
+    if (k === -1) return text.length;
+    if (text[k + 1 + fence.length] !== '`') return k + 1 + fence.length;
+    i = k + 1;
+  }
+}
+
+/**
+ * Stored user text → typed text + attachments: file references and inlined text files become attachment entries
+ * (name, type, size; no local file). The server path of an upload is only kept in `remoteRef` (never displayed).
+ * Images arrive as `[Bild]` markers (contentText) and stay.
+ * `idPrefix` makes the attachment ids stable across refreshes.
+ */
+export function splitAttachmentMarkers(text: string, idPrefix: string): { text: string; attachments: Attachment[] } {
+  if (!text.includes('[Datei angehängt: ')) return { text, attachments: [] };
+  const re = new RegExp(FILE_MARKER_RE.source, 'g');
+  const attachments: Attachment[] = [];
+  let out = '';
+  let pos = 0;
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    let end = m.index + m[0].length;
+    if (m[5]) end = inlineBlockEnd(text, end);
+    out += text.slice(pos, m.index);
+    pos = end;
+    re.lastIndex = end;
+    const att: Attachment = { id: `${idPrefix}-att-${attachments.length}`, kind: 'file', name: m[1], mimeType: m[2], size: parseShownSize(m[3]), uri: '', status: 'ready' };
+    // the upload on the bridge (kept 7 days): never shown, but a regenerate of this turn sends the same reference
+    if (m[4]) att.remoteRef = { id: '', path: m[4], name: att.name, size: att.size, mimeType: att.mimeType };
+    attachments.push(att);
+  }
+  if (!attachments.length) return { text, attachments };
+  out += text.slice(pos);
+  return { text: out.replace(/\n{3,}/g, '\n\n').trim(), attachments };
 }
 
 /** Normalised text for matching a local user message against a stored one. */
@@ -267,12 +328,19 @@ export function sameUserText(a: string, b: string): boolean {
  * messages: an empty local text with attachments matches a stored text that consists only of attachment
  * parts/markers (`[Bild]`, `[Datei angehängt: …]`).
  */
-export function sameUserTurn(local: Pick<ChatMessage, 'text' | 'attachments'>, remoteText: string): boolean {
-  return matchUserTurn(local, normalizedUserText(local.text), normalizedUserText(remoteText));
+export function sameUserTurn(local: Pick<ChatMessage, 'text' | 'attachments'>, remote: RemoteTurn): boolean {
+  return matchUserTurn(local, normalizedUserText(local.text), withAttachments(normalizedUserText(remoteText(remote)), remote));
 }
 
 type UserTurn = Pick<ChatMessage, 'text' | 'attachments'>;
+/** stored user turn: its raw text, or the mapped message (attachments parsed out of the text, mapRemoteMessages) */
+type RemoteTurn = string | UserTurn;
 type NormalizedUserText = { text: string; attachments: boolean };
+
+const remoteText = (r: RemoteTurn) => (typeof r === 'string' ? r : r.text);
+function withAttachments(n: NormalizedUserText, r: RemoteTurn): NormalizedUserText {
+  return typeof r !== 'string' && r.attachments?.length && !n.attachments ? { ...n, attachments: true } : n;
+}
 
 function normalizedUserText(text: string): NormalizedUserText {
   const core = userTextCore(text);
@@ -289,7 +357,7 @@ function matchUserTurn(local: UserTurn, l: NormalizedUserText, r: NormalizedUser
  * text once, rather than stripping attachments / folding whitespace for every candidate pair.
  * Keep this matcher scoped to one reconciliation so the cache cannot retain old transcripts.
  */
-export function createUserTurnMatcher(): (local: UserTurn, remoteText: string) => boolean {
+export function createUserTurnMatcher(): (local: UserTurn, remote: RemoteTurn) => boolean {
   const cache = new Map<string, NormalizedUserText>();
   const normalized = (text: string): NormalizedUserText => {
     let hit = cache.get(text);
@@ -299,7 +367,7 @@ export function createUserTurnMatcher(): (local: UserTurn, remoteText: string) =
     }
     return hit;
   };
-  return (local, remoteText) => matchUserTurn(local, normalized(local.text), normalized(remoteText));
+  return (local, remote) => matchUserTurn(local, normalized(local.text), withAttachments(normalized(remoteText(remote)), remote));
 }
 
 /**

@@ -1,5 +1,7 @@
 import type { ConversationMeta, IndexFile, MessagesFile, ProfileKind, RemoteInfo } from './types.ts';
 import { sanitizeChatOptions } from '../hermes/capabilities.ts';
+import { sanitizeModelLock } from '../hermes/modelLock.ts';
+import { botOf } from '../hermes/bots.ts';
 import type { ChatMessage } from '../hermes/types.ts';
 import { DEFAULT_TITLE, PROFILE_KINDS, SCHEMA_VERSION } from './types.ts';
 
@@ -45,11 +47,15 @@ function optional(raw: Record<string, unknown>): Partial<ConversationMeta> {
   const out: Partial<ConversationMeta> = {};
   const mo = sanitizeChatOptions(raw.modelOptions);
   if (mo) out.modelOptions = mo;
+  const lock = sanitizeModelLock(raw.modelLock);
+  if (lock) out.modelLock = lock;
   if (raw.origin === 'remote') out.origin = 'remote';
   const r = sanitizeRemote(raw.remote);
   if (r) out.remote = r;
   if (raw.archived === true) out.archived = true;
   if (raw.historyTruncated === true) out.historyTruncated = true;
+  const bot = typeof raw.hermesProfile === 'string' ? botOf(raw.hermesProfile) : undefined;
+  if (bot) out.hermesProfile = bot;
   if (typeof raw.branchSeed === 'number' && Number.isFinite(raw.branchSeed) && raw.branchSeed >= 1) out.branchSeed = Math.floor(raw.branchSeed);
   return out;
 }
