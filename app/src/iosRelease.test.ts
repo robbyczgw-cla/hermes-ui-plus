@@ -28,7 +28,8 @@ test('ios version: numeric marketing version from the pre-release app version', 
   assert.equal(plugin.iosMarketingVersion('1.02'), '1.2');
   assert.throws(() => plugin.iosMarketingVersion('alpha'), /numeric/);
   assert.throws(() => plugin.iosMarketingVersion('1.2.3.4'), /numeric/);
-  assert.equal(plugin.iosMarketingVersion(appJson.version), '0.1.0');
+  // the configured version maps to its numeric core (no pinned value: the release bumps it)
+  assert.equal(plugin.iosMarketingVersion(appJson.version), String(appJson.version).split(/[-+]/)[0]);
 });
 
 test('ios build number: env override, else configured, validated', () => {

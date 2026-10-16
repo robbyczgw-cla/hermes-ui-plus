@@ -40,6 +40,7 @@ import {
 import { ImageSlotGroup } from '../../imageSlot';
 import type { SlotMode } from '../../../../images/slot';
 import { ActionTile, CardImage, DetailSheet, HeaderPill, InfoRow, OpenLine, Rail, RatingRow, SNAP_START, SectionLabel, SkeletonCard, railLayout, type RailLayout } from './parts';
+import { useCaptureMode } from '../../../lib/capture';
 
 type PlacesState = { saved: string[] };
 const INITIAL: PlacesState = { saved: [] };
@@ -57,6 +58,7 @@ export function Places({ node }: { node: Partial<HuiPlaces> }) {
   const { lang } = useLocale();
   const L = numLang(lang);
   const { streaming, onAction } = useHui();
+  const capture = useCaptureMode();
   const id = useModuleId('places', node as Record<string, unknown>);
   const model = useMemo(() => normalizePlaces(node, streaming), [node, streaming]);
   const [st, setSt] = useNodeState<PlacesState>(id, INITIAL);
@@ -100,7 +102,8 @@ export function Places({ node }: { node: Partial<HuiPlaces> }) {
   }
 
   const list = model.layout === 'list';
-  const layout = railLayout(w, { peek: 0.8, maxCard: 320, minGridCard: 260 });
+  // share-as-image: one card per row (a rail would cut the cards off at the frame edge)
+  const layout = railLayout(w, { peek: 0.8, maxCard: 320, minGridCard: 260, grid: capture, minCols: capture ? 1 : 2 });
   const opened = openKey ? model.items.find((p) => p.key === openKey) : undefined;
   const count = model.items.length + (model.pending ? 1 : 0);
 
@@ -119,7 +122,7 @@ export function Places({ node }: { node: Partial<HuiPlaces> }) {
             ) : null}
             <ProvenanceChip basis={model.basis} source={model.source} />
           </View>
-          {mapNode ? <HeaderPill icon="map" label={showMap ? tr('ui.places.hideMap') : tr('ui.places.showMap')} onPress={() => setShowMap((v) => !v)} active={showMap} /> : null}
+          {mapNode && !capture ? <HeaderPill icon="map" label={showMap ? tr('ui.places.hideMap') : tr('ui.places.showMap')} onPress={() => setShowMap((v) => !v)} active={showMap} /> : null}
         </View>
       </View>
 
@@ -253,7 +256,7 @@ function PlaceCard({ t, p, lang, now, layout, saved, onOpen, act }: { t: Theme; 
   const [imgMode, setImgMode] = useState<SlotMode>('skeleton');
   const noImg = imgMode === 'collapse';
   return (
-    <View style={{ flex: 1, width: layout.cardW, borderRadius: t.radii.l, backgroundColor: t.colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: t.colors.border, overflow: 'hidden', ...t.shadows.sm }}>
+    <View style={{ flex: 1, width: layout.cardW, borderRadius: t.radii.card, backgroundColor: t.colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: t.colors.border, overflow: 'hidden', ...t.shadows.sm }}>
       <View style={noImg && saved ? { minHeight: 44 } : undefined}>
         <CardImage query={p.imageQuery} autoQuery={placeImageQuery(p)} url={p.image} kind={kind} height={CARD_IMG} allowAsk onPress={onOpen} onMode={setImgMode} />
         {saved ? (
@@ -289,10 +292,10 @@ function PlaceRow({ t, p, lang, now, saved, onOpen, act }: { t: Theme; p: PlaceI
   const open = openState(p, tr, now);
   const [imgMode, setImgMode] = useState<SlotMode>('skeleton');
   return (
-    <View style={{ borderRadius: t.radii.l, backgroundColor: t.colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: t.colors.border, padding: t.spacing.s, gap: t.spacing.s }}>
+    <View style={{ borderRadius: t.radii.card, backgroundColor: t.colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: t.colors.border, padding: t.spacing.s, gap: t.spacing.s }}>
       <View style={{ flexDirection: 'row', gap: t.spacing.m, alignItems: 'center' }}>
         <View style={imgMode === 'collapse' ? { display: 'none' } : { width: LIST_IMG }}>
-          <CardImage query={p.imageQuery} autoQuery={placeImageQuery(p)} url={p.image} kind={placeKind(p.category, p.name)} height={LIST_IMG} radius={t.radii.m} iconSize={26} inline allowAsk onPress={onOpen} onMode={setImgMode} />
+          <CardImage query={p.imageQuery} autoQuery={placeImageQuery(p)} url={p.image} kind={placeKind(p.category, p.name)} height={LIST_IMG} radius={t.radii.control} iconSize={26} inline allowAsk onPress={onOpen} onMode={setImgMode} />
         </View>
         <PressableScale haptic="selection" scaleTo={0.99} onPress={onOpen} accessibilityLabel={placeA11y(p, tr, lang, now)} accessibilityHint={tr('ui.places.detailsHint')} style={{ flex: 1, gap: 3, minWidth: 0 }} pressedStyle={{ opacity: 0.85 }}>
           <HText variant="bodyStrong" numberOfLines={1}>

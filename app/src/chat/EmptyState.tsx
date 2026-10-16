@@ -1,9 +1,11 @@
 import { memo, useMemo } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Text } from '../ui/primitives/Text';
 import { useT } from '../i18n';
 import { usePreferences } from '../settings/PreferencesProvider';
-import { scaledText } from '../settings/preferences';
-import { FadeIn, useTheme } from '../ui';
+import { FLAVOR } from '../flavor';
+import { FadeIn, scaleFont, textStyle, useTheme } from '../ui';
+import { PetasosMark } from '../ui/primitives/PetasosMark';
 import { lightHaptic } from './actions';
 import { Icon } from './icons';
 import { STARTER_ICONS, avatarInitial, chatStarters, greeting, type Starter } from './starters';
@@ -25,12 +27,16 @@ type Props = {
 /** columns of the starter grid: 2 on phones, 3 from small tablets on */
 const WIDE = 640;
 const MAX_WIDTH = 720;
+/** left/right edge of greeting and tiles: the tile border lines up with the greeting text */
+const EDGE = 20;
 
 /**
- * Start screen: personal greeting (time of day) under a small typographic monogram of the assistant, and a
- * grid of starter tiles near the composer. Each tile names a task and shows a stroke icon of the interactive
- * card it produces. Settings → Chat → "Vorschläge auf dem Startbildschirm" hides the grid; the greeting then
- * sits a little lower (upper half, not top third) so the screen still reads as composed.
+ * Start screen: the app's Petasos mark (official build; the personal flavor has its own icon and keeps the assistant
+ * monogram) with "… is ready", a one-colour greeting (time of day) set in the display face (Gloock, the one place
+ * besides onboarding and empty states where it appears) and right below it the grid of starter tiles, the
+ * whole group optically centred a little above the middle. Each tile names a task and shows a stroke icon of the
+ * interactive card it produces; tiles align with the greeting's left edge. Settings → Chat → "Vorschläge auf dem
+ * Startbildschirm" hides the grid.
  */
 export const EmptyState = memo(function EmptyState({ onPick, profileName, assistantName, offline, offlineHint, onOpenSettings, onQuick }: Props) {
   const t = useTheme();
@@ -47,22 +53,25 @@ export const EmptyState = memo(function EmptyState({ onPick, profileName, assist
 
   return (
     <ScrollView style={styles.flex} contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-      <View style={[styles.hero, showStarters ? styles.heroWithStarters : styles.heroAlone]}>
+      <View style={styles.spacerTop} />
+      <View style={styles.hero}>
         <FadeIn style={styles.heroInner}>
           <View style={styles.identity} accessible accessibilityLabel={ready}>
-            <View style={[styles.mono, { borderColor: t.colors.accent }]}>
-              <Text style={[styles.monoText, { color: t.colors.accent }]} maxFontSizeMultiplier={1.4}>
-                {avatarInitial(assistantName)}
-              </Text>
-            </View>
-            <Text style={[styles.ready, { color: t.colors.muted }, scaledText(14, 18, fs)]} numberOfLines={1}>
+            {FLAVOR === 'hermes' ? (
+              <PetasosMark width={36} />
+            ) : (
+              <View style={[styles.mono, { borderColor: t.colors.accent }]}>
+                <Text style={[styles.monoText, { color: t.colors.accentText }]} maxFontSizeMultiplier={1.4}>
+                  {avatarInitial(assistantName)}
+                </Text>
+              </View>
+            )}
+            <Text style={[textStyle(t, 'callout'), styles.ready, { color: t.colors.muted }]} numberOfLines={1}>
               {ready}
             </Text>
           </View>
-          <Text style={[styles.headline, { color: t.colors.text }, cols === 3 ? scaledText(36, 42, fs) : scaledText(30, 36, fs)]} accessibilityRole="header">
-            {hello}
-            {'\n'}
-            <Text style={{ color: t.colors.subtle }}>{tr('chat.empty.lead')}</Text>
+          <Text style={[textStyle(t, 'hero'), { color: t.colors.text }, cols === 3 ? scaleFont(40, 46, fs) : null]} accessibilityRole="header">
+            {`${hello}\n${tr('chat.empty.lead')}`}
           </Text>
           {offline ? (
             <Pressable
@@ -71,7 +80,7 @@ export const EmptyState = memo(function EmptyState({ onPick, profileName, assist
               style={({ pressed }) => [styles.offline, { backgroundColor: t.colors.dangerSoft }, pressed && { opacity: 0.7 }]}
             >
               <Icon name="alert" size={16} color={t.colors.danger} />
-              <Text style={[styles.offlineText, { color: t.colors.danger }, scaledText(13.5, 18, fs)]}>
+              <Text style={[textStyle(t, 'caption'), styles.offlineText, { color: t.colors.danger }]}>
                 {tr('chat.empty.offline', { profile: profileName, hint: offlineHint ?? tr('chat.header.status.unreachable') })}
               </Text>
             </Pressable>
@@ -90,7 +99,7 @@ export const EmptyState = memo(function EmptyState({ onPick, profileName, assist
               ]}
             >
               <Icon name="boltFilled" size={14} color={t.colors.accent} strokeWidth={1.4} />
-              <Text style={[styles.quickText, { color: t.colors.text }, scaledText(14, 18, fs)]} numberOfLines={1}>
+              <Text style={[textStyle(t, 'callout'), styles.quickText, { color: t.colors.text }]} numberOfLines={1}>
                 {tr('quick.start.pill')}
                 <Text style={{ color: t.colors.subtle, fontWeight: '400' }}>{`  ·  ${tr('quick.start.pillSub')}`}</Text>
               </Text>
@@ -100,7 +109,7 @@ export const EmptyState = memo(function EmptyState({ onPick, profileName, assist
       </View>
       {showStarters ? (
         <FadeIn delay={70} style={styles.starters}>
-          <Text style={[styles.label, { color: t.colors.subtle }, scaledText(12.5, 16, fs)]} accessibilityRole="header">
+          <Text style={[textStyle(t, 'caption'), styles.label, { color: t.colors.muted }]} accessibilityRole="header">
             {tr('chat.empty.startersLabel')}
           </Text>
           <View style={styles.grid}>
@@ -110,6 +119,7 @@ export const EmptyState = memo(function EmptyState({ onPick, profileName, assist
           </View>
         </FadeIn>
       ) : null}
+      <View style={showStarters ? styles.spacerBottom : styles.spacerBottomAlone} />
     </ScrollView>
   );
 });
@@ -117,7 +127,6 @@ export const EmptyState = memo(function EmptyState({ onPick, profileName, assist
 const StarterTile = memo(function StarterTile({ s, cols, onPick }: { s: Starter; cols: number; onPick(prompt: string): void }) {
   const t = useTheme();
   const tr = useT();
-  const fs = t.fontScale;
   return (
     <Pressable
       onPress={() => {
@@ -137,10 +146,10 @@ const StarterTile = memo(function StarterTile({ s, cols, onPick }: { s: Starter;
     >
       <Icon name={STARTER_ICONS[s.key]} size={20} color={t.colors.accent} strokeWidth={1.7} />
       <View style={styles.tileText}>
-        <Text style={[styles.tileTitle, { color: t.colors.text }, scaledText(15, 20, fs)]} numberOfLines={2}>
+        <Text style={[textStyle(t, 'bodyStrong'), { color: t.colors.text }]} numberOfLines={2}>
           {s.title}
         </Text>
-        <Text style={[styles.tileSub, { color: t.colors.muted }, scaledText(13, 17, fs)]} numberOfLines={2}>
+        <Text style={[textStyle(t, 'caption'), { color: t.colors.muted }]} numberOfLines={2}>
           {s.subtitle}
         </Text>
       </View>
@@ -151,22 +160,23 @@ const StarterTile = memo(function StarterTile({ s, cols, onPick }: { s: Starter;
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   scroll: { flexGrow: 1, width: '100%', maxWidth: MAX_WIDTH, alignSelf: 'center', paddingBottom: 10 },
-  hero: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 24, minHeight: 200 },
-  // optical centre: a bit above the middle with tiles below; lower (but still upper half) without them
-  heroWithStarters: { paddingTop: 8, paddingBottom: 24 },
-  heroAlone: { paddingBottom: 72 },
+  // greeting + tiles are one group; the spacers put it a bit above the middle (more room below than above)
+  spacerTop: { flexGrow: 2, minHeight: 16 },
+  spacerBottom: { flexGrow: 3, minHeight: 8 },
+  spacerBottomAlone: { flexGrow: 4 },
+  hero: { paddingHorizontal: EDGE, paddingBottom: 28 },
   heroInner: { gap: 14 },
   identity: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  mono: { width: 30, height: 30, borderRadius: 9, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  mono: { width: 30, height: 30, borderRadius: 10, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
   monoText: { fontSize: 15, lineHeight: 18, fontWeight: '700', letterSpacing: -0.2 },
-  ready: { fontSize: 14, fontWeight: '500', flexShrink: 1 },
-  headline: { fontSize: 30, lineHeight: 36, fontWeight: '600', letterSpacing: -0.8 },
-  offline: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 8, paddingHorizontal: 12, paddingVertical: 9, minHeight: 44, borderRadius: 12 },
-  offlineText: { fontSize: 13.5, fontWeight: '500', flexShrink: 1 },
-  quick: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 7, minHeight: 40, paddingLeft: 12, paddingRight: 15, borderRadius: 999, borderWidth: StyleSheet.hairlineWidth },
-  quickText: { fontSize: 14, fontWeight: '600', flexShrink: 1 },
-  starters: { paddingHorizontal: 12, gap: 10 },
-  label: { fontSize: 12.5, fontWeight: '600', letterSpacing: 0.2, paddingHorizontal: 12 },
+  ready: { fontWeight: '500', flexShrink: 1 },
+  offline: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 8, paddingHorizontal: 12, paddingVertical: 9, minHeight: 44, borderRadius: 10 },
+  offlineText: { fontWeight: '500', flexShrink: 1 },
+  // maxWidth: with large text the one-line pill must end in "…" inside the column, not run off-screen (web)
+  quick: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', maxWidth: '100%', gap: 7, minHeight: 40, paddingLeft: 12, paddingRight: 15, borderRadius: 999, borderWidth: StyleSheet.hairlineWidth },
+  quickText: { fontWeight: '600', flexShrink: 1 },
+  starters: { paddingHorizontal: EDGE, gap: 10 },
+  label: { fontWeight: '600' },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   tile: {
     flexGrow: 1,
@@ -181,6 +191,4 @@ const styles = StyleSheet.create({
   tile2: { flexBasis: '46%' },
   tile3: { flexBasis: '30%' },
   tileText: { gap: 1 },
-  tileTitle: { fontSize: 15, fontWeight: '600', letterSpacing: -0.2 },
-  tileSub: { fontSize: 13 },
 });

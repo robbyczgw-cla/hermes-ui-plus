@@ -39,7 +39,7 @@ export function InlineClock({
   const stateText = done ? tr('ui.timer.done') : running ? tr('ui.timer.running') : c.status === 'paused' ? tr('ui.timer.paused') : tr('ui.timer.notStarted');
   const color = done ? t.colors.success : running ? t.colors.accent : t.colors.borderStrong;
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.m, padding: t.spacing.m, borderRadius: t.radii.l, backgroundColor: t.colors.surfaceAlt }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.m, padding: t.spacing.m, borderRadius: t.radii.card, backgroundColor: t.colors.surfaceAlt }}>
       <ClockRing size={48} stroke={4} frac={done ? 0 : progress(c, now)} color={color} track={t.colors.border}>
         {done ? <Icon name="check" size={20} color={t.colors.success} strokeWidth={2.4} /> : <D2Icon name="timer" size={18} color={color} />}
       </ClockRing>
@@ -52,7 +52,7 @@ export function InlineClock({
         </HText>
       </View>
       {running ? (
-        <PressableScale haptic="selection" onPress={() => ctl.adjust(clockKey, ADJUST_STEP_MS)} accessibilityLabel={tr('ui.timer.plusMinuteA11y')} hitSlop={4} style={{ minHeight: 40, minWidth: 52, paddingHorizontal: 8, borderRadius: t.radii.pill, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: t.colors.borderStrong }}>
+        <PressableScale haptic="selection" onPress={() => ctl.adjust(clockKey, ADJUST_STEP_MS)} accessibilityLabel={tr('ui.timer.plusMinuteA11y')} hitSlop={4} style={{ minHeight: 40, minWidth: 52, paddingHorizontal: 8, borderRadius: t.radii.pill, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: t.colors.borderControl }}>
           <HText variant="caption" weight="600" tabular>
             {tr('ui.timer.plusMinute')}
           </HText>

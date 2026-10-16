@@ -19,9 +19,15 @@ config.cacheVersion = `${config.cacheVersion ?? ''}|expo-public:${publicEnvHash}
 const i18nCore = path.join(__dirname, 'src/i18n/core.ts');
 const i18nDictsApp = path.join(__dirname, 'src/i18n/dicts.app.ts');
 const upstreamResolve = config.resolver.resolveRequest;
+// perf builds, level 2 (app/src/perf/probe.ts, docs/PERF.md): React's profiling renderer, so <Profiler onRender> reports
+// render times in a release bundle; every other build keeps the production renderer
+const reactProfiling = process.env.EXPO_PUBLIC_HUI_PERF === '2';
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   // i18n: en/es dictionaries load lazily in the app (src/i18n/dicts.app.ts); Node tests keep the
   // eager src/i18n/dicts.ts so makeT('en', …) stays synchronous there
+  if (reactProfiling && moduleName === '../implementations/ReactFabric-prod') {
+    return { type: 'sourceFile', filePath: path.join(path.dirname(context.originModulePath), '../implementations/ReactFabric-profiling.js') };
+  }
   if (moduleName === './dicts.ts' && context.originModulePath === i18nCore) {
     return { type: 'sourceFile', filePath: i18nDictsApp };
   }

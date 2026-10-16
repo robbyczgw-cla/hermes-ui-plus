@@ -503,7 +503,7 @@ export function useRemoteTranscript(conversationId: string | undefined, profile:
 export function useApplyRemoteTranscript(
   chat: { messages: ChatMessage[]; status: string; replaceMessages?: (m: ChatMessage[]) => boolean },
   transcript: Pick<RemoteTranscript, 'revision' | 'remote' | 'ack'>,
-  conv: { meta: ConversationMeta | undefined; save: (m: ChatMessage[], opts?: { keepOrder?: boolean }) => void }
+  conv: { meta: ConversationMeta | undefined; save: (m: ChatMessage[], opts?: { keepOrder?: boolean }) => void; flush: () => Promise<void> }
 ): boolean {
   const applied = useRef(0);
   // state (not only the ref): an unchanged snapshot replaces nothing, so nothing else would re-render
@@ -513,6 +513,7 @@ export function useApplyRemoteTranscript(
   const origin = conv.meta?.origin;
   const convId = conv.meta?.id;
   const save = conv.save;
+  const flush = conv.flush;
   useEffect(() => {
     if (!remote || revision === applied.current || status === 'streaming' || !replaceMessages) return;
     // opening a chat does not move it in the list: saved like a fetch ahead (order = activity, SNAPSHOT_SAVE)
@@ -520,9 +521,14 @@ export function useApplyRemoteTranscript(
     if (!merged) return; // refused (turn started): retried on the next render
     applied.current = revision;
     setAppliedRevision(revision);
-    // an interrupted answer completed by the stored session: "Antwort ist da" (de-duplicated by message id)
-    if (convId && merged !== messages) for (const m of recoveredAnswers(messages, merged)) emitAnswerReady({ conversationId: convId, message: m, late: true });
-  }, [revision, remote, status, messages, replaceMessages, origin, save, convId, ack]);
+    // an interrupted answer completed by the stored session: "Antwort ist da" (de-duplicated by message id); the
+    // notification waits until it is written – now, not on the debounce timer (it does not run in the Android background)
+    const recovered = convId && merged !== messages ? recoveredAnswers(messages, merged) : [];
+    if (convId && recovered.length) {
+      const written = flush().catch(() => {});
+      for (const m of recovered) emitAnswerReady({ conversationId: convId, message: m, late: true, written });
+    }
+  }, [revision, remote, status, messages, replaceMessages, origin, save, flush, convId, ack]);
   return !!remote && revision !== appliedRevision;
 }
 

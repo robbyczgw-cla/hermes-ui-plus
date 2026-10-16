@@ -12,6 +12,7 @@ import { stopSpeaking, toggleSpeaking, useSpeaker } from '../speaker';
 import { voiceErrorText } from '../types';
 import type { VoiceConn } from '../types';
 import { VoiceIcon } from './icons';
+import { a11yState } from '../../ui/lib/a11yState';
 
 export type SpeakButtonProps = {
   /** the assistant message (markdown incl. ```hui blocks; they are summarised, not read) */
@@ -60,9 +61,9 @@ export function SpeakButton({ message, conn, iconSize = 17, onError }: SpeakButt
         hitSlop={8}
         accessibilityRole="button"
         accessibilityLabel={label}
-        accessibilityState={{ busy: s.status === 'loading' }}
+        {...a11yState({ busy: s.status === 'loading' })}
         accessibilityValue={active ? { min: 0, max: 100, now: Math.round(s.progress * 100) } : undefined}
-        style={({ pressed }) => [styles.btn, pressed && { backgroundColor: theme.colors.surfacePressed }]}
+        style={({ pressed }) => [styles.btn, { borderRadius: theme.radii.control }, pressed && { backgroundColor: theme.colors.surfacePressed }]}
       >
         <View style={{ width: iconSize, height: iconSize, alignItems: 'center', justifyContent: 'center' }}>
           {active && s.status !== 'loading' ? (
@@ -104,7 +105,7 @@ export function SpeakButton({ message, conn, iconSize = 17, onError }: SpeakButt
           hitSlop={8}
           accessibilityRole="button"
           accessibilityLabel={t('voice.speak.stop')}
-          style={({ pressed }) => [styles.btn, pressed && { backgroundColor: theme.colors.surfacePressed }]}
+          style={({ pressed }) => [styles.btn, { borderRadius: theme.radii.control }, pressed && { backgroundColor: theme.colors.surfacePressed }]}
         >
           <VoiceIcon name="stop" size={iconSize} color={theme.colors.muted} />
         </Pressable>
@@ -115,6 +116,6 @@ export function SpeakButton({ message, conn, iconSize = 17, onError }: SpeakButt
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  btn: { padding: 6, borderRadius: 8 },
+  btn: { padding: 6 },
   ring: { position: 'absolute' },
 });

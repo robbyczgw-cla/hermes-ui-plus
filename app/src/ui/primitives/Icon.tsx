@@ -24,6 +24,12 @@ export type IconName =
   | 'table'
   | 'chart'
   | 'send'
+  | 'play'
+  | 'reset'
+  | 'timer'
+  | 'chef'
+  | 'expand'
+  | 'cart'
   | 'dot';
 
 /** Minimal stroke icon set (Lucide-like geometry, 24 grid, 1.75 stroke). */
@@ -134,6 +140,35 @@ export function Icon({ name, size = 18, color, strokeWidth = 1.75 }: { name: Ico
       break;
     case 'send':
       body = <Path d="M12 19V5M5 12l7-7 7 7" {...p} />;
+      break;
+    case 'play':
+      body = <Path d="M7 4.5v15a1 1 0 0 0 1.5.86l12-7.5a1 1 0 0 0 0-1.72l-12-7.5A1 1 0 0 0 7 4.5z" fill={color} stroke="none" />;
+      break;
+    case 'reset':
+      body = <Path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1M3.5 4v5h5" {...p} />;
+      break;
+    case 'timer':
+      body = (
+        <>
+          <Circle cx={12} cy={13.5} r={7.5} {...p} />
+          <Path d="M12 9.5v4l2.5 2M9.5 2.5h5M12 2.5V6" {...p} />
+        </>
+      );
+      break;
+    case 'chef':
+      body = <Path d="M7 14.5V20h10v-5.5M7 14.5a4 4 0 0 1-.7-7.9A5 5 0 0 1 12 3.5a5 5 0 0 1 5.7 3.1 4 4 0 0 1-.7 7.9H7zM7 17h10" {...p} />;
+      break;
+    case 'expand':
+      body = <Path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" {...p} />;
+      break;
+    case 'cart':
+      body = (
+        <>
+          <Path d="M3 4h2.2l2.3 11.2a1.5 1.5 0 0 0 1.5 1.2h8.4a1.5 1.5 0 0 0 1.5-1.1L20.5 8H6.1" {...p} />
+          <Circle cx={9.5} cy={20} r={1.2} {...p} />
+          <Circle cx={17} cy={20} r={1.2} {...p} />
+        </>
+      );
       break;
     case 'dot':
       body = <Circle cx={12} cy={12} r={3} fill={color} />;

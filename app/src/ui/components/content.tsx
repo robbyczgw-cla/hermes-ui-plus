@@ -1,7 +1,8 @@
 import { Fragment, useEffect, useState } from 'react';
-import { ScrollView, View } from 'react-native';
+import { ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import Animated, { Easing, useAnimatedStyle, useReducedMotion, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useMotionReduced, useTheme } from '../theme';
+import { scaleFont } from '../themes';
 import { useAnswerUiPrefs } from '../lib/answerPrefs';
 import { StatValue } from './CountUpValue';
 import { useHui } from '../primitives/context';
@@ -19,7 +20,13 @@ import type { HuiCallout, HuiCompare, HuiList, HuiProgress, HuiStats, HuiSteps, 
 import { useLocale, useT } from '../../i18n';
 import { useSettledAfter } from '../lib/useSettledAfter';
 import { NARROW_TEXT_PROPS } from '../lib/textWrap';
+import { statCardMinWidth } from '../lib/fontScaleLayout';
 import { compareRows } from './comparePoints.ts';
+import { compareLooksLikeProducts, compareProductQuery } from './compareProducts.ts';
+import { CardImage } from './modules/d1/parts';
+import { D1Icon } from './modules/d1/icons';
+import { productKind } from './modules/d1/d1Model.ts';
+import { useCaptureMode } from '../lib/capture';
 
 export type NodeProps<T> = { node: Partial<T> };
 
@@ -37,7 +44,7 @@ export function TextBlock({ node }: NodeProps<HuiText>) {
       return <InlineText variant="caption" color="muted" text={text} />;
     case 'mono':
       return (
-        <HText variant="mono" selectable style={{ backgroundColor: t.colors.codeBg, padding: t.spacing.m, borderRadius: t.radii.s }}>
+        <HText variant="mono" selectable style={{ backgroundColor: t.colors.codeBg, padding: t.spacing.m, borderRadius: t.radii.control }}>
           {text}
         </HText>
       );
@@ -59,7 +66,7 @@ export function Callout({ node }: NodeProps<HuiCallout>) {
   const title = asOptString(node.title);
   const text = asString(node.text);
   return (
-    <View style={{ flexDirection: 'row', gap: t.spacing.m, backgroundColor: bg, borderRadius: t.radii.m, padding: t.spacing.m + 2 }}>
+    <View style={{ flexDirection: 'row', gap: t.spacing.m, backgroundColor: bg, borderRadius: t.radii.control, padding: t.spacing.m + 2 }}>
       <View style={{ paddingTop: 2 }}>
         <Icon name={TONE_ICON[tone]} size={18} color={fg} />
       </View>
@@ -89,6 +96,8 @@ export function Stats({ node }: NodeProps<HuiStats>) {
   const reduced = useMotionReduced();
   const { motion } = useAnswerUiPrefs();
   const countUp = fresh && !reduced && motion;
+  // large text: wider cards → one per row instead of a value cut to "1,2…" (fontScaleLayout.ts)
+  const minW = statCardMinWidth(t.fontScale * (useWindowDimensions().fontScale || 1));
   const items = asObjects(node.items);
   if (!items.length) return streaming ? <StatsSkeleton /> : null;
   const n = items.length;
@@ -101,7 +110,7 @@ export function Stats({ node }: NodeProps<HuiStats>) {
         const trend = inferTrend(it.trend, delta);
         const tc = trend === 'up' ? t.colors.success : trend === 'down' ? t.colors.danger : t.colors.muted;
         return (
-          <FadeIn key={i} delay={i * 40} style={{ flexGrow: 1, flexBasis: n === 1 ? '100%' : n === 3 && i === 2 ? '100%' : '45%', minWidth: 140 }}>
+          <FadeIn key={i} delay={i * 40} style={{ flexGrow: 1, flexBasis: n === 1 ? '100%' : n === 3 && i === 2 ? '100%' : '45%', minWidth: minW }}>
             <Surface depth={depth} style={{ gap: 4, flexGrow: 1 }}>
               <HText variant="caption" color="muted" numberOfLines={1}>
                 {label || ' '}
@@ -125,7 +134,7 @@ export function Stats({ node }: NodeProps<HuiStats>) {
         );
       })}
       {streaming ? (
-        <View style={{ flexGrow: 1, flexBasis: '45%', minWidth: 140, opacity: 0.6 }}>
+        <View style={{ flexGrow: 1, flexBasis: '45%', minWidth: minW, opacity: 0.6 }}>
           <Surface style={{ gap: 8 }}>
             <Skeleton width="50%" height={10} />
             <Skeleton width="65%" height={22} />
@@ -202,8 +211,8 @@ export function List({ node }: NodeProps<HuiList>) {
         let marker: React.ReactNode;
         if (icon && isEmojiish(icon)) {
           marker = (
-            <View style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: t.colors.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
-              <HText style={{ fontSize: 15, lineHeight: 20 }}>{icon}</HText>
+            <View style={{ width: 28, height: 28, borderRadius: t.radii.inline, backgroundColor: t.colors.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
+              <HText style={scaleFont(15, 20, t.fontScale)}>{icon}</HText>
             </View>
           );
         } else if (style === 'number') {
@@ -308,7 +317,7 @@ export function Steps({ node }: NodeProps<HuiSteps>) {
                 {done ? (
                   <Icon name="check" size={14} color={t.colors.onAccent} strokeWidth={2.5} />
                 ) : (
-                  <HText variant="micro" tabular style={{ color: active ? t.colors.accent : t.colors.muted, fontWeight: '600' }}>
+                  <HText variant="micro" tabular style={{ color: active ? t.colors.accentText : t.colors.muted, fontWeight: '600' }}>
                     {i + 1}
                   </HText>
                 )}
@@ -357,7 +366,7 @@ export function Timeline({ node }: NodeProps<HuiTimeline>) {
               {!last ? <View style={{ flex: 1, width: 1.5, backgroundColor: t.colors.border, marginTop: 4 }} /> : null}
             </View>
             <View style={{ flex: 1, paddingBottom: last ? 0 : t.spacing.l, gap: 2 }}>
-              <HText variant="micro" color="muted" style={{ textTransform: 'uppercase' }}>
+              <HText variant="caption" weight="600" color="muted">
                 {asString(it.time)}
               </HText>
               <InlineText variant="bodyStrong" text={asString(it.title)} />
@@ -386,12 +395,47 @@ export function Timeline({ node }: NodeProps<HuiTimeline>) {
 
 /* ───────────── compare ───────────── */
 
+const COMPARE_THUMB = 44;
+
+/**
+ * Small product photo in a compare column header when the columns are products without an `imageQuery`
+ * (compareProducts.ts). Same chain as product cards (CardImage: autoQuery → web image search only, the privacy
+ * settings and the search queue); a fixed square, so nothing moves when the photo arrives or never does: the
+ * neutral glyph underneath stays when the slot collapses (no photo / no image search).
+ */
+function CompareProductThumb({ title, enabled }: { title: string; enabled: boolean }) {
+  const t = useTheme();
+  const kind = productKind(title);
+  const query = compareProductQuery(title);
+  return (
+    <View style={{ width: COMPARE_THUMB, height: COMPARE_THUMB, borderRadius: t.radii.m, overflow: 'hidden', backgroundColor: t.colors.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
+      <D1Icon name={kind} size={20} color={t.colors.muted} strokeWidth={1.5} />
+      {query ? (
+        // own group: the thumbnail never turns the other columns' slots into fallback tiles
+        <ImageSlotGroup>
+          <CardImage autoQuery={query} webOnly kind={kind} height={COMPARE_THUMB} fit={productImageFit('compare')} tile inline radius={t.radii.m} iconSize={20} enabled={enabled} label={title} style={StyleSheet.absoluteFill} />
+        </ImageSlotGroup>
+      ) : null}
+    </View>
+  );
+}
+
 export function Compare({ node }: NodeProps<HuiCompare>) {
   const t = useTheme();
   const { streaming } = useHui();
   const cols = asObjects(node.columns);
+  // product columns get header thumbnails; latched, so a later streamed column never takes them away again
+  const detected = compareLooksLikeProducts(cols);
+  const [productLatch, setProductLatch] = useState(false);
+  useEffect(() => {
+    if (detected) setProductLatch(true);
+  }, [detected]);
+  const products = detected || productLatch;
+  // share-as-image: more than two columns stack (a horizontal scroller would cut them off at the frame edge)
+  const capture = useCaptureMode();
   if (!cols.length) return streaming ? <CompareSkeleton /> : null;
-  const scroll = cols.length > 2;
+  const stack = capture && cols.length > 2;
+  const scroll = cols.length > 2 && !stack;
   const renderCol = (c: Record<string, unknown>, i: number) => {
     const hl = c.highlight === true;
     const badge = asOptString(c.badge);
@@ -401,6 +445,7 @@ export function Compare({ node }: NodeProps<HuiCompare>) {
       cons: asArray(c.cons).map((x) => asString(x)),
     });
     const imageQuery = asOptString(c.imageQuery);
+    const thumb = products && !imageQuery && !!asString(c.title);
     return (
       <View
         key={i}
@@ -409,17 +454,21 @@ export function Compare({ node }: NodeProps<HuiCompare>) {
             backgroundColor: hl ? t.colors.accentSoft : t.colors.surface,
             borderWidth: hl ? 1.5 : 1,
             borderColor: hl ? t.colors.accent : t.colors.border,
-            borderRadius: t.radii.l,
+            borderRadius: t.radii.card,
             padding: t.spacing.l,
             gap: t.spacing.m,
           },
-          scroll ? { width: 228 } : { flex: 1, minWidth: 0 },
+          scroll ? { width: 228 } : stack ? null : { flex: 1, minWidth: 0 },
         ]}
       >
         {imageQuery ? <Thumb query={imageQuery} size="100%" height={120} fit={productImageFit('compare')} label={asString(c.title)} webOnly enabled={!streaming || i < cols.length - 1} /> : null}
-        <View style={{ gap: 6 }}>
-          {badge ? <Badge label={badge} tone={hl ? 'accent' : 'neutral'} /> : null}
-          <InlineText {...NARROW_TEXT_PROPS} variant="headline" text={asString(c.title)} />
+        {/* wide (scrolling) cards: thumbnail beside the title; two narrow columns: above it */}
+        <View style={thumb ? (scroll || stack ? { flexDirection: 'row', alignItems: 'center', gap: t.spacing.s } : { gap: t.spacing.s }) : null}>
+          {thumb ? <CompareProductThumb title={asString(c.title)} enabled={!streaming || i < cols.length - 1} /> : null}
+          <View style={[{ gap: 6 }, thumb && (scroll || stack) ? { flex: 1, minWidth: 0 } : null]}>
+            {badge ? <Badge label={badge} tone={hl ? 'accent' : 'neutral'} /> : null}
+            <InlineText {...NARROW_TEXT_PROPS} variant="headline" text={asString(c.title)} />
+          </View>
         </View>
         <View style={{ gap: t.spacing.s }}>
           {rows.map((r, j) => (
@@ -450,7 +499,7 @@ export function Compare({ node }: NodeProps<HuiCompare>) {
             {cols.map(renderCol)}
           </ScrollView>
         ) : (
-          <View style={{ flexDirection: 'row', gap: t.spacing.s }}>{cols.map(renderCol)}</View>
+          <View style={{ flexDirection: stack ? 'column' : 'row', gap: t.spacing.s }}>{cols.map(renderCol)}</View>
         )}
         <ProvenanceChip node={node} />
       </View>
@@ -477,7 +526,7 @@ export function Fallback({ node, reason, renderError, empty }: { node: unknown; 
   const json = safeJson(node);
   return (
     <Surface style={{ gap: t.spacing.s }}>
-      <PressableScale haptic="selection" scaleTo={0.99} onPress={() => setOpen((o) => !o)} accessibilityLabel={tr('ui.content.showJson')}>
+      <PressableScale haptic="selection" scaleTo={0.99} onPress={() => setOpen((o) => !o)} accessibilityLabel={tr('ui.content.showJson')} accessibilityState={{ expanded: open }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s }}>
           <Icon name="sparkle" size={16} color={t.colors.muted} />
           <HText variant="callout" color="muted" style={{ flex: 1 }} numberOfLines={1}>
@@ -489,8 +538,8 @@ export function Fallback({ node, reason, renderError, empty }: { node: unknown; 
         </View>
       </PressableScale>
       {open ? (
-        <ScrollView horizontal style={{ backgroundColor: t.colors.codeBg, borderRadius: t.radii.s }} contentContainerStyle={{ padding: t.spacing.m }}>
-          <HText variant="mono" color="muted" selectable style={{ fontSize: 12, lineHeight: 18 }}>
+        <ScrollView horizontal style={{ backgroundColor: t.colors.codeBg, borderRadius: t.radii.control }} contentContainerStyle={{ padding: t.spacing.m }}>
+          <HText variant="mono" color="muted" selectable >
             {json}
           </HText>
         </ScrollView>

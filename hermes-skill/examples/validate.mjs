@@ -13,6 +13,12 @@ try {
 } catch (e) {
   console.warn('note: app normalizeNode not importable (' + e.message + '), strict checks only');
 }
+let parseUnifiedDiff = null;
+try {
+  ({ parseUnifiedDiff } = await import(resolve(here, '../../app/src/ui/components/modules/e2/diffModel.ts')));
+} catch (e) {
+  console.warn('note: app parseUnifiedDiff not importable (' + e.message + '), ```diff fences are not parsed');
+}
 
 // Real calc engine (app/src/calc, TS via Node type stripping). Falls back to a light syntax check.
 let calc = null;
@@ -24,7 +30,8 @@ const V2_TYPES = ['choice','checklist','calc','map','recipe','tabs','accordion',
 const V3_TYPES = ['translation','poll','agenda','weather','decision','rank','scale'];
 const V4_TYPES = ['summary','places','products','guide','workout','studyplan','vocab','mindmap'];
 const V5_TYPES = ['paths','blocks'];
-const TYPES = [...V1_TYPES, ...V2_TYPES, ...V3_TYPES, ...V4_TYPES, ...V5_TYPES];
+const V6_TYPES = ['diff','terminal','changes'];
+const TYPES = [...V1_TYPES, ...V2_TYPES, ...V3_TYPES, ...V4_TYPES, ...V5_TYPES, ...V6_TYPES];
 const PATH_TONES = ['neutral','good','warn','bad'];
 const BLOCK_STYLES = ['soft','framed'];
 const PATH_ICONS = ['laptop','desktop','phone','server','cloud','disk','folder','file','database','network','lock','user','globe','app','container','vm','terminal'];
@@ -35,7 +42,7 @@ const HM = /^([01]\d|2[0-3]):[0-5]\d$/;
 const LANG = /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})?$/;
 const BASES = ['user','sourced','calculated','estimate','illustrative'];
 const INPUT_NODES = ['choice','slots','confirm','form','poll','rank','scale','paths-select']; // decision/agenda are editable widgets but answered on demand; counted below too // max one per answer
-const ID_NODES = ['form','choice','checklist','calc','recipe','quiz','flashcards','timer','slots','confirm','poll','agenda','decision','rank','scale','places','products','guide','workout','studyplan','vocab']; // interactive: id required (mindmap: id optional)
+const ID_NODES = ['form','choice','checklist','calc','recipe','quiz','flashcards','timer','slots','confirm','poll','agenda','decision','rank','scale','places','products','guide','workout','studyplan','vocab','changes']; // interactive: id required (mindmap: id optional)
 const ISO = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?$/;
 const IDENT = /^[\p{L}_][\p{L}\p{N}_]*$/u;
 let ctx = { ids: new Map(), refs: [], summaryAt: [], mindLabels: new Set(), pathTitles: new Map() }; // per assistant message: node id -> type; ask.include references
@@ -275,7 +282,70 @@ function checkRoot(n, p) {
 // common field mix-ups → hint in the "unknown field" error
 const FIELD_HINTS = { 'products.items': 'use "products"', 'products[].title': 'use "name"', 'places.items': 'use "places"', 'places[].title': 'use "name"',
   'paths.rows': 'use "items"', 'paths.options': 'use "items"', 'paths.paths': 'use "items"', 'paths.selectable': 'use "select"',
-  'blocks.cols': 'use "columns"', 'blocks.groups': 'use "columns"', 'blocks.sides': 'use "columns"', 'blocks.items': 'put boxes into columns[].items', 'blocks.select': 'blocks is display-only', 'blocks.footnote': 'use "caption"', 'blocks.note': 'use "caption"' };
+  'blocks.cols': 'use "columns"', 'blocks.groups': 'use "columns"', 'blocks.sides': 'use "columns"', 'blocks.items': 'put boxes into columns[].items', 'blocks.select': 'blocks is display-only', 'blocks.footnote': 'use "caption"', 'blocks.note': 'use "caption"',
+  'diff.diffs': 'use "files"', 'diff.changes': 'use "files"', 'diff.diff': 'use "patch"', 'diff.text': 'use "patch"', 'diff.unified': 'use "patch"', 'diff.layout': 'use "view"', 'diff.select': 'diff is display-only',
+  'terminal.cmd': 'use "command"', 'terminal.stdout': 'use "output"', 'terminal.stderr': 'use "output"', 'terminal.text': 'use "output"', 'terminal.result': 'use "output"', 'terminal.code': 'use "exitCode"', 'terminal.exit': 'use "exitCode"', 'terminal.duration': 'use "durationMs"', 'terminal.dir': 'use "cwd"',
+  'changes.items': 'use "files"', 'changes.changes': 'use "files"', 'changes.diffs': 'use "files"', 'changes.diff': 'use "patch"', 'changes.select': 'changes is display-only' };
+const FILE_STATUSES = ['added','modified','deleted','renamed'];
+const TERMINAL_STATUSES = ['running','done','error'];
+const FILE_HINTS = { file: 'use "path"', name: 'use "path"', filename: 'use "path"', old_path: 'use "oldPath"', from: 'use "oldPath"', added: 'use "additions"', removed: 'use "deletions"', adds: 'use "additions"', dels: 'use "deletions"', diff: 'use "patch"', lang: 'use "language"' };
+
+// hunks: {oldStart, newStart, header?, lines[]}; every line starts with ' ', '+', '-' (or '\\' for "No newline at end of file")
+function checkHunks(hs, p) {
+  chk(isArr(hs) && hs.length >= 1, p, 'non-empty hunks array');
+  (isArr(hs) ? hs : []).forEach((h, i) => { const q = `${p}[${i}]`;
+    if (!h || !is(h, 'object') || isArr(h)) return errs.push(`${q}: hunk must be {oldStart, newStart, header?, lines}`);
+    keys(h, ['oldStart','newStart','header','lines'], q);
+    chk(Number.isInteger(h.oldStart) && h.oldStart >= 0, q + '.oldStart', 'integer >= 0'); chk(Number.isInteger(h.newStart) && h.newStart >= 0, q + '.newStart', 'integer >= 0');
+    optStr(h, 'header', 200, q);
+    chk(isArr(h.lines) && h.lines.length >= 1, q + '.lines', 'non-empty array of prefixed lines');
+    (isArr(h.lines) ? h.lines : []).forEach((l, j) => { chk(is(l, 'string') && /^[ +\-\\]/.test(l), `${q}.lines[${j}]`, 'line must start with " ", "+", "-" (or "\\")'); }); });
+}
+// one file entry of diff.files / changes.files (changes: status required, counts; diff: status optional, before/after)
+function checkFileEntry(f, q, inChanges) {
+  if (!f || !is(f, 'object') || isArr(f)) return errs.push(`${q}: file must be object`);
+  const allowed = ['path','oldPath','status','binary','hunks','patch', ...(inChanges ? ['additions','deletions','byAgent'] : ['language','before','after'])];
+  for (const k of Object.keys(f)) if (!allowed.includes(k)) errs.push(`${q}.${k}: unknown field${FILE_HINTS[k] ? ' (' + FILE_HINTS[k] + ')' : ''}`);
+  reqStr(f, 'path', 300, q); optStr(f, 'oldPath', 300, q); optStr(f, 'language', 30, q); optBool(f, 'binary', q); optBool(f, 'byAgent', q);
+  if (inChanges) chk(f.status !== undefined, q + '.status', 'missing');
+  if (f.status !== undefined) chk(FILE_STATUSES.includes(f.status), q + '.status', 'bad status ' + f.status + ' (' + FILE_STATUSES.join('|') + ')');
+  if (f.oldPath !== undefined) chk(f.status === 'renamed', q + '.oldPath', 'oldPath only with status "renamed"');
+  if (f.hunks !== undefined) checkHunks(f.hunks, q + '.hunks');
+  optStr(f, 'patch', 400000, q);
+  for (const k of ['additions','deletions']) if (f[k] !== undefined) chk(Number.isInteger(f[k]) && f[k] >= 0, `${q}.${k}`, 'integer >= 0');
+  if (!inChanges) {
+    chk((f.before !== undefined) === (f.after !== undefined), q, 'before and after go together');
+    if (f.before !== undefined) { chk(is(f.before, 'string') && is(f.after, 'string'), q + '.before', 'strings (whole old / new text)'); }
+    chk(f.hunks !== undefined || f.patch !== undefined || f.before !== undefined || f.binary === true, q, 'file needs hunks, patch or before+after');
+  }
+}
+// diff: display-only; `patch` (unified text) or `files`
+function checkDiff(n, p) {
+  keys(n, ['type','id','title','patch','files','view'], p); optStr(n, 'title', 200, p); optStr(n, 'patch', 800000, p);
+  if (n.view !== undefined) chk(oneOf(n.view, ['unified','split']), p + '.view', 'unified|split');
+  const files = isArr(n.files) ? n.files : [n.diffs, n.changes].find(isArr);
+  chk(n.patch !== undefined || isArr(n.files), p, 'diff needs "patch" (unified text) or "files"');
+  if (n.files !== undefined) chk(isArr(n.files) && n.files.length >= 1 && n.files.length <= 200, p + '.files', '1-200 files');
+  (files || []).forEach((f, i) => checkFileEntry(f, `${p}.files[${i}]`, false));
+}
+// terminal: display-only; command and/or raw output
+function checkTerminal(n, p) {
+  keys(n, ['type','id','title','command','cwd','output','outputStart','truncated','exitCode','durationMs','status'], p);
+  optStr(n, 'title', 200, p); optStr(n, 'command', 4000, p); optStr(n, 'cwd', 300, p);
+  if (n.output !== undefined) chk(is(n.output, 'string'), p + '.output', 'string (raw output, ANSI escapes ok)');
+  chk(n.command !== undefined || (is(n.output, 'string') && n.output.length > 0), p, 'terminal needs command or output');
+  if (n.exitCode !== undefined) chk(Number.isInteger(n.exitCode), p + '.exitCode', 'integer');
+  if (n.durationMs !== undefined) chk(is(n.durationMs, 'number') && Number.isFinite(n.durationMs) && n.durationMs >= 0, p + '.durationMs', 'number >= 0 (milliseconds)');
+  if (n.status !== undefined) chk(TERMINAL_STATUSES.includes(n.status), p + '.status', 'bad status ' + n.status + ' (' + TERMINAL_STATUSES.join('|') + ')');
+}
+// changes: files an agent turn touched; needs an id (per-file "viewed" state), display-only
+function checkChanges(n, p) {
+  keys(n, ['type','id','title','summary','agent','files','patch'], p); optStr(n, 'title', 200, p); optStr(n, 'summary', 200, p); optStr(n, 'agent', 40, p); optStr(n, 'patch', 800000, p);
+  if (is(n.summary, 'string')) chk(!/\n/.test(n.summary), p + '.summary', 'one line');
+  const files = isArr(n.files) ? n.files : [n.items, n.changes, n.diffs].find(isArr);
+  chk(isArr(n.files) && n.files.length >= 1 && n.files.length <= 200, p + '.files', '1-200 files');
+  (files || []).forEach((f, i) => checkFileEntry(f, `${p}.files[${i}]`, true));
+}
 const PATH_ITEM_HINTS = { steps: 'use "path"', nodes: 'use "path"', chain: 'use "path"', flow: 'use "path"', label: 'use "title"', name: 'use "title"', description: 'use "note"', verdict: 'use "badge"', tone: 'put it into badge: {text, tone}' };
 
 // paths: 2-6 rows (title, verdict badge, 1-6 node chain, one note line); select:true needs an id and counts as an input node
@@ -459,6 +529,9 @@ function checkNode(n, p) {
     case 'confirm': str(n.title, p + '.title'); if (n.text !== undefined) str(n.text, p + '.text'); break;
     case 'paths': checkPaths(n, p); break;
     case 'blocks': checkBlocks(n, p); break;
+    case 'diff': checkDiff(n, p); break;
+    case 'terminal': checkTerminal(n, p); break;
+    case 'changes': checkChanges(n, p); break;
     default: if (V4_TYPES.includes(n.type)) checkV4(n, p);
   }
 }
@@ -528,7 +601,7 @@ function validateFile(f, quiet = false) {
     const types = []; let srcCount = 0;
     const fences = (body.match(/^```/gm) || []).length;
     chk(fences % 2 === 0, f, 'unbalanced ``` fences');
-    for (const m of body.matchAll(/^```(hui|hui-html)\n([\s\S]*?)\n```$/gm)) {
+    for (const m of body.matchAll(/^```(hui|hui-html|diff|patch|terminal)\n([\s\S]*?)\n```$/gm)) {
       nb++;
       const [, kind, src] = m;
       const where = `${f.split('/').pop()}#${nb}(${kind})`;
@@ -541,7 +614,29 @@ function validateFile(f, quiet = false) {
           const nn = normalizeNode(node);
           chk(nn && (nn.type === node.type || !node || node.type === undefined), where, 'app normalizeNode dropped node');
         }
-      } else checkHtml(src, where);
+      } else if (kind === 'diff' || kind === 'patch') {
+        // typed text fence: the app's unified diff parser must find >= 1 file with >= 1 hunk
+        if (parseUnifiedDiff) { const fl = parseUnifiedDiff(src); chk(fl.length >= 1 && fl.some(x => x.hunks && x.hunks.length >= 1), where, `\`\`\`${kind} fence: app parser finds no file with a hunk (needs --- / +++ / @@ headers or +/- lines)`); }
+        chk(/^@@ |^[+-](?![+-]{2} )/m.test(src), where, `\`\`\`${kind} fence has no @@ header and no +/- change line (not a diff)`);
+        chk(!/^\s*\{/.test(src), where, `\`\`\`${kind} fence holds JSON - use plain unified diff text or a \`\`\`hui diff node`);
+        // @@ counts must match the body (a wrong count makes a parser read the next file's --- / +++ as lines)
+        for (const h of src.matchAll(/^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@.*\n((?:[ +\-\\].*(?:\n|$)|\n)*)/gm)) {
+          const want = [h[1] === undefined ? 1 : +h[1], h[2] === undefined ? 1 : +h[2]];
+          let o = 0, n = 0;
+          for (const l of h[3].split('\n')) {
+            if ((o >= want[0] && n >= want[1]) || /^(--- (a\/|\/dev\/null)|\+\+\+ (b\/|\/dev\/null)|diff --git )/.test(l)) break;
+            if (l.startsWith('-')) o++; else if (l.startsWith('+')) n++; else if (!l.startsWith('\\')) { o++; n++; }
+          }
+          chk(o === want[0] && n === want[1], where, `\`\`\`${kind} fence: hunk "${h[0].split('\n')[0].slice(0, 40)}" counts ${want[0]}/${want[1]} lines but has ${o}/${n}`);
+        }
+      } else if (kind === 'terminal') {
+        chk(src.trim().length > 0, where, 'empty ```terminal fence');
+        chk(/^[$%>❯] \S/.test(src), where, '```terminal fence: first line is `$ <command>`');
+        // the optional exit line must be the app's form, else it shows as output
+        const last = src.trimEnd().split('\n').pop();
+        if (/^\s*\[exit/i.test(last)) chk(/^\[exit -?\d+(, [\d.]+ ?(ms|s|min|m|h))?\]$/.test(last.trim()), where, '```terminal exit line: `[exit <code>]` or `[exit <code>, 4.2s]`');
+      }
+      else checkHtml(src, where);
     }
     for (const [id, t] of ctx.ids) fileIds.set(id, t);
     for (const l of ctx.mindLabels) fileMind.add(l);
@@ -613,7 +708,7 @@ function validateFile(f, quiet = false) {
   const tableRefs = new Set();
   for (const m of skillMd.matchAll(/^\|[^\n]*\|\s*([\w, -]*?)\s*\|$/gm)) for (const r of m[1].split(',')) { const n = r.trim().split(' ')[0]; if (n && n !== 'ref' && !/^-+$/.test(n)) tableRefs.add(n); }
   for (const n of tableRefs) chk(refNames.has(n), 'SKILL.md', `routing table names reference "${n}" but references/${n}.md does not exist`);
-  for (const n of ['products', 'places', 'guide-workout', 'learning', 'mindmap', 'paths', 'blocks', 'ask', 'plan', 'research', 'calc-expressions']) chk(tableRefs.has(n), 'SKILL.md', `reference "${n}" is not routed from the table`);
+  for (const n of ['products', 'places', 'guide-workout', 'learning', 'mindmap', 'paths', 'blocks', 'coding', 'ask', 'plan', 'research', 'calc-expressions']) chk(tableRefs.has(n), 'SKILL.md', `reference "${n}" is not routed from the table`);
   const ACTION_TYPES = ['send', 'open_url', 'copy', 'ask', 'submit', 'calendar', 'reminder', 'maps', 'call', 'email', 'sms', 'timer', 'add_to_list'];
   for (const n of refFiles) {
     const t = readFileSync(join(skillDir, 'references', n), 'utf8');

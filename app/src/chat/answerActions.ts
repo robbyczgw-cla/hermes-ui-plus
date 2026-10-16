@@ -21,6 +21,8 @@ export type AnswerActions = {
   quick?: boolean;
   /** quick thread: "Mit Hermes weitermachen" from this answer (new Hermes chat with the Q&A as context) */
   handOff?(messageId: string): void;
+  /** "Als Bild teilen": the question this answer replies to, as the user sees it (null: none) */
+  questionFor?(messageId: string): string | null;
 };
 
 export const AnswerActionsContext = createContext<AnswerActions | null>(null);

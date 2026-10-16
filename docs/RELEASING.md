@@ -49,7 +49,15 @@ scripts/check.sh all                       # tsc, app tests, scripts tests (plai
 node scripts/leak-guard.mjs --tree         # with the private denylist where it exists (docs/LEAK-GUARD.md)
 ```
 
-CI (`.github/workflows/ci.yml`) runs the same suites on every push.
+CI (`.github/workflows/ci.yml`) runs the same suites on every pull request and on pushes to main.
+
+The **release workflow** (`.github/workflows/release.yml`, run by hand from the Actions tab or by pushing a `v*` tag)
+builds the web bundle and the `npm pack` of the bridge on a GitHub runner and attaches them to the run as artifacts,
+each with a `.sha256` file. It checks that all version fields agree, that a tag equals `v<version>` and that the
+CHANGELOG has a dated section; it scans both artifacts (generic leak-guard patterns and gitleaks). It never publishes:
+no GitHub release, no tag, no npm publish, no store upload, and it has no write permission. Compare its checksums with
+your own build (steps 6 and 7) and publish by hand (steps 8 and 9). The signed Android and iOS jobs in that file are
+disabled templates that need repository secrets and a protected environment.
 
 ### 3. Release date
 

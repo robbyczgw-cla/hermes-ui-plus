@@ -17,6 +17,7 @@ import { V3_KINDS, V3Body, V3Skeleton, V3Table, v3HasData, type V3Kind } from '.
 import type { HuiChart, HuiChartKind } from '../types';
 import type { NodeProps } from './content';
 import { Table } from './Table';
+import { useCaptureMode } from '../lib/capture';
 
 // Native SVG charts. Design rules (dataviz skill): fixed categorical order (never cycled,
 // max 8 series), thin marks, 4px rounded data-ends on the baseline, 2px lines, 2px surface
@@ -38,6 +39,8 @@ export function Chart({ node }: NodeProps<HuiChart>) {
   const hasData = v3 ? v3HasData(v3, series3, node as Record<string, unknown>, streaming) : series.some((s) => s.points.length > 0);
   const [width, setWidth] = useState(0);
   const [showTable, setShowTable] = useState(false);
+  // share-as-image: no chart/table switch (an app-only control)
+  const capture = useCaptureMode();
   // entrance = container fade/grow on the UI thread (ChartParts.Entrance); geometry is always final
   const playEntrance = useEntranceOnMount();
   const progress = 1;
@@ -68,14 +71,14 @@ export function Chart({ node }: NodeProps<HuiChart>) {
           {title ? <InlineText variant="headline" text={title} /> : null}
           {subtitle ? <HText variant="caption" color="muted">{subtitle}</HText> : null}
         </View>
-        <PressableScale
+        {capture ? null : <PressableScale
           haptic="selection"
           onPress={() => setShowTable((v) => !v)}
           accessibilityLabel={showTable ? tr('ui.chart.showChart') : tr('ui.chart.showTable')}
           style={{ width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: showTable ? t.colors.accentSoft : 'transparent' }}
         >
           <Icon name={showTable ? 'chart' : 'table'} size={17} color={showTable ? t.colors.accent : t.colors.muted} />
-        </PressableScale>
+        </PressableScale>}
       </View>
       {showTable ? (
         v3 ? (
@@ -359,7 +362,7 @@ function PieChart({ t, series, donut, width, progress, unit }: { t: Theme; serie
             haptic="selection"
             scaleTo={0.99}
             onPress={() => setSel((cur) => (cur === i ? null : i))}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6, paddingHorizontal: 8, borderRadius: t.radii.s, backgroundColor: active ? t.colors.surfaceAlt : 'transparent', opacity: selIdx !== null && !active ? 0.6 : 1 }}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6, paddingHorizontal: 8, borderRadius: t.radii.control, backgroundColor: active ? t.colors.surfaceAlt : 'transparent', opacity: selIdx !== null && !active ? 0.6 : 1 }}
           >
             <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: t.colors.chart[i] }} />
             <HText variant="callout" numberOfLines={1} style={{ flex: 1 }} weight={active ? '600' : '400'}>

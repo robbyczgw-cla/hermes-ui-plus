@@ -15,7 +15,6 @@ export const hermesTools = {
   delegate: {
     title: 'Subagente',
     many: '{count} subagentes',
-    withGoal: 'Subagente: {goal}',
   },
   cron: {
     create: 'Crear recordatorio',
@@ -43,9 +42,9 @@ export const hermesTools = {
     pages: '{count, plural, one {# página} other {# páginas}}',
   },
   skill: {
-    view: 'Skill cargada',
-    list: 'Skills consultadas',
-    manage: 'Skill editada',
+    view: 'Skill cargado',
+    list: 'Skills consultados',
+    manage: 'Skill editado',
   },
   tool: {
     patch: 'Editar archivo',
@@ -91,6 +90,5 @@ export const hermesTools = {
     deleteMessage: 'Por favor, elimina el recordatorio {name}.',
     today: 'hoy {time}',
     tomorrow: 'mañana {time}',
-    a11y: '{title}, {when}, {text}',
   },
 } satisfies typeof de;

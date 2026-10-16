@@ -125,6 +125,9 @@ export function routeLoader(shape: string): LoaderKind {
     case 'timer':
     case 'interactive':
     case 'code':
+    case 'diff':
+    case 'terminal':
+    case 'changes':
       return 'gear';
     case 'recipe':
     case 'steps':

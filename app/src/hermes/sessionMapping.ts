@@ -13,7 +13,7 @@ import type { ChatMessage, ToolEvent, ToolDetail, TraceStep } from './types';
 import type { RemoteMessage, RemoteToolCall } from './sessions';
 import { DETAIL_MAX_BYTES, LINKS_MAX, capPayload, sanitize } from './trace.ts';
 import { parseWebToolOutput } from './webResults.ts';
-import { stripTurnExtras } from './turnOverride.ts';
+import { splitTurnExtras, stripTurnExtras, type TurnExtras } from './turnOverride.ts';
 import { applyEvent } from './chatState.ts';
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -179,9 +179,12 @@ export function mapRemoteMessages(rows: RemoteMessage[]): ChatMessage[] {
       close();
       const id = remoteMessageId(r.id, 'user');
       // attachment references (`[Datei angehängt: …]`) → attachment chips, like the live message (no server path)
-      const { text, attachments } = splitAttachmentMarkers(contentText(r.content).trim(), id);
-      if (!text && !attachments.length) continue;
-      out.push({ id, role: 'user', text, ...(attachments.length ? { attachments } : {}), tools: [], status: 'done', createdAt: ts });
+      const split = splitAttachmentMarkers(contentText(r.content).trim(), id);
+      const { attachments } = split;
+      // hidden app text (retry note, branch context) is not what the user wrote: cut, the bubble shows a chip
+      const { text, extras } = splitStoredExtras(split.text);
+      if (!text && !attachments.length && !extras) continue;
+      out.push({ id, role: 'user', text, ...(attachments.length ? { attachments } : {}), ...(extras ? { turnExtras: extras } : {}), tools: [], status: 'done', createdAt: ts });
       continue;
     }
     if (r.role === 'assistant') {
@@ -311,6 +314,19 @@ export function userTextCore(s: string): { core: string; attachments: boolean } 
   }
   // hidden one-turn note / branch context block (turnOverride.ts) are not part of the typed text
   return { core: stripTurnExtras(lines.join('\n')), attachments };
+}
+
+/**
+ * `splitTurnExtras` for a stored user text: the `[Bild]` / `[N Bilder]` / `[Datei]` marker lines `contentText` puts
+ * after the text part (and so after a trailing note) stay at the end.
+ */
+export function splitStoredExtras(text: string): { text: string; extras?: TurnExtras } {
+  const lines = text.split('\n');
+  let n = lines.length;
+  while (n > 0 && MARKER_LINE_RE.test(lines[n - 1].trim())) n--;
+  const split = splitTurnExtras(lines.slice(0, n).join('\n'));
+  if (!split.extras) return { text };
+  return { text: [split.text, ...lines.slice(n)].join('\n').trim(), extras: split.extras };
 }
 
 function sameNorm(x: string, y: string): boolean {

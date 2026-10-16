@@ -25,3 +25,6 @@ website/media/*.mp4
 # python bytecode (hermes-plugin/)
 __pycache__/
 *.pyc
+
+# lane host scratch (scripts/lib/lane-sync.sh): never inside the repo, ignored in case a test or tool leaks it here
+/hui-lane/

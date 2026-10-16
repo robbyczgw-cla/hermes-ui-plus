@@ -11,6 +11,7 @@ import {
   FONT_SIZES,
   isAccentPref,
   isThemeFamilyId,
+  LEGACY_ACCENT_SWATCHES,
   scaleFont,
   type AccentPref,
   type Density,
@@ -208,12 +209,14 @@ export function parseToolDetailsPref(v: unknown): ToolDetailsPref {
   return VALIDATORS.toolDetails(v) ? v : DEFAULT_PREFERENCES.toolDetails;
 }
 
+const legacyAccent = (v: string): string => (Object.hasOwn(LEGACY_ACCENT_SWATCHES, v) ? LEGACY_ACCENT_SWATCHES[v] : v);
+
 /** Any object → complete, valid Preferences (unknown keys dropped, invalid values → default). */
 export function sanitizePreferences(raw: unknown): Preferences {
   const src = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
   const out = { ...DEFAULT_PREFERENCES } as Preferences;
   for (const k of Object.keys(VALIDATORS) as (keyof Preferences)[]) {
-    const v = k === 'accent' && typeof src[k] === 'string' ? (src[k] as string).toLowerCase() : src[k];
+    const v = k === 'accent' && typeof src[k] === 'string' ? legacyAccent((src[k] as string).toLowerCase()) : src[k];
     if (VALIDATORS[k](v)) (out as Record<string, unknown>)[k] = v;
   }
   // old switch "Websuche über UI-Bridge" (off) → Wikipedia only

@@ -10,8 +10,12 @@ export const approvals = {
     flagged: 'Hermes lo marcó como peligroso',
     high: 'Riesgo alto (estimado)',
     elevated: 'Riesgo elevado (estimado)',
-    estimateNote: 'Riesgo estimado por la app, no por Hermes',
     normal: 'Se necesita confirmación',
+    short: {
+      high: 'Riesgo alto',
+      elevated: 'Riesgo elevado',
+    },
+    byApp: 'estimado por la app, no por Hermes',
   },
   choice: {
     once: {
@@ -26,7 +30,7 @@ export const approvals = {
     },
     always: {
       label: 'Permitir siempre (en todas partes, también Telegram)',
-      hint: 'Lista global de permisos de Hermes – también vale para Telegram y cron',
+      hint: 'Lista global de permisos de Hermes: también se aplica a Telegram y cron',
       a11y: 'Permitir comandos similares de forma permanente y en todas partes, también en Telegram y cron',
     },
     deny: {
@@ -34,6 +38,8 @@ export const approvals = {
       a11y: 'Rechazar este comando',
     },
     retry: '{label} – intentar de nuevo',
+    more: 'Más opciones',
+    less: 'Menos opciones',
   },
   confirm: {
     title: '¿Permitir siempre de verdad?',
@@ -89,7 +95,7 @@ export const approvals = {
   command: {
     unusual: 'El comando contiene caracteres inusuales',
     unusualHint: 'Los caracteres de control invisibles se muestran como códigos \\u…; los caracteres no ASCII pueden parecer normales. Revisa el comando con atención.',
-    label: '{count, plural, =1 {COMANDO} other {COMANDO · # líneas}}',
+    label: '{count, plural, =1 {Comando} other {Comando · # líneas}}',
     a11y: 'Comando: {command}',
     copy: 'Copiar',
     copied: 'Copiado',

@@ -3,9 +3,10 @@
  * Tap the text to dismiss; shows "Einstellungen öffnen" when the mic permission is blocked and
  * "Erneut senden" when a failed transcription can be retried.
  */
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { Text } from '../../ui/primitives/Text';
 import { useT } from '../../i18n';
-import { useTheme } from '../../ui';
+import { Button, useTheme } from '../../ui';
 import type { Dictation } from '../useDictation';
 
 export function DictationNotice({ dictation }: { dictation: Dictation }) {
@@ -14,7 +15,7 @@ export function DictationNotice({ dictation }: { dictation: Dictation }) {
   if (!dictation.error) return null;
   return (
     <View style={styles.row} accessibilityRole="alert">
-      <Text onPress={dictation.clearError} style={[styles.text, { color: dictation.available ? theme.colors.danger : theme.colors.muted }]} accessibilityHint={t('voice.dictation.dismiss')}>
+      <Text onPress={dictation.clearError} style={[theme.typography.caption, styles.text, { color: dictation.available ? theme.colors.danger : theme.colors.muted }]} accessibilityHint={t('voice.dictation.dismiss')}>
         {dictation.error}
       </Text>
       {dictation.permissionBlocked ? <Action label={t('voice.dictation.openSettings')} onPress={dictation.openSettings} /> : null}
@@ -24,16 +25,10 @@ export function DictationNotice({ dictation }: { dictation: Dictation }) {
 }
 
 function Action({ label, onPress }: { label: string; onPress(): void }) {
-  const theme = useTheme();
-  return (
-    <Pressable onPress={onPress} accessibilityRole="button" hitSlop={8}>
-      <Text style={[styles.action, { color: theme.colors.accent }]}>{label}</Text>
-    </Pressable>
-  );
+  return <Button label={label} variant="tertiary" size="small" onPress={onPress} />;
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', columnGap: 10, rowGap: 2, paddingHorizontal: 18, paddingTop: 4 },
-  text: { fontSize: 13, lineHeight: 18, flexShrink: 1 },
-  action: { fontSize: 13, fontWeight: '600' },
+  row: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 10, rowGap: 2, paddingHorizontal: 18, paddingTop: 4 },
+  text: { flexShrink: 1 },
 });

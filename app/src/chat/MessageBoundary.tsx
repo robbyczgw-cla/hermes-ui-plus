@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { Text } from '../ui/primitives/Text';
 import type { ChatMessage } from '../hermes';
 import { useT } from '../i18n';
 import { useTheme } from '../ui';
@@ -21,21 +22,21 @@ function MessageErrorCard({ message, error }: { message: ChatMessage; error: unk
   const err = errorText(error);
   return (
     <View
-      style={[styles.card, { borderColor: t.colors.border, backgroundColor: t.colors.surfaceAlt }]}
+      style={[styles.card, { borderRadius: t.radii.card }, { borderColor: t.colors.border, backgroundColor: t.colors.surfaceAlt }]}
       accessible
       accessibilityLabel={tr('chat.messageError.a11y')}
     >
       <View style={styles.head}>
         <Icon name="alert" size={16} color={t.colors.danger} />
-        <Text style={[styles.title, { color: t.colors.text }]}>{tr('chat.messageError.title')}</Text>
+        <Text style={[t.typography.bodyStrong, styles.title, { color: t.colors.text }]}>{tr('chat.messageError.title')}</Text>
       </View>
       {text ? (
-        <Text style={[styles.body, { color: t.colors.muted }]} selectable numberOfLines={12}>
+        <Text style={[t.typography.callout, { color: t.colors.muted }]} selectable numberOfLines={12}>
           {text}
         </Text>
       ) : null}
       {err ? (
-        <Text style={[styles.err, { color: t.colors.muted }]} numberOfLines={2} selectable>
+        <Text style={[t.typography.caption, { color: t.colors.muted }]} numberOfLines={2} selectable>
           {err}
         </Text>
       ) : null}
@@ -73,9 +74,7 @@ export class MessageBoundary extends Component<Props, State> {
 }
 
 const styles = StyleSheet.create({
-  card: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 14, padding: 12, gap: 6 },
+  card: { borderWidth: StyleSheet.hairlineWidth, padding: 12, gap: 6 },
   head: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  title: { fontSize: 15, fontWeight: '600' },
-  body: { fontSize: 14, lineHeight: 20 },
-  err: { fontSize: 12, lineHeight: 16 },
+  title: { fontWeight: '600' },
 });

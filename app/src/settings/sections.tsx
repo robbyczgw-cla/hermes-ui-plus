@@ -23,7 +23,6 @@ import {
 } from './preferences';
 import { AccentPicker, LivePreview, ThemeFamilyGrid } from './ThemePicker';
 import { Footnote, Group, SectionHeader, Segmented, SubLabel, SwitchRow } from './ui';
-import { joinSentences } from './flavorTexts';
 import { BG_SERVICE_ENABLED } from '../background/bgService';
 
 export type SettingsRow = {
@@ -361,7 +360,7 @@ export function useCustomizationSections(): SettingsSection[] {
       sw(
         'answers.shareImage',
         tr('settings.answers.shareImage'),
-        Platform.OS === 'web' ? joinSentences(tr('settings.answers.shareImageSub'), tr('settings.answers.shareImageWeb')) : tr('settings.answers.shareImageSub'),
+        tr('settings.answers.shareImageSub'),
       ),
     ],
   };

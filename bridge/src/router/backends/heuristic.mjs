@@ -68,6 +68,28 @@ const WRITE_FIRST = re(String.raw`^\s*(bitte\s+)?(schreib|verfass|formulier|entw
 const TECH_EVENTS = /\b(javascript|typescript|dom|api|listener|handler|event[- ]?(sourcing|loop|bus|driven|emitter)|webhook|kafka|react|node|python|java|kotlin|swift|callback|trigger)\b/i;
 const notAskingOrWriting = (t) => ASKS_FIRST.test(t) || WRITE_FIRST.test(t);
 
+// --- product comparison (compare cue + concrete buyable products → products with component "compare") --------------
+// Precision over recall: only product lines that name a device on their own ("iPhone 17", "Odin 2 mini", "Steam Deck")
+// or a maker followed by a model token ("Sony XM6", "Bose QC", "BMW i4"). Concepts, plans and services ("Kubernetes vs
+// Nomad", "Miete vs Kauf", "Apple Music vs Spotify") match neither and stay compare.
+const PRODUCT_LINE = String.raw`(iphone|ipad|macbook|imac|mac mini|mac studio|airpods|apple watch|pixel \d|pixel (pro|fold|buds|watch)|galaxy (s|z|a|tab|watch|buds)\s?\d*|xperia|oneplus|redmi|fairphone|thinkpad|ideapad|zenbook|vivobook|surface (pro|laptop|go|book)|kindle|kobo|tolino|playstation|ps[345]|xbox|nintendo|switch (\d|oled|lite)|steam deck|rog ally|legion go|ayaneo|trimui|anbernic|miyoo|retroid|powkiddy|odin \d|rg ?\d{2,3}\p{L}*|rg (rotate|cube|arc|nano|ds)|game ?boy|gopro|garmin|fitbit|roborock|dyson|thermomix|nespresso|tesla model|model [3ysx]\b>|vw id\.?\s?\d|wh-1000\p{L}*\d*|quietcomfort)`;
+const PRODUCT_MAKER = String.raw`(apple|google|samsung|sony|bose|sennheiser|beyerdynamic|jbl|lg|lenovo|dell|hp|asus|acer|msi|razer|logitech|canon|nikon|fujifilm|panasonic|philips|bosch|siemens|miele|xiaomi|huawei|honor|oppo|anker|ecovacs|dji|nothing phone|vw|volkswagen|bmw|audi|mercedes|toyota|skoda|hyundai|kia|volvo|porsche|ford|renault|tesla)`;
+// a model token right after the maker: has a digit ("XM6", "i4", "S25") or is a typical model word ("QC", "Ultra")
+const MODEL_TOKEN = String.raw`([\p{L}-]*\d[\p{L}\p{N}-]*|qc|ultra|pro|max|mini|air|plus|lite|ultralight)`;
+const PRODUCT_ITEM = re(String.raw`\b<${PRODUCT_LINE}\b>|\b<${PRODUCT_MAKER}\s+${MODEL_TOKEN}\b>`);
+const COMPARE_CUE = re(String.raw`\b<(vergleich\p{L}*|gegenüberstell\p{L}*|vs\.?|versus|unterschied(e)? zwischen|difference(s)? between|compare|comparison|comparar|comparativa)\b>`);
+const PRODUCT_CATEGORY = re(String.raw`\b<${PRODUCT_NOUN}(n|s|en)?\b>`);
+const SHOPPING_CUE = re(String.raw`\b<(preis\p{L}*|prices?|precios?|kosten|kaufen|buy|comprar|angebot\p{L}*|deals?)\b>|\d ?(€|\$|eur\b>|euro)`);
+const EITHER_OR = re(String.raw`\b<(oder|or|o)\b>`);
+
+/** Does a comparison message name concrete buyable products (devices, gadgets, appliances, cars)? */
+export function looksLikeProductComparison(text) {
+  const t = String(text ?? '');
+  if (!(COMPARE_CUE.test(t) || EITHER_OR.test(t)) || CODE.test(t)) return false;
+  // named models, or a product category together with a shopping cue ("4 Staubsauger mit Preisen")
+  return PRODUCT_ITEM.test(t) || (PRODUCT_CATEGORY.test(t) && SHOPPING_CUE.test(t));
+}
+
 // --- explicit format requests (ordered by priority) ------------------------------------------
 /** @typedef {{format: string, re: RegExp, conf: number, component?: (m: string) => string|undefined, why: string, unless?: (t: string) => boolean}} Rule */
 
@@ -263,8 +285,26 @@ const IMPLICIT = [
     re: re(String.raw`\b<(wo (liegt|liegen|befindet|befinden)|where (is|are) .{1,30} located|in der nähe|nearby|near me|sehenswürdigkeiten in|attractions in|standorte|locations of|route von .{1,30} nach|route from .{1,30} to|von .{1,30} nach .{1,30} (fahren|reisen|radeln|wandern)|reise durch|trip through|rundreise)`) },
 ];
 
+// v5 coding views (diff / terminal / changes). Checked before the generic code guard (which sends coding requests to text):
+// only clear cues – showing a change, REALLY running a command / the tests, listing the changed files.
+const HOW_TO_ASK = re(String.raw`^\s*(how (do|can|should|would) i|how to|wie (kann|muss|soll|würde) ich|wie führe ich|cómo (puedo )?(ejecuto|ejecutar|correr)|what (does|is)|how does|wie funktioniert|was (macht|ist|bedeutet)|erkl[äa]r\p{L}*|explain|qué (hace|es)|cómo funciona)\b>`);
+const RUN_VERB = String.raw`(run|rerun|re-run|execute|ejecuta\p{L}*|ejecutar|corre|correr|führ\p{L}*|start(e|en))`;
+const RUN_OBJECT = String.raw`(tests?|testsuite|test suite|unit tests?|pruebas|specs?|pytest|jest|vitest|npm|pnpm|yarn|npx|git|make|cargo|go test|pip|docker (ps|compose|build|logs|images)|tsc|eslint|prettier|ruff|lint\p{L}*|builds?|compil\p{L}*|typecheck|type-?check|ls|grep|curl|systemctl|journalctl|kubectl|terraform|ansible)`;
+const CODING = [
+  { format: 'diff', why: 'show a code change / patch', conf: 0.85,
+    unless: (t) => HOW_TO_ASK.test(t) || WRITE_FIRST.test(t),
+    re: re(String.raw`\bgit diff\b>|\b<(zeig\p{L}*|show|display|gib|give|muestra\p{L}*|mostrar|erstell\p{L}*|create|generate|generier\p{L}*|mach\p{L}*|make|als|as an?|as|en forma de|como|in form of)\b>.{0,30}\b<(diff|patch|unified diff)(?![\p{L}\p{N}-])|\b<(den|der|das|the|el) (diff|patch)(?![\p{L}\p{N}-])|\b<(was würde sich|what would change|what will change|what changes|qué cambiar[ií]a|qué cambia)\b>.{0,50}\b<(datei|file|archiv\p{L}*|code|config\p{L}*|funktion|function|script|skript|zeile|line)|\b<(vorher[ /-]+nachher|before[ /-]*(and |&)?[ /-]*after|antes y después)\b>.{0,40}\b<(code|config\p{L}*|datei|file|funktion|function|archivo|skript|script)|\b<(code|config\p{L}*|datei|file|funktion|function|archivo)\b>.{0,30}\b<(vorher[ /-]+nachher|before[ /-]*(and |&)?[ /-]*after|antes y después)`) },
+  { format: 'terminal', why: 'run a command / show its output', conf: 0.85,
+    unless: (t) => HOW_TO_ASK.test(t) || WRITE_FIRST.test(t),
+    re: re(String.raw`\b<${RUN_VERB}\b>.{0,25}\b<${RUN_OBJECT}\b>|\b<(die |den |das |the |los |las |el )?${RUN_OBJECT}\b>.{0,25}\b<(aus ?führ\p{L}*|laufen|durchlaufen|ausführen|run|execute)\b>|\b<(ausgabe|output|log|ergebnis(se)?|salida|logs)\b>\s+(von|vom|des|der|of|from|de|del)\s+(dem |den |the |el |la )?\x60?${RUN_OBJECT}\b>|\b<(test|build|lint|ci|npm|git|docker|befehl|command|comando)-?\s?(output|ausgabe|log|logs|salida)\b>|\b<(show|zeig\p{L}*|muestra\p{L}*|gib)\b>.{0,25}\b<(output|ausgabe|log|salida)\b>.{0,20}\b<(of|from|von|vom|de|del)\b>.{0,20}\x60?${RUN_OBJECT}\b>`) },
+  { format: 'changes', why: 'files changed in a task', conf: 0.8,
+    re: re(String.raw`\b<(welche )?(dateien|files|archivos)\b>.{0,25}\b<(hast du|habt ihr|hat der agent|did you|have you|were|wurden|has the agent|has el agente|cambiaste|has cambiado|modificaste|has modificado)\b>.{0,20}\b<(geändert|verändert|angefasst|bearbeitet|angepasst|change[d]?|touch(ed)?|edit(ed)?|modif(y|ied)|cambiad\p{L}*|modificad\p{L}*)|\b<(which|what) files (did you|have you|were|got)\b>|\b<(geänderte|veränderte|bearbeitete|changed|modified|touched|edited|modificados|cambiados)\s+(dateien|files|archivos)\b>|\b<(list|liste|zeig\p{L}*|show)\b>.{0,25}\b<(changed|modified|geänderten|geänderte|veränderten) (files|dateien)\b>|\b<(archivos|ficheros) (modificados|cambiados|que (cambiaste|modificaste))\b>|\b<qué (archivos|ficheros) (cambiaste|has cambiado|modificaste|has modificado|tocaste)\b>|\b<git status\b>|\b<(zusammenfassung|übersicht|summary|overview|resumen) (der |von |of |de )?(deine[nr] |your |tus )?(änderungen|changes|cambios)\b>`) },
+  { format: 'changes', why: 'what did you change (agent task)', conf: 0.6,
+    re: re(String.raw`\b<(was hast du (alles |denn |eigentlich )?(geändert|verändert|angepasst)|what (all )?did you (change|modify|touch|edit)|what have you (changed|modified|edited)|qué (has )?(cambiado|cambiaste|modificaste))\b>`) },
+];
+
 const HUI_TYPE = /```hui\s*\n\s*\{\s*"type"\s*:\s*"(\w+)"(?:[^`]*?"kind"\s*:\s*"(\w+)")?/;
-const HUI_TO_FORMAT = { table: 'table', chart: 'chart', stats: 'stats', compare: 'compare', steps: 'steps', timeline: 'timeline', form: 'form', image: 'image', checklist: 'checklist', recipe: 'recipe', calc: 'calc', map: 'map', weather: 'weather', agenda: 'agenda', places: 'places', products: 'products', guide: 'guide', workout: 'workout', studyplan: 'studyplan', vocab: 'vocab', mindmap: 'mindmap', timer: 'timer', blocks: 'blocks' };
+const HUI_TO_FORMAT = { table: 'table', chart: 'chart', stats: 'stats', compare: 'compare', steps: 'steps', timeline: 'timeline', form: 'form', image: 'image', checklist: 'checklist', recipe: 'recipe', calc: 'calc', map: 'map', weather: 'weather', agenda: 'agenda', places: 'places', products: 'products', guide: 'guide', workout: 'workout', studyplan: 'studyplan', vocab: 'vocab', mindmap: 'mindmap', timer: 'timer', blocks: 'blocks', diff: 'diff', terminal: 'terminal', changes: 'changes' };
 
 /** @param {string} format @param {number} confidence @param {string} reason @param {string} [component] */
 function decision(format, confidence, reason, component) {
@@ -301,6 +341,9 @@ export function classifyHeuristic(turns) {
   if (/^\[(form|choice|checklist|calc|quiz|slot|confirm|pin|poll|agenda|decision|rank|scale|guide|workout|studyplan|vocab|products|paths):[\w-]+\]|^\[mindmap\]/.test(text)) return decision('text', 0.3, 'machine reply from an app widget');
   if (NEGATED_VISUAL.test(text)) return decision('text', 0.8, 'visual explicitly declined');
 
+  const coding = firstMatch(CODING, text);
+  if (coding) return decision(coding.rule.format, isFollowup ? Math.max(coding.rule.conf, 0.85) : coding.rule.conf, `${isFollowup ? 'follow-up: ' : ''}${coding.rule.why}`);
+
   const explicit = firstMatch(EXPLICIT, text);
   const codey = CODE.test(text);
   if (explicit && !(codey && !PRESENTATION_REQUEST.test(text))) {
@@ -321,7 +364,11 @@ export function classifyHeuristic(turns) {
       component = prior?.[2] ?? undefined;
     }
     const conf = isFollowup ? Math.max(rule.conf, 0.85) : rule.conf;
-    return decision(rule.format, conf, `${isFollowup ? 'follow-up: ' : ''}${rule.why}`, component);
+    const pre = isFollowup ? 'follow-up: ' : '';
+    // concrete devices side by side: product cards (photos, prices, specs table) instead of generic compare columns
+    if (rule.format === 'compare' && looksLikeProductComparison(text)) return decision('products', Math.max(conf, 0.84), `${pre}product comparison`, 'compare');
+    if (rule.format === 'products' && !component && COMPARE_CUE.test(text)) component = 'compare';
+    return decision(rule.format, conf, `${pre}${rule.why}`, component);
   }
 
   if (codey) return decision('text', 0.85, 'coding request');
@@ -338,6 +385,7 @@ export function classifyHeuristic(turns) {
     // except for cues that are strong on their own.
     const strong = ['calc', 'calculator', 'chart', 'steps', 'timeline', 'checklist', 'map'].includes(rule.format);
     if (!strong && SHORT_FACT.test(text) && text.length < 50) return decision('text', 0.6, 'short factual question');
+    if (rule.format === 'compare' && looksLikeProductComparison(text)) return decision('products', 0.7, 'product choice', 'compare');
     return decision(rule.format, rule.conf, rule.why, rule.component?.(text));
   }
 

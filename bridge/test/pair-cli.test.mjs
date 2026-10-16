@@ -323,3 +323,25 @@ test('redeem: global rate limit across addresses (behind a proxy everybody share
   t += 60_001;
   assert.equal((await post('198.51.100.7', 'x'.repeat(43))).status, 410);
 });
+
+test('Docker: compose example offers the web bundle (BRIDGE_WEB_DIR + ./web volume), says there is no prebuilt image; ENTRYPOINT keeps --env-file for the bridge', async () => {
+  const compose = readFileSync(new URL('../docker-compose.example.yml', import.meta.url), 'utf8');
+  assert.match(compose, /^\s+# BRIDGE_WEB_DIR: \/web$/m);
+  assert.match(compose, /^\s+# - \.\/web:\/web:ro/m);
+  assert.match(compose, /--strip-components=1/);
+  assert.match(compose, /no prebuilt image/);
+  assert.match(compose, /\/bridge\/pair\?code=/);
+  const dockerfile = readFileSync(new URL('../Dockerfile', import.meta.url), 'utf8');
+  assert.match(dockerfile, /^ENTRYPOINT \["node", "--", "bin\/hermes-ui-bridge\.mjs"\]$/m);
+  // what `--` buys: the bridge, not Node.js, reports a missing env file
+  const { spawnSync } = await import('node:child_process');
+  const r = spawnSync(process.execPath, ['--', new URL('../bin/hermes-ui-bridge.mjs', import.meta.url).pathname, '--env-file', '/nonexistent-test-dir/env'], { encoding: 'utf8', timeout: 20_000 });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /error: env file not found: \/nonexistent-test-dir\/env\. Create it first/);
+  // the wizard's compose snippet mounts a host web dir instead of passing the host path into the container
+  const { composeSnippet } = await import('../src/setup/service.mjs');
+  const c = composeSnippet({ envFile: '/e', webDir: '/srv/web' });
+  assert.match(c, /BRIDGE_WEB_DIR: \/web/);
+  assert.match(c, /- "\/srv\/web:\/web:ro"/);
+  assert.doesNotMatch(composeSnippet({ envFile: '/e' }), /\/web/);
+});

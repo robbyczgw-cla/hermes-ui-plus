@@ -8,11 +8,13 @@
  *       caps={caps.modelCaps(model)} onChange={conv.setModelOptions} />
  */
 import { memo } from 'react';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '../../ui/primitives/Text';
 import { useT, type TKey } from '../../i18n';
-import { SheetGrabber, SheetModal, useTheme } from '../../ui';
+import { SheetGrabber, SheetModal, Toggle, useTheme } from '../../ui';
 import { useModalPresence } from '../../ui/lib/useModalPresence';
 import { REASONING_EFFORTS, type HermesChatOptions, type HermesReasoning, type ModelCaps } from '../capabilities';
+import { a11yState } from '../../ui/lib/a11yState';
 
 export type HermesOptionsSheetProps = {
   open: boolean;
@@ -89,7 +91,7 @@ function OptionsSheet({ open, onClose, value, onChange, caps, subtitle, web }: H
                 <Text style={[styles.rowTitle, { color: t.colors.text }]}>{tr('backends.hermes.options.web')}</Text>
                 <Text style={[styles.rowDetail, { color: t.colors.muted }]}>{tr('backends.hermes.options.webDetail')}</Text>
               </View>
-              <Switch value={!!value?.web} onValueChange={(on) => onChange(normalize({ ...value, web: on }))} accessibilityLabel={tr('backends.hermes.options.web')} />
+              <Toggle value={!!value?.web} onValueChange={(on) => onChange(normalize({ ...value, web: on }))} accessibilityLabel={tr('backends.hermes.options.web')} />
             </View>
           </>
         ) : null}
@@ -104,7 +106,7 @@ function OptionsSheet({ open, onClose, value, onChange, caps, subtitle, web }: H
               key={c}
               onPress={() => onChange(normalize({ ...value, reasoning: c }))}
               accessibilityRole="button"
-              accessibilityState={{ selected: active }}
+              {...a11yState({ selected: active }, 'button')}
               accessibilityLabel={tr('backends.hermes.options.reasoningA11y', { label: tr(REASONING_KEYS[c]) })}
               style={({ pressed }) => [
                 styles.row,
@@ -128,7 +130,7 @@ function OptionsSheet({ open, onClose, value, onChange, caps, subtitle, web }: H
                 <Text style={[styles.rowTitle, { color: t.colors.text }]}>{tr('backends.hermes.options.fast')}</Text>
                 <Text style={[styles.rowDetail, { color: t.colors.muted }]}>{tr('backends.hermes.options.fastDetail')}</Text>
               </View>
-              <Switch
+              <Toggle
                 value={!!value?.fast}
                 onValueChange={(fast) => onChange(normalize({ ...value, fast }))}
                 accessibilityLabel={tr('backends.hermes.options.fastA11y')}
@@ -145,7 +147,7 @@ const styles = StyleSheet.create({
   sheet: { paddingHorizontal: 12 },
   title: { fontSize: 16, fontWeight: '600', paddingHorizontal: 8 },
   sub: { fontSize: 12.5, paddingHorizontal: 8, marginTop: 2 },
-  section: { fontSize: 11.5, fontWeight: '600', letterSpacing: 0.6, paddingHorizontal: 12, paddingTop: 14, paddingBottom: 4 },
+  section: { fontSize: 13, lineHeight: 18, fontWeight: '600', paddingHorizontal: 12, paddingTop: 14, paddingBottom: 4 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 10, minHeight: 48 },
   rowTitle: { fontSize: 15.5, fontWeight: '500' },
   rowDetail: { fontSize: 12.5, marginTop: 1 },

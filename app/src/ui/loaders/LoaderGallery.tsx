@@ -22,7 +22,7 @@ export function LoaderGallery() {
             <View
               key={k}
               testID={`loader-${k}`}
-              style={{ width: 96, height: 88, alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: t.radii.m, backgroundColor: t.colors.surface, borderWidth: 1, borderColor: t.colors.border }}
+              style={{ width: 96, height: 88, alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: t.radii.control, backgroundColor: t.colors.surface, borderWidth: 1, borderColor: t.colors.border }}
             >
               <Loader kind={k} size={36} />
               <HText variant="caption" color="muted" numberOfLines={1}>

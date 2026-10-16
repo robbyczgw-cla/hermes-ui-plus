@@ -128,7 +128,7 @@ export function GallerySectionB({ onAction }: { onAction: HuiActionHandler }) {
         </HText>
         {MODULES_B_SAMPLES.map((s, i) => (
           <View key={i} style={{ gap: t.spacing.s }} nativeID={`gallery-b-${i}`}>
-            <HText variant="micro" color="subtle" style={{ textTransform: 'uppercase', letterSpacing: 0.6 }}>
+            <HText variant="caption" weight="600" color="subtle">
               {s.title}
             </HText>
             <HuiView node={s.node} streaming={!!s.streaming} onAction={onAction} />

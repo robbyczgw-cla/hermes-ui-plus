@@ -12,6 +12,7 @@
  * `onClose` covers the backdrop tap, Android back and Esc on web (useEscapeToClose: the topmost sheet closes). Omit it (e.g. while busy) to make the sheet non-dismissable.
  * Sheets that need their own Modal wrapper (keyboard avoiding, keyed bodies) use `<SheetLayer>` inside it.
  */
+import { webNoTab } from '../lib/webStyle';
 import type { ReactNode } from 'react';
 import { Modal, Platform, Pressable, StyleSheet, View, useWindowDimensions, type DimensionValue, type StyleProp, type ViewStyle } from 'react-native';
 import { webDialogName } from '../lib/ariaState';
@@ -55,12 +56,12 @@ export function SheetLayer({ onClose, closeLabel, maxWidth = 640, maxHeight, bot
   useEscapeToClose(!empty, onClose);
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-      <Pressable style={[StyleSheet.absoluteFill, { backgroundColor: t.colors.overlay }]} onPress={onClose} disabled={!onClose} accessibilityLabel={closeLabel} />
+      <Pressable style={[StyleSheet.absoluteFill, { backgroundColor: t.colors.overlay }]} onPress={onClose} disabled={!onClose} accessibilityRole="button" accessibilityLabel={closeLabel} {...webNoTab} />
       {empty ? null : <View style={[StyleSheet.absoluteFill, dialog ? styles.centerWrap : styles.bottomWrap]} pointerEvents="box-none">
         <View
           style={[
             styles.sheet,
-            dialog ? styles.dialog : styles.bottom,
+            dialog ? [styles.dialog, { borderRadius: t.radii.card }] : { borderTopLeftRadius: t.radii.card, borderTopRightRadius: t.radii.card },
             {
               maxWidth,
               backgroundColor: t.dark ? t.colors.surface : t.colors.bg,
@@ -74,6 +75,8 @@ export function SheetLayer({ onClose, closeLabel, maxWidth = 640, maxHeight, bot
           accessibilityViewIsModal
           aria-modal
           accessibilityLabel={label}
+          // iOS VoiceOver escape gesture (two-finger Z): accessibilityViewIsModal hides the backdrop button, so this is the dismiss
+          onAccessibilityEscape={onClose}
         >
           {children}
         </View>
@@ -118,8 +121,7 @@ const styles = StyleSheet.create({
   bottomWrap: { justifyContent: 'flex-end', alignItems: 'center' },
   centerWrap: { justifyContent: 'center', alignItems: 'center', padding: 24 },
   sheet: { width: '100%', borderWidth: StyleSheet.hairlineWidth, paddingTop: 8 },
-  bottom: { borderTopLeftRadius: 20, borderTopRightRadius: 20 },
-  dialog: { borderRadius: 18, overflow: 'hidden' },
+  dialog: { overflow: 'hidden' },
   grabber: { alignSelf: 'center', width: 36, height: 4, borderRadius: 2, marginBottom: 10 },
   dialogTop: { height: 6 },
 });

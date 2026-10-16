@@ -252,8 +252,9 @@ export function relativeFallback(locale: string, value: number, unit: string): s
 }
 
 /**
- * Web: keep `<html lang>` in step with the UI language. The exported index.html carries the build default (`de`), so an
- * English UI was announced as German (browser "translate from German?" prompt, screen reader voice). No-op off the web.
+ * Web: keep `<html lang>` in step with the UI language. The exported index.html defaults to `en` and its inline script
+ * picks the saved or browser language before the app loads; with a fixed `de` an English UI was announced as German
+ * (browser "translate from German?" prompt, screen reader voice). No-op off the web.
  */
 export function applyDocumentLang(doc: { documentElement?: { lang: string } | null } | undefined, lang: string): void {
   const el = doc?.documentElement;

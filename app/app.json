@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "Hermes UI+",
+    "name": "HUI+",
     "slug": "hermes-ui-plus",
-    "version": "0.1.0-alpha.1",
+    "version": "0.1.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -16,8 +16,8 @@
           "NSAllowsArbitraryLoads": true
         },
         "CFBundleAllowMixedLocalizations": true,
-        "NSPhotoLibraryAddUsageDescription": "Hermes saves images from the chat to your photo library when you choose Save Image.",
-        "NSLocalNetworkUsageDescription": "Hermes connects to your Hermes server or bridge on your local network."
+        "NSPhotoLibraryAddUsageDescription": "The app saves images from the chat to your photo library when you choose Save Image.",
+        "NSLocalNetworkUsageDescription": "The app connects to your Hermes server or bridge on your local network."
       },
       "config": {
         "usesNonExemptEncryption": false
@@ -73,7 +73,7 @@
     },
     "web": {
       "favicon": "./assets/favicon.png",
-      "lang": "de"
+      "lang": "en"
     },
     "plugins": [
       [
@@ -83,7 +83,75 @@
         }
       ],
       "expo-router",
-      "expo-font",
+      [
+        "expo-font",
+        {
+          "android": {
+            "fonts": [
+              {
+                "fontFamily": "Atkinson Hyperlegible Next",
+                "fontDefinitions": [
+                  {
+                    "path": "./assets/fonts/AtkinsonHyperlegibleNext-Regular.ttf",
+                    "weight": 400
+                  },
+                  {
+                    "path": "./assets/fonts/AtkinsonHyperlegibleNext-Italic.ttf",
+                    "weight": 400,
+                    "style": "italic"
+                  },
+                  {
+                    "path": "./assets/fonts/AtkinsonHyperlegibleNext-Medium.ttf",
+                    "weight": 500
+                  },
+                  {
+                    "path": "./assets/fonts/AtkinsonHyperlegibleNext-SemiBold.ttf",
+                    "weight": 600
+                  },
+                  {
+                    "path": "./assets/fonts/AtkinsonHyperlegibleNext-Bold.ttf",
+                    "weight": 700
+                  }
+                ]
+              },
+              {
+                "fontFamily": "Gloock",
+                "fontDefinitions": [
+                  {
+                    "path": "./assets/fonts/Gloock-Regular.ttf",
+                    "weight": 400
+                  }
+                ]
+              },
+              {
+                "fontFamily": "JetBrains Mono",
+                "fontDefinitions": [
+                  {
+                    "path": "./assets/fonts/JetBrainsMono-Regular.ttf",
+                    "weight": 400
+                  },
+                  {
+                    "path": "./assets/fonts/JetBrainsMono-Bold.ttf",
+                    "weight": 700
+                  }
+                ]
+              }
+            ]
+          },
+          "ios": {
+            "fonts": [
+              "./assets/fonts/AtkinsonHyperlegibleNext-Regular.ttf",
+              "./assets/fonts/AtkinsonHyperlegibleNext-Italic.ttf",
+              "./assets/fonts/AtkinsonHyperlegibleNext-Medium.ttf",
+              "./assets/fonts/AtkinsonHyperlegibleNext-SemiBold.ttf",
+              "./assets/fonts/AtkinsonHyperlegibleNext-Bold.ttf",
+              "./assets/fonts/Gloock-Regular.ttf",
+              "./assets/fonts/JetBrainsMono-Regular.ttf",
+              "./assets/fonts/JetBrainsMono-Bold.ttf"
+            ]
+          }
+        }
+      ],
       "expo-image",
       [
         "expo-build-properties",
@@ -97,15 +165,15 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Hermes needs access to your photos to attach images to messages.",
-          "cameraPermission": "Hermes uses the camera to take photos for your messages and to scan pairing codes (QR).",
-          "microphonePermission": "Hermes uses the microphone so you can dictate messages. The recording is only used for speech recognition."
+          "photosPermission": "The app needs access to your photos to attach images to messages.",
+          "cameraPermission": "The app uses the camera to take photos for your messages and to scan pairing codes (QR).",
+          "microphonePermission": "The app uses the microphone so you can dictate messages. The recording is only used for speech recognition."
         }
       ],
       [
         "expo-audio",
         {
-          "microphonePermission": "Hermes uses the microphone so you can dictate messages. The recording is only used for speech recognition.",
+          "microphonePermission": "The app uses the microphone so you can dictate messages. The recording is only used for speech recognition.",
           "recordAudioAndroid": true,
           "enableBackgroundRecording": false,
           "enableBackgroundPlayback": false
@@ -114,7 +182,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Hermes uses the camera to take photos for your messages and to scan pairing codes (QR).",
+          "cameraPermission": "The app uses the camera to take photos for your messages and to scan pairing codes (QR).",
           "microphonePermission": false,
           "recordAudioAndroid": false
         }
@@ -122,7 +190,7 @@
       [
         "expo-calendar",
         {
-          "calendarPermission": "Hermes adds events to your calendar when you confirm it in the chat.",
+          "calendarPermission": "The app adds events to your calendar when you confirm it in the chat.",
           "remindersPermission": false
         }
       ],
@@ -137,8 +205,8 @@
       [
         "expo-speech-recognition",
         {
-          "microphonePermission": "Hermes uses the microphone so you can dictate messages. The recording is only used for speech recognition.",
-          "speechRecognitionPermission": "Hermes uses your device's speech recognition to turn dictation into text.",
+          "microphonePermission": "The app uses the microphone so you can dictate messages. The recording is only used for speech recognition.",
+          "speechRecognitionPermission": "The app uses your device's speech recognition to turn dictation into text.",
           "androidSpeechServicePackages": [
             "com.google.android.googlequicksearchbox",
             "com.google.android.as",
@@ -147,7 +215,8 @@
         }
       ],
       "./plugins/withSceneLifecycle.js",
-      "./plugins/withIosRelease.js"
+      "./plugins/withIosRelease.js",
+      "./plugins/withShareTarget.js"
     ],
     "scheme": "hermesuiplus",
     "experiments": {

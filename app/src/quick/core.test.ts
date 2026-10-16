@@ -9,7 +9,7 @@ import {
   parseStoredThread, pruneExpired, quickBackendFor, quickProfileFor, quickChatUrl, quickConfigUrl, quickFailureOf, quickStampOf, QUICK_LIMITS, serializeThread,
   shortModel, waitParts,
 } from './core.ts';
-import { availabilityKey, createAvailability, DEMO_KEY } from './availability.ts';
+import { availabilityKey, createAvailability, DEMO_KEY, quickOffered } from './availability.ts';
 import { streamQuickCore } from './stream.ts';
 import { demoQuickSamples, pickDemoAnswer, runDemoQuick } from './demo.ts';
 
@@ -215,6 +215,30 @@ test('availability: an old bridge without the route (404) or a rejected token is
   const f = configFetch([() => ({ ok: false, status: 404, body: {} })]);
   const a = createAvailability({ fetch: f.fetch });
   assert.equal((await a.refresh({ baseUrl: 'http://old.test/v1', apiKey: 'k' }))?.on, false);
+});
+
+test('Hermes plugin self-test failed (multi-profile Hermes): available:false + reason hides ⚡, older bodies still work', async () => {
+  assert.deepEqual(parseQuickConfig({ available: false, reason: 'profile_scope_unavailable' }), { available: false, model: null, provider: null, allowModelOverride: false, reason: 'profile_scope_unavailable' });
+  assert.equal(parseQuickConfig({ available: false, reason: 'Free <b>text</b>' }).reason, undefined, 'only machine-readable reasons');
+  assert.equal(parseQuickConfig({ available: false }).reason, undefined, 'older bridges send no reason');
+  let t = 0;
+  const f = configFetch([
+    () => ({ ok: true, status: 200, body: { available: true, model: 'fast-1' } }),
+    () => ({ ok: true, status: 200, body: { available: false, reason: 'profile_scope_unavailable' } }),
+  ]);
+  const a = createAvailability({ fetch: f.fetch, now: () => t, ttlMs: 1000 });
+  const conn = { baseUrl: 'http://h.test/v1', apiKey: 'tok_test_000000' };
+  const key = availabilityKey(conn);
+  assert.equal(quickOffered(a.get(key)), false, 'unknown: hidden');
+  await a.refresh(conn);
+  assert.equal(quickOffered(a.get(key)), true);
+  t = 2000;
+  await a.refresh(conn);
+  assert.equal(quickOffered(a.get(key)), false, '⚡ hidden');
+  assert.equal(a.get(key)?.reason, 'profile_scope_unavailable');
+  assert.equal(a.get(key)?.config, null);
+  // a request that the plugin refuses after its self-test tripped: 404 feature_off (+ reason) → markOff, like an absent plugin
+  assert.deepEqual(quickFailureOf({ status: 404, code: 'feature_off', reason: 'profile_scope_unavailable' }), { kind: 'feature_off' });
 });
 
 test('plugin not installed: off, ⚡ hidden, and no request loop (one config check per TTL; none for direct connections)', async () => {

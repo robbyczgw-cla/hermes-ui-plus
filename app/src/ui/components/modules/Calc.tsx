@@ -237,9 +237,9 @@ function SliderInput({ t, inp, value, error, onValue, onError }: { t: Theme; inp
               setEditing(true);
             }}
             accessibilityLabel={CALC.edit(inp.label)}
-            style={{ minHeight: 36, paddingHorizontal: 10, justifyContent: 'center', borderRadius: t.radii.s, backgroundColor: t.colors.accentSoft }}
+            style={{ minHeight: 36, paddingHorizontal: 10, justifyContent: 'center', borderRadius: t.radii.control, backgroundColor: t.colors.accentSoft }}
           >
-            <HText variant="callout" weight="600" tabular style={{ color: t.colors.accent }}>
+            <HText variant="callout" weight="600" tabular style={{ color: t.colors.accentText }}>
               {valueText}
             </HText>
           </PressableScale>
@@ -323,7 +323,7 @@ function Outputs({ t, hero, rest, invalid }: { t: Theme; hero: OutputRow | null;
   return (
     <View style={{ gap: t.spacing.s }} accessibilityLiveRegion="polite">
       {hero ? (
-        <View style={{ backgroundColor: t.colors.accentSoft, borderRadius: t.radii.m, paddingVertical: t.spacing.m, paddingHorizontal: t.spacing.l, gap: 2 }} accessible accessibilityLabel={`${hero.label}: ${hero.text}`}>
+        <View style={{ backgroundColor: t.colors.accentSoft, borderRadius: t.radii.control, paddingVertical: t.spacing.m, paddingHorizontal: t.spacing.l, gap: 2 }} accessible accessibilityLabel={`${hero.label}: ${hero.text}`}>
           <HText variant="caption" color="muted" weight="500">
             {hero.label}
           </HText>
@@ -333,13 +333,15 @@ function Outputs({ t, hero, rest, invalid }: { t: Theme; hero: OutputRow | null;
         </View>
       ) : null}
       {rest.length ? (
-        <View style={{ borderRadius: t.radii.m, borderWidth: 1, borderColor: t.colors.border }}>
+        <View style={{ borderRadius: t.radii.control, borderWidth: 1, borderColor: t.colors.border }}>
           {rest.map((r, i) => (
-            <View key={i} style={{ flexDirection: 'row', alignItems: 'baseline', gap: t.spacing.m, paddingVertical: 10, paddingHorizontal: t.spacing.m, borderTopWidth: i ? 1 : 0, borderColor: t.colors.border }} accessible accessibilityLabel={`${r.label}: ${r.text}`}>
-              <HText variant="callout" color="muted" style={{ flex: 1 }}>
+            // wrap: when label (min 120) + value no longer fit (large text), the value moves to its own line, right-aligned,
+            // instead of running past the card edge
+            <View key={i} style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', gap: t.spacing.m, paddingVertical: 10, paddingHorizontal: t.spacing.m, borderTopWidth: i ? 1 : 0, borderColor: t.colors.border }} accessible accessibilityLabel={`${r.label}: ${r.text}`}>
+              <HText variant="callout" color="muted" style={{ flexGrow: 1, flexShrink: 1, flexBasis: 0, minWidth: 120 }}>
                 {r.label}
               </HText>
-              <HText variant="bodyStrong" tabular style={{ color: r.value === null ? t.colors.subtle : t.colors.text }}>
+              <HText variant="bodyStrong" tabular style={{ marginLeft: 'auto', flexShrink: 1, textAlign: 'right', color: r.value === null ? t.colors.subtle : t.colors.text }}>
                 {r.text}
               </HText>
             </View>
@@ -380,7 +382,7 @@ function SweepChart({ model, points }: { model: CalcModel; points: { x: number; 
 
 function Formula({ t, model, rows }: { t: Theme; model: CalcModel; rows: OutputRow[] }) {
   const CALC = useS().calc;
-  const mono = { fontFamily: t.fonts.mono, fontSize: 12.5, lineHeight: 18 };
+  const mono = { fontFamily: t.fonts.mono, fontSize: t.typography.mono.fontSize, lineHeight: t.typography.mono.lineHeight };
   return (
     <Disclosure title={CALC.formulaTitle}>
       {model.outputs.map((o, i) => (

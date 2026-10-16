@@ -12,10 +12,16 @@ export const STARTERS: readonly StarterPrompt[] = [
   { id: 'capabilities', titleKey: 'onboarding.starters.capabilities.title', subtitleKey: 'onboarding.starters.capabilities.subtitle', promptKey: 'onboarding.starters.capabilities.prompt' },
 ];
 
-/** Demo starters: the translated prompts hit the keywords of the scripted mock scenarios (demo/scenarios.ts). */
+/**
+ * Demo starters: the "Answers you can act on" tour. Each translated prompt is a sample request of demo/prompts.ts (a test
+ * keeps the i18n texts identical to it) and reaches its scripted scenario in every language; the first, "Chart", is the
+ * entry of the review notes (store/review/app-review-notes.md).
+ */
 export const DEMO_STARTERS: readonly StarterPrompt[] = [
   { id: 'chart', titleKey: 'onboarding.demoStarters.chart.title', subtitleKey: 'onboarding.demoStarters.chart.subtitle', promptKey: 'onboarding.demoStarters.chart.prompt' },
-  { id: 'compare', titleKey: 'onboarding.demoStarters.compare.title', subtitleKey: 'onboarding.demoStarters.compare.subtitle', promptKey: 'onboarding.demoStarters.compare.prompt' },
-  { id: 'loan', titleKey: 'onboarding.demoStarters.loan.title', subtitleKey: 'onboarding.demoStarters.loan.subtitle', promptKey: 'onboarding.demoStarters.loan.prompt' },
-  { id: 'mixed', titleKey: 'onboarding.demoStarters.mixed.title', subtitleKey: 'onboarding.demoStarters.mixed.subtitle', promptKey: 'onboarding.demoStarters.mixed.prompt' },
+  { id: 'approval', titleKey: 'onboarding.demoStarters.approval.title', subtitleKey: 'onboarding.demoStarters.approval.subtitle', promptKey: 'onboarding.demoStarters.approval.prompt' },
+  { id: 'checklist', titleKey: 'onboarding.demoStarters.checklist.title', subtitleKey: 'onboarding.demoStarters.checklist.subtitle', promptKey: 'onboarding.demoStarters.checklist.prompt' },
+  { id: 'products', titleKey: 'onboarding.demoStarters.products.title', subtitleKey: 'onboarding.demoStarters.products.subtitle', promptKey: 'onboarding.demoStarters.products.prompt' },
+  { id: 'recipe', titleKey: 'onboarding.demoStarters.recipe.title', subtitleKey: 'onboarding.demoStarters.recipe.subtitle', promptKey: 'onboarding.demoStarters.recipe.prompt' },
+  { id: 'explain', titleKey: 'onboarding.demoStarters.explain.title', subtitleKey: 'onboarding.demoStarters.explain.subtitle', promptKey: 'onboarding.demoStarters.explain.prompt' },
 ];

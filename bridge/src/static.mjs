@@ -9,9 +9,11 @@
 // are not older than the original; otherwise compressible text is gzipped on the fly (small LRU, encoding.mjs).
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { COMPRESSIBLE_EXT, MAX_COMPRESS_BYTES, MIN_COMPRESS_BYTES, acceptedEncodings, createGzipCache } from './encoding.mjs';
 import { checkRequestPath } from './paths.mjs';
 import { precompressedSibling, realStaticRoot, resolveStaticFile } from './static-safe.mjs';
+import { docUrl } from './links.mjs';
 
 export const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -89,6 +91,20 @@ export { resolveStaticFile };
  * @param {{dir?: string, logger?: any, csp?: string}} o  csp: BRIDGE_WEB_CSP (on | report-only | off)
  * @returns {{enabled: boolean, root: string, matches(req): boolean, handle(req, res): void}}
  */
+/**
+ * Web Share Target of the PWA (app/public/manifest.webmanifest `share_target`): the service worker answers this POST
+ * itself. It only reaches the server when no worker controls the page (first visit, worker unregistered): the shared
+ * data cannot be kept here (no auth, no storage), so the body is discarded and the app is told (`#huiShare=missed`
+ * → "the share did not arrive, share again"), instead of a 404 the user would never understand.
+ */
+export const SHARE_TARGET_PATH = '/share-target';
+
+function shareTargetMissed(req, res) {
+  req.resume();
+  res.writeHead(303, { location: '/#huiShare=missed', 'cache-control': 'no-store', 'content-length': '0', connection: 'close' });
+  res.end();
+}
+
 export function createStatic({ dir, logger, csp: cspMode } = {}) {
   const root = realStaticRoot(dir);
   if (dir && !root) logger?.warn?.('BRIDGE_WEB_DIR does not exist, web app disabled', {});
@@ -96,12 +112,15 @@ export function createStatic({ dir, logger, csp: cspMode } = {}) {
   const pathOf = (req) => { const c = checkRequestPath(req.url); return c.ok ? c.path : null; };
 
   function matches(req) {
-    if (!root || (req.method !== 'GET' && req.method !== 'HEAD')) return false;
+    if (!root) return false;
+    if (req.method === 'POST') return pathOf(req) === SHARE_TARGET_PATH;
+    if (req.method !== 'GET' && req.method !== 'HEAD') return false;
     const p = pathOf(req);
     return p !== null && !isApiPath(p);
   }
 
   function handle(req, res) {
+    if (req.method === 'POST') return shareTargetMissed(req, res);
     const p = pathOf(req);
     const hit = p === null ? null : resolveStaticFile(root, p);
     if (!hit) {
@@ -162,4 +181,62 @@ export function createStatic({ dir, logger, csp: cspMode } = {}) {
   }
 
   return { enabled: Boolean(root), root: root ?? '', matches, handle };
+}
+
+// ---- status page for `GET /` when no web app is installed ------------------------------------------------------------
+// Someone opening the bridge URL in a browser used to get a 401 JSON error, which looks broken. Without BRIDGE_WEB_DIR the
+// bridge answers `/` (only `/`, GET/HEAD) with a fixed page instead. It is the same for everyone and every state: no
+// name, version, host, token, device or pairing-code information (it must not reveal whether a code is pending), and
+// a strict CSP (no scripts at all, the one inline <style> pinned by its hash). Everything else stays behind auth.
+const LANDING_STYLE = 'body{font:16px/1.5 system-ui,sans-serif;max-width:40rem;margin:3rem auto;padding:0 1rem;color:#1d1d1f;background:#fff}'
+  + 'code{background:#f2f2f2;padding:.1em .3em;border-radius:4px}a{color:#1a5fb4}'
+  + '@media (prefers-color-scheme:dark){body{color:#e8e8e8;background:#161616}code{background:#2a2a2a}a{color:#8ab4f8}}';
+
+export const LANDING_HTML = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer"><meta name="robots" content="noindex">
+<title>Hermes UI+ bridge</title><style>${LANDING_STYLE}</style></head>
+<body><main>
+<h1>Hermes UI+ bridge is running</h1>
+<p>This is the bridge between the HUI+ app and your Hermes Agent. There is nothing to sign in to here.</p>
+<h2>Pair the app</h2>
+<p>On the machine that runs the bridge, create a one-time pair link and scan its QR code with the HUI+ app
+(<b>Scan QR code</b>):</p>
+<p><code>npx hermes-ui-plus-bridge devices add "Phone"</code></p>
+<p>In Docker: <code>docker compose exec bridge node bin/hermes-ui-bridge.mjs devices add "Phone"</code>.
+Details: <a href="${docUrl('docs/SELF-HOSTING.md#4-pair-devices-and-manage-device-tokens')}">pairing devices</a>.</p>
+<h2>Web app not installed</h2>
+<p>This bridge does not serve the web app (<code>BRIDGE_WEB_DIR</code> is not set). To use HUI+ in a browser,
+unpack the web bundle and point <code>BRIDGE_WEB_DIR</code> at it: <a href="${docUrl('docs/WEB-APP.md')}">docs/WEB-APP.md</a>.</p>
+</main></body></html>
+`;
+
+export const LANDING_CSP = [
+  "default-src 'none'",
+  `style-src 'sha256-${createHash('sha256').update(LANDING_STYLE).digest('base64')}'`,
+  "img-src 'none'",
+  "base-uri 'none'",
+  "form-action 'none'",
+  "frame-ancestors 'none'",
+].join('; ');
+
+/** `GET|HEAD /` (any query string) while no web app is configured. */
+export function isLandingRequest(req) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return false;
+  const c = checkRequestPath(req.url);
+  return c.ok && c.path === '/';
+}
+
+export function serveLanding(req, res) {
+  const body = Buffer.from(LANDING_HTML);
+  res.writeHead(200, {
+    'content-type': 'text/html; charset=utf-8',
+    'content-length': body.length,
+    'content-security-policy': LANDING_CSP,
+    'cache-control': 'no-store',
+    'x-content-type-options': 'nosniff',
+    'x-frame-options': 'DENY',
+    'referrer-policy': 'no-referrer',
+  });
+  res.end(req.method === 'HEAD' ? undefined : body);
 }

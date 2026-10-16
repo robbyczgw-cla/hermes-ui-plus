@@ -10,6 +10,7 @@ import { ScrollView, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Path } from 'react-native-svg';
 import { useTheme, type Theme } from '../../../theme';
+import { scaleFont } from '../../../themes';
 import { useHui } from '../../../primitives/context';
 import { HText, PressableScale, Surface } from '../../../primitives/basics';
 import { Skeleton, SkeletonLines } from '../../../primitives/Skeleton';
@@ -111,7 +112,7 @@ export function Weather({ node }: { node: Partial<HuiWeather> }) {
             </HText>
             {c ? (
               <View accessible accessibilityLabel={tr('ui.weather.a11yCurrent', { temp: formatTemp(T(c.temp), unit), condition: cond(c.condition) })} style={{ gap: 0 }}>
-                <HText tabular style={{ fontSize: 48 * t.fontScale, lineHeight: 56 * t.fontScale, fontWeight: '300', letterSpacing: -1.5, color: t.colors.text }}>
+                <HText tabular style={{ ...scaleFont(48, 56, t.fontScale), fontWeight: '400', letterSpacing: -1.5, color: t.colors.text }}>
                   {formatTemp(T(c.temp))}
                 </HText>
                 <HText variant="callout" color="muted" numberOfLines={1}>
@@ -190,7 +191,7 @@ export function Weather({ node }: { node: Partial<HuiWeather> }) {
 
 function SectionLabel({ text }: { text: string }) {
   return (
-    <HText variant="micro" color="subtle" style={{ textTransform: 'uppercase', letterSpacing: 0.6 }} accessibilityRole="header">
+    <HText variant="caption" weight="600" color="subtle" accessibilityRole="header">
       {text}
     </HText>
   );
@@ -225,7 +226,7 @@ function UnitToggle({ t, unit, onChange, label }: { t: Theme; unit: Unit; onChan
 function HourCell({ t, showPrecip, label, temp, condition, precip, rain, a11y }: { t: Theme; showPrecip: boolean; label: string; temp: string; condition: HuiWeatherCondition; precip: string | null; rain: string; a11y: string }) {
   return (
     // minWidth, not width: a longer label ("12:30 PM", large font scale) widens its cell instead of being cut to "12:00 P…"
-    <View accessible accessibilityLabel={a11y} style={{ minWidth: 56, paddingHorizontal: 2, alignItems: 'center', gap: 6, paddingVertical: t.spacing.s, borderRadius: t.radii.m }}>
+    <View accessible accessibilityLabel={a11y} style={{ minWidth: 56, paddingHorizontal: 2, alignItems: 'center', gap: 6, paddingVertical: t.spacing.s, borderRadius: t.radii.control }}>
       <HText variant="caption" color="muted" tabular numberOfLines={1}>
         {label}
       </HText>

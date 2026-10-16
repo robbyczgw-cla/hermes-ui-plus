@@ -18,7 +18,7 @@ import { Alert, Platform } from 'react-native';
 import { useT } from '../i18n';
 import { applyCheck, draftHasErrors, draftIsBusy, draftReducer, needsUpload, toSent } from './draft';
 import type { DraftAction, DraftAttachment } from './draft';
-import { importWebFiles, openAppSettings, pickAttachments, recoverPendingPick } from './pickers';
+import { importSharedFiles, importWebFiles, openAppSettings, pickAttachments, recoverPendingPick } from './pickers';
 import type { PickResult, PickSource } from './pickers';
 import { setDraftUris } from './liveDrafts';
 import { deleteAttachmentFiles } from './store';
@@ -50,9 +50,11 @@ export type AttachmentDraft = {
   /** true when the draft can be sent (no running uploads, no error chips) */
   canSend: boolean;
   add(source: PickSource): Promise<void>;
-  /** web / desktop app: dropped or pasted files */
+  /** web / desktop app: dropped or pasted files; returns the ids successfully prepared */
   /** `stillWanted` false → the remaining prepared files are discarded (desktop app lock engaged meanwhile) */
-  addFiles(files: readonly File[], opts?: { stillWanted?: () => boolean }): Promise<void>;
+  addFiles(files: readonly File[], opts?: { stillWanted?: () => boolean }): Promise<string[]>;
+  /** "Share to HUI+": native uris; returns the ids prepared, so a failed import cannot send a partial share */
+  addShared(files: readonly { uri: string; name: string; mimeType?: string; size?: number }[]): Promise<string[]>;
   remove(id: string): void;
   retry(id: string): void;
   /**
@@ -185,7 +187,7 @@ export function useAttachmentDraft(opts: UseAttachmentDraftOptions): AttachmentD
 
   const addFiles = useCallback(
     async (files: readonly File[], opts?: { stillWanted?: () => boolean }) => {
-      if (!files.length) return;
+      if (!files.length) return [];
       setNotice(null);
       setPicking(true);
       try {
@@ -196,6 +198,25 @@ export function useAttachmentDraft(opts: UseAttachmentDraftOptions): AttachmentD
           opts?.stillWanted
         );
         accept({ ...res, attachments: [] });
+        return res.attachments.map((a) => a.id);
+      } finally {
+        setPicking(false);
+      }
+    },
+    [accept]
+  );
+
+  const addShared = useCallback(
+    async (files: readonly { uri: string; name: string; mimeType?: string; size?: number }[]) => {
+      if (!files.length) return [];
+      setNotice(null);
+      setPicking(true);
+      try {
+        const res = await importSharedFiles(files, remainingSlots(stateRef.current.length), (att) =>
+          accept({ attachments: [att], errors: [], canceled: false })
+        );
+        accept({ ...res, attachments: [] });
+        return res.attachments.map((a) => a.id);
       } finally {
         setPicking(false);
       }
@@ -313,6 +334,7 @@ export function useAttachmentDraft(opts: UseAttachmentDraftOptions): AttachmentD
       canSend: !uploading && !picking && !draftHasErrors(attachments),
       add,
       addFiles,
+      addShared,
       remove,
       retry,
       prepareForSend,
@@ -321,6 +343,6 @@ export function useAttachmentDraft(opts: UseAttachmentDraftOptions): AttachmentD
       takeForSend,
       discard,
     }),
-    [attachments, picking, uploading, error, add, addFiles, remove, retry, prepareForSend, preparePending, commitSend, takeForSend, discard]
+    [attachments, picking, uploading, error, add, addFiles, addShared, remove, retry, prepareForSend, preparePending, commitSend, takeForSend, discard]
   );
 }

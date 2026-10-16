@@ -7,9 +7,10 @@
  */
 import { useState } from 'react';
 import type { ReactNode } from 'react';
-import { ActivityIndicator, Platform, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Text } from '../../ui/primitives/Text';
 import { useLocale, useT } from '../../i18n';
-import { useTheme } from '../../ui';
+import { Button, Toggle, useTheme } from '../../ui';
 import { Segmented } from '../../settings/ui';
 import { effectiveSttApi, isSttApiComplete, isTtsApiComplete, STT_API_PRESETS } from '../apiCore';
 import type { AppLang } from '../apiCore';
@@ -26,6 +27,7 @@ import { UNAVAILABLE_KEYS } from '../useDictation';
 import { useVoiceConfig } from '../useVoiceConfig';
 import { VoiceIcon } from './icons';
 import { ApiSttForm, ApiTtsForm, DeviceVoicePicker, EnginePicker, ENGINE_NAME } from './VoiceEngineSettings';
+import { a11yState } from '../../ui/lib/a11yState';
 
 export type VoiceSettingsSectionProps = {
   conn: VoiceConn | null;
@@ -96,15 +98,13 @@ export function VoiceSettingsSection({ conn }: VoiceSettingsSectionProps) {
         {showBridge && loading && !config ? (
           <View style={[styles.row, styles.rowBorder(theme)]}>
             <ActivityIndicator size="small" color={theme.colors.muted} />
-            <Text style={[styles.rowSub, { color: theme.colors.muted }]}>{t('voice.settings.loadingVoices')}</Text>
+            <Text style={[theme.typography.caption, styles.rowSub, { color: theme.colors.muted }]}>{t('voice.settings.loadingVoices')}</Text>
           </View>
         ) : null}
         {showBridge && error && !config ? (
           <View style={[styles.row, styles.rowBorder(theme)]}>
-            <Text style={[styles.rowSub, { color: theme.colors.danger, flex: 1 }]}>{voiceErrorText(error, t)}</Text>
-            <Pressable onPress={reload} accessibilityRole="button" hitSlop={8}>
-              <Text style={[styles.link, { color: theme.colors.accent }]}>{t('actions.retry')}</Text>
-            </Pressable>
+            <Text style={[theme.typography.caption, styles.rowSub, { color: theme.colors.danger, flex: 1 }]}>{voiceErrorText(error, t)}</Text>
+            <Button label={t('actions.retry')} variant="tertiary" size="small" onPress={reload} />
           </View>
         ) : null}
         {showBridge && config && voices.length
@@ -113,13 +113,15 @@ export function VoiceSettingsSection({ conn }: VoiceSettingsSectionProps) {
             ))
           : null}
         {showBridge && config && voices.length > COLLAPSED ? (
-          <Pressable
-            onPress={() => setExpanded((e) => !e)}
-            accessibilityRole="button"
-            style={({ pressed }) => [styles.row, styles.rowBorder(theme), pressed && { backgroundColor: theme.colors.surfacePressed }]}
-          >
-            <Text style={[styles.link, { color: theme.colors.accent }]}>{expanded ? t('voice.settings.showLess') : t('voice.settings.showAll', { count: voices.length })}</Text>
-          </Pressable>
+          <View style={[styles.row, styles.rowBorder(theme)]}>
+            <Button
+              label={expanded ? t('voice.settings.showLess') : t('voice.settings.showAll', { count: voices.length })}
+              variant="tertiary"
+              size="small"
+              accessibilityState={{ expanded }}
+              onPress={() => setExpanded((e) => !e)}
+            />
+          </View>
         ) : null}
         {showBridge && config?.tts && !voices.length ? (
           <DeviceVoiceRow note={t('voice.settings.bridgeDefaultNote')} onPreview={() => undefined} bridgeDefault />
@@ -137,12 +139,12 @@ export function VoiceSettingsSection({ conn }: VoiceSettingsSectionProps) {
         ) : null}
         {!tts.engine && tts.reason === 'no_bridge' ? (
           <View style={[styles.row, styles.rowBorder(theme)]}>
-            <Text style={[styles.rowSub, { color: theme.colors.danger, flex: 1 }]}>{t('voice.errors.ttsNoBridge')}</Text>
+            <Text style={[theme.typography.caption, styles.rowSub, { color: theme.colors.danger, flex: 1 }]}>{t('voice.errors.ttsNoBridge')}</Text>
           </View>
         ) : null}
 
         <View style={[styles.block, styles.rowBorder(theme)]}>
-          <Text style={[styles.rowTitle, { color: theme.colors.text }]}>{t('voice.settings.speed')}</Text>
+          <Text style={[theme.typography.body, { color: theme.colors.text }]}>{t('voice.settings.speed')}</Text>
           <View style={styles.chips} accessibilityRole="radiogroup">
             {TTS_RATES.map((r) => {
               const sel = Math.abs(settings.ttsRate - r) < 0.01;
@@ -154,11 +156,11 @@ export function VoiceSettingsSection({ conn }: VoiceSettingsSectionProps) {
                     setSpeakerRate(r);
                   }}
                   accessibilityRole="radio"
-                  accessibilityState={{ selected: sel }}
+                  {...a11yState({ selected: sel, checked: sel })}
                   accessibilityLabel={t('voice.settings.rateLabel', { rate: formatRate(r, locale) })}
-                  style={[styles.chip, { backgroundColor: sel ? theme.colors.text : theme.colors.surfaceAlt }]}
+                  style={[styles.chip, { borderRadius: theme.radii.pill, backgroundColor: sel ? theme.colors.text : theme.colors.surfaceAlt }]}
                 >
-                  <Text style={{ color: sel ? theme.colors.bg : theme.colors.text, fontSize: 14, fontWeight: sel ? '600' : '500' }}>{formatRate(r, locale)}</Text>
+                  <Text style={[theme.typography.callout, { color: sel ? theme.colors.bg : theme.colors.text, fontWeight: sel ? '600' : '500' }]}>{formatRate(r, locale)}</Text>
                 </Pressable>
               );
             })}
@@ -167,16 +169,15 @@ export function VoiceSettingsSection({ conn }: VoiceSettingsSectionProps) {
 
         <View style={styles.row}>
           <View style={styles.flex}>
-            <Text style={[styles.rowTitle, { color: theme.colors.text }]}>{t('voice.settings.autoRead')}</Text>
-            <Text style={[styles.rowSub, { color: theme.colors.muted }]}>{t('voice.settings.autoReadHint')}</Text>
+            <Text style={[theme.typography.body, { color: theme.colors.text }]}>{t('voice.settings.autoRead')}</Text>
+            <Text style={[theme.typography.caption, styles.rowSub, { color: theme.colors.muted }]}>{t('voice.settings.autoReadHint')}</Text>
           </View>
-          <Switch
+          <Toggle
             value={settings.autoRead}
             onValueChange={(v) => {
               update({ autoRead: v });
               if (!v) stopSpeaking();
             }}
-            trackColor={{ true: theme.colors.accent, false: theme.colors.borderStrong }}
             accessibilityLabel={t('voice.settings.autoRead')}
           />
         </View>
@@ -191,13 +192,13 @@ export function VoiceSettingsSection({ conn }: VoiceSettingsSectionProps) {
             active={stt.engine}
           />
         <View style={[styles.block, settings.sttEngine === 'apikey' && styles.rowBorder(theme)]}>
-          <Text style={[styles.rowTitle, { color: theme.colors.text }]}>{t('language.label')}</Text>
+          <Text style={[theme.typography.body, { color: theme.colors.text }]}>{t('language.label')}</Text>
           {/* shared settings control: falls back to radio rows when "Automatisch" etc. would be cut (E2E round 7) */}
           <Segmented<SttLanguage> label={t('language.label')} value={settings.sttLanguage} options={langOptions} onChange={(v) => update({ sttLanguage: v })} />
         </View>
         {settings.sttEngine === 'apikey' ? <ApiSttForm /> : null}
       </Group>
-      <Text style={[styles.footnote, { color: theme.colors.subtle }]}>
+      <Text style={[theme.typography.caption, styles.footnote, { color: theme.colors.subtle }]}>
         {stt.engine === 'device'
             ? t(
                 Platform.OS === 'web'
@@ -229,7 +230,7 @@ function VoiceRow({ voice, selected, onSelect, onPreview }: { voice: TtsVoice; s
       <Pressable
         onPress={onSelect}
         accessibilityRole="radio"
-        accessibilityState={{ selected }}
+        {...a11yState({ selected, checked: selected })}
         accessibilityLabel={`${voice.name}${sub ? `, ${sub}` : ''}`}
         style={styles.rowMain}
       >
@@ -237,11 +238,11 @@ function VoiceRow({ voice, selected, onSelect, onPreview }: { voice: TtsVoice; s
           {selected ? <View style={[styles.radioDot, { backgroundColor: theme.colors.accent }]} /> : null}
         </View>
         <View style={styles.flex}>
-          <Text style={[styles.rowTitle, { color: theme.colors.text }]} numberOfLines={1}>
+          <Text style={[theme.typography.body, { color: theme.colors.text }]} numberOfLines={1}>
             {voice.name}
           </Text>
           {sub ? (
-            <Text style={[styles.rowSub, { color: theme.colors.muted }]} numberOfLines={1}>
+            <Text style={[theme.typography.caption, styles.rowSub, { color: theme.colors.muted }]} numberOfLines={1}>
               {sub}
             </Text>
           ) : null}
@@ -258,8 +259,8 @@ function DeviceVoiceRow({ note, onPreview, bridgeDefault }: { note: string; onPr
   return (
     <View style={[styles.row, styles.rowBorder(theme)]}>
       <View style={styles.flex}>
-        <Text style={[styles.rowTitle, { color: theme.colors.text }]}>{bridgeDefault ? t('voice.settings.defaultVoice') : t('voice.settings.deviceVoice')}</Text>
-        <Text style={[styles.rowSub, { color: theme.colors.muted }]}>{note}</Text>
+        <Text style={[theme.typography.body, { color: theme.colors.text }]}>{bridgeDefault ? t('voice.settings.defaultVoice') : t('voice.settings.deviceVoice')}</Text>
+        <Text style={[theme.typography.caption, styles.rowSub, { color: theme.colors.muted }]}>{note}</Text>
       </View>
       {bridgeDefault ? null : <PreviewButton id="preview:device" label={t('voice.settings.previewDevice')} onPreview={onPreview} />}
     </View>
@@ -277,46 +278,44 @@ function PreviewButton({ id, label, onPreview }: { id: string; label: string; on
       accessibilityRole="button"
       accessibilityLabel={active ? t('voice.settings.previewStopLabel') : label}
       hitSlop={6}
-      style={({ pressed }) => [styles.preview, { backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surfaceAlt }]}
+      style={({ pressed }) => [styles.preview, { borderRadius: theme.radii.pill, backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surfaceAlt }]}
     >
       {s.status === 'loading' ? (
         <ActivityIndicator size="small" color={theme.colors.text} style={{ transform: [{ scale: 0.75 }] }} />
       ) : (
         <VoiceIcon name={active ? 'stop' : s.status === 'error' ? 'alert' : 'play'} size={14} color={s.status === 'error' ? theme.colors.danger : theme.colors.text} />
       )}
-      <Text style={[styles.previewText, { color: theme.colors.text }]}>{active ? t('voice.settings.previewStop') : t('voice.settings.preview')}</Text>
+      <Text style={[theme.typography.caption, styles.previewText, { color: theme.colors.text }]}>{active ? t('voice.settings.previewStop') : t('voice.settings.preview')}</Text>
     </Pressable>
   );
 }
 
 function SectionTitle({ children }: { children: string }) {
   const theme = useTheme();
-  return <Text style={[styles.sectionTitle, { color: theme.colors.muted }]}>{children.toUpperCase()}</Text>;
+  return <Text style={[theme.typography.caption, styles.sectionTitle, { color: theme.colors.muted }]}>{children}</Text>;
 }
 
 function Group({ children }: { children: ReactNode }) {
   const theme = useTheme();
-  return <View style={[styles.group, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>{children}</View>;
+  return <View style={[styles.group, { borderRadius: theme.radii.card, backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>{children}</View>;
 }
 
 const base = StyleSheet.create({
   wrap: { gap: 8 },
   flex: { flex: 1 },
-  sectionTitle: { fontSize: 12.5, fontWeight: '500', letterSpacing: 0.4, marginTop: 12, marginLeft: 14 },
-  group: { borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
+  sectionTitle: { fontWeight: '600', marginTop: 12, marginLeft: 14 },
+  group: { borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, minHeight: 52, paddingVertical: 8 },
   rowMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12 },
   block: { paddingHorizontal: 14, paddingVertical: 12, gap: 10 },
-  rowTitle: { fontSize: 16 },
-  rowSub: { fontSize: 13, marginTop: 2 },
-  link: { fontSize: 15, fontWeight: '500' },
+  rowSub: { marginTop: 2 },
   radio: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
   radioDot: { width: 10, height: 10, borderRadius: 5 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  chip: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6, minWidth: 48, alignItems: 'center' },
-  preview: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 999, paddingHorizontal: 10, height: 30 },
-  previewText: { fontSize: 13, fontWeight: '500' },
-  footnote: { fontSize: 13, lineHeight: 18, marginHorizontal: 14, marginBottom: 4 },
+  chip: { paddingHorizontal: 12, paddingVertical: 6, minWidth: 48, alignItems: 'center' },
+  preview: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, height: 30 },
+  previewText: { fontWeight: '500' },
+  footnote: { marginHorizontal: 14, marginBottom: 4 },
 });
 
 const styles = {

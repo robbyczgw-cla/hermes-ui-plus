@@ -3,10 +3,13 @@
 # dist/share/desktop/ (served by `tailscale serve` at /hermes/desktop/).
 #
 # Usage: [FLAVOR=hermes|personal] [HUI_PRIVATE_DIR=…] scripts/build-desktop-mac.sh   (docs/BUILD.md "Flavors")
-# Output: dist/share/desktop/{<name>_<ver>_aarch64.dmg,<zip>,index.html,icon-256.png,build.txt}
-#         hermes: name/id from app/brand/identity.json ("Hermes UI+", xyz.hermesui.desktop), zip hermes-ui-plus-macos.zip;
+# Output: dist/share/desktop/{<dmg>,<zip>,index.html,icon-256.png,build.txt}
+#         hermes: name/id from app/brand/identity.json ("HUI+" = displayName → HUI+.app, xyz.hermesui.desktop),
+#         dmg hermes-ui-plus-<ver>-macos-arm64.dmg (= the release asset name, independent of the app name),
+#         zip hermes-ui-plus-macos.zip;
 #         personal: desktopName/desktopId of $HUI_PRIVATE_DIR/app/identity.json, else "Hermes" / io.hermesiui.desktop
-#         (the pre-rename identity, so an installed personal app keeps its settings), zip Hermes.app.zip
+#         (the pre-rename identity, so an installed personal app keeps its settings), dmg <name>_<ver>_aarch64.dmg (Tauri's
+#         name), zip Hermes.app.zip
 #         dist/build-desktop-<timestamp>.log
 #
 # Flow (runs on the build machine):
@@ -33,6 +36,8 @@
 #   KEEP_CACHE=1                    keep src-tauri/target (~2-3 GB, fast rebuilds) and node_modules on the Mac;
 #                                   default: both deleted after the build (the cargo registry in ~/.cargo stays)
 #   INSTALL=1                       also install into ~/Applications on the Mac (replacing an old copy) and launch
+#   HUI_MAC_LOCK_WAIT [2700]        seconds to wait for the Mac's single heavy-job lock (scripts/lib/maclock.sh: iOS, desktop
+#                                   and Android builds / emulator never overlap on the Mac); 0 = refuse at once
 #   MIN_FREE_GB [8]                 refuse to start below this much free disk on the Mac
 #   PUBLIC_BASE [$DESKTOP_PUBLIC_BASE]  URL of dist/share/desktop/ (e.g. https://<build-host>.<tailnet>.ts.net/hermes/desktop);
 #                                   the hermes flavor is published next to it in desktop-plus/ (both flavors coexist)
@@ -56,9 +61,9 @@ flavor_load_build_env
 if [ "$FLAVOR" = personal ]; then
   _pid() { node -p "try{require(process.argv[1])[process.argv[2]]||''}catch{''}" "$HUI_PRIVATE_DIR/app/identity.json" "$1"; }
   DESKTOP_NAME="$(_pid desktopName)"; DESKTOP_NAME="${DESKTOP_NAME:-Hermes}"
-  DESKTOP_ID="$(_pid desktopId)"; DESKTOP_ID="${DESKTOP_ID:-io.hermesiui.desktop}"; ZIP_NAME="Hermes.app.zip"
+  DESKTOP_ID="$(_pid desktopId)"; DESKTOP_ID="${DESKTOP_ID:-io.hermesiui.desktop}"; ZIP_NAME="Hermes.app.zip"; DMG_BASE=""
 else
-  DESKTOP_NAME="$BRAND_SHORT_NAME"; DESKTOP_ID="$BRAND_DESKTOP_ID"; ZIP_NAME="$BRAND_ARTIFACT-macos.zip"
+  DESKTOP_NAME="$BRAND_DISPLAY_NAME"; DESKTOP_ID="$BRAND_DESKTOP_ID"; ZIP_NAME="$BRAND_ARTIFACT-macos.zip"; DMG_BASE="$BRAND_ARTIFACT"
 fi
 MAC_HOST="${MAC_HOST:-}"
 [ -n "$MAC_HOST" ] || { echo "MAC_HOST is not set (env or \$HUI_PRIVATE_DIR/build.env)"; exit 2; }
@@ -70,6 +75,7 @@ fi
 # names end up in the Tauri config (JSON via node), the remote env (printf %q) and the download page (HTML-escaped)
 [[ "$DESKTOP_ID" =~ ^[A-Za-z0-9.-]+$ ]] || { echo "invalid desktop id '$DESKTOP_ID'" >&2; exit 2; }
 [[ "$ZIP_NAME" =~ ^[A-Za-z0-9._+-]+\.zip$ ]] || { echo "invalid zip name '$ZIP_NAME'" >&2; exit 2; }
+[[ -z "$DMG_BASE" || "$DMG_BASE" =~ ^[a-z0-9][a-z0-9-]*$ ]] || { echo "invalid dmg base name '$DMG_BASE'" >&2; exit 2; }
 case "$DESKTOP_NAME" in ''|*/*|*$'\n'*) echo "invalid desktop name" >&2; exit 2 ;; esac
 html_esc() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/"/\&quot;/g' -e "s/'/\&#39;/g" <<<"$1"; }
 SKIP_WEB="${SKIP_WEB:-0}"; KEEP_CACHE="${KEEP_CACHE:-0}"; INSTALL="${INSTALL:-0}"; MIN_FREE_GB="${MIN_FREE_GB:-8}"
@@ -165,9 +171,11 @@ if [ "$SIGN" = 1 ]; then
   rm -rf "$SEC_STAGE"
 fi
 t "remote build on $MAC_HOST"
+# the Mac runs one heavy job at a time (this build, iOS builds, the Android lane): the lock is taken on the Mac itself
+"${SSH[@]}" "mkdir -p hui-lane" && rsync -a "$ROOT/scripts/lib/maclock.sh" "$MAC_HOST:hui-lane/maclock.sh"
 # every value shell-quoted for the remote shell (a name with an apostrophe or spaces must not break / inject)
 printf -v REMOTE_ENV '%q=%q ' REMOTE_DIR "$REMOTE_DIR" KEEP_CACHE "$KEEP_CACHE" INSTALL "$INSTALL" MIN_FREE_GB "$MIN_FREE_GB" \
-  SHA "$SHA" DESKTOP_NAME "$DESKTOP_NAME" DESKTOP_ID "$DESKTOP_ID" ZIP_NAME "$ZIP_NAME" SIGN "$SIGN" NOTARIZE "$NOTARIZE"
+  HUI_MAC_LOCK_WAIT "${HUI_MAC_LOCK_WAIT:-2700}" SHA "$SHA" DESKTOP_NAME "$DESKTOP_NAME" DESKTOP_ID "$DESKTOP_ID" ZIP_NAME "$ZIP_NAME" DMG_BASE "$DMG_BASE" SIGN "$SIGN" NOTARIZE "$NOTARIZE"
 "${SSH[@]}" "${REMOTE_ENV}/bin/bash -s" <<'REMOTE'
 set -Eeuo pipefail
 t() { echo "--- [mac $(date +%T)] $*"; }
@@ -178,8 +186,12 @@ export npm_config_cache="$B/.npm-cache"   # never touch the user's ~/.npm
 # no /Users/<name>/… paths (cargo registry, build dir) in panic strings / debug info of the shipped binary
 export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$HOME/.cargo=/cargo --remap-path-prefix=$HOME/.rustup=/rustup --remap-path-prefix=$B=/build --remap-path-prefix=$HOME=/home"
 free_gb() { df -g "$HOME" | awk 'NR==2{print $4}'; }
+# one heavy job at a time on the Mac (hui-lane/maclock.sh, shared with build-ios.sh and the Android lane)
+. "$HOME/hui-lane/maclock.sh"
+maclock_acquire desktop "$HUI_MAC_LOCK_WAIT" || exit 3
 KC=""; ORIG_KCS=""
 cleanup() {
+  maclock_release
   t "cleanup (KEEP_CACHE=$KEEP_CACHE)"
   if [ -n "$KC" ]; then
     # shellcheck disable=SC2086
@@ -250,7 +262,9 @@ fi
 VER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
 BID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")"
 rm -rf "$PUB"; mkdir -p "$PUB"
-cp "$DMG" "$PUB/"
+# hermes: the release asset name, so it does not follow the app name (HUI+_<ver>_aarch64.dmg from Tauri)
+DMG_OUT="${DMG_BASE:+$DMG_BASE-$VER-macos-arm64.dmg}"; DMG_OUT="${DMG_OUT:-$(basename "$DMG")}"
+cp "$DMG" "$PUB/$DMG_OUT"
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$PUB/$ZIP_NAME"
 sips -z 256 256 src-tauri/icons/icon.png --out "$PUB/icon-256.png" >/dev/null
 {
@@ -259,7 +273,7 @@ sips -z 256 256 src-tauri/icons/icon.png --out "$PUB/icon-256.png" >/dev/null
   echo "signature:  $(codesign -dvv "$APP" 2>&1 | grep -E '^(Signature=|Authority=Developer ID Application)' | sed -E 's/: .*/: <identity>/' | head -1)"
   echo "gatekeeper: $(spctl -a -t exec -vv "$APP" 2>&1 | grep -E 'accepted|rejected|source=' | tr '\n' ' ')"
   echo "app size:   $(du -sh "$APP" | cut -f1)  (binary $(du -h "$APP"/Contents/MacOS/* | cut -f1 | head -1))"
-  echo "dmg:        $(basename "$DMG") $(du -h "$DMG" | cut -f1)"
+  echo "dmg:        $DMG_OUT $(du -h "$DMG" | cut -f1)"
   echo "zip:        $ZIP_NAME $(du -h "$PUB/$ZIP_NAME" | cut -f1)"
   echo "min macOS:  $(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$APP/Contents/Info.plist" 2>/dev/null)"
 } | tee "$PUB/build.txt"
@@ -269,6 +283,12 @@ if [ "$INSTALL" = 1 ]; then
   mkdir -p "$HOME/Applications"
   osascript -e "tell application id \"$DESKTOP_ID\" to quit" >/dev/null 2>&1 || true
   sleep 1
+  # a copy under an earlier app name (e.g. "Hermes UI+.app" before 0.1.1) with the same bundle id would stay next to it
+  for old in "$HOME/Applications"/*.app; do
+    [ -d "$old" ] && [ "$(basename "$old")" != "$DESKTOP_NAME.app" ] || continue
+    [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$old/Contents/Info.plist" 2>/dev/null)" = "$DESKTOP_ID" ] || continue
+    echo "removing the old copy $(basename "$old")"; rm -rf "$old"
+  done
   rm -rf "$HOME/Applications/$DESKTOP_NAME.app"
   ditto "$APP" "$HOME/Applications/$DESKTOP_NAME.app"
   open "$HOME/Applications/$DESKTOP_NAME.app"

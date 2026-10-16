@@ -182,6 +182,12 @@ test('markdownColumnWidth scales with the font: the round-11 period column fits 
   assert.equal(markdownColumnWidth(prose, 1.3), 338);
 });
 
+test('markdownColumnWidth: a short inline-code cell fits on one line in monospace', () => {
+  const cmd = ['Command', '`df -h /mnt/new`', '`find /srv -type f | wc -l`'];
+  // 25 monospace glyphs (8.8 px) + cell padding 22 + chip padding 8
+  assert.ok(markdownColumnWidth(cmd, 1) >= Math.ceil(25 * 8.8) + 30, String(markdownColumnWidth(cmd, 1)));
+});
+
 test('fill mode never squeezes a text column below its unbreakable content (keep)', () => {
   const widths = [160, 300];
   const numeric = [false, false];

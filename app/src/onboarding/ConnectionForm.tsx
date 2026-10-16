@@ -212,7 +212,7 @@ export function ConnectionForm({
         ) : (
           <>
             <Button label={probing ? tr('onboarding.form.testing') : tr('onboarding.form.test')} onPress={runTest} loading={probing} disabled={!!keyError || !urlText.trim()} />
-            {current && !current.ok && url.ok && !keyError ? <Button variant="ghost" label={tr('onboarding.form.saveAnyway')} onPress={() => void save()} disabled={saving} /> : null}
+            {current && !current.ok && url.ok && !keyError ? <Button variant="tertiary" label={tr('onboarding.form.saveAnyway')} onPress={() => void save()} disabled={saving} /> : null}
           </>
         )
       }
@@ -281,7 +281,14 @@ export function ConnectionForm({
             help={livePair?.token && key === livePair.token ? tr('onboarding.form.keyFromPair', { masked: maskKey(livePair.token) }) : tr('onboarding.form.keyHelp')}
             trailing={
               key ? (
-                <Pressable onPress={() => setShowKey((v) => !v)} hitSlop={8} accessibilityRole="button" style={{ paddingHorizontal: 10, paddingVertical: 8 }}>
+                <Pressable
+                  onPress={() => setShowKey((v) => !v)}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  // "Show" alone does not say what is shown when a screen reader lists the controls
+                  accessibilityLabel={`${showKey ? tr('onboarding.form.hide') : tr('onboarding.form.show')}: ${tr('onboarding.form.keyLabel')}`}
+                  style={{ paddingHorizontal: 10, paddingVertical: 8 }}
+                >
                   <HText variant="caption" color="accent" weight="600">
                     {showKey ? tr('onboarding.form.hide') : tr('onboarding.form.show')}
                   </HText>

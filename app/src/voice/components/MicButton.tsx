@@ -6,15 +6,17 @@
  * dimmed and explains on tap (UNAVAILABLE_KEYS message in dictation.error).
  */
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 import { useT } from '../../i18n';
 import { bestOn, haptic, useTheme } from '../../ui';
 import { createHoldController } from '../holdPress';
+import { micKeyProps } from '../micKeys';
 import type { Dictation } from '../useDictation';
 import { useDictationMeter } from '../useDictation';
 import { VoiceIcon } from './icons';
+import { a11yState } from '../../ui/lib/a11yState';
 
 export type MicButtonProps = {
   dictation: Dictation;
@@ -106,7 +108,9 @@ export function MicButton({ dictation, size = 36, disabled, holdToTalk = true, h
         accessibilityRole="button"
         accessibilityLabel={label}
         accessibilityHint={hint}
-        accessibilityState={{ disabled: !!disabled, busy }}
+        {...a11yState({ disabled: !!disabled, busy })}
+        // web: a tab stop with role=button, but only pointer events were wired: Enter / Space (micKeys.ts)
+        {...(Platform.OS === 'web' ? micKeyProps({ dictation, disabled }) : null)}
         accessibilityActions={[{ name: 'activate' }]}
         onAccessibilityAction={(e) => {
           if (e.nativeEvent.actionName !== 'activate' || disabled) return;

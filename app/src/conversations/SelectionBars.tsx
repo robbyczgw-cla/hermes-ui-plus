@@ -7,8 +7,9 @@
 import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, { FadeOut, ReduceMotion, SlideOutDown } from 'react-native-reanimated';
 import { useT } from '../i18n';
-import { bestOn, haptic, HText, Icon, PressableScale, useTheme } from '../ui';
+import { Button, haptic, HText, Icon, useTheme } from '../ui';
 import { ConvIcon } from './icons';
+import { a11yState } from '../ui/lib/a11yState';
 
 export type SelectionFilters = { old: boolean; profile: boolean };
 
@@ -37,16 +38,7 @@ export function SelectionHeader({
         <HText variant="headline" style={styles.flex} accessibilityRole="header" accessibilityLiveRegion="polite" aria-live="polite">
           {tr('conversations.list.selected', { count })}
         </HText>
-        <Pressable
-          onPress={onDone}
-          accessibilityRole="button"
-          accessibilityLabel={tr('conversations.list.done')}
-          style={({ pressed }) => [styles.doneBtn, { borderRadius: t.radii.pill, backgroundColor: pressed ? t.colors.surfacePressed : t.colors.surfaceAlt }]}
-        >
-          <HText variant="callout" weight="600">
-            {tr('conversations.list.done')}
-          </HText>
-        </Pressable>
+        <Button label={tr('conversations.list.done')} onPress={onDone} />
       </View>
       <View style={styles.chips}>
         <Chip label={tr('conversations.list.filterOld')} on={filters.old} onPress={() => onFilters({ ...filters, old: !filters.old })} />
@@ -65,7 +57,7 @@ function Chip({ label, on, onPress }: { label: string; on: boolean; onPress: () 
         onPress();
       }}
       accessibilityRole="checkbox"
-      accessibilityState={{ checked: on }}
+      {...a11yState({ checked: on })}
       accessibilityLabel={label}
       hitSlop={{ top: 4, bottom: 4 }}
       style={({ pressed }) => [
@@ -78,7 +70,7 @@ function Chip({ label, on, onPress }: { label: string; on: boolean; onPress: () 
       ]}
     >
       {on ? <Icon name="check" size={14} color={t.colors.accent} strokeWidth={2.4} /> : null}
-      <HText variant="caption" weight="600" style={{ color: on ? t.colors.accent : t.colors.text }}>
+      <HText variant="caption" weight="600" style={{ color: on ? t.colors.accentText : t.colors.text }}>
         {label}
       </HText>
     </Pressable>
@@ -107,54 +99,27 @@ export function SelectionBottomBar({
   restore?: boolean;
 }) {
   const t = useTheme();
-  const onDanger = bestOn(t.colors.danger, ['#FFFFFF', t.colors.bg]);
   const tr = useT();
   const none = allSelected && count > 0;
   return (
     <Animated.View exiting={exitBar} style={[styles.bar, { borderTopColor: t.colors.border, backgroundColor: t.colors.bg }]}>
-      <Pressable
-        onPress={() => {
-          haptic('selection');
-          if (none) onSelectNone();
-          else onSelectAll();
-        }}
+      <Button
+        label={none ? tr('conversations.list.selectNone') : tr('conversations.list.selectAll')}
+        variant="tertiary"
         disabled={!none && !canSelectAll}
-        accessibilityRole="button"
-        accessibilityState={{ disabled: !none && !canSelectAll }}
-        style={({ pressed }) => [styles.barBtn, { borderRadius: t.radii.pill, opacity: !none && !canSelectAll ? 0.45 : 1 }, pressed && { backgroundColor: t.colors.surfacePressed }]}
-      >
-        <HText variant="callout" weight="600" style={{ color: t.colors.accent }}>
-          {none ? tr('conversations.list.selectNone') : tr('conversations.list.selectAll')}
-        </HText>
-      </Pressable>
+        onPress={() => (none ? onSelectNone() : onSelectAll())}
+      />
       {onArchive ? (
-        <Pressable
-          onPress={onArchive}
-          disabled={!count}
-          accessibilityRole="button"
-          accessibilityState={{ disabled: !count }}
+        <Button
+          label={restore ? tr('menus.archive.bulkRestore') : tr('menus.archive.bulk')}
+          icon={(color, size) => <ConvIcon name="archive" size={size} color={color} />}
           accessibilityLabel={restore ? tr('menus.archive.bulkRestoreA11y', { count }) : tr('menus.archive.bulkA11y', { count })}
-          style={({ pressed }) => [styles.archiveBtn, { borderRadius: t.radii.pill, backgroundColor: pressed ? t.colors.surfacePressed : t.colors.surfaceAlt, opacity: count ? 1 : 0.45 }]}
-        >
-          <ConvIcon name="archive" size={17} color={t.colors.text} />
-          <HText variant="callout" weight="600">
-            {restore ? tr('menus.archive.bulkRestore') : tr('menus.archive.bulk')}
-          </HText>
-        </Pressable>
+          disabled={!count}
+          onPress={onArchive}
+          style={styles.archiveBtn}
+        />
       ) : null}
-      <PressableScale
-        onPress={onDelete}
-        disabled={!count}
-        accessibilityRole="button"
-        accessibilityState={{ disabled: !count }}
-        accessibilityLabel={tr('conversations.list.deleteSelected', { count })}
-        style={[styles.deleteBtn, { borderRadius: t.radii.pill, backgroundColor: t.colors.danger, opacity: count ? 1 : 0.45 }]}
-      >
-        <ConvIcon name="trash" size={17} color={onDanger} />
-        <HText variant="callout" weight="600" style={{ color: onDanger }}>
-          {tr('conversations.list.deleteSelected', { count })}
-        </HText>
-      </PressableScale>
+      <Button label={tr('conversations.list.deleteSelected', { count })} icon={(color, size) => <ConvIcon name="trash" size={size} color={color} />} tone="seal" disabled={!count} onPress={onDelete} />
     </Animated.View>
   );
 }
@@ -163,11 +128,8 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   header: { gap: 8 },
   headerRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 44 },
-  doneBtn: { minHeight: 44, minWidth: 44, paddingHorizontal: 16, justifyContent: 'center', alignItems: 'center' },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 36, paddingHorizontal: 12, borderWidth: 1 },
   bar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingHorizontal: 12, paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth },
-  barBtn: { minHeight: 44, paddingHorizontal: 12, justifyContent: 'center' },
-  deleteBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 44, paddingHorizontal: 16 },
-  archiveBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 44, paddingHorizontal: 14, marginLeft: 'auto' },
+  archiveBtn: { marginLeft: 'auto' },
 });

@@ -255,6 +255,7 @@ test('products: ranked lists, verdict, category scores', () => {
     'Platz 1: Retroid Gerät 1. Beste Ergonomie. Ergonomie 9 von 10, 2D 7,5 von 10, 3D 10 von 10.',
   );
   assert.equal(productKind('Pocket 5', 'Retroid'), 'gamepad');
+  for (const n of ['TrimUI Brick Hammer', 'RG 35XX SP', 'RG Rotate', 'Konkr Pocket Advance']) assert.equal(productKind(n), 'gamepad', n);
   assert.equal(productKind('RG406H', 'Anbernic'), 'gamepad');
   assert.equal(productKind('Steam Deck OLED'), 'gamepad');
 });

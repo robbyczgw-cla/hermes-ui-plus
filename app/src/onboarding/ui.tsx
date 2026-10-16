@@ -3,20 +3,19 @@
 import * as Clipboard from 'expo-clipboard';
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
 import {
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
-  TextInput,
   View,
   useWindowDimensions,
   type TextInputProps,
 } from 'react-native';
+import { Text, TextInput } from '../ui/primitives/Text';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
-import { FadeIn, HText, Icon, PressableScale, haptic, mix, useIsWide, useTheme, type IconName } from '../ui';
+import { Button as UiButton, FadeIn, HText, Icon, PressableScale, haptic, mix, useIsWide, useTheme, type IconName } from '../ui';
 import { useTitlebarInset } from '../desktop/chrome';
 import { useT } from '../i18n';
 import { codeBoxLines } from './model';
@@ -24,7 +23,7 @@ import { codeBoxLines } from './model';
 export const CONTENT_MAX = 480;
 
 // ── icons not in the shared set ───────────────────────────────────────────────────────────────
-export type OnbIconName = 'qr' | 'server' | 'play' | 'plug' | 'key' | 'terminal' | 'shield' | 'camera';
+export type OnbIconName = 'qr' | 'server' | 'play' | 'plug' | 'key' | 'terminal' | 'shield' | 'camera' | 'agent';
 
 export function OnbIcon({ name, size = 22, color }: { name: OnbIconName | IconName; size?: number; color: string }) {
   const p = { stroke: color, strokeWidth: 1.75, fill: 'none', strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
@@ -87,6 +86,14 @@ export function OnbIcon({ name, size = 22, color }: { name: OnbIconName | IconNa
           <Circle cx={12} cy={13} r={3.5} {...p} />
         </Svg>
       );
+    case 'agent':
+      // chat bubble with a shell prompt: "your agent does it"
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24">
+          <Path d="M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-7l-4.5 3.5V17H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" {...p} />
+          <Path d="M7.5 8.5l2.5 2-2.5 2M12.5 12.5h4" {...p} />
+        </Svg>
+      );
     default:
       return <Icon name={name} size={size} color={color} />;
   }
@@ -116,7 +123,7 @@ export function OnbFrame({ children }: { children: ReactNode }) {
             height: Math.max(480, Math.min(height - 64, 820)),
             backgroundColor: t.colors.bg,
             borderColor: t.colors.border,
-            borderRadius: t.radii.xl + 6,
+            borderRadius: t.radii.card,
           },
           Platform.OS === 'web' ? ({ boxShadow: t.dark ? '0 18px 60px rgba(0,0,0,0.55)' : '0 18px 50px rgba(20,20,58,0.10)' } as object) : null,
         ]}
@@ -211,13 +218,30 @@ function StepDots({ step, total }: { step: number; total: number }) {
   );
 }
 
+/** Gloock onboarding title: the compact size (24/30) for long titles so they stay on a few lines at every font size. */
+export function heroVariant(title: string): 'hero' | 'heroCompact' {
+  return title.length > 28 ? 'heroCompact' : 'hero';
+}
+
+/**
+ * A Gloock title with the brand's "+" set like the website wordmark: Atkinson Bold, because Gloock's own plus is a
+ * hairline that reads as a stray mark next to "HUI".
+ */
+export function HeroText({ children, align }: { children: string; align?: 'center' }) {
+  const t = useTheme();
+  const parts = children.split('+');
+  return (
+    <HText variant={heroVariant(children)} align={align} accessibilityRole="header">
+      {parts.map((p, i) => (i === 0 ? p : [<Text key={i} style={{ fontFamily: t.fonts.sans, fontWeight: '700' }}>+</Text>, p]))}
+    </HText>
+  );
+}
+
 export function Title({ children, lead }: { children: string; lead?: string }) {
   const t = useTheme();
   return (
     <FadeIn style={{ gap: t.spacing.s, marginTop: t.spacing.s, marginBottom: t.spacing.xl }}>
-      <HText variant="display" accessibilityRole="header">
-        {children}
-      </HText>
+      <HeroText>{children}</HeroText>
       {lead ? (
         <HText variant="body" color="muted">
           {lead}
@@ -227,7 +251,16 @@ export function Title({ children, lead }: { children: string; lead?: string }) {
   );
 }
 
+/** the onboarding icon set (qr, play, …; falls back to the shared icons) as a Button icon renderer */
+function onbButtonIcon(icon?: OnbIconName | IconName) {
+  return icon ? (color: string, size: number) => <OnbIcon name={icon} size={size} color={color} /> : undefined;
+}
+
 // ── buttons ───────────────────────────────────────────────────────────────────────────────────
+/**
+ * Onboarding button on top of the app's one `Button`: primary = ink (the one main action of a step), secondary =
+ * outline, tertiary = text. `ghost` is the old name of tertiary.
+ */
 export function Button({
   label,
   onPress,
@@ -238,36 +271,12 @@ export function Button({
 }: {
   label: string;
   onPress: () => void;
-  variant?: 'primary' | 'secondary' | 'ghost';
+  variant?: 'primary' | 'secondary' | 'tertiary' | 'ghost';
   disabled?: boolean;
   loading?: boolean;
   icon?: OnbIconName | IconName;
 }) {
-  const t = useTheme();
-  const primary = variant === 'primary';
-  const fg = primary ? (t.dark ? '#0D0D0D' : '#FFFFFF') : t.colors.text;
-  return (
-    <PressableScale
-      onPress={onPress}
-      disabled={disabled || loading}
-      accessibilityLabel={label}
-      accessibilityState={{ busy: !!loading }}
-      haptic={primary ? 'light' : 'selection'}
-      style={[
-        styles.button,
-        {
-          backgroundColor: primary ? t.colors.text : variant === 'secondary' ? t.colors.surfaceAlt : 'transparent',
-          borderRadius: t.radii.pill,
-        },
-      ]}
-      pressedStyle={{ opacity: 0.85 }}
-    >
-      {loading ? <ActivityIndicator size="small" color={fg} /> : icon ? <OnbIcon name={icon} size={18} color={fg} /> : null}
-      <HText variant="bodyStrong" style={{ color: fg }} numberOfLines={1}>
-        {label}
-      </HText>
-    </PressableScale>
-  );
+  return <UiButton label={label} onPress={onPress} variant={variant === 'ghost' ? 'tertiary' : variant} icon={onbButtonIcon(icon)} disabled={disabled} loading={loading} />;
 }
 
 /** Big tappable choice row (connection options). */
@@ -280,19 +289,20 @@ export function OptionCard({ icon, title, text, badge, onPress, delay = 0 }: { i
         accessibilityLabel={`${title}. ${text}`}
         haptic="selection"
         scaleTo={0.985}
-        style={[styles.option, { borderColor: t.colors.border, backgroundColor: t.dark ? t.colors.surface : t.colors.bg, borderRadius: t.radii.l }]}
+        style={[styles.option, { borderColor: t.colors.border, backgroundColor: t.dark ? t.colors.surface : t.colors.bg, borderRadius: t.radii.card }]}
         pressedStyle={{ backgroundColor: t.colors.surfacePressed }}
       >
-        <View style={[styles.optionIcon, { backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.m }]}>
+        <View style={[styles.optionIcon, { backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.control }]}>
           <OnbIcon name={icon} size={22} color={t.colors.text} />
         </View>
         <View style={styles.flex1}>
           <View style={styles.row}>
-            <HText variant="headline" style={styles.flexShrink} numberOfLines={2}>
+            {/* no line limit: the option name is the choice itself; at large text it was cut to "I have a QR…" */}
+            <HText variant="headline" style={styles.flexShrink}>
               {title}
             </HText>
             {badge ? (
-              <View style={[styles.badge, { backgroundColor: t.colors.accentSoft }]}>
+              <View style={[styles.badge, { backgroundColor: t.colors.accentSoft, borderRadius: t.radii.inline }]}>
                 <HText variant="micro" color="accent">
                   {badge}
                 </HText>
@@ -331,7 +341,7 @@ export function Field({
           {
             backgroundColor: t.colors.surfaceAlt,
             borderColor: error ? t.colors.danger : focus ? t.colors.borderStrong : 'transparent',
-            borderRadius: t.radii.m,
+            borderRadius: t.radii.control,
           },
         ]}
       >
@@ -351,7 +361,7 @@ export function Field({
             setFocus(false);
             input.onBlur?.(e);
           }}
-          style={[styles.input, { color: t.colors.text, fontFamily: t.fonts.sans }, Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : null]}
+          style={[styles.input, { color: t.colors.text, fontFamily: t.fonts.sans, fontSize: t.typography.reading.fontSize }, Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : null]}
         />
         {trailing}
       </View>
@@ -368,37 +378,14 @@ export function Field({
   );
 }
 
-/** Compact secondary action (diagnostics buttons, copy, share). */
+/** Compact action (diagnostics buttons, copy, share): `accent` = the main one of the group (ink), else outline. */
 export function ActionPill({ label, onPress, icon, tone = 'neutral', disabled }: { label: string; onPress: () => void; icon?: OnbIconName | IconName; tone?: 'neutral' | 'accent'; disabled?: boolean }) {
-  const t = useTheme();
-  const fg = tone === 'accent' ? t.colors.accent : t.colors.text;
-  return (
-    <PressableScale
-      onPress={onPress}
-      disabled={disabled}
-      accessibilityLabel={label}
-      haptic="selection"
-      scaleTo={0.97}
-      style={[styles.pill, { backgroundColor: tone === 'accent' ? t.colors.accentSoft : t.colors.surfaceAlt, borderRadius: t.radii.pill }]}
-      pressedStyle={{ opacity: 0.8 }}
-    >
-      {icon ? <OnbIcon name={icon} size={15} color={fg} /> : null}
-      <HText variant="caption" weight="600" style={{ color: fg }} numberOfLines={1}>
-        {label}
-      </HText>
-    </PressableScale>
-  );
+  return <UiButton label={label} onPress={onPress} variant={tone === 'accent' ? 'primary' : 'secondary'} size="small" icon={onbButtonIcon(icon)} disabled={disabled} style={styles.pill} />;
 }
 
+/** Quiet text action under a primary button ("Try the demo", "Paste from clipboard"). */
 export function SmallLink({ label, onPress }: { label: string; onPress: () => void }) {
-  const t = useTheme();
-  return (
-    <Pressable onPress={onPress} hitSlop={8} accessibilityRole="button" style={({ pressed }) => [{ paddingHorizontal: t.spacing.s, paddingVertical: 6, opacity: pressed ? 0.6 : 1 }]}>
-      <HText variant="caption" color="accent" weight="600">
-        {label}
-      </HText>
-    </Pressable>
-  );
+  return <UiButton label={label} onPress={onPress} variant="tertiary" size="small" />;
 }
 
 // ── notices ───────────────────────────────────────────────────────────────────────────────────
@@ -425,7 +412,7 @@ export function Notice({
   return (
     <FadeIn>
       <View
-        style={[styles.notice, { backgroundColor: t.colors[`${tone}Soft`], borderRadius: t.radii.m }]}
+        style={[styles.notice, { backgroundColor: t.colors[`${tone}Soft`], borderRadius: t.radii.control }]}
         accessibilityLiveRegion={tone === 'danger' || tone === 'success' ? 'polite' : undefined}
       >
         <View style={{ paddingTop: 2 }}>
@@ -489,7 +476,7 @@ export function CodeBox({ code, label }: { code: string; label?: string }) {
       .catch(() => {});
   };
   return (
-    <View style={[styles.code, { backgroundColor: t.colors.codeBg, borderColor: t.colors.border, borderRadius: t.radii.m }]}>
+    <View style={[styles.code, { backgroundColor: t.colors.codeBg, borderColor: t.colors.border, borderRadius: t.radii.control }]}>
       <View style={[styles.codeHead, { borderBottomColor: t.colors.border }]}>
         <HText variant="caption" color="muted">
           {label ?? 'bash'}
@@ -517,7 +504,7 @@ export function CodeBox({ code, label }: { code: string; label?: string }) {
 const styles = StyleSheet.create({
   frameOuter: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   frameCard: { width: '100%', maxWidth: CARD_MAX, overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth },
-  pill: { minHeight: 36, paddingHorizontal: 12, paddingVertical: 7, flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start' },
+  pill: { alignSelf: 'flex-start' },
   fill: { flex: 1 },
   flex1: { flex: 1 },
   flexShrink: { flexShrink: 1 },
@@ -529,12 +516,11 @@ const styles = StyleSheet.create({
   backBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   dots: { flexDirection: 'row', gap: 6, alignItems: 'center' },
   footer: { paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth },
-  button: { minHeight: 50, paddingHorizontal: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   option: { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 14, borderWidth: 1, marginBottom: 10 },
   optionIcon: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  badge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999 },
+  badge: { paddingHorizontal: 8, paddingVertical: 2 },
   inputWrap: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, paddingRight: 4 },
-  input: { flex: 1, minHeight: 48, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16 },
+  input: { flex: 1, minHeight: 48, paddingHorizontal: 14, paddingVertical: 12 },
   notice: { flexDirection: 'row', gap: 10, padding: 14, marginBottom: 16 },
   hintRow: { flexDirection: 'row', gap: 8 },
   code: { borderWidth: 1, overflow: 'hidden', marginBottom: 12 },

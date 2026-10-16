@@ -1,5 +1,6 @@
-import { memo, useCallback, useMemo, useState } from 'react';
-import { LayoutAnimation, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { memo, useCallback, useDeferredValue, useMemo, useState } from 'react';
+import { LayoutAnimation, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '../ui/primitives/Text';
 import { ApprovalHistory } from '../approvals/ApprovalHistory';
 import { AttachmentTray, MessageAttachments } from '../attachments';
 import type { ChatMessage } from '../hermes';
@@ -14,6 +15,7 @@ import type { HuiAction, HuiNode, Segment } from '../protocol/types';
 import { skeletonShapeForRoute } from '../protocol/streamPlaceholder.ts';
 import { segmentAppendRun } from '../protocol/streamParser.ts';
 import {
+  Button,
   HuiView,
   WaitingIndicator,
   personaLoader,
@@ -31,7 +33,6 @@ import { HtmlBlock } from '../sandbox';
 import { useToolDetails } from '../settings/Appearance';
 import { useActiveProfile } from '../settings/ConnectionProvider';
 import { usePreferences } from '../settings/PreferencesProvider';
-import { scaledText } from '../settings/preferences';
 import { RouteSkeleton } from '../ui';
 import { SpeakButton, getSpeakerState, stopSpeaking, toggleSpeaking, type VoiceConn } from '../voice';
 import { answerContextMenu, useNativeContextMenu } from '../desktop/messageMenu';
@@ -42,6 +43,7 @@ import { Icon, type IconName } from './icons';
 import { isLocalMessage } from './localMessages';
 import { Markdown } from './Markdown';
 import { ReplyChip } from './ReplyChip';
+import { TurnExtrasChips } from './TurnExtrasChip';
 import { ReformattedMarker, TransformBar } from './TransformBar';
 import { parseReplyMessage, replyCopyText } from './replyMessage';
 import { useMarkdownImageBase } from './MarkdownImageContext';
@@ -57,6 +59,8 @@ import { CutNotice, LateMark } from './TurnNotices';
 import { FailureText } from './FailureText';
 import { ProgressNotesDisclosure, ToolDetailSheet, ToolTimelinePanel, TurnFooter } from './ToolTimeline';
 import { useSegments } from './useSegments';
+import { PERF, perfNow, perfSpan } from '../perf/probe';
+import { perfWrap, usePerfCommit } from '../perf/react';
 import { usePendingBubble, useQueuedBubble, type PendingBubble } from './pendingSendContext';
 import { queuedNotice } from '../hermes/pendingSend';
 import { AnswerScope } from './answers/AnswerScope';
@@ -65,7 +69,8 @@ import { withCitationSources } from './answers/citations';
 import { withRetrievedSources } from './answers/webSources';
 import { dedupeTranslations } from './answers/dedupe';
 import { splitProgressNotes, type ProgressNote } from '../hermes/progressNotes';
-import { SHARE_IMAGE_SUPPORTED, ShareImageSheet } from './answers/shareImage';
+import { ShareImageSheet } from './answers/ShareImageSheet';
+import { planShare } from './answers/shareModel';
 import { ReportSheet } from '../compliance/ReportSheet';
 import { useAnswerReport, withdrawReport } from '../compliance/store';
 import { ActionMenu, MenuHeader, type MenuItem } from './ActionMenu';
@@ -75,6 +80,7 @@ import { FindScope, Highlighted, useMessageHighlight } from './findContext';
 import { HandOffButton, QuickMetaLine } from '../quick/QuickMeta';
 import { shortModel } from '../quick/core';
 import type { TFn, TKey } from '../i18n';
+import { a11yState } from '../ui/lib/a11yState';
 
 /**
  * HuiAction handler of the chat shell. `messageId` = the assistant message holding the node (the `ask`
@@ -98,7 +104,6 @@ export const UserMessage = memo(function UserMessage({ message }: { message: Cha
   // Settings: Darstellung → Nachrichtenstil (Blase / Schlicht) + Schriftgröße, Chat → Zeitstempel
   const { prefs } = usePreferences();
   const plain = prefs.bubbleStyle === 'plain';
-  const textSize = scaledText(16, 23, t.fontScale);
   const doCopy = () => copy(copyText, tr('chat.message.copied'));
   const hl = useMessageHighlight(message.id); // "Im Chat suchen"
   // VoiceOver: the bubble is one element (plain text, no controls inside); long-press copy is offered as
@@ -124,12 +129,14 @@ export const UserMessage = memo(function UserMessage({ message }: { message: Cha
             styles.userBubble,
             plain
               ? [styles.userPlain, { borderRightColor: t.colors.accent }, pressed && { opacity: 0.6 }]
-              : [{ backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.xl }, pressed && { backgroundColor: t.colors.surfacePressed }],
+              : [{ backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.card, borderBottomEndRadius: t.radii.inline }, pressed && { backgroundColor: t.colors.surfacePressed }],
           ]}
+          // the bubble is the message text (long-press / the a11y action copies it), not a button
+          accessibilityRole="text"
           accessibilityHint={tr('chat.message.longPressCopy')}
           {...a11yCopy}
         >
-          <Text style={[styles.userText, textSize, { color: t.colors.text }, plain && styles.userPlainText]} selectable={Platform.OS === 'web'}>
+          <Text style={[t.typography.reading, { color: t.colors.text }, plain && styles.userPlainText]} selectable={Platform.OS === 'web'}>
             {hl ? <Highlighted text={bubbleText} hl={hl} /> : bubbleText}
           </Text>
         </Pressable>
@@ -141,6 +148,7 @@ export const UserMessage = memo(function UserMessage({ message }: { message: Cha
             </Pressable>
           ))
         : null}
+      {message.turnExtras ? <TurnExtrasChips extras={message.turnExtras} /> : null}
       {message.sendQueued ? <QueuedActions message={message} /> : null}
       {prefs.showTimestamps ? <Timestamp at={message.createdAt} /> : null}
     </View>
@@ -163,29 +171,27 @@ function QueuedActions({ message }: { message: ChatMessage }) {
   const canResend = !!q && !checking && !q.busy;
   return (
     <View style={styles.pendingWrap}>
-      <Text style={[styles.pendingText, styles.queuedNote, { color: checking ? t.colors.muted : t.colors.danger }]} accessibilityLiveRegion="polite" accessibilityRole={checking ? undefined : 'alert'}>
+      <Text testID={checking ? 'msg-queued-checking' : 'msg-not-sent'} style={[t.typography.caption, styles.queuedNote, { color: checking ? t.colors.muted : t.colors.danger }]} accessibilityLiveRegion="polite" accessibilityRole={checking ? undefined : 'alert'}>
         {tr(note)}
       </Text>
       {q && !checking ? (
         <View style={styles.pendingRow}>
-          <Pressable
+          <Button
+            label={tr('chat.message.queuedDiscard')}
+            variant="tertiary"
+            size="small"
             onPress={() => q.discard(message.id)}
-            hitSlop={8}
-            accessibilityRole="button"
+            testID="msg-discard"
             accessibilityLabel={tr('chat.message.queuedDiscardA11y')}
-          >
-            <Text style={[styles.pendingText, { color: t.colors.muted, fontWeight: '600' }]}>{tr('chat.message.queuedDiscard')}</Text>
-          </Pressable>
-          <Pressable
+          />
+          <Button
+            label={tr('chat.message.queuedResend')}
+            size="small"
             onPress={() => q.resend(message.id)}
+            testID="msg-send-again"
             disabled={!canResend}
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityState={{ disabled: !canResend }}
             accessibilityLabel={tr('chat.message.queuedResendA11y')}
-          >
-            <Text style={[styles.pendingText, { color: canResend ? t.colors.accent : t.colors.muted, fontWeight: '600' }]}>{tr('chat.message.queuedResend')}</Text>
-          </Pressable>
+          />
         </View>
       ) : null}
     </View>
@@ -207,13 +213,17 @@ function PendingAttachments({ message }: { message: ChatMessage }) {
     <View style={styles.pendingWrap}>
       {atts.length ? <AttachmentTray attachments={atts} onRemove={(id) => bubble?.remove(id)} onRetry={bubble ? (id) => bubble.retry(id) : undefined} /> : null}
       <View style={styles.pendingRow} accessibilityLiveRegion="polite">
-        <Text style={[styles.pendingText, { color: failed ? t.colors.danger : t.colors.muted }]} accessibilityRole={failed ? 'alert' : undefined}>
+        <Text style={[t.typography.caption, { color: failed ? t.colors.danger : t.colors.muted }]} accessibilityRole={failed ? 'alert' : undefined}>
           {tr(failed ? 'chat.message.pendingFailed' : 'chat.message.pendingUploads')}
         </Text>
         {bubble ? (
-          <Pressable onPress={bubble.cancel} hitSlop={8} accessibilityRole="button" accessibilityLabel={tr('chat.message.pendingCancelA11y')}>
-            <Text style={[styles.pendingText, { color: t.colors.accent, fontWeight: '600' }]}>{tr('chat.message.pendingCancel')}</Text>
-          </Pressable>
+          <Button
+            label={tr('chat.message.pendingCancel')}
+            variant="tertiary"
+            size="small"
+            onPress={bubble.cancel}
+            accessibilityLabel={tr('chat.message.pendingCancelA11y')}
+          />
         ) : null}
       </View>
     </View>
@@ -297,7 +307,10 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
     // tags inside interim notes still become file chips
     return shownText === message.text ? m : { ...m, refs: extract(message.text, 1).refs };
   }, [shownText, message.text, streaming, mediaCaches, shownRun, textRun]);
+  const tSeg = PERF ? perfNow() : 0;
   const rawSegments = useSegments(media.text, !streaming, message.id, media.text === shownText ? shownRun : undefined);
+  if (PERF) perfSpan(streaming ? 'segments' : 'segments.final', tSeg);
+  usePerfCommit(!!isLast, message.text.length, streaming); // no-op unless EXPO_PUBLIC_HUI_PERF is set
   // finished answers: B3 closing `[n]` sources list → sources block + numeric pills; UX8 duplicated translation text
   const cited = useMemo(
     () => (streaming ? { segments: rawSegments, cites: 0, research: false } : withCitationSources(dedupeTranslations(rawSegments))),
@@ -324,6 +337,9 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
   const [sheetKey, setSheetKey] = useState<string | null>(null);
   const showReasoning = !!message.reasoning && !verbose;
   const uiPrefs = usePreferences().prefs;
+  // "Als Bild teilen": the setting is on and the answer has text or cards to draw (not only an HTML widget)
+  const drawable = useMemo(() => !streaming && !planShare(segments).empty, [segments, streaming]);
+  const canShareImage = drawable && uiPrefs['answers.shareImage'];
   const showTime = uiPrefs.showTimestamps;
   // waiting delight (ui/loaders): context-aware indicator + rotating status line until the first content
   const reducedMotion = useMotionReduced();
@@ -344,7 +360,6 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
   const mdBase = useMarkdownImageBase();
   const compareAfter = useMemo(() => (compareBefore && !streaming ? resultImageUrl(message, mdBase) : null), [compareBefore, streaming, message, mdBase]);
   // Settings → Schriftgröße also reaches the shell texts around the answer (Markdown scales itself)
-  const fs = (size: number, line: number) => scaledText(size, line, t.fontScale);
   // answer "⋯" / long-press menu (answerMenu.ts): header (time + model), branch, retry ▸, copy/share, "Melden" last.
   // "Antwort melden" (Play AI-generated content policy) keeps its report sheet (compliance/)
   const report = useAnswerReport(id);
@@ -366,7 +381,7 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
       hasText: hasCopy,
       recovering,
       usedWeb: usedWebSearch(message),
-      shareImage: SHARE_IMAGE_SUPPORTED && uiPrefs['answers.shareImage'],
+      shareImage: canShareImage,
       reported: !!report.report,
       canBranch: !!actions?.canBranch,
       canHandOff: !!actions?.handOff && !!message.quick,
@@ -419,7 +434,7 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
       }
     }
     return items;
-  }, [menuOpen, local, streaming, failed, isLast, hasCopy, recovering, message, uiPrefs, report.report, actions, tr, copy, share, media.text, id]);
+  }, [menuOpen, local, streaming, failed, isLast, hasCopy, recovering, message, canShareImage, report.report, actions, tr, copy, share, media.text, id]);
   const menuHeader = useMemo(() => {
     if (!menuOpen) return null;
     const lines: string[] = [];
@@ -434,10 +449,14 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
     return <MenuHeader lines={lines} />;
   }, [menuOpen, message, actions, local, tr, formatDate, formatRelative]);
   const openMenu = !streaming ? () => setMenuOpen(true) : undefined;
+  // Older answers mount their action row (four SVG icon buttons, ~half of an answer's mount time while a long chat
+  // scrolls, docs/PERF.md) in a deferred render: React renders it time-sliced after the urgent mount instead of inside
+  // the list's render batch. Same height meanwhile (no shift); the newest answer shows it at once.
+  const rowReady = useDeferredValue(true, isLast);
   // macOS app: right-click → native menu with the answer actions (desktop/messageMenu.ts); {} elsewhere
   const nativeMenu = useNativeContextMenu(() => {
     if (streaming || recovering) return null;
-    const keys = answerMenuItems({ local, streaming, failed, isLast, busy: false, hasText: hasCopy, recovering, usedWeb: false, shareImage: false, reported: !!report.report, canBranch: !!actions?.canBranch });
+    const keys = answerMenuItems({ local, streaming, failed, isLast, busy: false, hasText: hasCopy, recovering, usedWeb: false, shareImage: canShareImage, reported: !!report.report, canBranch: !!actions?.canBranch });
     const sp = getSpeakerState();
     const speaking = sp.messageId === id && (sp.status === 'playing' || sp.status === 'paused' || sp.status === 'loading');
     return answerContextMenu(
@@ -449,6 +468,7 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
         speak: local ? undefined : speaking ? stopSpeaking : () => toggleSpeaking({ id, text: shownText, conn: voiceConn, t: tr, locale }),
         speaking,
         share: () => void share(plainCopyText(media.text)),
+        shareImage: () => setImageOpen(true),
         branch: actions ? () => actions.branchFrom(id) : undefined,
       },
       tr,
@@ -460,7 +480,7 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
       {reportOpen ? (
         <ReportSheet visible messageId={id} conversationId={conversationId} answerText={copyText} onClose={() => setReportOpen(false)} onToast={toast} />
       ) : null}
-      {imageOpen ? <ShareImageSheet segments={segments} onDone={() => setImageOpen(false)} /> : null}
+      {imageOpen ? <ShareImageSheet segments={segments} cites={cited.cites} question={actions?.questionFor?.(id) ?? null} onDone={() => setImageOpen(false)} /> : null}
     </>
   );
 
@@ -472,10 +492,10 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
           onPress={report.reveal}
           accessibilityRole="button"
           accessibilityLabel={tr('compliance.report.hiddenA11y')}
-          style={({ pressed }) => [styles.reportedCover, { backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.m }, pressed && { opacity: 0.7 }]}
+          style={({ pressed }) => [styles.reportedCover, { backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.control }, pressed && { opacity: 0.7 }]}
         >
           <Icon name="flag" size={15} color={t.colors.muted} />
-          <Text style={[fs(13.5, 18), { color: t.colors.muted, flex: 1 }]}>{tr('compliance.report.hidden')}</Text>
+          <Text style={[t.typography.caption, { color: t.colors.muted, flex: 1 }]}>{tr('compliance.report.hidden')}</Text>
           <Icon name="eye" size={16} color={t.colors.muted} />
         </Pressable>
         {sheets}
@@ -503,7 +523,7 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
       {thinking && !showReasoning && !message.approval ? <WaitingIndicator state={waitState} mode={waitMode} seed={seed} persona={persona} startedAt={waitStartedAt} /> : null}
       {streaming && (message.statusNote || (empty && progressNotes.length)) ? (
         // server status line, else the agent's latest interim note while its tools run (UX1)
-        <Text style={[styles.statusNote, fs(13, 18), { color: t.colors.muted }]} numberOfLines={2} accessibilityLiveRegion="polite">
+        <Text style={[t.typography.caption, styles.statusNote, { color: t.colors.muted }]} numberOfLines={2} accessibilityLiveRegion="polite">
           {message.statusNote || progressNotes[progressNotes.length - 1].text}
         </Text>
       ) : null}
@@ -515,8 +535,8 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
       ) : null}
       {compacted ? <ContextDivider /> : null}
       <AnswerScope segments={segments} streaming={streaming} cites={cited.cites}>
-        {segments.map((seg, i) => (seg.kind === 'hui' && seg.node?.type === 'suggestions' && !uiPrefs.showFollowups ? null : (
-          <SegmentView
+        {perfWrap(streaming ? 'Segments' : 'SegmentsDone', segments.map((seg, i) => (seg.kind === 'hui' && seg.node?.type === 'suggestions' && !uiPrefs.showFollowups ? null : (
+          perfWrap(`seg.${seg.kind}${streaming ? '' : '.done'}`, <SegmentView
             key={seg.key}
             seg={seg}
             first={i === 0}
@@ -524,8 +544,8 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
             onAction={onAction}
             route={routeShape}
             collapse={seg.kind === 'markdown' && (summaryBefore(segments, i) || (cited.research && i === firstMarkdown(segments) ? 'section' : false))}
-          />
-        )))}
+          />, seg.key)
+        ))))}
       </AnswerScope>
       {showSkeleton && routeShape ? (
         <View style={empty && !thinking ? undefined : styles.segGap}>
@@ -536,48 +556,44 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
       {notes.length ? <MemoryNotes notes={notes} /> : null}
       {reminders.length ? <ReminderCards reminders={reminders} /> : null}
       {message.truncated ? (
-        <Text style={[styles.stopped, fs(12.5, 17), { color: t.colors.subtle }]}>{tr('chat.message.truncated')}</Text>
+        <Text style={[t.typography.caption, styles.stopped, { color: t.colors.subtle }]}>{tr('chat.message.truncated')}</Text>
       ) : null}
       {message.textCapped ? (
-        <Text style={[styles.stopped, fs(12.5, 17), { color: t.colors.subtle }]}>{tr('chat.message.capped')}</Text>
+        <Text style={[t.typography.caption, styles.stopped, { color: t.colors.subtle }]}>{tr('chat.message.capped')}</Text>
       ) : null}
       {isCut(message) ? (
         // direct backend, app was in the background: calm notice with "Fortsetzen" / "Neu starten" (background/cut.ts)
         <CutNotice message={message} isLast={isLast} onRetry={onRetry} />
       ) : message.status === 'error' ? (
-        <View style={[styles.errorBox, { backgroundColor: t.colors.dangerSoft, borderRadius: t.radii.m }]}>
+        <View style={[styles.errorBox, { backgroundColor: t.colors.dangerSoft, borderRadius: t.radii.control }]}>
           <Icon name="alert" size={18} color={t.colors.danger} />
           <View style={{ flex: 1, gap: 2 }}>
-            <Text style={[styles.errorTitle, fs(14, 19), { color: t.colors.danger }]}>{tr('chat.message.failed')}</Text>
+            <Text testID="msg-failed" style={[t.typography.callout, styles.errorTitle, { color: t.colors.danger }]}>{tr('chat.message.failed')}</Text>
             {message.error ? <FailureText message={message} override={authError && !message.errorText ? tr(AUTH_DENIED_KEY) : undefined} /> : null}
           </View>
           {isLast && authError && profile ? (
             // rejected key / token: retrying is pointless – open the profile editor of this connection
-            <Pressable
+            <Button
+              label={tr('chat.message.editConnection')}
+              size="small"
               onPress={() => router.push({ pathname: '/settings', params: { edit: profile.id } })}
-              style={({ pressed }) => [styles.retryBtn, { borderColor: t.colors.borderStrong }, pressed && { opacity: 0.6 }]}
-              accessibilityRole="button"
-            >
-              <Text style={[styles.retryText, fs(13, 18), { color: t.colors.text }]}>{tr('chat.message.editConnection')}</Text>
-            </Pressable>
+            />
           ) : isLast ? (
-            <Pressable
-              onPress={onRetry}
-              style={({ pressed }) => [styles.retryBtn, { borderColor: t.colors.borderStrong }, pressed && { opacity: 0.6 }]}
-              accessibilityRole="button"
-            >
-              <Icon name="retry" size={15} color={t.colors.text} />
-              <Text style={[styles.retryText, fs(13, 18), { color: t.colors.text }]}>{tr('chat.message.retry')}</Text>
-            </Pressable>
+            <Button label={tr('chat.message.retry')} icon={(color, size) => <Icon name="retry" size={size} color={color} />} size="small" onPress={onRetry} testID="msg-retry" />
           ) : null}
         </View>
       ) : null}
       {recovering ? (
-        <Text style={[styles.stopped, fs(12.5, 17), { color: t.colors.muted }]} accessibilityLiveRegion="polite">
+        <Text testID="msg-recovering" style={[t.typography.caption, styles.stopped, { color: t.colors.muted }]} accessibilityLiveRegion="polite">
           {tr('chat.message.recovering')}
         </Text>
+      ) : streaming && message.reconnecting !== undefined ? (
+        // resumable stream lost: re-attaching at the bridge, the answer continues where it stopped (hermes/stream.ts)
+        <Text style={[t.typography.caption, styles.stopped, { color: t.colors.muted }]} accessibilityLiveRegion="polite">
+          {tr('chat.message.reconnecting')}
+        </Text>
       ) : message.status === 'stopped' ? (
-        <Text style={[styles.stopped, fs(12.5, 17), { color: t.colors.subtle }]}>{tr('chat.message.stopped')}</Text>
+        <Text testID="msg-stopped" style={[t.typography.caption, styles.stopped, { color: t.colors.subtle }]}>{tr('chat.message.stopped')}</Text>
       ) : message.status === 'done' ? (
         <LateMark message={message} />
       ) : null}
@@ -592,17 +608,22 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
       )}
       {verbose && sheetKey ? <ToolDetailSheet message={message} rowKey={sheetKey} onClose={() => setSheetKey(null)} /> : null}
       {/* N5: no action row under an answer that is still being fetched (stream lost, recovery running) */}
-      {!streaming && !recovering && message.status !== 'error' && (hasCopy || reportable) ? (
+      {!streaming && !recovering && message.status !== 'error' && (hasCopy || reportable) && !rowReady ? (
         <View style={styles.actionsRow}>
-          {/* visible row: Kopieren · Vorlesen · Teilen · ⋯ (retry variants, branch, image, Melden live in the menu) */}
+          <View style={styles.rowPlaceholder} />
+        </View>
+      ) : !streaming && !recovering && message.status !== 'error' && (hasCopy || reportable) ? (
+        perfWrap('ActionRow', <View style={styles.actionsRow}>
+          {/* visible row: Kopieren · Vorlesen · Teilen · Als Bild teilen · ⋯ (retry variants, branch, Melden live in the menu) */}
           {hasCopy ? <CopyButton onCopy={() => copy(copyText(), tr('chat.message.answerCopied'))} /> : null}
           {local || !hasCopy ? null : <SpeakButton message={shownText === message.text ? message : { id: message.id, text: shownText }} conn={voiceConn} onError={toast} />}
           {hasCopy ? <IconButton icon="share" label={tr('actions.share')} onPress={() => void share(copyText())} /> : null}
+          {canShareImage ? <IconButton icon="image" label={tr('menus.answer.shareImage')} onPress={() => setImageOpen(true)} /> : null}
           {openMenu ? <IconButton icon="more" label={tr('menus.answer.more')} onPress={openMenu} /> : null}
           {showTime ? <Timestamp at={message.createdAt} inline /> : null}
           {/* quick thread, newest answer: the way on to the full agent */}
           {actions?.handOff && message.quick && isLast && !local ? <HandOffButton onPress={() => actions.handOff?.(id)} /> : null}
-        </View>
+        </View>)
       ) : showTime && !streaming ? (
         <Timestamp at={message.createdAt} />
       ) : null}
@@ -642,12 +663,11 @@ function firstMarkdown(segments: readonly Segment[]): number {
 function Timestamp({ at, inline }: { at: number; inline?: boolean }) {
   const t = useTheme();
   const { formatDate } = useLocale();
-  const size = scaledText(11.5, 15, t.fontScale);
   if (!at || !Number.isFinite(at)) return null;
   const today = new Date(at).toDateString() === new Date().toDateString();
   const label = formatDate(at, today ? { timeStyle: 'short' } : { dateStyle: 'short', timeStyle: 'short' });
   return (
-    <Text style={[styles.time, size, inline && styles.timeInline, { color: t.colors.subtle }]} numberOfLines={1}>
+    <Text style={[t.typography.micro, styles.time, inline && styles.timeInline, { color: t.colors.subtle }]} numberOfLines={1}>
       {label}
     </Text>
   );
@@ -667,7 +687,7 @@ function CopyButton({ onCopy }: { onCopy: () => void }) {
       hitSlop={8}
       accessibilityRole="button"
       accessibilityLabel={copied ? tr('actions.copied') : tr('actions.copy')}
-      style={({ pressed }) => [styles.iconBtn, styles.copyBtn, pressed && { backgroundColor: t.colors.surfacePressed }]}
+      style={({ pressed }) => [styles.iconBtn, { borderRadius: t.radii.control }, styles.copyBtn, pressed && { backgroundColor: t.colors.surfacePressed }]}
     >
       <Icon name={copied ? 'check' : 'copy'} size={17} color={copied ? t.colors.success : t.colors.muted} />
       {/* icon only: a "Kopiert" label pushed the neighbouring actions ~48 dp (E2E round 7); the toast says it */}
@@ -675,7 +695,7 @@ function CopyButton({ onCopy }: { onCopy: () => void }) {
   );
 }
 
-function IconButton({ icon, label, onPress }: { icon: Extract<IconName, 'copy' | 'retry' | 'share' | 'more'>; label: string; onPress: () => void }) {
+function IconButton({ icon, label, onPress }: { icon: Extract<IconName, 'copy' | 'retry' | 'share' | 'image' | 'more'>; label: string; onPress: () => void }) {
   const t = useTheme();
   return (
     <Pressable
@@ -683,7 +703,7 @@ function IconButton({ icon, label, onPress }: { icon: Extract<IconName, 'copy' |
       hitSlop={8}
       accessibilityRole="button"
       accessibilityLabel={label}
-      style={({ pressed }) => [styles.iconBtn, pressed && { backgroundColor: t.colors.surfacePressed }]}
+      style={({ pressed }) => [styles.iconBtn, { borderRadius: t.radii.control }, pressed && { backgroundColor: t.colors.surfacePressed }]}
     >
       <Icon name={icon} size={17} color={t.colors.muted} />
     </Pressable>
@@ -746,7 +766,7 @@ function HuiSegment({ seg, onAction, route }: { seg: Extract<Segment, { kind: 'h
     // the block was not a renderable node: its content as a readable list + the raw block on demand
     return (
       <View>
-        <Text style={[styles.fallbackNote, { color: t.colors.muted }, scaledText(12.5, 17, t.fontScale)]}>{tr('chat.message.componentFallback')}</Text>
+        <Text style={[t.typography.caption, styles.fallbackNote, { color: t.colors.muted }]}>{tr('chat.message.componentFallback')}</Text>
         <HuiView node={seg.node} streaming={false} onAction={onAction} routeFormat={route} animateIn={fadeIn} />
         <RawBlock raw={seg.raw} />
       </View>
@@ -754,9 +774,9 @@ function HuiSegment({ seg, onAction, route }: { seg: Extract<Segment, { kind: 'h
   }
   return (
     <View>
-      <View style={[styles.errorBox, { backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.m }]}>
+      <View style={[styles.errorBox, { backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.control }]}>
         <Icon name="alert" size={16} color={t.colors.muted} />
-        <Text style={[{ flex: 1, color: t.colors.muted }, scaledText(13, 18, t.fontScale)]}>
+        <Text style={[t.typography.caption, { flex: 1, color: t.colors.muted }]}>
           {seg.error ? tr('chat.message.componentErrorDetail', { error: seg.error }) : tr('chat.message.componentError')}
         </Text>
       </View>
@@ -777,17 +797,17 @@ function RawBlock({ raw }: { raw: string }) {
         onPress={() => setOpen((o) => !o)}
         hitSlop={6}
         accessibilityRole="button"
-        accessibilityState={{ expanded: open }}
+        {...a11yState({ expanded: open })}
         style={styles.reasoningHead}
       >
-        <Text style={[styles.reasoningTitle, scaledText(13, 18, t.fontScale), { color: t.colors.muted }]}>
+        <Text style={[t.typography.caption, styles.reasoningTitle, { color: t.colors.muted }]}>
           {open ? tr('chat.message.hideRaw') : tr('chat.message.showRaw')}
         </Text>
         <Icon name={open ? 'chevronDown' : 'chevronRight'} size={14} color={t.colors.muted} />
       </Pressable>
       {open ? (
-        <ScrollView horizontal style={[styles.rawBody, { backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.s }]} contentContainerStyle={{ padding: 10 }}>
-          <Text selectable style={[styles.rawText, { color: t.colors.muted }]}>
+        <ScrollView horizontal style={[styles.rawBody, { backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.control }]} contentContainerStyle={{ padding: 10 }}>
+          <Text selectable style={[t.typography.mono, { color: t.colors.muted }]}>
             {raw.length > 20000 ? raw.slice(0, 20000) + '…' : raw}
           </Text>
         </ScrollView>
@@ -801,8 +821,6 @@ function Reasoning({ text, live }: { text: string; live: boolean }) {
   const t = useTheme();
   const tr = useT();
   const [open, setOpen] = useState(false);
-  const titleSize = scaledText(13.5, 18, t.fontScale);
-  const bodySize = scaledText(13.5, 20, t.fontScale);
   return (
     <View style={styles.reasoning}>
       <Pressable
@@ -812,15 +830,15 @@ function Reasoning({ text, live }: { text: string; live: boolean }) {
         }}
         hitSlop={6}
         accessibilityRole="button"
-        accessibilityState={{ expanded: open }}
+        {...a11yState({ expanded: open })}
         style={styles.reasoningHead}
       >
-        <Text style={[styles.reasoningTitle, titleSize, { color: t.colors.muted }]}>{live ? tr('chat.thinking.live') : tr('chat.thinking.done')}</Text>
+        <Text style={[t.typography.caption, styles.reasoningTitle, { color: t.colors.muted }]}>{live ? tr('chat.thinking.live') : tr('chat.thinking.done')}</Text>
         <Icon name={open ? 'chevronDown' : 'chevronRight'} size={14} color={t.colors.muted} />
       </Pressable>
       {open ? (
         <View style={[styles.reasoningBody, { borderLeftColor: t.colors.borderStrong }]}>
-          <Text style={[styles.reasoningText, bodySize, { color: t.colors.muted }]} selectable>
+          <Text style={[t.typography.callout, { color: t.colors.muted }]} selectable>
             {text.trim()}
           </Text>
         </View>
@@ -833,13 +851,11 @@ const styles = StyleSheet.create({
   userRow: { flexDirection: 'column', alignItems: 'flex-end', gap: 6, paddingLeft: 56 },
   pendingWrap: { alignSelf: 'flex-end', alignItems: 'flex-end', maxWidth: '100%' },
   pendingRow: { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end' },
-  pendingText: { fontSize: 13 },
   queuedNote: { textAlign: 'right', marginBottom: 4 },
   userBubble: { paddingHorizontal: 16, paddingVertical: 10, maxWidth: '100%' },
-  userText: { fontSize: 16, lineHeight: 23 },
   userPlain: { borderRightWidth: 2, paddingRight: 12, paddingLeft: 0, paddingVertical: 2, borderRadius: 0 },
   userPlainText: { textAlign: 'right' },
-  time: { fontSize: 11.5, marginTop: 2, fontVariant: ['tabular-nums'] },
+  time: { marginTop: 2, fontVariant: ['tabular-nums'] },
   timeInline: { marginTop: 0, marginLeft: 6 },
   replyRow: { maxWidth: '100%', alignItems: 'flex-end' },
   assistant: { width: '100%' },
@@ -848,21 +864,19 @@ const styles = StyleSheet.create({
   fallbackNote: { marginBottom: 6 },
   rawWrap: { marginTop: 8 },
   rawBody: { marginTop: 6, maxHeight: 320 },
-  rawText: { fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }), fontSize: 12, lineHeight: 17 },
-  errorTitle: { fontSize: 14, fontWeight: '600' },
-  retryBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 6 },
-  retryText: { fontSize: 13, fontWeight: '500' },
-  stopped: { fontSize: 12.5, marginTop: 6 },
-  statusNote: { fontSize: 13, fontStyle: 'italic', marginBottom: 6 },
+  errorTitle: { fontWeight: '600' },
+  stopped: { marginTop: 6 },
+  statusNote: { fontStyle: 'italic', marginBottom: 6 },
   reasoning: { marginBottom: 10 },
   reasoningHead: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', paddingVertical: 2 },
-  reasoningTitle: { fontSize: 13.5, fontWeight: '500' },
+  reasoningTitle: { fontWeight: '500' },
   reasoningBody: { borderLeftWidth: 2, paddingLeft: 10, marginTop: 6 },
-  reasoningText: { fontSize: 13.5, lineHeight: 20 },
   actionsRow: { flexDirection: 'row', alignItems: 'center', gap: 2, marginTop: 6, marginLeft: -6 },
   attachments: { marginBottom: 10 },
   followups: { marginTop: 12 },
-  iconBtn: { padding: 6, borderRadius: 8 },
+  iconBtn: { padding: 6 },
+  /** action row height (iconBtn: 6 + 17 + 6) while the deferred row is not rendered yet */
+  rowPlaceholder: { height: 29 },
   copyBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   reportedCover: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 10, alignSelf: 'flex-start' },
 });

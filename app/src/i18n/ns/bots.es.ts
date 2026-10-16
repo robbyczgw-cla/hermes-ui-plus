@@ -13,7 +13,7 @@ export const bots = {
     field: 'Bots',
     placeholder: 'p. ej. research, trabajo',
     footnote:
-      'Los bots son perfiles de Hermes: modelo, memoria y habilidades propios. Nombres como en «hermes profile create», separados por comas. A través del UI bridge aparecen solos. El bot se elige en el chat desde el menú de modelos.',
+      'Los bots son perfiles de Hermes: modelo, memoria y skills propios. Nombres como en «hermes profile create», separados por comas. A través del bridge aparecen solos. El bot se elige en el chat desde el menú de modelos.',
     invalid: 'Se ignora (solo minúsculas, dígitos, - y _): {names}',
   },
   drawer: {

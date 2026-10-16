@@ -56,7 +56,7 @@ export const conversations = {
   menu: {
     rename: 'Renombrar',
     pin: 'Fijar',
-    unpin: 'Desfijar',
+    unpin: 'Dejar de fijar',
     delete: 'Eliminar',
     select: 'Seleccionar',
   },

@@ -3,6 +3,7 @@ import { View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { interpolate, useAnimatedStyle, useReducedMotion, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import { useTheme, type Theme } from '../../theme';
+import { scaleFont } from '../../themes';
 import { useHui } from '../../primitives/context';
 import { FadeIn, HText, InlineText, PressableScale, Surface } from '../../primitives/basics';
 import { Icon } from '../../primitives/Icon';
@@ -68,7 +69,7 @@ export function Flashcards({ node }: { node: Partial<HuiFlashcards> }) {
       <Surface style={{ gap: t.spacing.l }}>
         {header}
         <FadeIn style={{ alignItems: 'center', gap: 6, paddingVertical: t.spacing.m }}>
-          <HText style={{ fontSize: 34, lineHeight: 42 }}>🎉</HText>
+          <HText style={scaleFont(34, 42, t.fontScale)}>🎉</HText>
           <HText variant="headline">{S.flashcards.doneTitle}</HText>
           <HText variant="callout" color="muted" align="center">
             {S.flashcards.doneText(deck.total, deckRounds(deck))}
@@ -96,7 +97,7 @@ export function Flashcards({ node }: { node: Partial<HuiFlashcards> }) {
         {flipped ? (
           <>
             <SecondaryButton label={S.flashcards.again} onPress={() => verdict('again')} style={{ flex: 1 }} />
-            <PrimaryButton label={S.flashcards.known} tone="success" icon="check" onPress={() => verdict('known')} style={{ flex: 1 }} />
+            <PrimaryButton label={S.flashcards.known} icon="check" onPress={() => verdict('known')} style={{ flex: 1 }} />
           </>
         ) : (
           <SecondaryButton label={S.flashcards.flip} onPress={() => setFlipped(true)} style={{ flex: 1 }} />
@@ -160,7 +161,7 @@ function Card({ t, card, flipped, onFlip, onVerdict }: { t: Theme; card: Flashca
     right: 0,
     top: 0,
     minHeight: h,
-    borderRadius: t.radii.l,
+    borderRadius: t.radii.card,
     borderWidth: 1,
     borderColor: side === 'back' ? t.colors.accent : t.colors.border,
     backgroundColor: side === 'back' ? t.colors.accentSoft : t.colors.surfaceAlt,
@@ -194,7 +195,7 @@ function Card({ t, card, flipped, onFlip, onVerdict }: { t: Theme; card: Flashca
           style={{ height: h }}
         >
           <Animated.View style={[face('front'), front]} onLayout={measure} pointerEvents="none">
-            <HText variant="micro" color="subtle" style={{ textTransform: 'uppercase', letterSpacing: 0.6 }}>
+            <HText variant="caption" weight="600" color="subtle">
               {S.flashcards.front}
             </HText>
             <InlineText variant="title" text={card.front} style={{ textAlign: 'center' }} />
@@ -203,7 +204,7 @@ function Card({ t, card, flipped, onFlip, onVerdict }: { t: Theme; card: Flashca
             </HText>
           </Animated.View>
           <Animated.View style={[face('back'), back]} onLayout={measure} pointerEvents="none">
-            <HText variant="micro" color="accent" style={{ textTransform: 'uppercase', letterSpacing: 0.6 }}>
+            <HText variant="caption" weight="600" color="accent">
               {S.flashcards.back}
             </HText>
             <InlineText variant="headline" text={card.back || '–'} style={{ textAlign: 'center' }} />

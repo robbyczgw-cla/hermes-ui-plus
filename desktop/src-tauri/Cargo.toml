@@ -1,6 +1,6 @@
 [package]
 name = "hermes-ui-desktop"
-version = "0.1.0-alpha.1"
+version = "0.1.1"
 description = "Hermes UI desktop app"
 edition = "2021"
 publish = false

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the Hermes UI+ web app (PWA) as a static bundle, memory-capped and in a clean copy of app/.
+# Build the HUI+ (Hermes UI+) web app (PWA) as a static bundle, memory-capped and in a clean copy of app/.
 #
 # Usage: [FLAVOR=hermes|personal] [HUI_PRIVATE_DIR=…] scripts/build-web.sh [--brand <brand.env>]   (docs/BUILD.md "Flavors")
 #   FLAVOR=hermes (default)  official build → dist/web/. Fails if anything from the private overlay would ship
@@ -22,9 +22,9 @@
 # one web build at a time (flock), refusing to start when MemAvailable is too low.
 #
 # Env (defaults in brackets):
-#   EXPO_PUBLIC_APP_NAME [BRAND_NAME]        app name (manifest name, iOS home-screen title fallback); hermes default from
-#                                            app/brand/identity.json, personal: from personal.env
-#   EXPO_PUBLIC_APP_SHORT_NAME [BRAND_SHORT_NAME / =APP_NAME]  home-screen label + in-app header (keep it ≤ 12 chars)
+#   EXPO_PUBLIC_APP_NAME [BRAND_DISPLAY_NAME] app name (manifest name, page title, iOS home-screen title fallback);
+#                                            hermes default from app/brand/identity.json ("HUI+"), personal: personal.env
+#   EXPO_PUBLIC_APP_SHORT_NAME [BRAND_DISPLAY_NAME / =APP_NAME]  home-screen label + in-app header (keep it ≤ 12 chars)
 #   EXPO_PUBLIC_THEME_COLOR [#ffffff]        manifest theme/background colour, light theme-color meta
 #                                            (hermes default: identity.json colors.paper)
 #   EXPO_PUBLIC_THEME_COLOR_DARK [#000000]   dark theme-color meta (hermes default: identity.json colors.ink)
@@ -32,6 +32,9 @@
 #                                            an earlier deployment's worker + hui-shell-* caches (scripts/web-finalize.mjs)
 #   MEM_MAX [4G]  CPU_QUOTA [300%]  MIN_AVAIL_GB [5]  MAX_WORKERS [2]
 #   BUILD_DIR [~/builds/hermes-ui-web]
+#   HUI_BUILD_PLAIN=1                        no flock / MemAvailable check / systemd scope: for CI runners
+#                                            (.github/workflows/release.yml) and machines without a systemd user session.
+#                                            Everything else (flavor guards, release gate, flavor mark) is unchanged.
 #   NPM_CI=1                                 install node_modules with `npm ci` instead of hard-linking the
 #                                            repo's app/node_modules into the clean copy (default: hard-link
 #                                            copy when the repo has node_modules, else npm ci)
@@ -104,7 +107,7 @@ flavor_init
 if [ "$FLAVOR" = personal ]; then DEFAULT_OUT="$ROOT/dist/web-personal"; else DEFAULT_OUT="$ROOT/dist/web"; fi
 WEB_OUT="${WEB_OUT:-$DEFAULT_OUT}"
 if [ "$FLAVOR" != personal ]; then
-  export EXPO_PUBLIC_APP_NAME="${EXPO_PUBLIC_APP_NAME:-$BRAND_NAME}" EXPO_PUBLIC_APP_SHORT_NAME="${EXPO_PUBLIC_APP_SHORT_NAME:-$BRAND_SHORT_NAME}"
+  export EXPO_PUBLIC_APP_NAME="${EXPO_PUBLIC_APP_NAME:-$BRAND_DISPLAY_NAME}" EXPO_PUBLIC_APP_SHORT_NAME="${EXPO_PUBLIC_APP_SHORT_NAME:-$BRAND_DISPLAY_NAME}"
   export WEB_DESCRIPTION="${WEB_DESCRIPTION:-$BRAND_TAGLINE}"
   # browser chrome / PWA splash in the Standard theme's backgrounds (identity.json colors.paper / colors.ink)
   export EXPO_PUBLIC_THEME_COLOR="${EXPO_PUBLIC_THEME_COLOR:-$BRAND_PAPER}" EXPO_PUBLIC_THEME_COLOR_DARK="${EXPO_PUBLIC_THEME_COLOR_DARK:-$BRAND_INK}"
@@ -120,19 +123,22 @@ exec > >(tee -a "$LOG") 2>&1
 trap 'echo "WEB BUILD FAILED (line $LINENO). Log: $LOG" >&2' ERR
 T0=$SECONDS
 
-exec 9>"$HOME/builds/.hermes-web-build.lock"
-flock -n 9 || { echo "another web build is running ($HOME/builds/.hermes-web-build.lock)"; exit 1; }
+PLAIN="${HUI_BUILD_PLAIN:-0}"
+if [ "$PLAIN" != 1 ]; then
+  exec 9>"$HOME/builds/.hermes-web-build.lock"
+  flock -n 9 || { echo "another web build is running ($HOME/builds/.hermes-web-build.lock)"; exit 1; }
 
-AVAIL_KB="$(awk '/^MemAvailable:/{print $2}' /proc/meminfo)"
-echo "MemAvailable: $((AVAIL_KB/1024)) MB (need >= $((MIN_AVAIL_GB*1024)) MB)"
-if [ "$AVAIL_KB" -lt $((MIN_AVAIL_GB*1024*1024)) ]; then
-  echo "REFUSING TO BUILD: not enough free memory (lower MIN_AVAIL_GB deliberately if you must)."
-  exit 1
+  AVAIL_KB="$(awk '/^MemAvailable:/{print $2}' /proc/meminfo)"
+  echo "MemAvailable: $((AVAIL_KB/1024)) MB (need >= $((MIN_AVAIL_GB*1024)) MB)"
+  if [ "$AVAIL_KB" -lt $((MIN_AVAIL_GB*1024*1024)) ]; then
+    echo "REFUSING TO BUILD: not enough free memory (lower MIN_AVAIL_GB deliberately if you must)."
+    exit 1
+  fi
+  export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+  export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}"
+  systemd-run --user --scope -q -p MemoryMax=64M true 2>/dev/null \
+    || { echo "systemd-run --user --scope not usable; refusing to build without memory limits"; exit 1; }
 fi
-export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
-export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}"
-systemd-run --user --scope -q -p MemoryMax=64M true 2>/dev/null \
-  || { echo "systemd-run --user --scope not usable; refusing to build without memory limits"; exit 1; }
 
 echo "=== rsync app/ -> $BUILD_DIR/app (clean copy)"
 mkdir -p "$BUILD_DIR/app"
@@ -148,17 +154,25 @@ if [ -n "${BRAND_ICON:-}" ]; then
   [ -f "$BRAND_ICON_FILE" ] || { echo "brand icon not found: $BRAND_ICON_FILE"; exit 2; }
 fi
 
-heavy_slice_init   # shared aggregate cap with APK builds / checks (scripts/lib/heavy.sh)
 UNIT="hermes-web-build-$TS"
 STAGE="$WEB_OUT.staging-$TS"
-# stop the scope (and any orphaned Metro workers) and drop the staging copy on every exit, also on Ctrl-C
-trap 'systemctl --user stop "$UNIT.scope" 2>/dev/null || true; rm -rf "$STAGE"' EXIT
-echo "=== expo export in scope $UNIT (MemoryMax=$MEM_MAX MemorySwapMax=0 CPUQuota=$CPU_QUOTA)"
 rc=0
-HERMES_WEB_INNER=1 BUILD_DIR="$BUILD_DIR" MAX_WORKERS="$MAX_WORKERS" BRAND_ICON_FILE="$BRAND_ICON_FILE" \
-systemd-run --user --scope --quiet --unit="$UNIT" "${HEAVY_SLICE[@]}" \
-  -p MemoryMax="$MEM_MAX" -p MemorySwapMax=0 -p CPUQuota="$CPU_QUOTA" \
-  bash "$ROOT/scripts/build-web.sh" || rc=$?
+if [ "$PLAIN" = 1 ]; then
+  # the runner is the isolation: no scope to stop, only the staging copy to drop
+  trap 'rm -rf "$STAGE"' EXIT
+  echo "=== expo export (plain mode, no systemd scope)"
+  HERMES_WEB_INNER=1 BUILD_DIR="$BUILD_DIR" MAX_WORKERS="$MAX_WORKERS" BRAND_ICON_FILE="$BRAND_ICON_FILE" \
+    bash "$ROOT/scripts/build-web.sh" || rc=$?
+else
+  heavy_slice_init   # shared aggregate cap with APK builds / checks (scripts/lib/heavy.sh)
+  # stop the scope (and any orphaned Metro workers) and drop the staging copy on every exit, also on Ctrl-C
+  trap 'systemctl --user stop "$UNIT.scope" 2>/dev/null || true; rm -rf "$STAGE"' EXIT
+  echo "=== expo export in scope $UNIT (MemoryMax=$MEM_MAX MemorySwapMax=0 CPUQuota=$CPU_QUOTA)"
+  HERMES_WEB_INNER=1 BUILD_DIR="$BUILD_DIR" MAX_WORKERS="$MAX_WORKERS" BRAND_ICON_FILE="$BRAND_ICON_FILE" \
+  systemd-run --user --scope --quiet --unit="$UNIT" "${HEAVY_SLICE[@]}" \
+    -p MemoryMax="$MEM_MAX" -p MemorySwapMax=0 -p CPUQuota="$CPU_QUOTA" \
+    bash "$ROOT/scripts/build-web.sh" || rc=$?
+fi
 PEAK="$(systemctl --user show "$UNIT.scope" -p MemoryPeak --value 2>/dev/null || true)"
 systemctl --user stop "$UNIT.scope" 2>/dev/null || true
 if [ "$rc" -ne 0 ]; then

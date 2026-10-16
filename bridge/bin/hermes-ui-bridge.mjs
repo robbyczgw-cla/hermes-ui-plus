@@ -11,7 +11,7 @@ if (nodeTooOld(process.versions.node)) {
   process.stderr.write(nodeTooOldMessage(process.versions.node, process.execPath));
   process.exit(1);
 }
-const { HELP, parseArgs, prepareEnv, preflight, featureSummary } = await import('../src/cli.mjs');
+const { HELP, parseArgs, prepareEnv, preflight, featureSummary, pairHint } = await import('../src/cli.mjs');
 
 const here = dirname(fileURLToPath(import.meta.url));
 const out = (s = '') => process.stdout.write(`${s}\n`);
@@ -102,7 +102,12 @@ async function main() {
   if (opts.check) {
     const results = await preflight(config);
     for (const r of results) out(`  [${r.level === 'ok' ? 'ok' : r.level === 'warn' ? '!!' : 'XX'}] ${r.message}`);
-    if (results.some((r) => r.level === 'error' || (opts.strict && r.fatalWhenStrict))) process.exit(1);
+    const fatal = results.filter((r) => r.level === 'error' || (opts.strict && r.fatalWhenStrict));
+    if (fatal.length) {
+      err(fatal.some((r) => r.level === 'error') ? '  stopping: see the error above'
+        : '  stopping (--strict: Hermes must be reachable at start; leave --strict out to start anyway and retry later)');
+      process.exit(1);
+    }
   }
   out('  features:');
   for (const [k, v] of featureSummary(config, env, { pairing, profiles: ctx.profiles })) out(`    ${k.padEnd(8)} ${v}`);
@@ -115,14 +120,15 @@ async function main() {
   if (opts.pair) {
     try {
       const uri = pairing.payload('paired via --pair');
-      out(`\n  Scan with the Hermes UI+ app (Settings > Scan QR code). ${devices ? 'One-time pairing code: works once, expires in 1 hour.' : 'Contains a credential, keep it private.'}`);
+      out(`\n  Scan with the HUI+ app (Settings > Scan QR code). ${devices ? 'One-time pairing code: works once, expires in 1 hour.' : 'Contains a credential, keep it private.'}`);
       if (!pairing.config.publicUrl) out(`  note: BRIDGE_PUBLIC_URL is not set, the QR points to ${pairing.effectiveUrl()}`);
       out(await qrTerminal(uri));
     } catch (e) {
       err(`  pairing refused: ${e.message}`);
     }
   } else if (tokenInfo?.created) {
-    out('\n  Pair the app: restart with --pair, or open http://127.0.0.1:' + server.address().port + '/bridge/pair on this machine.');
+    const { inContainer } = await import('../src/setup/wizard.mjs');
+    out(`\n  ${pairHint({ port: server.address().port, pairingEnabled: pairing.isEnabled(), inContainer: inContainer() })}`);
   }
   installShutdownHandlers(ctx, stopServices);
 }

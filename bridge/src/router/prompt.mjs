@@ -1,7 +1,7 @@
 import { COMPONENTS, DEFINITIONS, ROUTE_FORMATS } from './taxonomy.mjs';
 
 // Bump when the prompt/taxonomy changes: it is part of the decision cache key.
-export const PROMPT_VERSION = 'r6';
+export const PROMPT_VERSION = 'r7';
 
 function componentLine(format) {
   const c = COMPONENTS[format];
@@ -16,7 +16,7 @@ receives your choice as a hint. The app renders native components (tables, chart
 comparisons, steps, timelines, forms, images, choice cards, checklists, recipes, maps, quizzes
 and flashcards, calculators, timers, translation cards, polls, editable day agendas, weather, decision
 matrices, ranking and rating widgets, charts incl. radar/gauge/heatmap/waterfall, place and product cards, guided
-step-by-step guides, workouts, study plans, vocabulary trainers, mind maps, path comparisons, architecture blocks) and sandboxed HTML (diagrams, custom interactive widgets).
+step-by-step guides, workouts, study plans, vocabulary trainers, mind maps, path comparisons, architecture blocks, code diffs, terminal output, changed-file lists) and sandboxed HTML (diagrams, custom interactive widgets).
 Plain text is the default and is correct for most messages.
 
 ## Formats
@@ -41,7 +41,8 @@ ${ROUTE_FORMATS.map((f) => `- ${f}: ${DEFINITIONS[f]}${componentLine(f)}`).join(
    itineraries are map, while local businesses (restaurants, cafés, shops, opening hours) are places.
 7. The assistant needs a decision from the user: one decision among 2-6 concrete options
    ("hilf mir zu entscheiden", "ich kann mich nicht entscheiden", proposing times) → choice
-   instead of a prose question; 3+ inputs → form; options already named by the user → compare.
+   instead of a prose question; 3+ inputs → form; options already named by the user → compare (named
+   buyable products → products, component "compare", see rule 11).
 8. Lists: shopping/packing/to-do lists → checklist; a cooking recipe → recipe (a non-cooking
    how-to → steps); a timer, stopwatch, countdown or a reminder after a DURATION ("in 10 Minuten") → timer
    (reminders and alarms at a clock time or date → text).
@@ -58,7 +59,8 @@ ${ROUTE_FORMATS.map((f) => `- ${f}: ${DEFINITIONS[f]}${componentLine(f)}`).join(
     options by criteria/weights → decision (user names options without weighting → compare); put items in the
     user's own order → rank; one rating question on a scale → scale.
 11. Module formats (v4): restaurants/cafés/shops/"in der Nähe"/Öffnungszeiten → places; buying advice, "bestes … unter
-    200 €", product comparison with prices → products (two named items compared qualitatively → compare); hands-on
+    200 €", product comparison with prices → products; named buyable products compared (device models, appliances,
+    cars) → products, component "compare" (photos, prices, specs table); concepts, plans, services → compare; hands-on
     "Anleitung"/"Schritt für Schritt"/"wie wechsle ich …" (repair, assembly) → guide (software install or
     administrative steps → steps); "Trainingsplan"/"Workout" → workout; "Lernplan"/"in 4 Wochen lernen" →
     studyplan; "Vokabeln"/"vocabulario" → vocab; "Mindmap"/"Übersicht der Zusammenhänge" → mindmap;
@@ -68,7 +70,10 @@ ${ROUTE_FORMATS.map((f) => `- ${f}: ${DEFINITIONS[f]}${componentLine(f)}`).join(
     scatter; profile over several criteria → radar; one KPI vs target ("Tacho", "wie weit bin ich bei meinem Ziel")
     → gauge; activity per day over weeks → heatmap; budget/profit flow ("wohin geht mein Geld", "von Netto bis
     übrig") → waterfall; otherwise line/bar/area/pie/donut.
-13. Prefer text when unsure. Use confidence < 0.5 for genuine toss-ups.
+13. Coding views: a code change / patch → diff ("zeig mir den Diff", "show me the patch", "muestra el diff"); run a
+    command or the tests and show the output → terminal ("run the tests", "ejecuta git status"); the files an agent
+    changed → changes ("welche Dateien hast du geändert"). Writing or explaining code stays text.
+14. Prefer text when unsure. Use confidence < 0.5 for genuine toss-ups.
 
 ## When NOT to use a visual (choose text)
 - Short factual answers: "Wie hoch ist die Zugspitze?", "What is the capital of Peru?",
@@ -78,7 +83,7 @@ ${ROUTE_FORMATS.map((f) => `- ${f}: ${DEFINITIONS[f]}${componentLine(f)}`).join(
 - Personal, emotional, medical-worry or relationship topics ("Ich bin total gestresst",
   "my dog died") – a warm text answer, never a chart or form.
 - Coding: writing, explaining, reviewing or debugging code, shell commands, regex, SQL → text
-  (code blocks are part of text), even if the code itself produces a chart.
+  (code blocks are part of text), even if the code itself produces a chart. Exceptions: diff, terminal, changes.
 - Writing tasks: emails, letters, poems, summaries, long translations of documents, rewording.
 - Agent actions and commands: reminders at a clock time or date ("Erinnere mich morgen um 8 …"), alarms
   ("Weck mich um 7 Uhr"), sending messages, file or server operations, settings. Timer, countdown and
@@ -89,7 +94,8 @@ ${ROUTE_FORMATS.map((f) => `- ${f}: ${DEFINITIONS[f]}${componentLine(f)}`).join(
 
 ## Counterexamples
 - "Liste mir 3 gute Bücher über Stoizismus" → text (a short list is Markdown, not a table).
-- "Vergleiche iPhone 17 und Pixel 11" → compare; "Vergleiche die Specs von 6 Laptops in Zahlen" → table.
+- "Vergleiche iPhone 17 und Pixel 11" → products (component "compare"); "Vergleiche die Specs von 6 Laptops in Zahlen" → table;
+  "Kubernetes vs Nomad" / "Miete vs Kauf" → compare.
 - "Wie entwickelte sich der DAX seit 2000?" → chart (line); "Wie steht der DAX gerade?" → text or stats.
 - "Wie installiere ich Docker auf Ubuntu?" → steps; "Fix this Dockerfile error" → text.
 - "Plane meinen Tag morgen" → timeline; "Erinnere mich morgen um 8 an den Arzt" → text (action).
@@ -110,21 +116,24 @@ ${ROUTE_FORMATS.map((f) => `- ${f}: ${DEFINITIONS[f]}${componentLine(f)}`).join(
 - "Wir können uns nicht einigen, wo wir essen: macht eine Umfrage" → poll; "Ich weiß nicht, was ich essen soll" → choice.
 - "Plane meinen Samstag mit Zahnarzt um 10 und Kino um 19" → agenda; "Zeig die wichtigsten Etappen der Raumfahrt" → timeline.
 - "Brauche ich morgen einen Regenschirm in Köln?" → weather; "Wie entsteht Regen?" → text.
-- "Wohnung A, B oder C nach Preis, Lage und Größe gewichten" → decision; "Vergleiche iPhone und Pixel" → compare.
+- "Wohnung A, B oder C nach Preis, Lage und Größe gewichten" → decision; "Vergleiche Lissabon und Porto" → compare.
 - "Sortiere meine Prioritäten im Urlaub" → rank; "Wie gut war der Film, 1 bis 5?" → scale.
 - "Zeig die größten Städte als Ranking" → chart (hbar); "Netto bis übrig Monatsbudget" → chart (waterfall);
   "Ich habe 70 % meines Sparziels" → chart (gauge); "Korrelation Größe und Gewicht" → chart (scatter).
 - "Gibt es ein gutes Café in der Nähe vom Bahnhof Ulm?" / "Öffnungszeiten Apotheke Salzburg" → places;
   "Wann hat der Hornbach in Ulm heute offen?" → text (one fact); "Zeig die Cafés in Ulm auf einer Karte" → map.
-- "Welche Kopfhörer unter 200 € soll ich kaufen?" → products; "Vergleiche iPhone 17 und Pixel 11" → compare;
+- "Welche Kopfhörer unter 200 € soll ich kaufen?" → products; "Sony XM6 vs Bose QC" / "Steam Deck vs ROG Ally vs
+  Legion Go" → products (component "compare");
   "Wie funktioniert Noise-Cancelling?" → text.
 - "Wie wechsle ich einen Fahrradschlauch, Schritt für Schritt?" → guide; "Wie installiere ich Docker auf Ubuntu?" → steps.
 - "Trainingsplan für Brust und Schultern, 45 Minuten" → workout; "Wie viel Eiweiß brauche ich nach dem Training?" → text.
 - "Lernplan Spanisch A2 in 4 Wochen" → studyplan; "Teste mich zu Vulkanen" → quiz; "Plane meinen Samstag" → agenda.
 - "Vokabeln fürs Restaurant auf Spanisch" → vocab; "Übersetze Danke ins Spanische" → translation.
 - "Mach eine Mindmap zur Photosynthese" → mindmap; "Zeichne den Ablauf einer Steuererklärung" → diagram.
-- "Dateien der VM: im Mac, in der VM-Disk oder im geteilten Ordner?" → paths; "Vergleiche iPhone und Pixel" → compare.
+- "Dateien der VM: im Mac, in der VM-Disk oder im geteilten Ordner?" → paths; "Docker oder Podman?" → compare.
 - "Wie unterscheiden sich OrbStack und Parallels im Aufbau?" → blocks; "Zeichne den Ablauf eines Logins" → diagram.
+- "Zeig mir den Diff für user.ts" → diff; "Führ die Tests aus" → terminal; "Welche Dateien hast du geändert?" → changes;
+  "Schreib eine Funktion, die Dateien sortiert" / "Was macht git rebase?" → text.
 - "[quiz:abc] 2/4 richtig" / "[poll:x] Pizza 3 · Sushi 1 (4 Stimmen)" → text (machine reply from the widget);
   "[guide:reifen] Fertig" / "[mindmap] Erkläre „Calvin-Zyklus“ genauer" → text.
 

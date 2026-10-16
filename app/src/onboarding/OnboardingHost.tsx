@@ -12,13 +12,14 @@
 // on that profile · starter prompt → queued for the new chat (starterPrompt.ts; the session sends it).
 import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { BackHandler, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { BackHandler, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Text } from '../ui/primitives/Text';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useConversations } from '../conversations';
 import { useT } from '../i18n';
 import { useConnection } from '../settings/ConnectionProvider';
 import { PRESET_DEMO_ID, type ConnectionProfile } from '../settings/profiles';
-import { useTheme } from '../ui';
+import { textStyle, useTheme } from '../ui';
 import { pairConnectBusy, pairConnectLock, pairLinkArrival } from './connectLock';
 import { usePairDeepLink } from './deepLink';
 import { subscribeOnboardingRequests, type OnboardingRequest } from './hostEvents';
@@ -229,7 +230,7 @@ function CloseButton({ onPress }: { onPress(): void }) {
       accessibilityLabel={tr('onboarding.common.close')}
       style={({ pressed }) => [styles.close, { top: insets.top + 11, backgroundColor: t.colors.surfaceAlt, opacity: pressed ? 0.6 : 1 }]}
     >
-      <Text style={[styles.closeText, { color: t.colors.text }]}>✕</Text>
+      <Text style={[textStyle(t, 'body'), { color: t.colors.text, fontWeight: '600' }]}>✕</Text>
     </Pressable>
   );
 }
@@ -238,5 +239,4 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   overlay: { zIndex: 100, elevation: 100 },
   close: { position: 'absolute', right: 14, width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
-  closeText: { fontSize: 16, fontWeight: '600' },
 });

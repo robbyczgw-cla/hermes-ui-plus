@@ -19,11 +19,13 @@ export type AnswerMenuActions = {
   speak?: () => void;
   speaking?: boolean;
   share?: () => void;
+  /** "Share as Image…": the share-as-image sheet */
+  shareImage?: () => void;
   branch?: () => void;
 };
 
 /**
- * Copy · Copy as Markdown │ Retry · Read Aloud · Share… │ Continue in New Chat. `keys` = what the in-app menu offers
+ * Copy · Copy as Markdown │ Retry · Read Aloud · Share… · Share as Image… │ Continue in New Chat. `keys` = what the in-app menu offers
  * for this answer (answerMenuItems), so both menus agree on availability.
  */
 export function answerContextMenu(keys: readonly string[], a: AnswerMenuActions, t: TFn): NativeMenu | null {
@@ -37,6 +39,7 @@ export function answerContextMenu(keys: readonly string[], a: AnswerMenuActions,
       { id: 'retry', label: t('desktop.ctx.retry'), fn: has('retry') ? a.retry : undefined },
       { id: 'speak', label: a.speaking ? t('desktop.ctx.stopReading') : t('desktop.ctx.readAloud'), fn: has('copy') ? a.speak : undefined },
       { id: 'share', label: t('desktop.ctx.share'), fn: has('share') ? a.share : undefined },
+      { id: 'shareImage', label: t('desktop.ctx.shareImage'), fn: has('shareImage') ? a.shareImage : undefined },
     ],
     [{ id: 'branch', label: t('desktop.ctx.branch'), fn: has('branch') ? a.branch : undefined }],
   ];

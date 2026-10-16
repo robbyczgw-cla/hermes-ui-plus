@@ -38,7 +38,7 @@ export const FORWARD_REQUEST_HEADERS = new Set([
 ]);
 /** Never sent back to the client: hop-by-hop (above), upstream CORS (the bridge does its own), cookies. */
 const DROP_RESPONSE = new Set(['set-cookie', 'set-cookie2']);
-const EXPOSE_HEADERS = 'X-Hermes-Session-Id, X-Hermes-Session-Key, X-Hermes-Completed, X-Hermes-Partial, X-Hermes-Error, X-Hermes-UI-Route, X-Hermes-UI-Bridge, X-Hermes-UI-Resume, X-Hermes-UI-Resumed';
+const EXPOSE_HEADERS = 'X-Hermes-Session-Id, X-Hermes-Session-Key, X-Hermes-Completed, X-Hermes-Partial, X-Hermes-Error, X-Hermes-UI-Route, X-Hermes-UI-Bridge, X-Hermes-UI-Resume, X-Hermes-UI-Resumed, Date, X-Hermes-UI-Server-Time';
 
 /** @param {import('node:http').IncomingHttpHeaders} h */
 export function filterRequestHeaders(h) {

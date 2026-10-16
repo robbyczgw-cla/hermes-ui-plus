@@ -475,3 +475,21 @@ test('typed fences while streaming: held back until the first non-whitespace cha
   // an empty typed fence is an (empty) code block, not an error component
   assert.deepEqual(kinds(parseMessage('```poll\n```\n')), ['markdown']);
 });
+
+
+test('terminal text fences preserve a JSON log line instead of inferring an empty node', () => {
+  const nodeOf = (text: string) => {
+    const segment = parseMessage(text)[0];
+    assert.equal(segment.kind, 'hui');
+    return (segment as { node?: { type?: string; output?: string; status?: string } }).node;
+  };
+  for (const raw of ['{"level":"info","message":"started"}', '{"ok":false,"error":"test failed"}']) {
+    const node = nodeOf('```terminal\n' + raw + '\n```');
+    assert.equal(node?.type, 'terminal');
+    assert.equal(node?.output?.trim(), raw);
+  }
+  assert.equal(nodeOf('```terminal\n{"command":"echo test","output":"ok"}\n```')?.output, 'ok', 'structured terminal descriptors still work');
+  const running = nodeOf('```terminal\n{"status":"running"}\n```');
+  assert.equal(running?.status, 'running');
+  assert.equal(running?.output, undefined, 'a running descriptor stays a loading placeholder');
+});

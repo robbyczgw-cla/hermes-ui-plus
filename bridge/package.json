@@ -1,6 +1,6 @@
 {
   "name": "hermes-ui-plus-bridge",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.1",
   "description": "Optional UI Bridge for the Hermes Interactive UI+ app (unofficial community client for Hermes Agent): presentation router, uploads, voice, QR pairing and SSE pass-through in front of the Hermes Agent API.",
   "type": "module",
   "engines": {

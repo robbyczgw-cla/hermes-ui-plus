@@ -15,11 +15,11 @@ test('v4 taxonomy: new formats are native hui, defined, in prompt and schema', (
     assert.ok(ROUTE_FORMATS.includes(x), x);
     assert.equal(RENDERER[x], 'hui', x);
     assert.ok(DEFINITIONS[x], x);
-    assert.equal(COMPONENTS[x], null, x);
+    assert.deepEqual(COMPONENTS[x], x === 'products' ? ['compare'] : null, x); // products: router-products-compare.test.mjs
     assert.ok(ROUTER_SYSTEM_PROMPT.includes(`- ${x}: `), x);
     assert.equal(normalizeDecision({ format: x, confidence: 0.9, reason: 'r' }, { model: 'm', ms: 1 }).format, x);
   }
-  assert.equal(PROMPT_VERSION, 'r6');
+  assert.equal(PROMPT_VERSION, 'r7');
   assert.ok(ROUTER_SYSTEM_PROMPT.length < 24000, 'prompt stays compact');
   assert.equal(buildHint({ format: 'places', confidence: 0.86 }), 'UI-ROUTER-HINT: format=places confidence=0.9 data=live');
   // diagram:mindmap from an older model/prompt is the native mindmap now
@@ -39,7 +39,8 @@ test('v4 heuristic: places (de/en/es)', () => {
 
 test('v4 heuristic: products', () => {
   for (const t of ['Welche Kopfhörer unter 200 € soll ich kaufen?', 'Bestes Handy bis 500 Euro?', 'Best laptop under 800 dollars', 'Quiero comprar una aspiradora robot, ¿cuál me recomiendas?', 'Preisvergleich Saugroboter bis 300 €']) assert.equal(f(t).format, 'products', t);
-  assert.equal(f('Vergleiche iPhone 17 und Pixel 11').format, 'compare');
+  assert.equal(f('Vergleiche iPhone 17 und Pixel 11').format, 'products');
+  assert.equal(f('Vergleiche Lissabon und Porto').format, 'compare');
   for (const t of ['Wie funktioniert Noise-Cancelling bei Kopfhörern?', 'Ich will ein Haus kaufen. Wie finanziere ich das?', 'Welche Akkus haben die aktuellen E-Bikes von Bosch und Shimano']) assert.notEqual(f(t).format, 'products', t);
 });
 

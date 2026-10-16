@@ -1,13 +1,14 @@
 import { useRouter } from 'expo-router';
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useSyncExternalStore, type MutableRefObject } from 'react';
-import { Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Keyboard, KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
+import { Text } from '../ui/primitives/Text';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ActionRunnerProvider, ActiveTimersBar, listBus, useActionRunner, type ListBusEvent } from '../actions';
 import { ApprovalStack } from '../approvals';
 import type { ApprovalChoice, ApprovalRequest } from '../hermes/types';
 import type { Attachment, PendingUploads } from '../attachments';
 import { useConversations } from '../conversations';
-import { renameUnique, uniqueTitle } from '../conversations/title';
+import { displayTitle, renameUnique, uniqueTitle } from '../conversations/title';
 import type { ChatMessage, UseHermesChat } from '../hermes';
 import { useHermesCapabilities } from '../hermes/useHermesCapabilities';
 import { useHermesBots } from '../hermes/useHermesBots';
@@ -26,7 +27,7 @@ import { deleteMessageState, getNodeStateStore } from '../nodestate';
 import { parseMessage } from '../protocol/streamParser';
 import type { HuiAction } from '../protocol/types';
 import type { ConnectionProfile } from '../settings/profiles';
-import { columnMaxWidth, useKeyboardShortcuts, useTheme } from '../ui';
+import { Button, columnMaxWidth, useKeyboardShortcuts, useTheme } from '../ui';
 import { stopSpeaking, useAutoRead, useStopSpeakingOn, voiceConnFromProfile } from '../voice';
 import { lightHaptic, useChatActionHandler } from './actions';
 import { buildAskMessage } from './ask';
@@ -34,6 +35,7 @@ import { ChatHeader } from './ChatHeader';
 import { useChatShell } from './ChatShellContext';
 import { MarkdownImageContext } from './MarkdownImageContext';
 import { crashTestChat } from './crashTest';
+import { perfWrap } from '../perf/react';
 import { Composer, type ComposerHandle, type ComposerQuick } from './Composer';
 import { refreshQuickAvailability, useQuickAvailability } from '../quick/hooks';
 import { quickProfileFor } from '../quick/core';
@@ -53,9 +55,12 @@ import { PendingSendContext, QueuedSendContext, type PendingBubble, type QueuedB
 import { ModelPicker } from './ModelPicker';
 import { headerModelLabel } from './models';
 import { useToast } from './Toast';
+import { parseReplyMessage, replyCopyText } from './replyMessage';
+import { questionBefore } from './answers/shareModel';
 import { TurnActionsContext } from './turnActions';
 import type { Health } from './useConnectionHealth';
 import { AnswerActionsContext, type AnswerActions } from './answerActions';
+import { AnswerAnnouncer } from './AnswerAnnouncer';
 import { answerModelInfo, planRetry, retryModel, type RetryVariant } from './answerMenu';
 import { ChatMenu } from './ChatMenu';
 import { FindBar } from './FindBar';
@@ -153,7 +158,7 @@ function ChatViewVisible(props: Props) {
     <MarkdownImageContext.Provider value={props.profile.baseUrl || null}>
       <TurnActionsContext.Provider value={turnActions}>
         <ActionRunnerProvider conversationId={shell?.conversationId} onToast={toast} onSend={onRunnerSend}>
-          <ChatViewInner {...props} sendRef={sendRef} prefillRef={prefillRef} />
+          {perfWrap('ChatView', <ChatViewInner {...props} sendRef={sendRef} prefillRef={prefillRef} />)}
         </ActionRunnerProvider>
       </TurnActionsContext.Provider>
     </MarkdownImageContext.Provider>
@@ -592,10 +597,17 @@ function ChatViewInner({
           setModelOpen(true);
         }
       },
+      questionFor: (id) => {
+        const raw = questionBefore(getMessages(), id);
+        if (!raw) return null;
+        // protocol replies (`[choice:…] …`) as the chat shows them: free text + the chip texts
+        const reply = parseReplyMessage(raw, tr);
+        return reply ? replyCopyText(reply) : raw;
+      },
       modelInfo: (m) =>
         answerModelInfo({ kind: profile.kind, reported: m.metrics?.model ?? (m as { model?: string }).model, selected: model, serverDefault, effort }),
     }),
-    [profile.kind, conversationId, quickMode, quick?.handOff, branchFrom, isBusy, toast, tr, retryWith, sendText, model, serverDefault, effort],
+    [profile.kind, conversationId, quickMode, quick?.handOff, branchFrom, isBusy, toast, tr, retryWith, sendText, model, serverDefault, effort, getMessages],
   );
 
   // ---- "Im Chat suchen" (chat menu, ⌘/Ctrl+F): find bar, highlighted matches, scroll to the current one
@@ -729,7 +741,7 @@ function ChatViewInner({
       <ChatHeader
         topInset={insets.top}
         title={shownTitle}
-        chatTitle={meta?.title}
+        chatTitle={meta ? displayTitle(meta.title, tr('conversations.list.newChat')) : undefined}
         profileName={profile.name}
         health={health}
         offlineLabel={offlineHint}
@@ -761,15 +773,13 @@ function ChatViewInner({
       ) : null}
       {notice && noticeAction ? (
         <View style={[styles.noticeRow, { backgroundColor: t.colors.surfaceAlt }]} accessibilityRole="alert">
-          <Text style={[styles.noticeText, { color: t.colors.muted }]} numberOfLines={2}>
+          <Text style={[t.typography.caption, styles.noticeText, { color: t.colors.muted }]} numberOfLines={2}>
             {notice}
           </Text>
-          <Pressable onPress={noticeAction.onPress} accessibilityRole="button" hitSlop={8}>
-            <Text style={{ color: t.colors.accent, fontSize: 13, fontWeight: '600' }}>{noticeAction.label}</Text>
-          </Pressable>
+          <Button label={noticeAction.label} variant="tertiary" size="small" onPress={noticeAction.onPress} />
         </View>
       ) : notice ? (
-        <Text style={[styles.notice, { color: t.colors.muted, backgroundColor: t.colors.surfaceAlt }]} numberOfLines={2} accessibilityRole="alert">
+        <Text style={[t.typography.caption, styles.notice, { color: t.colors.muted, backgroundColor: t.colors.surfaceAlt }]} numberOfLines={2} accessibilityRole="alert">
           {notice}
         </Text>
       ) : null}
@@ -779,7 +789,7 @@ function ChatViewInner({
             <FindContext.Provider value={findState}>
               <PendingSendContext.Provider value={pendingBubble}>
               <QueuedSendContext.Provider value={queuedBubble}>
-              <MessageList
+              {perfWrap('MessageList', <MessageList
                 ref={listRef}
                 messages={messages}
                 onAction={onAction}
@@ -788,7 +798,7 @@ function ChatViewInner({
                 voiceConn={voiceConn}
                 followups={followups}
                 historyTruncated={!!meta?.historyTruncated}
-              />
+              />)}
               </QueuedSendContext.Provider>
               </PendingSendContext.Provider>
             </FindContext.Provider>
@@ -809,10 +819,10 @@ function ChatViewInner({
           />
         )}
         <TimersBar onTimerDone={onTimerDone} />
-        <View style={columnStyle}>
+        <View style={[styles.approvalCol, columnStyle]}>
           <ApprovalStack approvals={approvals} onRespond={onApprovalRespond} onClose={chat.dismissApproval} focus={chat.approvalFocus} style={styles.sheet} />
         </View>
-        <Composer
+        {perfWrap('Composer', <Composer
           ref={composerRef}
           streaming={streaming}
           placeholder={quickMode ? tr('quick.composer.placeholder') : (placeholder ?? tr('chat.composer.placeholderFor', { name: shownTitle }))}
@@ -824,7 +834,7 @@ function ChatViewInner({
           history={history}
           slash={slash.binding}
           quick={composerQuick}
-        />
+        />)}
       </KeyboardAvoidingView>
       <ModelPicker
         open={modelOpen}
@@ -841,6 +851,7 @@ function ChatViewInner({
       {slash.sheet}
       {chatMenu}
       <ConsentSheet visible={consentVisible} onAccept={acceptConsent} onLater={laterConsent} />
+      <AnswerAnnouncer messages={messages} />
     </View>
     </ImageEditProvider>
   );
@@ -871,7 +882,7 @@ export function ChatViewPending({ profile, model, onNewChat, onOpenDrawer, title
       <ChatHeader
         topInset={insets.top}
         title={shownTitle}
-        chatTitle={meta?.title}
+        chatTitle={meta ? displayTitle(meta.title, tr('conversations.list.newChat')) : undefined}
         profileName={profile.name}
         health="checking"
         streaming={false}
@@ -969,7 +980,9 @@ function useKeyboardVisible(): boolean {
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   sheet: { marginHorizontal: 12, marginBottom: 8 },
-  notice: { fontSize: 12.5, textAlign: 'center', paddingHorizontal: 16, paddingVertical: 6 },
+  /** may shrink below the approval card's height (large text): the card scrolls inside ApprovalStack */
+  approvalCol: { flexShrink: 1 },
+  notice: { textAlign: 'center', paddingHorizontal: 16, paddingVertical: 6 },
   noticeRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 6 },
-  noticeText: { flex: 1, fontSize: 12.5 },
+  noticeText: { flex: 1 },
 });

@@ -9,12 +9,9 @@ export const compliance = {
     accept: 'Verstanden & weiter',
     later: 'Später',
     privacy: 'Datenschutzerklärung',
-    needed: 'Bitte zuerst den Hinweis zur Datenweitergabe bestätigen.',
   },
   report: {
-    more: 'Weitere Aktionen',
     action: 'Melden',
-    actionA11y: 'Antwort melden',
     title: 'Antwort melden',
     lead: 'Was stimmt mit dieser Antwort nicht?',
     reasons: {

@@ -12,6 +12,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMotionReduced, useTheme, type Theme } from '../../../theme';
 import { withAlpha } from '../../../color';
 import { HText, PressableScale } from '../../../primitives/basics';
+import { Button } from '../../../primitives/Button';
+import type { IconName } from '../../../primitives/Icon';
 import { Skeleton } from '../../../primitives/Skeleton';
 import { useHui } from '../../../primitives/context';
 import { imageSourceFor, useImageGate, useImageProxyKey, useItemImage } from '../../../../images';
@@ -23,6 +25,8 @@ import { D1Icon, StarGlyph, type D1IconName } from './icons';
 import { useSettledAfter } from '../../../lib/useSettledAfter';
 import { formatCount, formatRating, starFills, type NumLang, type OpenKind } from './d1Model.ts';
 import { useEscapeToClose } from '../../../lib/useEscapeToClose';
+import { useCaptureBusy, useCaptureMode } from '../../../lib/capture';
+import { useCaptureImageSource } from '../../../lib/captureImage';
 
 /* ───────────── colours ───────────── */
 
@@ -111,8 +115,10 @@ export function CardImage({
   const t = useTheme();
   const tr = useT();
   const box = useRef<View>(null);
+  // share-as-image: the whole frame is "on screen" – the lookup starts at once
+  const capture = useCaptureMode();
   // one-way latch: set by the viewport watcher below (registered only while this slot needs it)
-  const [visible, setVisible] = useState(false);
+  const [visible, setVisible] = useState(capture);
   const markVisible = useCallback(() => setVisible(true), []);
   const [failed, setFailed] = useState<string | null>(null);
   // the answer URL whose direct / proxied load failed (the rendered uri may be the bridge proxy URL, not `url`)
@@ -126,8 +132,11 @@ export function CardImage({
   // memoized: expo-image (web) refetches a header source whenever the object changes
   const source = useMemo(() => (uri ? imageSourceFor(uri) : null), [uri, proxyKey]);
   const gate = useImageGate(uri);
+  // share-as-image on the web: drawn from a local copy (captureImage.ts); one that cannot be read is the glyph tile
+  const cap = useCaptureImageSource(r.kind === 'image' && gate.allowed ? source : null);
+  const capFailed = cap.state === 'failed';
   const loading = st.status === 'loading';
-  const showImg = r.kind === 'image' && !!uri && gate.allowed && failed !== uri;
+  const showImg = r.kind === 'image' && !!uri && gate.allowed && failed !== uri && !capFailed;
   // a tap-to-load button counts as content; a photo that failed to load or a plain category icon does not
   const hasContent = (r.kind === 'image' && !!uri && failed !== uri) || r.kind === 'ask';
   const capKey = `${url ?? ''}|${query ?? ''}|${autoQuery ?? ''}`;
@@ -141,13 +150,17 @@ export function CardImage({
     onMode?.(mode);
   }, [mode, onMode]);
   useNearViewportWatch(box, slotNeedsVisibility({ enabled, seen: visible, status: st.status, mode }), markVisible);
+  // capture: hold the frame until the photo is drawn (or the slot settled on glyph / collapse); past the deadline
+  // the slot is drawn as its fallback tile
+  const captureExpired = useCaptureBusy(mode !== 'collapse' && mode !== 'fallback' && (shimmer || loading || (showImg && loaded !== uri)));
   const tint = kindColor(t, kind);
-  const askShown = r.kind === 'ask' && !gate.allowed;
+  // capture: a host waiting for a tap stays the glyph (no load button in a shared image)
+  const askShown = r.kind === 'ask' && !gate.allowed && !capture;
   const ask = askPlaceholderLayout(height, iconSize);
   const bg = tile && showImg ? productTileBg(t) : withAlpha(tint, t.dark ? 0.2 : 0.12);
   const inset = photoInset({ tile, fit, height });
   if (mode === 'collapse') return null;
-  if (mode === 'fallback') {
+  if (mode === 'fallback' || (capture && capFailed) || (captureExpired && !(showImg && loaded === uri))) {
     const fh = inline ? height : fallbackHeight(height);
     return (
       <View
@@ -175,10 +188,10 @@ export function CardImage({
         </View>
       ) : null}
       {shimmer ? <Skeleton width="100%" height={null} radius={0} style={StyleSheet.absoluteFill} /> : null}
-      {showImg ? (
+      {showImg && cap.source ? (
         <View style={[StyleSheet.absoluteFill, { margin: inset }, tile && fit === 'contain' ? { mixBlendMode: 'multiply' } : null]}>
           <Image
-            source={source ?? { uri }}
+            source={cap.source}
             recyclingKey={uri}
             style={StyleSheet.absoluteFill}
             contentFit={fit}
@@ -214,7 +227,7 @@ export function CardImage({
               justifyContent: 'center',
               gap: 6,
               paddingHorizontal: ask.compact ? 0 : 14,
-              borderRadius: 18,
+              borderRadius: t.radii.pill,
               backgroundColor: pressed ? 'rgba(0,0,0,0.72)' : 'rgba(0,0,0,0.58)',
             })}
           >
@@ -291,11 +304,11 @@ export function OpenLine({ kind, text, variant = 'caption' }: { kind: OpenKind; 
 export type RailLayout = { mode: 'rail' | 'grid'; cardW: number; cols: number; gap: number };
 
 /** Phones: horizontal rail with the next card peeking; ≥ 640 px (or `grid`): wrapping grid. */
-export function railLayout(w: number, opts: { peek: number; maxCard: number; minGridCard: number; grid?: boolean; gap?: number }): RailLayout {
+export function railLayout(w: number, opts: { peek: number; maxCard: number; minGridCard: number; grid?: boolean; gap?: number; /** fewest grid columns (default 2) */ minCols?: number }): RailLayout {
   const gap = opts.gap ?? 10;
   if (w <= 0) return { mode: 'rail', cardW: 0, cols: 1, gap };
   if (opts.grid || w >= 640) {
-    const cols = Math.max(2, Math.floor((w + gap) / (opts.minGridCard + gap)));
+    const cols = Math.max(opts.minCols ?? 2, Math.floor((w + gap) / (opts.minGridCard + gap)));
     return { mode: 'grid', cardW: Math.floor((w - gap * (cols - 1)) / cols), cols, gap };
   }
   return { mode: 'rail', cardW: Math.min(opts.maxCard, Math.round(w * opts.peek)), cols: 1, gap };
@@ -411,7 +424,7 @@ function RailArrow({ dir, top, label, onPress, t }: { dir: 'prev' | 'next'; top:
         justifyContent: 'center',
         backgroundColor: t.colors.surface,
         borderWidth: StyleSheet.hairlineWidth,
-        borderColor: t.colors.borderStrong,
+        borderColor: t.colors.borderControl,
         opacity: pressed ? 0.85 : hovered ? 1 : 0.94,
         ...t.shadows.md,
       })}
@@ -429,7 +442,7 @@ export function SectionLabel({ text, right }: { text: string; right?: ReactNode 
   const t = useTheme();
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s, minHeight: 20 }}>
-      <HText variant="micro" color="muted" style={{ flex: 1, textTransform: 'uppercase', letterSpacing: 0.7 }} accessibilityRole="header">
+      <HText variant="caption" weight="600" color="muted" style={{ flex: 1 }} accessibilityRole="header">
         {text}
       </HText>
       {right}
@@ -438,7 +451,7 @@ export function SectionLabel({ text, right }: { text: string; right?: ReactNode 
 }
 
 /** Quiet pill button for the module header ("Alle auf Karte", "Vergleichen"). */
-export function HeaderPill({ icon, label, onPress, active, disabled, a11yLabel }: { icon: D1IconName; label: string; onPress: () => void; active?: boolean; disabled?: boolean; a11yLabel?: string }) {
+function HeaderPillInner({ icon, label, onPress, active, disabled, a11yLabel }: { icon: D1IconName; label: string; onPress: () => void; active?: boolean; disabled?: boolean; a11yLabel?: string }) {
   const t = useTheme();
   const fg = active ? t.colors.onAccent : t.colors.text;
   return (
@@ -461,17 +474,17 @@ export function HeaderPill({ icon, label, onPress, active, disabled, a11yLabel }
 }
 
 /** Icon-over-label action ("Route", "Anrufen" …). `tone='accent'` for the primary one. */
-export function ActionTile({ icon, label, a11yLabel, onPress, tone = 'neutral', active, disabled, big }: { icon: D1IconName; label: string; a11yLabel: string; onPress: () => void; tone?: 'neutral' | 'accent'; active?: boolean; disabled?: boolean; big?: boolean }) {
+function ActionTileInner({ icon, label, a11yLabel, onPress, tone = 'neutral', active, disabled, big }: { icon: D1IconName; label: string; a11yLabel: string; onPress: () => void; tone?: 'neutral' | 'accent'; active?: boolean; disabled?: boolean; big?: boolean }) {
   const t = useTheme();
   const accent = tone === 'accent' || active;
-  const fg = accent ? t.colors.accent : t.colors.text;
+  const fg = accent ? t.colors.accentText : t.colors.text;
   if (big) {
     return (
       <PressableScale haptic="selection" onPress={onPress} disabled={disabled} accessibilityLabel={a11yLabel} accessibilityState={{ selected: !!active }} style={{ flex: 1, alignItems: 'center', gap: 6, minHeight: 64, paddingVertical: 2 }}>
-        <View style={{ width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center', backgroundColor: tone === 'accent' ? t.colors.accent : active ? t.colors.accentSoft : t.colors.surfaceAlt }}>
-          <D1Icon name={icon} size={19} color={tone === 'accent' ? t.colors.onAccent : fg} strokeWidth={2} />
+        <View style={{ width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center', backgroundColor: tone === 'accent' ? t.colors.ink : active ? t.colors.accentSoft : t.colors.surfaceAlt }}>
+          <D1Icon name={icon} size={19} color={tone === 'accent' ? t.colors.onInk : fg} strokeWidth={2} />
         </View>
-        <HText variant="caption" weight="500" numberOfLines={1} style={{ color: tone === 'accent' ? t.colors.accent : fg }}>
+        <HText variant="caption" weight="500" numberOfLines={1} style={{ color: tone === 'accent' ? t.colors.text : fg }}>
           {label}
         </HText>
       </PressableScale>
@@ -484,36 +497,37 @@ export function ActionTile({ icon, label, a11yLabel, onPress, tone = 'neutral', 
       disabled={disabled}
       accessibilityLabel={a11yLabel}
       accessibilityState={{ selected: !!active }}
-      style={{ flex: 1, minHeight: 50, alignItems: 'center', justifyContent: 'center', gap: 3, borderRadius: t.radii.m, backgroundColor: accent ? t.colors.accentSoft : t.colors.surfaceAlt, paddingHorizontal: 2 }}
+      style={{ flex: 1, minHeight: 50, alignItems: 'center', justifyContent: 'center', gap: 3, borderRadius: t.radii.control, backgroundColor: accent ? t.colors.accentSoft : t.colors.surfaceAlt, paddingHorizontal: 2 }}
       pressedStyle={{ backgroundColor: t.colors.surfacePressed }}
     >
       <D1Icon name={icon} size={17} color={fg} strokeWidth={2} />
-      <HText variant="micro" weight="600" numberOfLines={1} style={{ color: fg, fontSize: 11.5 }}>
+      <HText variant="micro" weight="600" numberOfLines={1} style={{ color: fg }}>
         {label}
       </HText>
     </PressableScale>
   );
 }
 
-/** Generic pill button (primary / secondary / success state). */
+/** Icons the shared Button knows; other D1 glyphs are dropped, the label carries the meaning. */
+const BUTTON_ICONS: readonly string[] = ['check', 'external', 'plus', 'minus', 'copy', 'x', 'cart'];
+
+/**
+ * Card button on top of the one `Button` (primary = ink, secondary = outline). `success` is a state, not a colour: the
+ * finished, disabled action keeps its check icon and label ("Taken") in the quiet secondary style.
+ */
 export function PillButton({ label, icon, onPress, kind = 'secondary', disabled, a11yLabel, style, small }: { label: string; icon?: D1IconName; onPress: () => void; kind?: 'primary' | 'secondary' | 'success'; disabled?: boolean; a11yLabel?: string; style?: StyleProp<ViewStyle>; small?: boolean }) {
-  const t = useTheme();
-  const bg = kind === 'primary' ? t.colors.accent : kind === 'success' ? t.colors.successSoft : t.colors.surfaceAlt;
-  const fg = kind === 'primary' ? t.colors.onAccent : kind === 'success' ? t.colors.success : t.colors.text;
   return (
-    <PressableScale
-      haptic={kind === 'primary' ? 'light' : 'selection'}
-      onPress={onPress}
+    <Button
+      label={label}
+      icon={icon && BUTTON_ICONS.includes(icon) ? (icon as IconName) : undefined}
+      variant={kind === 'primary' ? 'primary' : 'secondary'}
+      size={small ? 'small' : 'regular'}
+      numberOfLines={small ? 2 : 1}
       disabled={disabled}
-      accessibilityLabel={a11yLabel ?? label}
-      style={[{ minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: small ? 10 : 16, borderRadius: t.radii.pill, backgroundColor: bg, borderWidth: kind === 'secondary' ? StyleSheet.hairlineWidth : 0, borderColor: t.colors.borderStrong }, style]}
-      pressedStyle={{ opacity: 0.86 }}
-    >
-      {icon ? <D1Icon name={icon} size={small ? 14 : 16} color={fg} strokeWidth={2.1} /> : null}
-      <HText variant={small ? 'caption' : 'callout'} weight="600" style={{ color: fg, flexShrink: 1 }} numberOfLines={small ? 2 : 1} align="center">
-        {label}
-      </HText>
-    </PressableScale>
+      onPress={onPress}
+      accessibilityLabel={a11yLabel}
+      style={style}
+    />
   );
 }
 
@@ -522,14 +536,14 @@ export function PillButton({ label, icon, onPress, kind = 'secondary', disabled,
 export function SkeletonCard({ width, imageH, lines = 3, style }: { width: number | `${number}%`; imageH: number; lines?: number; style?: StyleProp<ViewStyle> }) {
   const t = useTheme();
   return (
-    <View style={[{ width, borderRadius: t.radii.l, overflow: 'hidden', backgroundColor: t.colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: t.colors.border }, SNAP_START, style]} aria-hidden>
+    <View style={[{ width, borderRadius: t.radii.card, overflow: 'hidden', backgroundColor: t.colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: t.colors.border }, SNAP_START, style]} aria-hidden>
       <Skeleton height={imageH} radius={0} />
       <View style={{ padding: t.spacing.m, gap: 9 }}>
         <Skeleton width="72%" height={14} />
         {Array.from({ length: lines }, (_, i) => (
           <Skeleton key={i} width={i % 2 ? '45%' : '58%'} height={10} />
         ))}
-        <Skeleton height={44} radius={t.radii.m} style={{ marginTop: 4 }} />
+        <Skeleton height={44} radius={t.radii.control} style={{ marginTop: 4 }} />
       </View>
     </View>
   );
@@ -673,4 +687,14 @@ export function InfoRow({ label, value, strong, last, right, onPress, a11y }: { 
       {body}
     </PressableScale>
   );
+}
+
+/** share-as-image (capture mode): an app-only control, not part of the picture */
+export function HeaderPill(props: Parameters<typeof HeaderPillInner>[0]) {
+  return useCaptureMode() ? null : <HeaderPillInner {...props} />;
+}
+
+/** share-as-image (capture mode): an app-only control, not part of the picture */
+export function ActionTile(props: Parameters<typeof ActionTileInner>[0]) {
+  return useCaptureMode() ? null : <ActionTileInner {...props} />;
 }

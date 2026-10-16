@@ -1,8 +1,9 @@
 import { memo, useEffect, useRef, useState } from 'react';
-import { Animated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Text } from '../ui/primitives/Text';
 import { useTitlebarInset } from '../desktop/chrome';
 import { useT } from '../i18n';
-import { chatMaxWidth, scaledText } from '../settings/preferences';
+import { chatMaxWidth } from '../settings/preferences';
 import { usePreferences } from '../settings/PreferencesProvider';
 import { useTheme } from '../ui';
 import { useChatLayout } from './ChatLayoutContext';
@@ -103,7 +104,7 @@ export const ChatHeader = memo(function ChatHeader({
   return (
     <View style={{ paddingTop: topInset, backgroundColor: t.colors.bg }}>
       <View style={[styles.row, titlebarInset > 0 && { paddingLeft: titlebarInset - 8 }]}>
-        <HeaderButton icon="menu" label={tr('chat.header.chats')} onPress={onMenu} />
+        <HeaderButton icon="menu" label={tr('chat.header.chats')} onPress={onMenu} testID="header-chats" />
         {/* keeps the title centred when more buttons sit on the right */}
         {Array.from({ length: rightCount - 1 }, (_, i) => (
           <View key={i} style={styles.btn} />
@@ -111,13 +112,14 @@ export const ChatHeader = memo(function ChatHeader({
         <View style={styles.center}>
           <Pressable
             onPress={onModel ?? onSettings}
+            testID="header-model"
             hitSlop={{ top: 6, bottom: detail ? 0 : 6, left: 8, right: 8 }}
-            style={({ pressed }) => [styles.titleBtn, pressed && { backgroundColor: t.colors.surfacePressed }]}
+            style={({ pressed }) => [styles.titleBtn, { borderRadius: t.radii.control }, pressed && { backgroundColor: t.colors.surfacePressed }]}
             accessibilityRole="button"
             accessibilityLabel={tr('chat.header.pickModel.a11y', { title: `${title}${detail ? ` ${detail}` : ''}` })}
           >
             <View style={styles.titleRow}>
-              <Text style={[styles.title, { color: t.colors.text }, scaledText(17, 22, t.fontScale)]} numberOfLines={1} maxFontSizeMultiplier={1.6}>
+              <Text style={[t.typography.headline, styles.title, { color: t.colors.text }]} numberOfLines={1} maxFontSizeMultiplier={1.6}>
                 {title}
               </Text>
               {onModel ? <Icon name="chevronDown" size={14} color={t.colors.muted} strokeWidth={2.2} /> : null}
@@ -125,13 +127,13 @@ export const ChatHeader = memo(function ChatHeader({
             {detail && !offline ? (
               <View style={styles.detailRow}>
                 {line.model ? (
-                  <Text style={[styles.subtitle, { color: t.colors.subtle }, scaledText(12, 16, t.fontScale)]} numberOfLines={1} maxFontSizeMultiplier={1.6}>
+                  <Text style={[t.typography.caption, styles.subtitle, { color: t.colors.subtle }]} numberOfLines={1} maxFontSizeMultiplier={1.6}>
                     {line.model}
                   </Text>
                 ) : null}
                 {line.locked ? <LockMark size={11 * Math.min(t.fontScale, 1.6)} color={t.colors.subtle} /> : null}
                 {line.rest ? (
-                  <Text style={[styles.subtitle, styles.noShrink, { color: t.colors.subtle }, scaledText(12, 16, t.fontScale)]} numberOfLines={1} maxFontSizeMultiplier={1.6}>
+                  <Text style={[t.typography.caption, styles.subtitle, styles.noShrink, { color: t.colors.subtle }]} numberOfLines={1} maxFontSizeMultiplier={1.6}>
                     {line.rest}
                   </Text>
                 ) : null}
@@ -147,14 +149,14 @@ export const ChatHeader = memo(function ChatHeader({
               accessibilityLabel={tr('chat.header.settings.a11y', { profile: profileName, status: offlineText })}
             >
               <View style={[styles.dot, { backgroundColor: t.colors.danger }]} />
-              <Text style={[styles.subtitle, { color: t.colors.danger }, scaledText(12, 16, t.fontScale)]} numberOfLines={1} maxFontSizeMultiplier={1.6}>
+              <Text style={[t.typography.caption, styles.subtitle, { color: t.colors.danger }]} numberOfLines={1} maxFontSizeMultiplier={1.6}>
                 {offlineText}
               </Text>
             </Pressable>
           ) : null}
         </View>
         {options ? <HeaderButton icon="settings" label={tr('chat.header.options.a11y', { label: options.label })} onPress={options.onPress} badge={options.active} /> : null}
-        <HeaderButton icon="newChat" label={tr('chat.header.newChat')} onPress={onNewChat} disabled={!canReset} />
+        <HeaderButton icon="newChat" label={tr('chat.header.newChat')} onPress={onNewChat} disabled={!canReset} testID="header-new-chat" />
         {onChatMenu ? <HeaderButton icon="more" label={tr('menus.chat.open')} onPress={onChatMenu} disabled={!canReset} /> : null}
       </View>
       {demo ? <DemoStrip onConnect={demo.onConnect} /> : null}
@@ -219,33 +221,34 @@ function WideHeader({
             <Pressable
               onPress={onChatMenu}
               hitSlop={4}
-              style={({ pressed }) => [styles.wideTitleBtn, pressed && { backgroundColor: t.colors.surfacePressed }]}
+              style={({ pressed }) => [styles.wideTitleBtn, { borderRadius: t.radii.control }, pressed && { backgroundColor: t.colors.surfacePressed }]}
               accessibilityRole="button"
               accessibilityLabel={tr('menus.chat.titleA11y', { title: chatTitle || title })}
             >
-              <Text style={[styles.wideTitle, { color: t.colors.text }, scaledText(16, 21, t.fontScale)]} numberOfLines={1} maxFontSizeMultiplier={1.4}>
+              <Text style={[t.typography.headline, styles.wideTitle, { color: t.colors.text }]} numberOfLines={1} maxFontSizeMultiplier={1.4}>
                 {chatTitle || title}
               </Text>
               <Icon name="chevronDown" size={14} color={t.colors.muted} strokeWidth={2.2} />
             </Pressable>
           ) : (
-            <Text style={[styles.wideTitle, { color: t.colors.text }, scaledText(16, 21, t.fontScale)]} numberOfLines={1} maxFontSizeMultiplier={1.4} accessibilityRole="header">
+            <Text style={[t.typography.headline, styles.wideTitle, { color: t.colors.text }]} numberOfLines={1} maxFontSizeMultiplier={1.4} accessibilityRole="header">
               {chatTitle || title}
             </Text>
           )}
           <Pressable
             onPress={onModel ?? onSettings}
+            testID="header-model"
             hitSlop={6}
-            style={({ pressed }) => [styles.chip, { borderColor: t.colors.border, backgroundColor: pressed ? t.colors.surfacePressed : t.colors.surfaceAlt }]}
+            style={({ pressed }) => [styles.chip, { borderRadius: t.radii.pill }, { borderColor: t.colors.border, backgroundColor: pressed ? t.colors.surfacePressed : t.colors.surfaceAlt }]}
             accessibilityRole="button"
             accessibilityLabel={tr('chat.header.pickModel.a11y', { title: `${title}${detail ? ` ${detail}` : ''}` })}
           >
-            <Text style={[styles.chipText, { color: t.colors.muted }]} numberOfLines={1}>
+            <Text style={[t.typography.caption, styles.chipText, { color: t.colors.muted }]} numberOfLines={1}>
               {line.model || title}
             </Text>
             {line.locked ? <LockMark size={12} color={t.colors.muted} /> : null}
             {chipRest ? (
-              <Text style={[styles.chipText, styles.noShrink, { color: t.colors.muted }]} numberOfLines={1}>
+              <Text style={[t.typography.caption, styles.chipText, styles.noShrink, { color: t.colors.muted }]} numberOfLines={1}>
                 {chipRest}
               </Text>
             ) : null}
@@ -268,7 +271,7 @@ function WideHeader({
         </View>
         <View style={[styles.wideSide, { right: 8 }]}>
           {options ? <HeaderButton icon="settings" label={tr('chat.header.options.a11y', { label: options.label })} onPress={options.onPress} badge={options.active} /> : null}
-          <HeaderButton icon="newChat" label={tr('chat.header.newChat')} onPress={onNewChat} disabled={!canReset} />
+          <HeaderButton icon="newChat" label={tr('chat.header.newChat')} onPress={onNewChat} disabled={!canReset} testID="header-new-chat" />
         </View>
       </View>
       {demo ? <DemoStrip onConnect={demo.onConnect} /> : null}
@@ -282,15 +285,15 @@ function DemoStrip({ onConnect }: { onConnect(): void }) {
   const tr = useT();
   return (
     <View style={styles.demoRow}>
-      <View style={[styles.demo, { backgroundColor: t.colors.surfaceAlt }]}>
-        <View style={[styles.demoBadge, { backgroundColor: t.colors.accentSoft }]}>
-          <Text style={[styles.demoBadgeText, { color: t.colors.accent }]}>{tr('chat.header.demo.badge')}</Text>
+      <View style={[styles.demo, { borderRadius: t.radii.pill }, { backgroundColor: t.colors.surfaceAlt }]}>
+        <View style={[styles.demoBadge, { borderRadius: t.radii.pill }, { backgroundColor: t.colors.accentSoft }]}>
+          <Text style={[t.typography.micro, styles.demoBadgeText, { color: t.colors.accentText }]}>{tr('chat.header.demo.badge')}</Text>
         </View>
-        <Text style={[styles.demoText, { color: t.colors.muted }]} numberOfLines={1}>
+        <Text style={[t.typography.caption, styles.demoText, { color: t.colors.muted }]} numberOfLines={1}>
           {tr('chat.header.demo.text')}
         </Text>
         <Pressable onPress={onConnect} hitSlop={8} accessibilityRole="button" style={({ pressed }) => pressed && { opacity: 0.6 }}>
-          <Text style={[styles.demoCta, { color: t.colors.accent }]} numberOfLines={1}>
+          <Text style={[t.typography.caption, styles.demoCta, { color: t.colors.accentText }]} numberOfLines={1}>
             {tr('chat.header.demo.connect')}
           </Text>
         </Pressable>
@@ -308,12 +311,13 @@ function LockMark({ size, color }: { size: number; color: string }) {
   );
 }
 
-function HeaderButton({ icon, label, onPress, disabled, badge }: { icon: 'settings' | 'newChat' | 'menu' | 'sidebar' | 'more'; label: string; onPress(): void; disabled?: boolean; badge?: boolean }) {
+function HeaderButton({ icon, label, onPress, disabled, badge, testID }: { icon: 'settings' | 'newChat' | 'menu' | 'sidebar' | 'more'; label: string; onPress(): void; disabled?: boolean; badge?: boolean; testID?: string }) {
   const t = useTheme();
   return (
     <Pressable
       onPress={onPress}
       disabled={disabled}
+      testID={testID}
       hitSlop={8}
       accessibilityRole="button"
       accessibilityLabel={label}
@@ -355,10 +359,10 @@ const styles = StyleSheet.create({
   btn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', minWidth: 0 },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 5, maxWidth: '100%' },
-  titleBtn: { alignItems: 'center', maxWidth: '100%', minHeight: 36, justifyContent: 'center', paddingHorizontal: 10, paddingVertical: 3, borderRadius: 10 },
-  title: { fontSize: 17, fontWeight: '600', letterSpacing: -0.2, flexShrink: 1 },
+  titleBtn: { alignItems: 'center', maxWidth: '100%', minHeight: 36, justifyContent: 'center', paddingHorizontal: 10, paddingVertical: 3 },
+  title: { fontWeight: '600', letterSpacing: -0.2, flexShrink: 1 },
   subRow: { flexDirection: 'row', alignItems: 'center', gap: 5, maxWidth: '100%', paddingHorizontal: 8 },
-  subtitle: { fontSize: 12, flexShrink: 1 },
+  subtitle: { flexShrink: 1 },
   detailRow: { flexDirection: 'row', alignItems: 'center', gap: 3, maxWidth: '100%' },
   noShrink: { flexShrink: 0 },
   dot: { width: 7, height: 7, borderRadius: 4 },
@@ -367,14 +371,14 @@ const styles = StyleSheet.create({
   wideRow: { minHeight: 54, flexDirection: 'row', alignItems: 'center' },
   wideSide: { position: 'absolute', top: 0, bottom: 0, flexDirection: 'row', alignItems: 'center' },
   wideColumn: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  wideTitle: { fontSize: 16, fontWeight: '600', letterSpacing: -0.2, flexShrink: 1 },
-  wideTitleBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 1, minWidth: 0, minHeight: 44, paddingHorizontal: 8, marginLeft: -8, borderRadius: 10 },
-  chip: { flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 0, maxWidth: 260, minHeight: 30, paddingHorizontal: 11, borderRadius: 999, borderWidth: StyleSheet.hairlineWidth },
-  chipText: { fontSize: 13, fontWeight: '500', flexShrink: 1 },
+  wideTitle: { fontWeight: '600', letterSpacing: -0.2, flexShrink: 1 },
+  wideTitleBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 1, minWidth: 0, minHeight: 44, paddingHorizontal: 8, marginLeft: -8 },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 0, maxWidth: 260, minHeight: 30, paddingHorizontal: 11, borderWidth: StyleSheet.hairlineWidth },
+  chipText: { fontWeight: '500', flexShrink: 1 },
   demoRow: { alignItems: 'center', paddingHorizontal: 12, paddingBottom: 6 },
-  demo: { flexDirection: 'row', alignItems: 'center', gap: 8, maxWidth: '100%', borderRadius: 999, paddingLeft: 5, paddingRight: 12, paddingVertical: 4 },
-  demoBadge: { borderRadius: 999, paddingHorizontal: 7, paddingVertical: 2 },
-  demoBadgeText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.6 },
-  demoText: { fontSize: 13, flexShrink: 1 },
-  demoCta: { fontSize: 13, fontWeight: '600' },
+  demo: { flexDirection: 'row', alignItems: 'center', gap: 8, maxWidth: '100%', paddingLeft: 5, paddingRight: 12, paddingVertical: 4 },
+  demoBadge: { paddingHorizontal: 7, paddingVertical: 2 },
+  demoBadgeText: { fontWeight: '700' },
+  demoText: { flexShrink: 1 },
+  demoCta: { fontWeight: '600' },
 });

@@ -9,9 +9,13 @@
  * - after a turn that used tools, the stored session messages are fetched once and the turn's
  *   ToolEvents get the real arguments/results (+ reasoning) – `fetchToolDetails`, default on;
  *   switched off automatically for servers without the session API (support.ts)
- * - a stream lost AFTER Hermes accepted the turn (network switch, app in the background) is not a failed answer:
- *   the message waits ("Verbindung unterbrochen – Antwort wird nachgeladen…") and is completed from the live
- *   inbox (`applyInbox`) or the stored session (polled with backoff, on foreground / `recoverNow`) – recovery.ts
+ * - a stream lost AFTER Hermes accepted the turn (network switch, airplane mode, app in the background) is not a failed
+ *   answer. Behind the UI bridge it continues live: the stream re-attaches at its byte offset while it lasts (stream.ts,
+ *   note "Verbindung unterbrochen – verbinde neu…"; foreground / inbox reconnect retry at once), and an answer that
+ *   is still unfinished after that or after an app restart re-attaches to the bridge's recording (reattach.ts). Only
+ *   when the bridge refuses (`resume_unavailable` / `turn_unrecorded`) or without a bridge does the message wait
+ *   ("Verbindung unterbrochen – Antwort wird nachgeladen…") for the live inbox (`applyInbox`) or the stored session
+ *   (polled with backoff, on foreground / `recoverNow`) – recovery.ts
  * - "Send" while attachment uploads still run (`send(text, atts, pending)`): the user message shows at once with
  *   per-attachment progress, the turn starts by itself when every upload is done; a failed upload offers retry /
  *   remove on the bubble; stop() / newSession() / unmount cancel it (pendingSend.ts, attachments/pendingUploads.ts).
@@ -53,10 +57,12 @@ import { isNotFoundError, isUnsupportedError } from './sessions';
 import { sessionsSupported, setSessionsSupported } from './support';
 import { applyEvent, createAssistantMessage, createUserMessage, errorTextOf, finalize, newId } from './chatState';
 import { abortableDelay, autoRetryDelayMs, hasVisibleOutput, retryAfterErrorText } from './retryPolicy';
-import { applyRemoteAnswer, createRecovery, isRecoverable, markInterrupted, resumeCutOff, resumeRecovering, type InboxAnswer } from './recovery';
-import { approvalMayHaveArrived, keyedHermesError } from './stream';
+import { applyRemoteAnswer, createRecovery, isRecoverable, markInterrupted, needsRunUsage, resumeCutOff, resumeRecovering, withRunUsage, type InboxAnswer } from './recovery';
+import { adoptReplay, canReattach, covers, failedReattach, MAX_REATTACHES, REATTACH_SWAP_MS, replayBase, resumedStreaming, withoutResumable, type ReattachOutcome } from './reattach';
+import { approvalMayHaveArrived, keyedHermesError, type StreamChatResult } from './stream';
 import { branchSeedText, withContextSeed, withTurnNote, type TurnOverride } from './turnOverride';
 import { createThrottle, streamIntervalFor } from './throttle';
+import { PERF, perfDelta, perfFlush, perfMark, perfNow, perfSpan, perfTurnEnd, perfTurnStart } from '../perf/probe';
 import { checkTicket, takeTicket } from './turnTicket';
 import { answerInSession, newSendKey, reusableSendKey, sendKeyAfterFailure } from './idempotency';
 import { serverRootOf } from './bots';
@@ -81,6 +87,7 @@ import type {
   ChatMessage,
   ChatStatus,
   HermesConn,
+  HermesEvent,
 } from './types';
 
 /** longest wait for the transcript write before a turn request (storage stuck: send anyway, the debounced save follows) */
@@ -263,11 +270,25 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
   /** restore UI state of queued messages by id (absent = QUEUED_INITIAL) */
   const queuedRef = useRef(new Map<string, QueuedState>());
   const [queuedVersion, setQueuedVersion] = useState(0);
+  /** "try now" listeners of a re-attaching stream (stream.ts `wake`): app in the foreground, inbox reconnected */
+  const wakeRef = useRef(new Set<() => void>());
+  /** live re-attaches per message id (reattach.ts MAX_REATTACHES) */
+  const reattachesRef = useRef(new Map<string, number>());
+  /** a re-attach whose request has not been answered yet: a new send cancels it (the user must never wait for it) */
+  const attachingRef = useRef<AbortController | null>(null);
+  /** set below `run`: re-attach a recovering message (the recovery driver is created before it) */
+  const reattachRef = useRef<(m: ChatMessage) => Promise<ReattachOutcome>>(async () => 'retry');
+  /** completion ids whose run status was already asked for token counts */
+  const usageAskedRef = useRef(new Set<string>());
   connRef.current = conn;
   optsRef.current = options;
 
   const throttle = useMemo(
-    () => createThrottle(() => setMessages(messagesRef.current), options.updateIntervalMs ?? (() => streamIntervalFor(messagesRef.current))),
+    () =>
+      createThrottle(() => {
+        perfFlush();
+        setMessages(messagesRef.current);
+      }, options.updateIntervalMs ?? (() => streamIntervalFor(messagesRef.current))),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   );
@@ -285,6 +306,16 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
       p?.uploads.cancel();
     };
   }, [throttle]);
+
+  const wake = useCallback((fn: () => void) => {
+    wakeRef.current.add(fn);
+    return () => {
+      wakeRef.current.delete(fn);
+    };
+  }, []);
+  const wakeStreams = () => {
+    for (const fn of [...wakeRef.current]) fn();
+  };
 
   const updateLast = useCallback(
     (fn: (m: ChatMessage) => ChatMessage) => {
@@ -313,9 +344,37 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
       setError(failed);
       setStatus(failed ? 'error' : 'idle');
       optsRef.current.onTurnEnd?.(list, sessionRef.current);
+      void fillRunUsage(list);
     },
     [throttle]
   );
+
+  /** an answer filled in later lacks the stream's usage chunk: take the token counts from its run status, if any */
+  const fillRunUsage = async (list: ChatMessage[]) => {
+    let m: ChatMessage | undefined;
+    for (let i = list.length - 1; i >= 0 && !m; i--) if (needsRunUsage(list[i])) m = list[i];
+    if (!m?.completionId || usageAskedRef.current.has(m.completionId)) return;
+    usageAskedRef.current.add(m.completionId);
+    let usage;
+    try {
+      usage = (await fetchRunStatus(connRef.current, m.completionId)).usage;
+    } catch {
+      return; // offline / older server: the footer shows the time only
+    }
+    if (!usage || !mountedRef.current) return;
+    const at = messagesRef.current.findIndex((x) => x.id === m.id);
+    if (at < 0 || !needsRunUsage(messagesRef.current[at])) return;
+    const next = messagesRef.current.slice();
+    next[at] = withRunUsage(next[at], usage);
+    messagesRef.current = next;
+    if (runningRef.current) {
+      throttle.call(); // the running turn persists at its end
+      return;
+    }
+    throttle.cancel();
+    setMessages(next);
+    optsRef.current.onTurnEnd?.(next, sessionRef.current);
+  };
 
   /** the stored Hermes session, mapped; null = no session API; throws when the fetch failed (refs only: stable) */
   const fetchStoredSession = async (): Promise<ChatMessage[] | null> => {
@@ -354,6 +413,17 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
           }
         },
         fetchRemote: () => fetchStoredSession(),
+        canReattach: (m) => {
+          const list = messagesRef.current;
+          return (
+            !!connRef.current.bridge &&
+            mountedRef.current &&
+            !runningRef.current &&
+            (reattachesRef.current.get(m.id) ?? 0) < MAX_REATTACHES &&
+            canReattach(list, list.findIndex((x) => x.id === m.id))
+          );
+        },
+        reattach: (m) => reattachRef.current(m),
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
@@ -362,7 +432,9 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
   useEffect(() => {
     recovery.start(); // a restored interrupted answer
     const sub = AppState.addEventListener('change', (s) => {
-      if (s === 'active') recovery.poke();
+      if (s !== 'active') return;
+      wakeStreams(); // a stream re-attaching: try now
+      recovery.poke();
     });
     return () => {
       sub.remove();
@@ -371,8 +443,94 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
   }, [recovery]);
 
 
+  /** a stream event for the last message: approvals get their deadline (advertised timeout) when they arrive */
+  const stamped = (ev: HermesEvent, now: number): HermesEvent =>
+    ev.type === 'approval'
+      ? { ...ev, approval: withDeadline(ev.approval, { receivedAt: now, advertisedTimeoutS: optsRef.current.approvalTimeoutSeconds, restored: ev.approval.restored ? { serverNowMs: ev.approval.serverNowMs } : undefined }) }
+      : ev;
+
+  /** a resumable stream of the last message was lost (re-attaching) or continues: the "verbinde neu" note */
+  const markConnection = (state: 'lost' | 'resumed') =>
+    updateLast((m) => {
+      if (m.role !== 'assistant' || m.status !== 'streaming') return m;
+      if (state === 'lost') return { ...m, reconnecting: Date.now() };
+      const { reconnecting: _r, ...rest } = m;
+      return rest;
+    });
+
+  /**
+   * The outcome of the streamed turn in the last message (`current()` holds): its result, or what it threw.
+   * `accepted`: the server took the turn. Returns the failure text (error bubble) and whether it is being recovered.
+   */
+  const settleTurn = (outcome: { result: StreamChatResult } | { error: unknown }, accepted: boolean, idempotencyKey?: string): { failure?: string; interrupted: boolean } => {
+    if ('result' in outcome) {
+      if (outcome.result.aborted) {
+        // the chat was closed mid-turn (not stop()): the bridge keeps the run going → recover when reopened
+        if (!userStopRef.current && !mountedRef.current && accepted && connRef.current.bridge) {
+          updateLast((m) => markInterrupted(m, Date.now()));
+          return { interrupted: true };
+        }
+        updateLast((m) => finalize(m, 'stopped', undefined, Date.now()));
+        return { interrupted: false };
+      }
+      // finish event normally already set done/error; make sure nothing stays "streaming"
+      updateLast((m) => (m.status === 'streaming' ? finalize(m, 'done', undefined, Date.now()) : m));
+      const last = messagesRef.current[messagesRef.current.length - 1];
+      return { failure: last?.status === 'error' ? (last.error ?? 'Fehler') : undefined, interrupted: false };
+    }
+    const e = outcome.error;
+    if (isHermesError(e) && e.kind === 'aborted') {
+      updateLast((m) => finalize(m, 'stopped', undefined, Date.now()));
+      return { interrupted: false };
+    }
+    if (isHermesError(e) && answerInSession(e) && canRecover()) {
+      // connection lost after Hermes took the turn: it keeps running server-side → wait for the answer (or re-attach
+      // later: the bridge refused only when `resumeCode` says so). turn_unrecorded: a retry whose earlier attempt ran on
+      // the bridge without a recording – same, never twice
+      const refused = !!e.resumeCode;
+      updateLast((m) => {
+        const next = markInterrupted(m, Date.now());
+        return refused ? withoutResumable(next) : next;
+      });
+      return { interrupted: true };
+    }
+    const failure = e instanceof Error ? e.message : String(e);
+    const key = retryAfterErrorText(e) ?? errorTextOf(e);
+    // the bridge refused this key for good: the next "Erneut" needs a fresh one (idempotency.ts)
+    const nextKey = idempotencyKey ? sendKeyAfterFailure(idempotencyKey, isHermesError(e) ? e.code : undefined) : undefined;
+    updateLast((m) => {
+      const done = finalize(m, 'error', failure, Date.now(), key);
+      return nextKey && done.role === 'assistant' && done.sendKey === idempotencyKey ? { ...done, sendKey: nextKey } : done;
+    });
+    return { failure, interrupted: false };
+  };
+
+  /** the running turn of `sid` is over (`current()` holds): show + persist, then recovery / tool details */
+  const endTurn = (sid: string, failure: string | undefined, interrupted: boolean) => {
+    // ended before the server took it (error / stop): a sent message with a failed answer ("Erneut" re-uses the key)
+    messagesRef.current = ackSend(messagesRef.current);
+    runningRef.current = false;
+    abortRef.current = null;
+    throttle.cancel();
+    perfTurnEnd();
+    setMessages(messagesRef.current);
+    setError(failure);
+    setStatus(failure ? 'error' : 'idle');
+    optsRef.current.onTurnEnd?.(messagesRef.current, sid);
+    const last = messagesRef.current[messagesRef.current.length - 1];
+    if (interrupted) {
+      if (mountedRef.current) {
+        recovery.start();
+        void checkApprovalsRef.current();
+      }
+    } else if (!failure && last && optsRef.current.fetchToolDetails !== false && needsDetails(last)) {
+      void loadDetails(last.id, sid);
+    }
+  };
+
   const run = useCallback(
     async (text: string, attachments: Attachment[] = [], override?: TurnOverride, sendKey?: string) => {
+      perfTurnStart();
       runningRef.current = true;
       userStopRef.current = false;
       const ctrl = new AbortController();
@@ -401,6 +559,7 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
         const persist = optsRef.current.persistNow;
         if (persist && messagesRef.current.some((m) => m.sendUnacked)) {
           await settleWithin(() => persist(messagesRef.current), PERSIST_BEFORE_SEND_MS);
+          perfMark('persisted');
           if (!current()) return;
         }
         // attachments → OpenAI content parts (images inline, bridge files as path references);
@@ -421,9 +580,16 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
               modelOptions: optsRef.current.modelOptions,
               followups: optsRef.current.followups,
               idempotencyKey,
-              onAccepted: () => {
+              wake,
+              onConnection: (state) => {
+                if (current()) markConnection(state);
+              },
+              onAccepted: ({ resumable }) => {
+                perfMark('headers');
                 accepted = true;
                 if (seed) optsRef.current.onBranchSeedUsed?.();
+                // the bridge recorded the turn: a stream lost for longer (or an app restart) re-attaches live later
+                if (resumable && current()) updateLast((m) => (m.role === 'assistant' ? { ...m, resumable: true } : m));
                 // the server has the turn: a normal sent message from now on (a kill now recovers its answer)
                 if (current() && messagesRef.current.some((m) => m.sendUnacked)) {
                   messagesRef.current = ackSend(messagesRef.current);
@@ -435,11 +601,11 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
               onEvent: (ev) => {
                 if (abortRef.current !== ctrl) return;
                 const now = Date.now();
-                const e =
-                  ev.type === 'approval'
-                    ? { ...ev, approval: withDeadline(ev.approval, { receivedAt: now, advertisedTimeoutS: optsRef.current.approvalTimeoutSeconds }) }
-                    : ev;
+                const e = stamped(ev, now);
+                if (e.type === 'text') perfDelta(e.text.length);
+                const t0 = PERF ? perfNow() : 0;
                 updateLast((m) => applyEvent(m, e, now));
+                if (PERF) perfSpan('state.update', t0);
               },
             });
             break;
@@ -453,70 +619,136 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
             if (!current()) return;
           }
         }
-        if (!current()) {
-          // superseded by newSession()
-        } else if (result.aborted) {
-          // the chat was closed mid-turn (not stop()): the bridge keeps the run going → recover when reopened
-          if (!userStopRef.current && !mountedRef.current && accepted && connRef.current.bridge) {
-            interrupted = true;
-            updateLast((m) => markInterrupted(m, Date.now()));
-          } else {
-            updateLast((m) => finalize(m, 'stopped', undefined, Date.now()));
-          }
-        } else {
-          // finish event normally already set done/error; make sure nothing stays "streaming"
-          updateLast((m) =>
-            m.status === 'streaming' ? finalize(m, 'done', undefined, Date.now()) : m
-          );
-          const last = messagesRef.current[messagesRef.current.length - 1];
-          if (last?.status === 'error') failure = last.error ?? 'Fehler';
-        }
+        // !current(): superseded by newSession()
+        if (current()) ({ failure, interrupted } = settleTurn({ result }, accepted));
       } catch (e) {
-        if (!current()) {
-          // superseded by newSession()
-        } else if (isHermesError(e) && e.kind === 'aborted') {
-          updateLast((m) => finalize(m, 'stopped', undefined, Date.now()));
-        } else if (isHermesError(e) && answerInSession(e) && canRecover()) {
-          // connection lost after Hermes took the turn: it keeps running server-side → wait for the answer.
-          // turn_unrecorded: a retry whose earlier attempt ran on the bridge without a recording – same, never twice
-          interrupted = true;
-          updateLast((m) => markInterrupted(m, Date.now()));
-        } else {
-          failure = e instanceof Error ? e.message : String(e);
-          const key = retryAfterErrorText(e) ?? errorTextOf(e);
-          // the bridge refused this key for good: the next "Erneut" needs a fresh one (idempotency.ts)
-          const nextKey = sendKeyAfterFailure(idempotencyKey, isHermesError(e) ? e.code : undefined);
-          updateLast((m) => {
-            const done = finalize(m, 'error', failure, Date.now(), key);
-            return done.role === 'assistant' && done.sendKey === idempotencyKey ? { ...done, sendKey: nextKey } : done;
-          });
-        }
+        if (current()) ({ failure, interrupted } = settleTurn({ error: e }, accepted, idempotencyKey));
       } finally {
-        if (current()) {
-          // ended before the server took it (error / stop): a sent message with a failed answer ("Erneut" re-uses the key)
-          messagesRef.current = ackSend(messagesRef.current);
-          runningRef.current = false;
-          abortRef.current = null;
-          throttle.cancel();
-          setMessages(messagesRef.current);
-          setError(failure);
-          setStatus(failure ? 'error' : 'idle');
-          optsRef.current.onTurnEnd?.(messagesRef.current, sid);
-          const last = messagesRef.current[messagesRef.current.length - 1];
-          if (interrupted) {
-            if (mountedRef.current) {
-              recovery.start();
-              void checkApprovalsRef.current();
-            }
-          } else if (!failure && last && optsRef.current.fetchToolDetails !== false && needsDetails(last)) {
-            void loadDetails(last.id, sid);
-          }
-        }
+        if (current()) endTurn(sid, failure, interrupted);
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [throttle, updateLast]
   );
+
+  /**
+   * Re-attach the recovering last answer `target` to the bridge's recording of its turn (reattach.ts): the turn is
+   * replayed from byte 0 into a fresh copy that takes over the bubble once it covers it, then continues live.
+   * Resolves as soon as the outcome is known (`live` once the bridge answered with the stream); the turn itself runs on.
+   */
+  const reattach = (target: ChatMessage): Promise<ReattachOutcome> => {
+    const list = messagesRef.current;
+    if (runningRef.current) return Promise.resolve('retry');
+    if (!mountedRef.current || !connRef.current.bridge || !target.sendKey || !canReattach(list, list.findIndex((m) => m.id === target.id))) {
+      return Promise.resolve('gone');
+    }
+    const key = target.sendKey;
+    return new Promise<ReattachOutcome>((tell) => {
+      runningRef.current = true;
+      userStopRef.current = false;
+      const ctrl = new AbortController();
+      abortRef.current = ctrl;
+      attachingRef.current = ctrl;
+      const sid = sessionRef.current;
+      const current = () => abortRef.current === ctrl;
+      let accepted = false;
+      let failure: string | undefined;
+      let interrupted = false;
+      /** the replayed copy until it takes over the bubble (null afterwards) */
+      let replay: ChatMessage | null = replayBase(target);
+      let swapAt = Infinity;
+      const shown = () => messagesRef.current[messagesRef.current.length - 1];
+      const takeOver = () => {
+        const r = replay;
+        replay = null;
+        if (r) updateLast((m) => (m.id === r.id ? adoptReplay(m, r) : m));
+      };
+      void (async () => {
+        try {
+          const result = await streamChat({
+            conn: connRef.current,
+            text: '',
+            sessionId: sid,
+            signal: ctrl.signal,
+            idempotencyKey: key,
+            resumeFrom: 0,
+            wake,
+            onConnection: (state) => {
+              if (current()) markConnection(state);
+            },
+            onAccepted: () => {
+              accepted = true;
+              if (attachingRef.current === ctrl) attachingRef.current = null;
+              reattachesRef.current.set(target.id, (reattachesRef.current.get(target.id) ?? 0) + 1);
+              swapAt = Date.now() + REATTACH_SWAP_MS;
+              if (current()) {
+                // streaming again: no "loading the answer" note, the composer offers Stop
+                updateLast((m) => (m.id === target.id ? resumedStreaming(m) : m));
+                setStatus('streaming');
+                setError(undefined);
+              }
+              tell('live');
+            },
+            onEvent: (ev) => {
+              if (abortRef.current !== ctrl) return;
+              const now = Date.now();
+              const e = stamped(ev, now);
+              if (!replay) return updateLast((m) => applyEvent(m, e, now));
+              replay = applyEvent(replay, e, now);
+              const last = shown();
+              if (ev.type === 'finish' || ev.type === 'error' || now >= swapAt || (last && covers(replay, last))) takeOver();
+            },
+          });
+          if (current() && !accepted) {
+            tell('retry'); // aborted before the bridge answered (chat closed): the bubble stays recovering
+          } else if (current()) {
+            const last = shown();
+            if (!result.aborted || (replay && last && covers(replay, last))) takeOver();
+            replay = null;
+            ({ failure, interrupted } = settleTurn({ result }, accepted));
+          }
+        } catch (e) {
+          if (current() && !accepted) {
+            // the bridge did not continue the turn: the bubble stays as it was (recovering)
+            const outcome = isHermesError(e) ? failedReattach(e) : 'retry';
+            if (outcome === 'gone') updateLast((m) => (m.id === target.id ? withoutResumable(m) : m));
+            tell(outcome);
+          } else if (current()) {
+            const last = shown();
+            if (replay && last && covers(replay, last)) takeOver();
+            replay = null;
+            ({ failure, interrupted } = settleTurn({ error: e }, accepted));
+          }
+        } finally {
+          if (attachingRef.current === ctrl) attachingRef.current = null;
+          if (current()) {
+            if (accepted) endTurn(sid, failure, interrupted);
+            else {
+              runningRef.current = false;
+              abortRef.current = null;
+              throttle.cancel();
+              setMessages(messagesRef.current);
+              optsRef.current.onTurnEnd?.(messagesRef.current, sid); // e.g. `resumable` dropped
+            }
+          }
+          tell('retry'); // superseded / aborted before the answer (no-op once told)
+        }
+      })();
+    });
+  };
+  reattachRef.current = reattach;
+
+  /** a re-attach still waiting for the bridge's answer gives way to a new send (the answer stays recovering) */
+  const cancelAttach = () => {
+    const ctrl = attachingRef.current;
+    if (!ctrl) return;
+    attachingRef.current = null;
+    if (abortRef.current === ctrl) {
+      abortRef.current = null;
+      runningRef.current = false;
+    }
+    ctrl.abort();
+  };
 
   /** running tool-detail jobs: aborted on unmount / new session (a retired hook must never apply them) */
   const detailJobs = useRef(new Set<AbortController>());
@@ -592,6 +824,7 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
     /** `sendKey`: Idempotency-Key of an earlier attempt of this message ("Erneut senden" of a queued message) */
     (text: string, attachments: Attachment[] = [], pending?: PendingUploads, sendKey?: string) => {
       const t = text.trim();
+      if (t || attachments.length) cancelAttach();
       if ((!t && !attachments.length) || runningRef.current || !mountedRef.current) return false;
       const now = Date.now();
       // the key of this message's turn; the message is stored (queued, with it) before the request starts
@@ -986,6 +1219,7 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
   }, [checkApprovals]);
 
   const recoverNow = useCallback(() => {
+    wakeStreams(); // the inbox is back = the network is: a re-attaching stream tries now
     recovery.poke();
     void checkApprovals();
   }, [recovery, checkApprovals]);

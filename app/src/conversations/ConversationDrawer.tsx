@@ -16,6 +16,7 @@ import { useT } from '../i18n';
 import { useTheme } from '../ui';
 import { useEscapeToClose } from '../ui/lib/useEscapeToClose';
 import { useSettledAfter } from '../ui/lib/useSettledAfter';
+import { webOverlayPanel } from '../ui/lib/webStyle';
 import { ConversationList, type ConversationListProps } from './ConversationList';
 
 export type ConversationDrawerProps = ConversationListProps & {
@@ -92,6 +93,8 @@ export function ConversationDrawer({ open, onClose, onSelect, onNewChat, ...rest
         <Animated.View
           style={[styles.panel, { width, backgroundColor: t.colors.bg, borderRightColor: t.colors.border }, t.shadows.lg, panelStyle, settledOpen ? { transform: [{ translateX: 0 }] } : null]}
           accessibilityViewIsModal
+          accessibilityLabel={tr('conversations.sidebar.title')}
+          {...webOverlayPanel}
         >
           {/* macOS app: room for the traffic lights above the search field */}
           {titlebarInset > 0 ? <View style={styles.titlebar} /> : null}

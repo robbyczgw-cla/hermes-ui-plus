@@ -22,6 +22,14 @@ export function makeTitle(text: string, max: number = TITLE_MAX): string {
   return cut.replace(/[\s.,;:!?-]+$/, '') + '…';
 }
 
+/**
+ * Title as shown: the stored placeholder `DEFAULT_TITLE` is German (it is persisted and synced, so it stays as-is) –
+ * render it as the UI language's "new chat" label instead.
+ */
+export function displayTitle(title: string, newChat: string): string {
+  return title === DEFAULT_TITLE ? newChat : title;
+}
+
 /** User-entered title: trimmed, single line, bounded; empty -> null (caller keeps old title). */
 export function cleanUserTitle(input: string, max = 80): string | null {
   const t = input.replace(/\s+/g, ' ').trim();

@@ -10,6 +10,7 @@ import { useTheme, type Theme } from '../../../theme';
 import { withAlpha } from '../../../color';
 import { useHui } from '../../../primitives/context';
 import { HText, InlineText, PressableScale, Surface } from '../../../primitives/basics';
+import { Button } from '../../../primitives/Button';
 import { Icon } from '../../../primitives/Icon';
 import { haptic } from '../../../primitives/haptics';
 import { useNodeState } from '../../../../nodestate';
@@ -105,25 +106,12 @@ export function StudyPlan({ node }: { node: Partial<HuiStudyPlan> }) {
 
       {target && !streaming ? (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.m, flexWrap: 'wrap' }}>
-          <PressableScale
-            haptic={false}
-            onPress={jumpToday}
-            accessibilityRole="button"
-            accessibilityLabel={tr('ui.studyplan.todayA11y')}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 36, paddingHorizontal: 14, borderRadius: t.radii.pill, backgroundColor: t.colors.accentSoft }}
-            pressedStyle={{ opacity: 0.8 }}
-            hitSlop={4}
-          >
-            <D3Icon name="today" size={16} color={t.colors.accent} />
-            <HText variant="callout" weight="600" color="accent">
-              {tr('ui.studyplan.today')}
-            </HText>
-          </PressableScale>
+          <Button label={tr('ui.studyplan.today')} accessibilityLabel={tr('ui.studyplan.todayA11y')} size="small" onPress={jumpToday} />
           <Legend t={t} />
         </View>
       ) : null}
 
-      <View style={{ borderRadius: t.radii.m, borderWidth: 1, borderColor: t.colors.border, overflow: 'hidden' }}>
+      <View style={{ borderRadius: t.radii.control, borderWidth: 1, borderColor: t.colors.border, overflow: 'hidden' }}>
         {plan.weeks.map((w, wi) => (
           <Week
             key={w.id}
@@ -269,7 +257,7 @@ function Day({ t, day, index, done, today, focused, onTask, onDay }: { t: Theme;
     <View
       style={{
         marginTop: t.spacing.s,
-        borderRadius: t.radii.m,
+        borderRadius: t.radii.control,
         paddingVertical: 2,
         backgroundColor: focused ? withAlpha(t.colors.accent, t.dark ? 0.14 : 0.08) : 'transparent',
         borderWidth: focused ? 1 : 0,
@@ -277,7 +265,7 @@ function Day({ t, day, index, done, today, focused, onTask, onDay }: { t: Theme;
       }}
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s, paddingLeft: t.spacing.s, minHeight: 36 }}>
-        <HText variant="caption" weight="700" style={{ textTransform: 'uppercase', letterSpacing: 0.5, color: today ? t.colors.accent : t.colors.muted }} accessibilityRole="header">
+        <HText variant="caption" weight="600" style={{ color: today ? t.colors.accentText : t.colors.muted }} accessibilityRole="header">
           {label}
         </HText>
         {today ? (
@@ -323,7 +311,7 @@ function TaskRow({ t, task, checked, onPress }: { t: Theme; task: StudyTask; che
       accessibilityRole="checkbox"
       accessibilityState={{ checked }}
       accessibilityLabel={a11y}
-      style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s + 2, minHeight: 44, paddingHorizontal: t.spacing.s, paddingVertical: 6, borderRadius: t.radii.s }}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s + 2, minHeight: 44, paddingHorizontal: t.spacing.s, paddingVertical: 6, borderRadius: t.radii.control }}
       pressedStyle={{ backgroundColor: t.colors.surfacePressed }}
     >
       <View
@@ -332,7 +320,7 @@ function TaskRow({ t, task, checked, onPress }: { t: Theme; task: StudyTask; che
           height: 22,
           borderRadius: 11,
           borderWidth: checked ? 0 : 1.5,
-          borderColor: t.colors.borderStrong,
+          borderColor: t.colors.borderControl,
           backgroundColor: checked ? t.colors.success : 'transparent',
           alignItems: 'center',
           justifyContent: 'center',
@@ -341,7 +329,7 @@ function TaskRow({ t, task, checked, onPress }: { t: Theme; task: StudyTask; che
         {checked ? <Icon name="check" size={14} color={t.dark ? '#111' : '#FFF'} strokeWidth={2.8} /> : null}
       </View>
       {task.kind ? (
-        <View style={{ width: 26, height: 26, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: withAlpha(kc, t.dark ? 0.2 : 0.12) }}>
+        <View style={{ width: 26, height: 26, borderRadius: t.radii.inline, alignItems: 'center', justifyContent: 'center', backgroundColor: withAlpha(kc, t.dark ? 0.2 : 0.12) }}>
           <D3Icon name={task.kind} size={15} color={kc} strokeWidth={1.9} />
         </View>
       ) : null}

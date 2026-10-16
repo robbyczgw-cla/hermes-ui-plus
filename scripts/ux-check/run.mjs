@@ -33,14 +33,14 @@ const only = onlyArg ? onlyArg.slice('--scenario='.length).split(',').filter(Boo
 // prompt (demo picker keyword) / firstText anchors the answer start / expectText proves the final block
 const SCENARIOS = [
   { id: 'weather', prompt: 'How is the weather tomorrow?', firstText: 'Here is the weather', expectText: 'bring a jacket' },
-  { id: 'table', prompt: 'Show me a table', firstText: 'Die größten Städte', expectText: 'Berlin ist mit Abstand' },
-  { id: 'wide-table', prompt: 'Wide table please', firstText: 'Drei Alltagsgeräte', expectText: 'ohne seitliches Scrollen', expectCardsToggle: true },
-  { id: 'products', prompt: 'Headphones under 350', firstText: 'Drei fiktive Kopfhörer', expectText: 'Pulse 2' },
+  { id: 'table', prompt: 'Show me a table', firstText: 'The largest cities', expectText: 'Berlin is by far the largest' },
+  { id: 'wide-table', prompt: 'Wide table please', firstText: 'Three everyday devices', expectText: 'no sideways scrolling', expectCardsToggle: true },
+  { id: 'products', prompt: 'Headphones under 350', firstText: 'Three fictional headphones', expectText: 'Pulse 2' },
   { id: 'compare', prompt: 'Compare three plans', firstText: 'Comparison of the three plans', expectText: 'fits most people best' },
-  { id: 'places', prompt: 'Restaurants nearby', firstText: 'Drei fiktive Lokale', expectText: 'Gartenküche Beispiel' },
-  { id: 'recipe', prompt: 'Recipe for pasta', firstText: 'Ein schneller Klassiker', expectText: 'Spaghetti al Pomodoro' },
-  { id: 'suggestions', prompt: 'Buttons please', firstText: 'Was möchtest du als Nächstes tun?', expectText: 'Zeig mir ein Diagramm', expectSuggestions: true },
-  { id: 'text-card', prompt: 'Show my stats', firstText: 'Deine Kennzahlen diese Woche', expectText: 'Wochenziel Schritte' },
+  { id: 'places', prompt: 'Restaurants nearby', firstText: 'Three fictional places', expectText: 'Garden Kitchen' },
+  { id: 'recipe', prompt: 'Recipe for pasta', firstText: 'Gladly – the real Roman carbonara', expectText: 'Spaghetti carbonara' },
+  { id: 'suggestions', prompt: 'Buttons please', firstText: 'What would you like to do next?', expectText: 'Show me a chart of the temperature trend.', expectSuggestions: true },
+  { id: 'text-card', prompt: 'Show my stats', firstText: 'Your key figures this week', expectText: 'Weekly step goal' },
 ];
 
 /** localStorage seed (addInitScript fn): onboarding done, builtin offline demo profile active, English chrome. */

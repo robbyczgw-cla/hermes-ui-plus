@@ -35,8 +35,14 @@ import { ProvenanceChip } from './ProvenanceChip';
 import { useS } from './useS';
 import { useLocale } from '../../../i18n';
 import { MapSkeleton } from '../../skeletons';
+import Svg, { Circle, G, Line, Path, Text as SvgText } from 'react-native-svg';
+import { withAlpha } from '../../color';
+import { useCaptureBusy, useCaptureMode } from '../../lib/capture';
+import { sketchPoints } from './b/mapSketch';
 
 const MAP_HEIGHT = 260;
+/** share-as-image: height of the static sketch that stands in for the live map */
+const SKETCH_HEIGHT = 200;
 /** Static trusted document, built once (stable reference = the frame never reloads). */
 
 type MapState = { played?: boolean };
@@ -79,6 +85,8 @@ function MapBody({ model, streaming, basis, source }: { model: MapModel; streami
   const t = useTheme();
   const { onAction } = useHui();
   const reduced = useReducedMotion();
+  // share-as-image: a static sketch instead of the live map (tiles live in a WebView / iframe), no controls
+  const capture = useCaptureMode();
   const frame = useRef<HtmlFrameHandle>(null);
   const [state, setState] = useNodeState<MapState>(model.id, {});
   const [active, setActive] = useState<number | null>(null);
@@ -200,8 +208,10 @@ function MapBody({ model, streaming, basis, source }: { model: MapModel; streami
       ) : null}
 
       {/* map */}
-      <View style={{ height: MAP_HEIGHT, borderRadius: t.radii.m, overflow: 'hidden', backgroundColor: t.colors.surfaceAlt, borderWidth: 1, borderColor: t.colors.border }}>
-        {streaming ? (
+      <View style={{ height: capture ? SKETCH_HEIGHT : MAP_HEIGHT, borderRadius: t.radii.control, overflow: 'hidden', backgroundColor: t.colors.surfaceAlt, borderWidth: 1, borderColor: t.colors.border }}>
+        {capture ? (
+          <MapSketch t={t} markers={model.markers} route={model.route} label={MAP.mapA11y(stopsSummary(model.markers))} />
+        ) : streaming ? (
           <Skeleton width="100%" height={MAP_HEIGHT} radius={0} />
         ) : (
           <HtmlFrame
@@ -218,11 +228,11 @@ function MapBody({ model, streaming, basis, source }: { model: MapModel; streami
             accessibilityLabel={MAP.mapA11y(stopsSummary(model.markers))}
           />
         )}
-        {!streaming && showOverlay ? <MapOverlay t={t} state={libError ? 'lib' : tiles === 'failed' ? 'failed' : 'loading'} onRetry={retry} /> : null}
+        {!streaming && !capture && showOverlay ? <MapOverlay t={t} state={libError ? 'lib' : tiles === 'failed' ? 'failed' : 'loading'} onRetry={retry} /> : null}
       </View>
 
       {/* controls */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s, flexWrap: 'wrap' }}>
+      {capture ? null : <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s, flexWrap: 'wrap' }}>
         {model.animate && !libError ? (
           <>
             <RoundBtn
@@ -237,7 +247,7 @@ function MapBody({ model, streaming, basis, source }: { model: MapModel; streami
         <Btn label={exploring ? MAP.exploreDone : MAP.explore} bicon="expand" compact onPress={toggleExplore} disabled={streaming || libError} kind={exploring ? 'success' : 'secondary'} />
         <View style={{ flex: 1 }} />
         {focus ? <Btn label={MAP.openInMaps} icon="external" compact kind="ghost" onPress={() => openInMaps(focus)} disabled={streaming} /> : null}
-      </View>
+      </View>}
 
       {model.route ? (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -260,6 +270,43 @@ function MapBody({ model, streaming, basis, source }: { model: MapModel; streami
         </HText>
       ) : null}
     </Surface>
+  );
+}
+
+/** Static stand-in for the live map in a shared image: numbered pins at their relative positions, the dashed route. */
+function MapSketch({ t, markers, route, label }: { t: Theme; markers: readonly MapMarker[]; route: boolean; label: string }) {
+  const [w, setW] = useState(0);
+  useCaptureBusy(w === 0);
+  const h = SKETCH_HEIGHT - 2;
+  const pts = useMemo(() => sketchPoints(markers, w, h, 30), [markers, w, h]);
+  const grid = withAlpha(t.colors.text, t.dark ? 0.07 : 0.06);
+  const step = 28;
+  return (
+    <View style={{ flex: 1 }} onLayout={(e) => setW(Math.round(e.nativeEvent.layout.width))} accessible accessibilityRole="image" accessibilityLabel={label}>
+      {w > 0 ? (
+        <Svg width={w} height={h}>
+          <G stroke={grid} strokeWidth={1}>
+            {Array.from({ length: Math.ceil(w / step) }, (_, i) => (
+              <Line key={`v${i}`} x1={(i + 0.5) * step} y1={0} x2={(i + 0.5) * step} y2={h} />
+            ))}
+            {Array.from({ length: Math.ceil(h / step) }, (_, i) => (
+              <Line key={`h${i}`} x1={0} y1={(i + 0.5) * step} x2={w} y2={(i + 0.5) * step} />
+            ))}
+          </G>
+          {route && pts.length > 1 ? (
+            <Path d={pts.map((p, i) => `${i ? 'L' : 'M'}${p.x} ${p.y}`).join(' ')} stroke={t.colors.accent} strokeOpacity={0.75} strokeWidth={2.5} strokeDasharray="6 6" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+          ) : null}
+          {pts.map((p, i) => (
+            <G key={i}>
+              <Circle cx={p.x} cy={p.y} r={14} fill={t.colors.accent} stroke={t.colors.surface} strokeWidth={2.5} />
+              <SvgText x={p.x} y={p.y + 4.5} fontSize={12.5} fontWeight="700" fontFamily={t.fonts.sans} fill={t.colors.onAccent} textAnchor="middle">
+                {String(p.n)}
+              </SvgText>
+            </G>
+          ))}
+        </Svg>
+      ) : null}
+    </View>
   );
 }
 
@@ -291,7 +338,7 @@ function MapOverlay({ t, state, onRetry }: { t: Theme; state: 'loading' | 'faile
 function StopRow({ t, m, active, onPress, onOpen, thumbs }: { t: Theme; m: MapMarker; active: boolean; onPress: () => void; onOpen: () => void; thumbs: boolean }) {
   const MAP = useS().map;
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s, borderRadius: t.radii.m, backgroundColor: active ? t.colors.accentSoft : 'transparent', paddingRight: 4 }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s, borderRadius: t.radii.control, backgroundColor: active ? t.colors.accentSoft : 'transparent', paddingRight: 4 }}>
       <PressableScale
         haptic="selection"
         scaleTo={0.99}

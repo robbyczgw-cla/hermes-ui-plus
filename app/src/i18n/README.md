@@ -20,7 +20,7 @@ ICU-lite inline in the value, one key per message (no `_one/_other` keys):
 
 ## Adding strings
 1. Add the key to `de.ts` (source of truth), then to `en.ts` - `en` is `satisfies typeof de`, a missing/extra key fails `tsc`.
-2. Nested by feature: `chat.*`, `settings.*`, `voice.*`, ... Reuse `actions.*`, `errors.*`, `time.*` for shared text.
+2. Nested by feature: `chat.*`, `settings.*`, `voice.*`, ... Reuse `actions.*`, `errors.*` for shared text; relative times come from `formatRelative`.
 3. Module-level constants holding text must become functions of `t` (or store keys, translate at render).
 4. Run `node src/i18n/find-hardcoded.mjs [dir] [--all]` (`--all` also scans `.ts`) to list candidates (`file:line  kind  text`).
    It is heuristic: expect false positives (e.g. `Promise` in JSX text) and misses.
@@ -43,3 +43,10 @@ Re-diff against the inventory once it lands and adjust.
 
 Also in the same pass: replace hardcoded `toLocaleString('de-DE')`/date formatting with `useLocale()` helpers, and
 decide whether model-facing system prompts (bridge bootstrap, tool descriptions) stay German (recommended: leave untouched, not UI).
+
+## Quality gates (`i18nQuality.test.ts`)
+`npm test` fails on: keys missing/extra vs German (en, es), empty values, `{placeholder}` mismatches and malformed plurals,
+unused keys (dynamic key families are listed in `DYNAMIC_KEYS`), hardcoded user-visible strings in `src` (AST scan in
+`hardcoded.ts`; files that legitimately hold such text are listed with a reason in `ALLOW`), and terminology/register
+rules per locale (`TERMS`: du/tú, «» quotes, bridge gender, Schlüssel vs Key, ...). `compliance.consent.*` is fingerprinted
+(`AI_CONSENT_VERSION`): changing its wording needs a version bump.

@@ -2,16 +2,13 @@ import type { chat as de } from './chat.de.ts';
 
 // Namespace 'chat' (English). Must have exactly the keys of chat.de.ts.
 export const chat = {
-  approvalChip: {
-    a11y: 'Hermes is waiting for approval, open',
-    text: 'Hermes is waiting for approval',
-  },
   busy: 'Please wait until the answer is finished',
   copied: 'Copied',
   timerDone: 'Timer finished: {label}',
   code: {
     copied: 'Code copied',
     copy: 'Copy code',
+    scrollRight: 'Scroll code right',
   },
   composer: {
     placeholder: 'Message Hermes',
@@ -34,7 +31,6 @@ export const chat = {
     retry: 'Try again',
     newChat: 'Start new chat',
     resetChat: 'Reset chat',
-    resetDone: 'Saved answers of this chat were reset.',
     hint: 'The chat stays in the list.',
   },
   missingConnection: {
@@ -75,8 +71,8 @@ export const chat = {
     },
     demo: {
       badge: 'DEMO',
-      text: 'Prepared answers, offline',
-      connect: 'Connect',
+      text: 'No server · sample answers',
+      connect: 'Connect Hermes',
     },
   },
   empty: {
@@ -196,6 +192,10 @@ export const chat = {
     copied: 'Message copied',
     answerCopied: 'Answer copied',
     longPressCopy: 'Long-press to copy',
+    extraContext: 'Context from an earlier chat sent along',
+    extraNote: 'Note sent along',
+    answerReady: 'Answer ready',
+    answerReadyPreview: 'Answer ready: {preview}',
     pendingUploads: 'Sends once the upload is done…',
     pendingFailed: 'Upload failed – retry or remove the file.',
     pendingCancel: 'Cancel',
@@ -208,7 +208,6 @@ export const chat = {
     queuedResendA11y: 'Send the message again (missing files are uploaded first)',
     queuedDiscard: 'Discard',
     queuedDiscardA11y: 'Discard the message (the text goes back to the input)',
-    formSent: '📝 Form submitted',
     truncated: 'The answer was cut off because of the length limit.',
     capped: 'Very long answer: shortened in the app (end marked with […]).',
     failed: 'Answer failed',
@@ -227,9 +226,9 @@ export const chat = {
     hideDetails: 'Hide details',
     stopped: 'Stopped',
     recovering: 'Connection interrupted – loading the answer…',
+    reconnecting: 'Connection interrupted – reconnecting…',
     recovered: 'loaded later',
     finished: 'done',
-    regenerate: 'Regenerate',
     componentError: 'The component could not be displayed.',
     componentErrorDetail: 'The component could not be displayed: {error}',
     componentFallback: 'Shown as a list – the format of this block was not recognized.',
@@ -239,7 +238,6 @@ export const chat = {
   thinking: {
     live: 'Thinking…',
     done: 'Reasoning',
-    a11y: 'Hermes is thinking',
   },
   modelPicker: {
     title: 'Model for this chat',
@@ -425,7 +423,6 @@ export const chat = {
     readMoreA11y: 'Read more, about {n} more lines',
     collapseLive: 'Collapse',
     collapseLiveA11y: 'Collapse the answer, hide about {n} lines',
-    showLess: 'Show less',
     close: 'Close',
     footnoteA11y: 'Source {n}',
     footnoteTitle: 'Source {n}',
@@ -452,10 +449,32 @@ export const chat = {
     copied: 'Copied',
     share: {
       button: 'Share as image',
+      title: 'Share as image',
       busy: 'Creating image …',
       failed: 'The image could not be created.',
+      actionFailed: 'The image could not be passed on.',
       unavailable: 'Sharing is not available on this device.',
       dialogTitle: 'Share answer as image',
+      retry: 'Try again',
+      question: 'Show my question',
+      continues: 'Continues in the chat',
+      tagline: 'interactive chat for Hermes Agent',
+      previewA11y: 'Preview of the image',
+      nothing: 'This answer has nothing that fits into an image: its interactive widget only works in the app.',
+      widgetsLeftOut: '{count, plural, one {The interactive widget is left out, it only works in the app.} other {# interactive widgets are left out, they only work in the app.}}',
+      widgetPlaceholder: 'Interactive widget, not included in the image',
+      privacyNative: 'The image stays on this device until you pick an app in the share sheet.',
+      privacyLocal: 'The image is made on this device. Nothing is uploaded.',
+      downloaded: 'Image downloaded',
+      saved: 'Image saved to Downloads',
+      copied: 'Image copied',
+      action: { share: 'Share', download: 'Download', save: 'Save', copy: 'Copy' },
+      hint: {
+        share: 'Opens the share sheet with the image',
+        download: 'Saves the image as a PNG file',
+        save: 'Saves the image in your Downloads folder',
+        copy: 'Copies the image to the clipboard',
+      },
     },
   },
   // ── /polish-answers ──
@@ -489,6 +508,5 @@ export const chat = {
     },
     running: 'running',
     unread: 'new answer',
-    stopTurn: 'Stop answer',
   },
 } satisfies typeof de;

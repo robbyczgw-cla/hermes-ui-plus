@@ -4,11 +4,11 @@
  */
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
+import { Text } from '../ui/primitives/Text';
 import { ActionMenu, type MenuItem } from '../chat/ActionMenu';
 import { Icon } from '../chat/icons';
 import { useT } from '../i18n';
-import { scaledText } from '../settings/preferences';
 import { useTheme } from '../ui';
 
 type Props = {
@@ -42,11 +42,11 @@ export function QuickHeader({ topInset, canClear, onBack, onClear }: Props) {
         <View style={styles.center} accessible accessibilityRole="header" accessibilityLabel={`${tr('quick.thread.title')}. ${tr('quick.thread.hint')}`}>
           <View style={styles.titleRow}>
             <Icon name="boltFilled" size={15} color={t.colors.accent} strokeWidth={1.6} />
-            <Text style={[styles.title, { color: t.colors.text }, scaledText(17, 22, t.fontScale)]} numberOfLines={1} maxFontSizeMultiplier={1.6}>
+            <Text style={[t.typography.headline, styles.title, { color: t.colors.text }]} numberOfLines={1} maxFontSizeMultiplier={1.6}>
               {tr('quick.thread.title')}
             </Text>
           </View>
-          <Text style={[styles.subtitle, { color: t.colors.subtle }, scaledText(12, 16, t.fontScale)]} numberOfLines={1} maxFontSizeMultiplier={1.6}>
+          <Text style={[t.typography.caption, styles.subtitle, { color: t.colors.subtle }]} numberOfLines={1} maxFontSizeMultiplier={1.6}>
             {tr('quick.thread.hint')}
           </Text>
         </View>
@@ -71,6 +71,6 @@ const styles = StyleSheet.create({
   btn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', minWidth: 0, paddingHorizontal: 6 },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 6, maxWidth: '100%' },
-  title: { fontSize: 17, fontWeight: '600', letterSpacing: -0.2, flexShrink: 1 },
-  subtitle: { fontSize: 12, marginTop: 1, flexShrink: 1 },
+  title: { flexShrink: 1 },
+  subtitle: { marginTop: 1, flexShrink: 1 },
 });

@@ -82,16 +82,20 @@ The scanner does not OCR video frames: review visible content as well.
 
 ## CI (`.github/workflows/ci.yml`, jobs `leak-guard` and `gitleaks`)
 
-Runs the pinned gitleaks action (full history) and `leak-guard --tree --generic-only` plus its unit tests on every
-push and PR, next to the test jobs (app, bridge, push, scripts). Actions are pinned to commit SHAs; update the SHA together with the version comment. The gitleaks action
-needs a `GITLEAKS_LICENSE` secret only for organisation-owned repositories.
+Runs gitleaks (pinned release, checksum-verified by `.github/actions/setup-gitleaks`, full git history, `.gitleaks.toml`)
+and `leak-guard --tree --generic-only` plus its unit tests on every pull request and on pushes to main, next to the
+test jobs (app, services, website). No secret and no licence key is needed, so pull requests from forks run the same
+checks. The private denylist is not available in CI; it runs in the maintainers' hooks and release gate. Actions are
+pinned to commit SHAs; update the SHA together with the version comment (dependabot does both).
 
 **Manual step for the repository owner (GitHub settings, cannot be done from the repo):**
 Settings -> Code security -> enable **Secret scanning** and **Push protection** (and Dependabot alerts).
 
 ## Release artifacts
 
-`scripts/scan-artifact.sh <apk|aab|ipa|zip|dir|.app>`; part of the release steps in `docs/BUILD.md`.
+`scripts/scan-artifact.sh <apk|aab|ipa|zip|dir|.app>`; part of the release steps in `docs/BUILD.md`. The release workflow
+(`.github/workflows/release.yml`) runs it with `--public` (generic patterns + gitleaks) on the web bundle and the unpacked
+bridge package.
 
 ### Code signatures (iOS)
 

@@ -5,9 +5,9 @@
  * ("Melden"). Rows are ≥ 48 px high; an item runs after the sheet closed.
  */
 import { useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '../ui/primitives/Text';
 import { useT } from '../i18n';
-import { scaledText } from '../settings/preferences';
 import { SheetGrabber, SheetModal, haptic, useTheme } from '../ui';
 import { Icon, type IconName } from './icons';
 
@@ -97,7 +97,7 @@ export function MenuHeader({ lines }: { lines: string[] }) {
   return (
     <View accessible accessibilityLabel={shown.join(', ')}>
       {shown.map((l, i) => (
-        <Text key={i} style={[i === 0 ? styles.headTitle : styles.headLine, scaledText(i === 0 ? 13 : 12.5, i === 0 ? 18 : 17, t.fontScale), { color: i === 0 ? t.colors.muted : t.colors.subtle }]} numberOfLines={2}>
+        <Text key={i} style={[t.typography.caption, i === 0 ? styles.headTitle : styles.headLine, { color: i === 0 ? t.colors.muted : t.colors.subtle }]} numberOfLines={2}>
           {l}
         </Text>
       ))}
@@ -127,11 +127,11 @@ function Row({ item, first, onPress }: { item: MenuItem; first: boolean; onPress
     >
       <Icon name={item.icon} size={item.quiet ? 16 : 19} color={color} />
       <View style={styles.rowText}>
-        <Text style={[item.quiet ? styles.quietText : styles.text, scaledText(item.quiet ? 13.5 : 15.5, item.quiet ? 18 : 21, t.fontScale), { color }]} numberOfLines={2}>
+        <Text style={[item.quiet ? t.typography.callout : t.typography.body, { color }]} numberOfLines={2}>
           {item.label}
         </Text>
         {item.hint ? (
-          <Text style={[styles.hint, { color: t.colors.subtle }]} numberOfLines={2}>
+          <Text style={[t.typography.caption, styles.hint, { color: t.colors.subtle }]} numberOfLines={2}>
             {item.hint}
           </Text>
         ) : null}
@@ -152,7 +152,7 @@ function BackRow({ label, onPress }: { label: string; onPress: () => void }) {
       style={({ pressed }) => [styles.row, styles.back, pressed && { backgroundColor: t.colors.surfacePressed }]}
     >
       <Icon name="chevronLeft" size={18} color={t.colors.muted} />
-      <Text style={[styles.backText, { color: t.colors.text }]} numberOfLines={1} accessibilityRole="header">
+      <Text style={[t.typography.bodyStrong, styles.backText, { color: t.colors.text }]} numberOfLines={1} accessibilityRole="header">
         {label}
       </Text>
     </Pressable>
@@ -167,15 +167,13 @@ function Divider() {
 const styles = StyleSheet.create({
   sheet: { paddingHorizontal: 0 },
   header: { paddingHorizontal: 20, paddingTop: 2, paddingBottom: 10 },
-  headTitle: { fontSize: 13, fontWeight: '600' },
-  headLine: { fontSize: 12.5, marginTop: 2 },
+  headTitle: { fontWeight: '600' },
+  headLine: { marginTop: 2 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 50, paddingHorizontal: 20, paddingVertical: 8 },
   rowQuiet: { minHeight: 44 },
   rowText: { flex: 1, minWidth: 0 },
-  text: { fontSize: 15.5 },
-  quietText: { fontSize: 13.5 },
-  hint: { fontSize: 12, marginTop: 1 },
+  hint: { marginTop: 1 },
   back: { minHeight: 48, gap: 8 },
-  backText: { fontSize: 15, fontWeight: '600', flex: 1 },
+  backText: { flex: 1 },
   divider: { height: StyleSheet.hairlineWidth, marginTop: 6, marginBottom: 2 },
 });

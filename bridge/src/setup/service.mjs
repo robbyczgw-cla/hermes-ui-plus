@@ -38,7 +38,7 @@ const sdQuote = (raw) => {
  * ProtectSystem=strict, ProtectHome, StateDirectory. User units keep only options an unprivileged systemd
  * manager can apply everywhere (no namespaces), plus StateDirectory (= ~/.local/state/hermes-ui-bridge).
  */
-export function systemdUnit({ argv, envFile, system = false, port = 8790 }) {
+export function systemdUnit({ argv, envFile, system = false, port = 8790, credentials = [] }) {
   const lines = [
     '# Written by `hermes-ui-plus-bridge setup`; re-run it to update (manual edits are overwritten).',
     '[Unit]',
@@ -50,6 +50,13 @@ export function systemdUnit({ argv, envFile, system = false, port = 8790 }) {
     'Type=simple',
     `EnvironmentFile=${sdPath(envFile)}`,
     `Environment=NODE_ENV=production BRIDGE_PORT=${port}`,
+    // files the service user may not read (ProtectHome, root-only modes): systemd copies them into the credentials
+    // directory (%d) of this service and the env var points there. EnvironmentFile= wins over Environment=, so the env
+    // file must not set the same variable.
+    ...credentials.flatMap((c) => {
+      if (!/^[A-Za-z0-9_.-]+$/.test(c.name) || !/^[A-Z][A-Z0-9_]*$/.test(c.env)) throw new Error('invalid credential name');
+      return [`LoadCredential=${c.name}:${sdPath(c.path)}`, `Environment=${c.env}=%d/${c.name}`];
+    }),
     `ExecStart=${argv.map(sdQuote).join(' ')}`,
     'Restart=on-failure',
     'RestartSec=2',
@@ -146,7 +153,9 @@ export function launchdCommands({ uid, plistPath }) {
 }
 
 /** docker compose service for the bridge, reading the same env file. */
-export function composeSnippet({ envFile, port = 8790, hermesPort = 8642 }) {
+export function composeSnippet({ envFile, port = 8790, hermesPort = 8642, webDir = '' }) {
+  // the env file's BRIDGE_WEB_DIR is a host path: mount it and point the container at the mount instead
+  const web = webDir ? { env: '\n      BRIDGE_WEB_DIR: /web', volume: `\n      - ${JSON.stringify(`${webDir}:/web:ro`)}` } : { env: '', volume: '' };
   return `# docker-compose.yml (build from the bridge directory of the repo, or use your own image name)
 services:
   bridge:
@@ -159,13 +168,13 @@ services:
       HERMES_BASE_URL: http://host.docker.internal:${hermesPort}
       BRIDGE_HOST: 0.0.0.0
       BRIDGE_PORT: "8790"
-      BRIDGE_STATE_DIR: /var/lib/hermes-ui-bridge
+      BRIDGE_STATE_DIR: /var/lib/hermes-ui-bridge${web.env}
     ports:
       - "127.0.0.1:${port}:8790"   # loopback only; tailscale serve / a TLS proxy goes in front
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - bridge-data:/var/lib/hermes-ui-bridge
+      - bridge-data:/var/lib/hermes-ui-bridge${web.volume}
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]

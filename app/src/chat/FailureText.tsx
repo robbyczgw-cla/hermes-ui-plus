@@ -1,22 +1,33 @@
 // Text of the failure card: friendly message; for network failures the scrubbed technical detail behind a
-// "Details" toggle (hermes/networkFailure.ts).
-import { useState } from 'react';
-import { Pressable, StyleSheet, Text } from 'react-native';
+// "Details" toggle (hermes/networkFailure.ts). Under open details: "Report a problem" (support/), which only gets
+// the error's category + code (support/report.ts), never its text.
+import { useEffect, useState } from 'react';
+import { Pressable, StyleSheet, useWindowDimensions } from 'react-native';
+import { Text } from '../ui/primitives/Text';
 import type { ChatMessage } from '../hermes';
 import { useT } from '../i18n';
-import { scaledText } from '../settings/preferences';
 import { useTheme } from '../ui';
 import { presentMessageError } from '../hermes/networkFailure';
+import { ProblemReportSheet } from '../support/ProblemReportSheet';
+import { errorCodeOf, noteLastError } from '../support/report';
+import { useToast } from './Toast';
+import { a11yState } from '../ui/lib/a11yState';
+import { scaledLineLimit } from '../ui/lib/fontScaleLayout';
 
-export function FailureText({ message, override }: { message: Pick<ChatMessage, 'error' | 'errorText'>; override?: string }) {
+export function FailureText({ message, override }: { message: Pick<ChatMessage, 'error' | 'errorText'> & { createdAt?: number }; override?: string }) {
   const t = useTheme();
   const tr = useT();
   const [open, setOpen] = useState(false);
-  const fs = (size: number, line: number) => scaledText(size, line, t.fontScale);
+  const [reporting, setReporting] = useState(false);
+  const toast = useToast();
+  // 4 lines at text scale 1; more at large text so the advice part of the message is not cut
+  const maxLines = scaledLineLimit(4, t.fontScale * (useWindowDimensions().fontScale || 1));
   const shown = override ? { text: override } : presentMessageError(message, tr);
+  const { error, errorText, createdAt } = message;
+  useEffect(() => noteLastError(errorCodeOf({ error, errorText }), createdAt), [error, errorText, createdAt]);
   return (
     <>
-      <Text style={[styles.text, fs(13, 18), { color: t.colors.text }]} numberOfLines={4}>
+      <Text style={[t.typography.caption, { color: t.colors.text }]} numberOfLines={maxLines}>
         {shown.text}
       </Text>
       {shown.detail ? (
@@ -25,25 +36,37 @@ export function FailureText({ message, override }: { message: Pick<ChatMessage, 
           hitSlop={6}
           style={({ pressed }) => [styles.toggle, pressed && { opacity: 0.6 }]}
           accessibilityRole="button"
-          accessibilityState={{ expanded: open }}
+          {...a11yState({ expanded: open })}
         >
-          <Text style={[styles.toggleText, fs(12.5, 17), { color: t.colors.muted }]}>
+          <Text style={[t.typography.caption, styles.toggleText, { color: t.colors.muted }]}>
             {open ? tr('chat.message.hideDetails') : tr('chat.message.showDetails')}
           </Text>
         </Pressable>
       ) : null}
       {shown.detail && open ? (
-        <Text style={[styles.detail, fs(12, 16), { color: t.colors.subtle }]} selectable>
+        <Text style={[t.typography.caption, { color: t.colors.subtle }]} selectable>
           {shown.detail}
         </Text>
       ) : null}
+      {shown.detail && open ? (
+        <Pressable
+          onPress={() => {
+            noteLastError(errorCodeOf({ error, errorText }), Date.now()); // the card the user reports from wins
+            setReporting(true);
+          }}
+          hitSlop={6}
+          style={({ pressed }) => [styles.toggle, pressed && { opacity: 0.6 }]}
+          accessibilityRole="button"
+        >
+          <Text style={[t.typography.caption, styles.toggleText, { color: t.colors.muted }]}>{tr('support.report.fromError')}</Text>
+        </Pressable>
+      ) : null}
+      {reporting ? <ProblemReportSheet visible onClose={() => setReporting(false)} onToast={toast} /> : null}
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  text: { fontSize: 13, lineHeight: 18 },
   toggle: { alignSelf: 'flex-start', paddingVertical: 2 },
-  toggleText: { fontSize: 12.5, fontWeight: '600', textDecorationLine: 'underline' },
-  detail: { fontSize: 12, lineHeight: 16 },
+  toggleText: { fontWeight: '600', textDecorationLine: 'underline' },
 });

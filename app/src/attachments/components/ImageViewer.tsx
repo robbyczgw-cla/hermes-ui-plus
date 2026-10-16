@@ -4,11 +4,13 @@
  * GestureHandlerRootView on Android.
  */
 import { AttachmentImage } from './AttachmentImage';
-import { Modal, Pressable, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, StatusBar, StyleSheet, View } from 'react-native';
+import { Text } from '../../ui/primitives/Text';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useT } from '../../i18n';
+import { useTheme } from '../../ui';
 import { shareAttachment } from '../share';
 import type { Attachment } from '../types';
 import { AttIcon } from './icons';
@@ -32,6 +34,7 @@ export function ImageViewer({ attachment, onClose, onEdit }: ImageViewerProps) {
 function ViewerContent({ attachment, onClose, onEdit }: { attachment: Attachment; onClose(): void; onEdit?: (attachment: Attachment) => void }) {
   useEscapeToClose(true, onClose);
   const insets = useSafeAreaInsets();
+  const t = useTheme();
   const tr = useT();
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
@@ -110,7 +113,7 @@ function ViewerContent({ attachment, onClose, onEdit }: { attachment: Attachment
         <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel={tr('actions.close')} style={styles.roundBtn}>
           <AttIcon name="close" size={22} color="#fff" strokeWidth={2.2} />
         </Pressable>
-        <Text numberOfLines={1} style={styles.title}>
+        <Text numberOfLines={1} style={[t.typography.body, styles.title]}>
           {attachment.name}
         </Text>
         {onEdit ? (
@@ -122,9 +125,9 @@ function ViewerContent({ attachment, onClose, onEdit }: { attachment: Attachment
             hitSlop={8}
             accessibilityRole="button"
             accessibilityLabel={tr('imageEdit.actionA11y')}
-            style={styles.pill}
+            style={[styles.pill, { borderRadius: t.radii.pill }]}
           >
-            <Text style={styles.pillText}>{tr('imageEdit.action')}</Text>
+            <Text style={[t.typography.callout, styles.pillText]}>{tr('imageEdit.action')}</Text>
           </Pressable>
         ) : null}
         <Pressable onPress={() => void shareAttachment(attachment, tr)} hitSlop={10} accessibilityRole="button" accessibilityLabel={tr('actions.share')} style={styles.roundBtn}>
@@ -140,7 +143,7 @@ const styles = StyleSheet.create({
   bg: { backgroundColor: '#000' },
   topBar: { position: 'absolute', left: 0, right: 0, top: 0, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, gap: 12 },
   roundBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.14)' },
-  pill: { height: 40, borderRadius: 20, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.18)' },
-  pillText: { color: '#fff', fontSize: 14.5, fontWeight: '600' },
-  title: { flex: 1, color: '#fff', fontSize: 15, fontWeight: '500', textAlign: 'center' },
+  pill: { height: 40, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.18)' },
+  pillText: { color: '#fff', fontWeight: '600' },
+  title: { flex: 1, color: '#fff', fontWeight: '500', textAlign: 'center' },
 });

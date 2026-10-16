@@ -4,8 +4,9 @@ import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useI18n, useT } from '../../i18n';
 import { FadeIn, HText, Icon, PressableScale, useTheme } from '../../ui';
+import { AgentSetupSheet } from '../AgentSetupSheet';
 import { DEMO_STARTERS, STARTERS, type StarterPrompt } from '../starters';
-import { Button, CodeBox, Notice, OnbIcon, OnbScreen, OptionCard, Title } from '../ui';
+import { Button, CodeBox, Notice, OnbIcon, OnbScreen, OptionCard, Title, heroVariant } from '../ui';
 import { BRIDGE_SETUP_COMMAND, bridgeDocsUrl, copyText, HERMES_AGENT_URL, openDocs, promptsFor, sharePrompt } from './actions';
 
 type Progress = { step?: number; total?: number };
@@ -15,12 +16,22 @@ export type SetupChoice = 'link' | 'noBridge' | 'noHermes';
 
 export function SetupChoiceScreen({ onChoose, onBack, step, total }: { onChoose: (c: SetupChoice) => void; onBack?: () => void } & Progress) {
   const tr = useT();
+  const [agentSheet, setAgentSheet] = useState(false);
   return (
     <OnbScreen onBack={onBack} step={step} total={total}>
       <Title lead={tr('onboarding.guided.setup.lead')}>{tr('onboarding.guided.setup.title')}</Title>
       <OptionCard icon="qr" title={tr('onboarding.guided.setup.link.title')} text={tr('onboarding.guided.setup.link.text')} badge={tr('onboarding.guided.setup.link.badge')} onPress={() => onChoose('link')} />
+      <OptionCard icon="agent" title={tr('onboarding.agentSetup.option.title')} text={tr('onboarding.agentSetup.option.text')} onPress={() => setAgentSheet(true)} delay={25} />
       <OptionCard icon="server" title={tr('onboarding.guided.setup.noBridge.title')} text={tr('onboarding.guided.setup.noBridge.text')} onPress={() => onChoose('noBridge')} delay={50} />
       <OptionCard icon="sparkle" title={tr('onboarding.guided.setup.noHermes.title')} text={tr('onboarding.guided.setup.noHermes.text')} onPress={() => onChoose('noHermes')} delay={100} />
+      <AgentSetupSheet
+        visible={agentSheet}
+        onClose={() => setAgentSheet(false)}
+        onPasteLink={() => {
+          setAgentSheet(false);
+          onChoose('link');
+        }}
+      />
     </OnbScreen>
   );
 }
@@ -160,12 +171,12 @@ export function DoneGuidedScreen({
   const tr = useT();
   const starters: readonly StarterPrompt[] = (demo ? DEMO_STARTERS : STARTERS).slice(0, 3);
   return (
-    <OnbScreen onBack={onBack} step={step} total={total} footer={<Button variant="secondary" label={tr('onboarding.guided.done.newChat')} onPress={() => onStart()} />}>
+    <OnbScreen onBack={onBack} step={step} total={total} footer={<Button label={tr('onboarding.guided.done.newChat')} onPress={() => onStart()} />}>
       <FadeIn style={styles.hero}>
         <View style={[styles.check, { backgroundColor: t.colors.successSoft }]}>
           <Icon name="check" size={28} color={t.colors.success} />
         </View>
-        <HText variant="display" align="center" accessibilityRole="header">
+        <HText variant={heroVariant(tr('onboarding.guided.done.title'))} align="center" accessibilityRole="header">
           {tr('onboarding.guided.done.title')}
         </HText>
         <HText variant="body" color="muted" align="center">
@@ -202,7 +213,7 @@ export function DoneGuidedScreen({
       </View>
       <FadeIn delay={300}>
         <View style={[styles.tip, { borderColor: t.colors.border, borderRadius: t.radii.l }]}>
-          <View style={[styles.slashKey, { backgroundColor: t.colors.surfaceAlt, borderColor: t.colors.borderStrong }]}>
+          <View style={[styles.slashKey, { backgroundColor: t.colors.surfaceAlt, borderColor: t.colors.borderControl, borderRadius: t.radii.inline }]}>
             <HText variant="bodyStrong" style={{ fontFamily: t.fonts.mono }}>
               /
             </HText>
@@ -239,5 +250,5 @@ const styles = StyleSheet.create({
   starter: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 12, borderWidth: 1 },
   starterIcon: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   tip: { flexDirection: 'row', gap: 12, alignItems: 'center', padding: 12, borderWidth: 1, borderStyle: 'dashed' },
-  slashKey: { width: 32, height: 32, borderRadius: 8, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  slashKey: { width: 32, height: 32, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
 });

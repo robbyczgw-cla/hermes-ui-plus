@@ -177,7 +177,7 @@ export function GallerySectionCharts({ onAction }: { onAction: HuiActionHandler 
       </HText>
       {CHART_V3_SAMPLES.map((s, i) => (
         <View key={i} style={{ gap: t.spacing.s }} testID={`charts-v3-${i}`}>
-          <HText variant="micro" color="subtle" style={{ textTransform: 'uppercase', letterSpacing: 0.6 }}>
+          <HText variant="caption" weight="600" color="subtle">
             {s.title}
           </HText>
           <HuiView node={s.node} streaming={s.streaming} onAction={onAction} />

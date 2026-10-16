@@ -59,7 +59,7 @@ The wizard above does all of this for you. By hand: create an env file. These ar
 | `BRIDGE_PUBLIC_URL` | for pairing | The URL your devices use, e.g. `https://<your-host>.<tailnet>.ts.net`. Also restricts accepted `Host` names |
 | `BRIDGE_NAME` | no | Label shown in the app (default `Hermes`) |
 | `BRIDGE_PAIRING` | no | `1` allows pairing from another machine with a one-time code. Needed with Docker |
-| `BRIDGE_PAIR_SCHEME` | no | Scheme of the pairing QR code. Default `hermesuiplus` (the Hermes UI+ app); leave it unless you run a self-built app with another scheme |
+| `BRIDGE_PAIR_SCHEME` | no | Scheme of the pairing QR code. Default `hermesuiplus` (the HUI+ app); leave it unless you run a self-built app with another scheme |
 | `BRIDGE_TOKEN` | no | Admin token. If unset, a random one is generated and stored in the state directory |
 | `BRIDGE_STATE_DIR` | no | Tokens, device list, push registrations, uploads, image proxy cache. Default `~/.local/state/hermes-ui-bridge`. Pairing needs it (device list) |
 | `BRIDGE_PAIR_ADMIN_TOKEN` | no | **Unsafe**, legacy: `1` lets pairing without a state directory put the admin token `BRIDGE_TOKEN` into the link (a permanent credential). Default off: pairing then refuses |
@@ -72,9 +72,9 @@ The wizard above does all of this for you. By hand: create an env file. These ar
 | `BRIDGE_UPLOAD_MAX_INFLIGHT` / `BRIDGE_UPLOAD_MAX_INFLIGHT_TOTAL` | no | Uploads running at the same time per token / in total. Default `2` / `6` |
 | `BRIDGE_UPSTREAM_TIMEOUT_MS` | no | Timeout for the short Hermes calls (health, sessions, models, run status, approvals). Default `30000`. Streamed chat answers are not limited |
 | `BRIDGE_REQUEST_TIMEOUT_MS` | no | Time a client has to send its complete request (slow uploads). Default `300000` (5 min); headers must arrive within 30 s |
-| `BRIDGE_HERMES_PLUGIN_URL` / `BRIDGE_HERMES_PLUGIN_SECRET_FILE` | no | Schnellfrage (⚡) through the optional Hermes plugin `hermes-ui-plus` ([HERMES-PLUGIN.md](HERMES-PLUGIN.md)): its loopback URL (default `http://127.0.0.1:8646`) and the secret file the installer wrote (readable by the bridge user). Without the plugin ⚡ is not shown. `BRIDGE_QUICK=off` disables it; limits `BRIDGE_QUICK_RATE` (per device and minute, default `20`), `BRIDGE_QUICK_DAILY` (default `300`) |
+| `BRIDGE_HERMES_PLUGIN_URL` / `BRIDGE_HERMES_PLUGIN_SECRET_FILE` | no | Schnellfrage (⚡) through the optional Hermes plugin `hermes-ui-plus` ([HERMES-PLUGIN.md](HERMES-PLUGIN.md)): its loopback URL (default `http://127.0.0.1:8646`) and the secret file the installer wrote (readable by the bridge user; the setup wizard fills it in when it finds the plugin, and a root install's hardened unit gets it through `LoadCredential=` instead). Without the plugin ⚡ is not shown. Enable the plugin in Hermes' `config.yaml` (`plugins.enabled`), not with `hermes plugins enable`. `BRIDGE_QUICK=off` disables it; limits `BRIDGE_QUICK_RATE` (per device and minute, default `20`), `BRIDGE_QUICK_DAILY` (default `300`) |
 | `BRIDGE_PUSH_PREVIEW` | no | `1` shows message text in push notifications. Default off. More push settings: section 6 |
-| `BRIDGE_PROFILES` | no | Hermes profiles ("bots") the app may use. Default `auto`: every profile in `HERMES_HOME/profiles/` (needs read access to the Hermes home; without it any valid name is passed on and Hermes decides). Or a comma list such as `research,work=Work bot`, or `off`. The generated system service cannot read your home directory (`ProtectHome`): give the list there, or enter the bots in the app's connection settings |
+| `BRIDGE_PROFILES` | no | Hermes profiles ("bots") the app may use. Default `auto`: every profile in `HERMES_HOME/profiles/` (needs read access to the Hermes home; without it any valid name is passed on and Hermes decides). Or a comma list such as `research,work=Work bot`, or `off`. The generated system service cannot read your home directory (`ProtectHome`): the setup wizard writes the list for it (re-run it after adding a profile), or enter the bots in the app's connection settings. On Hermes v0.22 every profile's own `.env` needs the same `API_SERVER_KEY` as `HERMES_API_KEY` here, else its requests answer 401 |
 | `BRIDGE_APPROVAL_TIMEOUT_S` | no | How long an approval request is treated as open (app banner, approval push) after Hermes asked. Default `300`; match Hermes' own approval timeout |
 | `BRIDGE_MAX_CONCURRENT_TURNS` / `BRIDGE_MAX_TURNS_TOTAL` | no | Chat turns running at the same time per device token / in total (a turn counts until Hermes finished it). Default `8` / `16` |
 | `BRIDGE_RESUME` | no | `off` disables idempotent send and stream resume for chat turns (docs/BRIDGE.md). Limits: `BRIDGE_RESUME_TURN_KB` (2048 per turn), `BRIDGE_RESUME_TOTAL_MB` (32 in total), `BRIDGE_RESUME_RETAIN_MS` (600000) |
@@ -109,13 +109,29 @@ On start the bridge checks Hermes, prints which optional features are active (in
 
 ### With Docker
 
+There is **no prebuilt image in 0.1**: you build it from a git checkout (Node.js on the host is only needed for
+`npm run bundle-skill`, see below for a way without it).
+
 ```bash
 cd bridge                         # in a git checkout of the repository
 npm run bundle-skill              # copies the skill + bootstrap message into ./skill (the image needs them)
 cp docker-compose.example.yml docker-compose.yml
 printf 'HERMES_BASE_URL=http://host.docker.internal:8642\nHERMES_API_KEY=<key>\nBRIDGE_PUBLIC_URL=https://<your-host>.<tailnet>.ts.net\nBRIDGE_PAIRING=1\n' > .env
 docker compose up -d --build
-docker compose logs bridge        # shows the one-time pairing code
+docker compose logs bridge        # shows the pairing page path /bridge/pair?code=XXXX-XXXX (valid 10 minutes)
+docker compose exec bridge node bin/hermes-ui-bridge.mjs devices add "Phone"   # or: a pair link + QR code right away
+```
+
+With `BRIDGE_PAIRING=1` open the logged `/bridge/pair?code=…` path on the bridge URL (for example
+`https://<your-host>.<tailnet>.ts.net/bridge/pair?code=XXXX-XXXX`). Opening a bare `/bridge/pair` from the Docker host does
+not work: behind Docker's port mapping the request does not come from loopback.
+
+**Web app in Docker:** unpack the bundle into `./web` next to `docker-compose.yml` and uncomment `BRIDGE_WEB_DIR: /web`
+and the `./web:/web:ro` volume in the compose file ([WEB-APP.md](WEB-APP.md)):
+
+```bash
+mkdir -p web && tar -xzf hermes-ui-plus-web-<version>.tar.gz -C web --strip-components=1
+docker compose up -d
 ```
 
 The image is built locally, runs as an unprivileged user, and keeps its state in a volume. It contains the bootstrap system message that makes Hermes use the app's interactive components; the build stops with a clear message if `npm run bundle-skill` was not run (without Node on the host: `mkdir -p skill && cp -r ../hermes-skill/hermes-ui ../hermes-skill/bootstrap-system-message.txt skill/`). At startup the bridge prints a `skill` line; it says `MISSING` and logs a warning if the message could not be found. The port is published on loopback only, which is intentional. Hermes must listen on an address the container can reach (`host.docker.internal` is mapped to the host in the example compose file).

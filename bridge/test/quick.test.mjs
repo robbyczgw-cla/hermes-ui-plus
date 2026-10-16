@@ -26,7 +26,8 @@ const listen = async (handler) => {
 };
 const readJson = async (req) => { const c = []; for await (const x of req) c.push(x); return c.length ? JSON.parse(Buffer.concat(c).toString()) : null; };
 
-/** Fake plugin. mode: 'ok' | 'stream-slow' | 'crash' | 'disabled' */
+/** Fake plugin. mode: 'ok' | 'stream-slow' | 'crash' | 'disabled' | 'scope' (0.1.1 self-test failed) | 'bad-reason' |
+ *  'scope-late' (config fine, then a call trips the self-test and answers 404 feature_off + reason) */
 async function fakePlugin(mode = 'ok') {
   const seen = [];
   const state = { aborted: false };
@@ -38,7 +39,14 @@ async function fakePlugin(mode = 'ok') {
     if (mode === 'crash') return req.socket.destroy();
     if (req.url === '/quick/config') {
       res.writeHead(200, { 'content-type': 'application/json' });
-      return res.end(JSON.stringify({ enabled: mode !== 'disabled', aux_task: 'hui_quick', last_route: { provider: 'p1', model: 'm-fast' }, allow_model_override: true, streaming: true, limits: { max_tokens: 1024 } }));
+      const off = mode === 'scope' || (mode === 'scope-late' && state.tripped) ? { enabled: false, available: false, reason: 'profile_scope_unavailable' }
+        : mode === 'bad-reason' ? { enabled: false, available: false, reason: 'Not <a> reason' } : { enabled: mode !== 'disabled' };
+      return res.end(JSON.stringify({ ...off, aux_task: 'hui_quick', last_route: { provider: 'p1', model: 'm-fast' }, allow_model_override: true, streaming: true, limits: { max_tokens: 1024 } }));
+    }
+    if (mode === 'scope' || mode === 'scope-late') {
+      state.tripped = true;
+      res.writeHead(404, { 'content-type': 'application/json' });
+      return res.end(JSON.stringify({ error: { message: 'quick answers are unavailable on this Hermes', type: 'invalid_request_error', code: 'feature_off', reason: 'profile_scope_unavailable' } }));
     }
     if (body?.stream) {
       res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8' });
@@ -163,27 +171,46 @@ test('client disconnect aborts the plugin request', async (t) => {
   assert.equal(plugin.state.aborted, true);
 });
 
-for (const [name, env, mode] of [
-  ['plugin absent (nothing listening)', (h) => ({ HERMES_BASE_URL: h.url, BRIDGE_HERMES_PLUGIN_URL: 'http://127.0.0.1:9', BRIDGE_HERMES_PLUGIN_SECRET_FILE: secretFile })],
-  ['plugin not configured (no secret file)', (h) => ({ HERMES_BASE_URL: h.url })],
-  ['quick switched off in the bridge', (h, p) => ({ HERMES_BASE_URL: h.url, BRIDGE_HERMES_PLUGIN_URL: p.url, BRIDGE_HERMES_PLUGIN_SECRET_FILE: secretFile, BRIDGE_QUICK: 'off' })],
-  ['plugin crashing (drops connections)', (h, p) => ({ HERMES_BASE_URL: h.url, BRIDGE_HERMES_PLUGIN_URL: p.url, BRIDGE_HERMES_PLUGIN_SECRET_FILE: secretFile }), 'crash'],
-  ['plugin reports quick disabled', (h, p) => ({ HERMES_BASE_URL: h.url, BRIDGE_HERMES_PLUGIN_URL: p.url, BRIDGE_HERMES_PLUGIN_SECRET_FILE: secretFile }), 'disabled'],
+const plugged = (h, p) => ({ HERMES_BASE_URL: h.url, BRIDGE_HERMES_PLUGIN_URL: p.url, BRIDGE_HERMES_PLUGIN_SECRET_FILE: secretFile });
+for (const [name, env, mode, reason] of [
+  ['plugin absent (nothing listening)', (h) => ({ HERMES_BASE_URL: h.url, BRIDGE_HERMES_PLUGIN_URL: 'http://127.0.0.1:9', BRIDGE_HERMES_PLUGIN_SECRET_FILE: secretFile }), 'ok', 'plugin_unreachable'],
+  ['plugin not configured (no secret file)', (h) => ({ HERMES_BASE_URL: h.url }), 'ok', 'plugin_not_configured'],
+  ['quick switched off in the bridge', (h, p) => ({ ...plugged(h, p), BRIDGE_QUICK: 'off' }), 'ok', 'bridge_off'],
+  ['plugin crashing (drops connections)', plugged, 'crash', 'plugin_unreachable'],
+  ['plugin reports quick disabled (any plugin version)', plugged, 'disabled', 'plugin_disabled'],
+  // plugin >= 0.1.1: its self-test cannot get credentials for the aux task (multiplexing Hermes, scope helpers gone)
+  ['plugin self-test failed (profile scope)', plugged, 'scope', 'profile_scope_unavailable'],
+  ['plugin reason in an unexpected shape is not passed on', plugged, 'bad-reason', 'plugin_disabled'],
 ]) {
   test(`feature_off and chat still works: ${name}`, async (t) => {
-    const plugin = await fakePlugin(mode ?? 'ok');
+    const plugin = await fakePlugin(mode);
     const hermes = await fakeHermes();
     const b = await startBridge(env(hermes, plugin));
     t.after(() => { b.close(); plugin.close(); hermes.close(); });
-    assert.deepEqual(await (await b.call('/bridge/quick/config')).json(), { available: false });
+    assert.deepEqual(await (await b.call('/bridge/quick/config')).json(), { available: false, reason });
     const q = await b.call('/bridge/quick', post({ ...Q, stream: true }));
     assert.equal(q.status, 404);
-    assert.equal((await q.json()).error.code, 'feature_off');
+    const err = (await q.json()).error;
+    assert.equal(err.code, 'feature_off');
+    assert.equal(err.reason, reason);
+    assert.equal(plugin.seen.filter((x) => x.url !== '/quick/config').length, 0, 'no call reaches the plugin');
     const chat = await b.call('/v1/chat/completions', post({ model: 'hermes-agent', messages: [{ role: 'user', content: 'hi' }] }));
     assert.equal(chat.status, 200);
     assert.equal((await chat.json()).choices[0].message.content, 'agent says hi');
   });
 }
+
+test('plugin self-test trips during a call: its 404 feature_off + reason passes through, config follows', async (t) => {
+  const plugin = await fakePlugin('scope-late'); const hermes = await fakeHermes();
+  const b = await startBridge(plugged(hermes, plugin));
+  t.after(() => { b.close(); plugin.close(); hermes.close(); });
+  assert.equal((await (await b.call('/bridge/quick/config')).json()).available, true);
+  const q = await b.call('/bridge/quick', post({ ...Q, stream: true }));
+  assert.equal(q.status, 404);
+  assert.deepEqual((await q.json()).error, { message: 'quick answers are unavailable on this Hermes', type: 'invalid_request_error', code: 'feature_off', reason: 'profile_scope_unavailable' });
+  // re-probed at once (not after the 30 s probe TTL): the app's next config check hides ⚡
+  assert.deepEqual(await (await b.call('/bridge/quick/config')).json(), { available: false, reason: 'profile_scope_unavailable' });
+});
 
 test('plugin dies after the probe: request answers feature_off, chat unaffected', async (t) => {
   const plugin = await fakePlugin(); const hermes = await fakeHermes();

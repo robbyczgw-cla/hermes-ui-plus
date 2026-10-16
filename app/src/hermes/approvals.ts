@@ -13,7 +13,7 @@
  * `approvalLog` (persisted history rows). Every request ends in exactly one log row: once/session/always/deny,
  * `expired` (deadline passed) or `cancelled` (run ended / stopped without an answer).
  */
-import type { ApprovalOutcome, ApprovalRecord, ApprovalRequest, ChatMessage } from './types.ts';
+import type { ApprovalOutcome, ApprovalRecord, ApprovalRequest, ChatMessage, Usage } from './types.ts';
 import { pushTrace } from './trace.ts';
 
 /** Hermes default `approvals.timeout` (fallback when neither event nor server advertises one) */
@@ -102,15 +102,19 @@ export function setPending(m: ChatMessage, list: ApprovalRequest[]): ChatMessage
   return { ...rest, pendingApprovals: list, approval: list.find((a) => !a.expired) ?? list[0] };
 }
 
-function logged(m: ChatMessage, key: string): boolean {
-  return !!m.approvalLog?.some((r) => (r.requestId ?? `${r.runId}:${r.requestedAt}`) === key || r.requestId === key);
+/** Whether this exact request already has a recorded outcome, including replayed events without request ids. */
+export function approvalRecorded(m: ChatMessage, a: ApprovalRequest): boolean {
+  // A truncated command without an id is not enough evidence to suppress another request.
+  return !!m.approvalLog?.some(r => r.requestId || a.requestId
+    ? r.requestId === a.requestId
+    : r.command.length < LOG_COMMAND_MAX && r.runId === a.runId && r.timestamp === a.timestamp && r.command === a.command);
 }
 
 /** a new request (live event or restore): queued once per key; already answered/expired ones are ignored */
 export function addApproval(m: ChatMessage, a: ApprovalRequest, now: number): ChatMessage {
   const key = approvalKey(a);
   const queue = pendingOf(m);
-  if (queue.some((p) => approvalKey(p) === key) || logged(m, key)) return m;
+  if (queue.some((p) => approvalKey(p) === key) || approvalRecorded(m, a)) return m;
   const item = a.deadlineAt ? a : withDeadline(a, { receivedAt: a.receivedAt ?? now });
   const next = setPending(m, [...queue, item]);
   return pushTrace(next, 'approval', now, {
@@ -123,13 +127,14 @@ function record(a: ApprovalRequest, outcome: ApprovalOutcome, at: number): Appro
   const command = a.command.length > LOG_COMMAND_MAX ? `${a.command.slice(0, LOG_COMMAND_MAX - 1)}…` : a.command;
   const r: ApprovalRecord = { runId: a.runId, command, outcome, requestedAt: a.receivedAt ?? a.timestamp * 1000, at };
   if (a.requestId) r.requestId = a.requestId;
+  else r.timestamp = a.timestamp;
   if (a.description) r.description = a.description;
   return r;
 }
 
 function appendLog(m: ChatMessage, a: ApprovalRequest, outcome: ApprovalOutcome, at: number): ChatMessage {
   const log = [...(m.approvalLog ?? []), record(a, outcome, at)].slice(-LOG_MAX);
-  return pushTrace({ ...m, approvalLog: log }, 'approval_answer', at, { text: outcome, data: { requestId: a.requestId } });
+  return pushTrace({ ...m, approvalLog: log }, 'approval_answer', at, { text: outcome, data: { requestId: a.requestId, ...(!a.requestId ? { requestKey: approvalKey(a) } : {}) } });
 }
 
 /** the request `key` got its answer (or a terminal outcome): leaves the queue, one history row + timeline step */
@@ -214,6 +219,8 @@ export type RunStatus = {
   approval?: ApprovalRequest;
   /** server clock from the HTTP `Date` header (ms), for restored deadlines */
   serverNowMs?: number;
+  /** token usage of a finished run (`usage`: input/output/total_tokens, or prompt/completion_tokens) */
+  usage?: Usage;
 };
 
 const TERMINAL = new Set(['completed', 'failed', 'cancelled', 'canceled', 'incomplete', 'expired', 'stopped', 'not_found', 'error']);
@@ -246,7 +253,7 @@ export function applyRunStatus(m: ChatMessage, s: RunStatus, now: number, advert
   if (s.status === 'waiting_for_approval' && s.approval) {
     const a = withDeadline(s.approval, { receivedAt: now, advertisedTimeoutS, restored: { serverNowMs: s.serverNowMs } });
     const key = approvalKey(a);
-    if (logged(m, key) || pendingOf(m).some((p) => approvalKey(p) === key)) return expireApprovals(m, now);
+    if (approvalRecorded(m, a) || pendingOf(m).some((p) => approvalKey(p) === key)) return expireApprovals(m, now);
     if (!isLive(a, now)) return appendLog(m, a, 'expired', now);
     return addApproval(m, a, now);
   }

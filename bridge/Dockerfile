@@ -1,4 +1,4 @@
-# Hermes UI+ Bridge - small image, non-root. Build from this directory (a git checkout):
+# Hermes UI+ Bridge - small image, non-root. No prebuilt image is published in 0.1; build from this directory (a git checkout):
 #   npm run bundle-skill            # copies ../hermes-skill into ./skill (or: npm run docker:build)
 #   docker build -t hermes-ui-plus-bridge .
 # Without Node on the host: mkdir -p skill && cp -r ../hermes-skill/hermes-ui ../hermes-skill/bootstrap-system-message.txt skill/
@@ -26,5 +26,7 @@ EXPOSE 8790
 # Liveness of the bridge itself (any HTTP answer < 500 counts; does not depend on Hermes being up).
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.BRIDGE_PORT||8790)+'/bridge/voice/config').then(r=>process.exit(r.status<500?0:1),()=>process.exit(1))"
-ENTRYPOINT ["node", "bin/hermes-ui-bridge.mjs"]
+# `--` before the script: Node.js itself would otherwise grab a `--env-file` argument meant for the bridge and stop with
+# a bare "node: <file>: not found"; this way the bridge reports a missing file itself.
+ENTRYPOINT ["node", "--", "bin/hermes-ui-bridge.mjs"]
 CMD []

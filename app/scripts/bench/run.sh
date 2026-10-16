@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Hot-path benchmarks (not part of CI / `npm test`). Usage from anywhere:
-#   scripts/bench/run.sh [stream|list|misc|open|send|all] [--jitless | --hermes]
+#   scripts/bench/run.sh [stream|list|misc|open|send|coding|all] [--jitless | --hermes]
 #   (no flag)  Node with JIT + allocation numbers
 #   --jitless  Node without JIT (interpreter only)
 #   --hermes   bundle the bench with esbuild and run it on a Hermes VM, the engine of the app (no JIT, like on a
@@ -11,9 +11,9 @@ cd "$(dirname "$0")/../.."
 which="${1:-all}"
 mode="${2:-}"
 case "$which" in
-  stream|list|misc|open|send) benches=("$which") ;;
-  all) benches=(stream list misc) ;;  # open / send use timers + simulated I/O: node only
-  *) echo "usage: $0 stream|list|misc|open|send|all [--jitless|--hermes]" >&2; exit 2 ;;
+  stream|list|misc|open|send|coding) benches=("$which") ;;
+  all) benches=(stream list misc coding) ;;  # open / send use timers + simulated I/O: node only
+  *) echo "usage: $0 stream|list|misc|open|send|coding|all [--jitless|--hermes]" >&2; exit 2 ;;
 esac
 for b in "${benches[@]}"; do
   case "$mode" in

@@ -96,4 +96,6 @@ export const PERSONAL_ONLY_KEY_PREFIXES: readonly string[] = [];
 export const PROVIDER_MENTION_ALLOWED: Readonly<Record<string, string>> = {
   'compliance.consent': 'discloses the AI services a Hermes server may forward to (App Store 5.1.2(i))',
   'onboarding.guided.agent.useCoder': 'tells the user which coding agents can run the setup prompt; not a connection kind of the app',
+  'onboarding.agentSetup.option': 'names the agents that can run the setup prompt (agent setup sheet); not a connection kind of the app',
+  'onboarding.agentSetup.lead2': 'names where to paste the setup prompt (agent setup sheet); not a connection kind of the app',
 };

@@ -1,11 +1,14 @@
 import { memo, useEffect, useRef, useState } from 'react';
-import { Animated, Easing, LayoutAnimation, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, LayoutAnimation, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Text } from '../ui/primitives/Text';
 import { useLocale, useT } from '../i18n';
 import { useTheme } from '../ui';
+import { FONTS } from '../ui/theme';
 import type { ToolEvent } from '../hermes';
 import { formatDuration, toolEmoji } from './format';
 import { describeTool, toolViewText } from './hermesTools';
 import { Icon } from './icons';
+import { a11yState } from '../ui/lib/a11yState';
 
 const NATIVE = Platform.OS !== 'web';
 
@@ -33,13 +36,13 @@ export const ToolChips = memo(function ToolChips({ tools }: { tools: ToolEvent[]
         <Pressable
           onPress={toggle}
           accessibilityRole="button"
-          accessibilityState={{ expanded }}
+          {...a11yState({ expanded })}
           accessibilityLabel={tr('chat.toolChips.used', { count: tools.length })}
           style={({ pressed }) => [styles.summary, pressed && { opacity: 0.6 }]}
           hitSlop={6}
         >
           {single?.icon ? <Icon name={single.icon} size={14} color={t.colors.muted} /> : null}
-          <Text style={[styles.summaryText, { color: t.colors.muted }]}>
+          <Text style={[t.typography.caption, styles.summaryText, { color: t.colors.muted }]}>
             {tools.length === 1 ? `${single?.icon ? '' : `${toolEmoji(tools[0].name, tools[0].emoji)} `}${single?.title ?? ''}` : tr('chat.toolChips.used', { count: tools.length })}
             {errors ? ` · ${tr('chat.toolTimeline.errorCount', { count: errors })}` : cancelled ? ` · ${tr('chat.toolTimeline.cancelled')}` : ' ✓'}
           </Text>
@@ -96,7 +99,7 @@ function Chip({ tool }: { tool: ToolEvent }) {
   return (
     <Animated.View
       style={[
-        styles.chip,
+        styles.chip, { borderRadius: t.radii.pill },
         {
           backgroundColor: tool.status === 'error' ? t.colors.dangerSoft : t.colors.surfaceAlt,
           opacity: appear,
@@ -105,17 +108,17 @@ function Chip({ tool }: { tool: ToolEvent }) {
       ]}
       accessibilityLabel={`${toolViewText(view)}: ${running ? tr('chat.toolChips.state.running') : tool.status === 'error' ? tr('chat.toolChips.state.error') : cancelled ? tr('chat.toolTimeline.cancelled') : tr('chat.toolChips.state.done')}`}
     >
-      {view.icon ? <Icon name={view.icon} size={14} color={color} /> : <Text style={styles.emoji}>{toolEmoji(tool.name, tool.emoji)}</Text>}
-      <Animated.Text style={[styles.chipText, { color, opacity: pulse }]} numberOfLines={1}>
+      {view.icon ? <Icon name={view.icon} size={14} color={color} /> : <Text style={t.typography.caption}>{toolEmoji(tool.name, tool.emoji)}</Text>}
+      <Animated.Text style={[t.typography.caption, styles.chipText, { color, opacity: pulse }]} numberOfLines={1}>
         {label}
         {preview ? <Text style={{ color: t.colors.muted, fontWeight: '400' }}>{`  ${preview}`}</Text> : null}
         {extra ? <Text style={{ color: t.colors.subtle, fontWeight: '400' }}>{`  · ${extra}`}</Text> : null}
         {running ? '…' : ''}
       </Animated.Text>
       {tool.status === 'done' && !cancelled ? <Icon name="check" size={13} color={t.colors.success} strokeWidth={2.2} /> : null}
-      {cancelled ? <Text style={[styles.dur, { color: t.colors.subtle }]}>{tr('chat.toolTimeline.cancelled')}</Text> : null}
+      {cancelled ? <Text style={[t.typography.micro, styles.dur, { color: t.colors.subtle }]}>{tr('chat.toolTimeline.cancelled')}</Text> : null}
       {tool.status === 'error' ? <Icon name="alert" size={13} color={t.colors.danger} /> : null}
-      {dur && !running ? <Text style={[styles.dur, { color: t.colors.subtle }]}>{dur}</Text> : null}
+      {dur && !running ? <Text style={[t.typography.micro, styles.dur, { color: t.colors.subtle }]}>{dur}</Text> : null}
     </Animated.View>
   );
 }
@@ -123,11 +126,10 @@ function Chip({ tool }: { tool: ToolEvent }) {
 const styles = StyleSheet.create({
   wrap: { marginBottom: 10 },
   summary: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', paddingVertical: 2 },
-  summaryText: { fontSize: 13.5, fontWeight: '500' },
+  summaryText: { fontWeight: '500' },
   list: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   listBelow: { marginTop: 6 },
-  chip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, maxWidth: '100%' },
-  emoji: { fontSize: 13 },
-  chipText: { fontSize: 13, fontWeight: '500', flexShrink: 1 },
-  dur: { fontSize: 11.5, fontVariant: ['tabular-nums'] },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, maxWidth: '100%' },
+  chipText: { fontFamily: FONTS.sans, fontWeight: '500', flexShrink: 1 },
+  dur: { fontVariant: ['tabular-nums'] },
 });

@@ -16,6 +16,7 @@ import type {
   HuiFieldKind,
   HuiNode,
   HuiBlockStyle,
+  HuiFileStatus,
   HuiPathIcon,
   HuiPathTone,
 } from './types.ts';
@@ -96,6 +97,18 @@ export const MAX_PATHS_ITEMS = 6;
 export const MAX_PATH_NODES = 6;
 export const MAX_BLOCK_COLUMNS = 3;
 export const MAX_BLOCK_ITEMS = 12;
+/** coding views (diff, terminal, changes) */
+export const MAX_DIFF_FILES = 100;
+/** structured hunk lines per file */
+export const MAX_DIFF_LINES = 5000;
+/** unified diff text (`patch`): longer text is cut (the prefix is kept, so a streaming patch stays an append) */
+export const MAX_DIFF_PATCH = 400_000;
+/** `before` / `after` full texts of one file */
+export const MAX_DIFF_TEXT = 100_000;
+/** terminal output: the tail is kept (errors are at the end) */
+export const MAX_TERMINAL_OUTPUT = 200_000;
+export const MAX_TERMINAL_COMMAND = 4000;
+export const MAX_CHANGED_FILES = 200;
 const MAX_DEPTH = 8;
 /** children of one card/stack/tab/accordion item (legacy containers had no breadth cap) */
 export const MAX_CHILDREN = 100;
@@ -1901,6 +1914,196 @@ function normBlocks(x: Rec, base: Rec): void {
   provenance(base, x);
 }
 
+// ── coding views: diff, terminal, changes ──
+
+/** status words models use (lowercased, separators removed) → canonical file status */
+const FILE_STATUS_WORDS: Readonly<Record<string, HuiFileStatus>> = {
+  added: 'added', add: 'added', a: 'added', new: 'added', newfile: 'added', created: 'added', create: 'added', untracked: 'added',
+  modified: 'modified', modify: 'modified', m: 'modified', changed: 'modified', change: 'modified', edited: 'modified', edit: 'modified', updated: 'modified', update: 'modified',
+  deleted: 'deleted', delete: 'deleted', d: 'deleted', removed: 'deleted', remove: 'deleted', gone: 'deleted',
+  renamed: 'renamed', rename: 'renamed', r: 'renamed', moved: 'renamed', move: 'renamed', mv: 'renamed',
+};
+
+/** `added` / `created` / `M` / `moved` … → canonical status; unknown → undefined */
+export function normalizeFileStatus(x: unknown): HuiFileStatus | undefined {
+  if (typeof x !== 'string') return undefined;
+  const k = x.trim().toLowerCase().replace(/[\s_-]+/g, '');
+  return Object.prototype.hasOwnProperty.call(FILE_STATUS_WORDS, k) ? FILE_STATUS_WORDS[k] : undefined;
+}
+
+/** a long text field kept verbatim (no per-char work: patches / outputs grow on every streaming tick) */
+function rawText(x: unknown, max: number): string | undefined {
+  return typeof x === 'string' && x !== '' ? (x.length > max ? x.slice(0, max) : x) : undefined;
+}
+
+/** a file path: one line, ≤ 300 chars, leading `a/` `b/` of git headers dropped */
+function filePath(x: unknown): string | undefined {
+  const p = line(x, 300);
+  return p && p !== '/dev/null' ? p.replace(/^[ab]\/(?=.)/, '') : undefined;
+}
+
+/** one hunk line object ({type:'add', text}) → its prefixed unified form ("+text") */
+function hunkLineObj(v: Rec): string | undefined {
+  const text = str(v.text ?? v.content ?? v.line ?? v.value) ?? '';
+  const k = String(v.type ?? v.kind ?? v.op ?? v.sign ?? ' ').trim().toLowerCase();
+  if (k === '+' || k === 'add' || k === 'added' || k === 'insert' || k === 'ins' || k === 'new') return '+' + text;
+  if (k === '-' || k === 'del' || k === 'delete' || k === 'deleted' || k === 'remove' || k === 'removed' || k === 'old') return '-' + text;
+  return ' ' + text;
+}
+
+/** hunks: `{oldStart, newStart, header?, lines}` (lines = prefixed strings, line objects or one string), ≤ MAX_DIFF_LINES lines in total */
+function diffHunks(x: unknown): Rec[] {
+  const out: Rec[] = [];
+  let budget = MAX_DIFF_LINES;
+  for (const h of arr(x)) {
+    if (!isRec(h) || budget <= 0) continue;
+    const raw = typeof h.lines === 'string' ? h.lines.split('\n') : arr(h.lines ?? h.changes ?? h.content);
+    const lines: string[] = [];
+    for (let i = 0; i < raw.length && lines.length < budget; i++) {
+      const v = raw[i];
+      const l = typeof v === 'string' ? v.replace(/\r$/, '') : isRec(v) ? hunkLineObj(v) : undefined;
+      if (l !== undefined) lines.push(l === '' ? ' ' : l);
+    }
+    budget -= lines.length;
+    const o: Rec = {
+      oldStart: int(h.oldStart ?? h.old_start ?? h.oldLine ?? h.from, 0, 1e9) ?? 1,
+      newStart: int(h.newStart ?? h.new_start ?? h.newLine ?? h.to, 0, 1e9) ?? 1,
+    };
+    put(o, 'header', line(h.header ?? h.section ?? h.context, 200));
+    o.lines = lines;
+    out.push(o);
+  }
+  return out;
+}
+
+const DIFF_FILE_KEYS = ['files', 'changes', 'diffs'] as const;
+
+/** one file of a diff / changes node; `undefined` without a path */
+function diffFile(v: unknown, withCounts: boolean): Rec | undefined {
+  if (typeof v === 'string') return withCounts ? changedFileString(v) : undefined;
+  if (!isRec(v)) return undefined;
+  const oldPath = filePath(v.oldPath ?? v.old_path ?? v.from ?? v.previousPath ?? v.oldFile);
+  const path = filePath(v.path ?? v.file ?? v.filename ?? v.name ?? v.newPath ?? v.new_path ?? v.to) ?? oldPath;
+  if (!path) return undefined;
+  const o: Rec = { path };
+  if (oldPath && oldPath !== path) o.oldPath = oldPath;
+  const status = normalizeFileStatus(v.status ?? v.change ?? v.kind ?? v.action ?? v.op);
+  put(o, 'status', status ?? (o.oldPath ? 'renamed' : withCounts ? 'modified' : undefined));
+  if (withCounts) {
+    put(o, 'additions', int(v.additions ?? v.added ?? v.insertions ?? v.adds ?? v.plus, 0, 1e9));
+    put(o, 'deletions', int(v.deletions ?? v.deleted ?? v.removals ?? v.removed ?? v.dels ?? v.minus, 0, 1e9));
+  } else {
+    put(o, 'language', line(v.language ?? v.lang, 30));
+  }
+  if (bool(v.binary) === true) o.binary = true;
+  if (withCounts) put(o, 'byAgent', bool(v.byAgent ?? v.by_agent ?? v.agent));
+  if (Array.isArray(v.hunks)) o.hunks = diffHunks(v.hunks);
+  put(o, 'patch', rawText(v.patch ?? v.diff, MAX_DIFF_PATCH));
+  if (!withCounts) {
+    put(o, 'before', rawText(v.before ?? v.old ?? v.oldText ?? v.original, MAX_DIFF_TEXT));
+    put(o, 'after', rawText(v.after ?? v.new ?? v.newText ?? v.modified ?? v.updated, MAX_DIFF_TEXT));
+  }
+  return o;
+}
+
+/** "M src/app.ts" / "R old.ts -> new.ts" / "src/app.ts" (a `git status --short`-like line) */
+function changedFileString(s: string): Rec | undefined {
+  const m = /^\s*([AMDR?]{1,2}|added|modified|deleted|renamed|new|created)\s+(.+)$/i.exec(s);
+  const status = m ? normalizeFileStatus(m[1] === '??' ? 'untracked' : m[1].length === 2 ? m[1].trim()[0] : m[1]) : undefined;
+  const rest = status && m ? m[2] : s;
+  const mv = /^(.+?)\s+(?:->|→|=>)\s+(.+)$/.exec(rest);
+  const path = filePath(mv ? mv[2] : rest);
+  if (!path) return undefined;
+  const o: Rec = { path };
+  const oldPath = mv ? filePath(mv[1]) : undefined;
+  if (oldPath && oldPath !== path) o.oldPath = oldPath;
+  o.status = status ?? (o.oldPath ? 'renamed' : 'modified');
+  return o;
+}
+
+function normDiff(x: Rec, base: Rec): void {
+  put(base, 'title', line(x.title, 200));
+  let raw = firstArray(x, DIFF_FILE_KEYS);
+  // one file at the root ({path, hunks} / {path, patch} / {path, before, after})
+  if (!raw.length && (x.path ?? x.file ?? x.filename) !== undefined) raw = [x];
+  else put(base, 'patch', rawText(x.patch ?? x.diff ?? x.unified ?? x.text, MAX_DIFF_PATCH));
+  const files: Rec[] = [];
+  for (let i = 0; i < raw.length && files.length < MAX_DIFF_FILES; i++) {
+    const f = diffFile(raw[i], false);
+    if (f) files.push(f);
+  }
+  if (files.length || Array.isArray(x.files)) base.files = files;
+  const view = typeof x.view === 'string' ? x.view.trim().toLowerCase().replace(/[\s_-]+/g, '') : '';
+  put(base, 'view', view === 'split' || view === 'sidebyside' ? 'split' : view === 'unified' || view === 'inline' ? 'unified' : undefined);
+}
+
+/** "1.2s" / "350ms" / "2m 5s" / seconds as a number → milliseconds */
+function durationMs(x: Rec): number | undefined {
+  const ms = num(x.durationMs ?? x.duration_ms ?? x.elapsedMs ?? x.elapsed_ms);
+  if (ms !== undefined) return ms >= 0 ? Math.round(ms) : undefined;
+  const d = x.duration ?? x.elapsed ?? x.time;
+  const n = num(d);
+  if (n !== undefined) return n >= 0 ? Math.round(n * 1000) : undefined;
+  if (typeof d !== 'string') return undefined;
+  let total = 0;
+  let any = false;
+  for (const m of d.toLowerCase().matchAll(/(\d+(?:[.,]\d+)?)\s*(ms|h|m(?:in)?|s(?:ec)?)/g)) {
+    const v = Number(m[1].replace(',', '.'));
+    total += m[2] === 'ms' ? v : m[2] === 'h' ? v * 3_600_000 : m[2].startsWith('m') ? v * 60_000 : v * 1000;
+    any = true;
+  }
+  return any ? Math.round(total) : undefined;
+}
+
+const TERMINAL_STATUS_WORDS: Readonly<Record<string, 'running' | 'done' | 'error'>> = {
+  running: 'running', pending: 'running', inprogress: 'running', started: 'running', live: 'running',
+  done: 'done', ok: 'done', success: 'done', succeeded: 'done', passed: 'done', finished: 'done', completed: 'done', complete: 'done',
+  error: 'error', failed: 'error', fail: 'error', failure: 'error', errored: 'error', timeout: 'error', killed: 'error', cancelled: 'error', canceled: 'error',
+};
+
+function normTerminal(x: Rec, base: Rec): void {
+  put(base, 'title', line(x.title, 200));
+  const cmd = str(x.command ?? x.cmd ?? x.commandLine ?? x.input);
+  put(base, 'command', cmd === undefined ? undefined : block(cmd.replace(/^\s*[$%>]\s+/, ''), MAX_TERMINAL_COMMAND));
+  put(base, 'cwd', line(x.cwd ?? x.dir ?? x.workdir ?? x.directory, 300));
+  let out = typeof (x.output ?? x.stdout ?? x.log ?? x.result) === 'string' ? ((x.output ?? x.stdout ?? x.log ?? x.result) as string) : undefined;
+  if (typeof x.stderr === 'string' && x.stderr !== '' && x.output === undefined) out = out ? out + (out.endsWith('\n') ? '' : '\n') + x.stderr : x.stderr;
+  let truncated = int(x.truncated, 0, 1e12) ?? 0;
+  const start = int(x.outputStart ?? x.output_start ?? x.offset, 0, 1e15);
+  if (out !== undefined && out.length > MAX_TERMINAL_OUTPUT) {
+    // keep the tail from a line start (the end holds the result and the errors)
+    let cut = out.length - MAX_TERMINAL_OUTPUT;
+    const nl = out.indexOf('\n', cut);
+    if (nl !== -1 && nl - cut < 2000) cut = nl + 1;
+    truncated += cut;
+    out = out.slice(cut);
+  }
+  if (out) base.output = out;
+  if (truncated > 0) base.truncated = truncated;
+  else if (bool(x.truncated) === true) base.truncated = true;
+  // a cut head moves the window start too
+  if (start !== undefined) base.outputStart = start + (truncated - (int(x.truncated, 0, 1e12) ?? 0));
+  const code = x.exitCode ?? x.exit_code ?? x.code ?? x.exit ?? x.returncode ?? (typeof x.status === 'number' ? x.status : undefined);
+  put(base, 'exitCode', int(code, -1e9, 1e9));
+  put(base, 'durationMs', durationMs(x));
+  const st = typeof x.status === 'string' ? x.status.trim().toLowerCase().replace(/[\s_-]+/g, '') : '';
+  put(base, 'status', Object.prototype.hasOwnProperty.call(TERMINAL_STATUS_WORDS, st) ? TERMINAL_STATUS_WORDS[st] : bool(x.running) === true ? 'running' : undefined);
+}
+
+function normChanges(x: Rec, base: Rec): void {
+  put(base, 'title', line(x.title, 200));
+  put(base, 'summary', line(x.summary ?? x.description ?? x.message, 300));
+  const raw = firstArray(x, [...DIFF_FILE_KEYS, 'items']);
+  const files: Rec[] = [];
+  for (let i = 0; i < raw.length && files.length < MAX_CHANGED_FILES; i++) {
+    const f = diffFile(raw[i], true);
+    if (f) files.push(f);
+  }
+  base.files = files;
+  put(base, 'patch', rawText(x.patch ?? x.diff, MAX_DIFF_PATCH));
+  put(base, 'agent', line(x.agent, 40));
+}
+
 function norm(x: unknown, depth: number, ctx: Ctx, path: string): HuiNode | null {
   if (!isRec(x) || typeof x.type !== 'string') return null;
   if (++ctx.nodes > MAX_TREE_NODES) return null;
@@ -2120,7 +2323,7 @@ function norm(x: unknown, depth: number, ctx: Ctx, path: string): HuiNode | null
     case 'form':
       put(base, 'title', str(x.title));
       base.fields = formFields(x.fields);
-      base.submit = { label: (isRec(x.submit) ? str(x.submit.label) : undefined) ?? 'Senden' };
+      base.submit = { label: (isRec(x.submit) ? str(x.submit.label) : undefined) ?? '' }; // empty → the Form shows its localized default (ui.form.submit)
       break;
     case 'choice':
       normChoice(x, base);
@@ -2234,6 +2437,15 @@ function norm(x: unknown, depth: number, ctx: Ctx, path: string): HuiNode | null
     case 'blocks':
       normBlocks(x, base);
       break;
+    case 'diff':
+      normDiff(x, base);
+      break;
+    case 'terminal':
+      normTerminal(x, base);
+      break;
+    case 'changes':
+      normChanges(x, base);
+      break;
     default:
       // unknown type: pass through as-is for fallback rendering
       return x as unknown as HuiNode;
@@ -2308,6 +2520,22 @@ const TYPE_ALIASES: Readonly<Record<string, string>> = {
   'architecture': 'blocks',
   'architecture-diagram': 'blocks',
   'architecture-overview': 'blocks',
+  'patch': 'diff',
+  'unified-diff': 'diff',
+  'git-diff': 'diff',
+  'code-diff': 'diff',
+  'file-diff': 'diff',
+  'console': 'terminal',
+  'shell': 'terminal',
+  'command': 'terminal',
+  'command-output': 'terminal',
+  'shell-output': 'terminal',
+  'terminal-output': 'terminal',
+  'file-changes': 'changes',
+  'changed-files': 'changes',
+  'changeset': 'changes',
+  'change-set': 'changes',
+  'files-changed': 'changes',
 };
 /** alias keys that also mean `ranked: true` */
 const RANKED_ALIASES: ReadonlySet<string> = new Set(['product-ranking', 'ranked-products', 'ranked-product-list', 'top-products']);

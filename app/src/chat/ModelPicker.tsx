@@ -5,7 +5,8 @@
  * provider of GET /api/model/options (cached per profile, refreshed when the sheet opens and the cache is old).
  */
 import { memo, useCallback, useEffect, useMemo, type ReactNode } from 'react';
-import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { Text } from '../ui/primitives/Text';
 import { useHermesCapabilities } from '../hermes/useHermesCapabilities';
 import { botBaseUrl, botDisplayName, botOf, withBot, type HermesBot } from '../hermes/bots';
 import type { ConnectionProfile } from '../settings/profiles';
@@ -18,6 +19,7 @@ import { HERMES_DEFAULT_MODEL, listsServerModels, modelEntries } from './models'
 import { ModelSearchList } from './ModelSearchList';
 import { useModelList } from './useModelList';
 import { useModelPrefs } from './useModelPrefs';
+import { a11yState } from '../ui/lib/a11yState';
 
 type Props = {
   open: boolean;
@@ -127,7 +129,7 @@ function BotRow({ bots, selected, onPick }: { bots: readonly HermesBot[]; select
   const tr = useT();
   return (
     <View style={styles.bots}>
-      <Text style={[styles.botsTitle, { color: t.colors.muted }]} accessibilityRole="header">
+      <Text testID="model-picker-bots" style={[t.typography.caption, styles.botsTitle, { color: t.colors.muted }]} accessibilityRole="header">
         {tr('bots.picker.section')}
       </Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.botsRow} keyboardShouldPersistTaps="handled">
@@ -143,18 +145,18 @@ function BotRow({ bots, selected, onPick }: { bots: readonly HermesBot[]; select
                 onPick(name);
               }}
               accessibilityRole="radio"
-              accessibilityState={{ selected: on }}
+              {...a11yState({ selected: on, checked: on })}
               accessibilityLabel={b.model ? tr('bots.picker.a11y', { name: label, model: b.model }) : label}
               style={({ pressed }) => [
-                styles.bot,
+                styles.bot, { borderRadius: t.radii.control },
                 { borderColor: on ? t.colors.accent : t.colors.border, backgroundColor: on ? t.colors.surfaceAlt : pressed ? t.colors.surfacePressed : 'transparent' },
               ]}
             >
-              <Text style={[styles.botName, { color: on ? t.colors.text : t.colors.muted }]} numberOfLines={1}>
+              <Text style={[t.typography.caption, styles.botName, { color: on ? t.colors.text : t.colors.muted }]} numberOfLines={1}>
                 {label}
               </Text>
               {b.model ? (
-                <Text style={[styles.botModel, { color: t.colors.subtle }]} numberOfLines={1}>
+                <Text style={[t.typography.micro, styles.botModel, { color: t.colors.subtle }]} numberOfLines={1}>
                   {b.model}
                 </Text>
               ) : null}
@@ -190,7 +192,7 @@ export function ModelSheet({
     <SheetModal visible={open} onClose={onClose} closeLabel={tr('actions.close')} label={title} style={styles.sheet}>
       <SheetGrabber />
       <View style={styles.head}>
-        <Text style={[styles.title, { color: t.colors.text }]}>{title}</Text>
+        <Text style={[t.typography.headline, styles.title, { color: t.colors.text }]}>{title}</Text>
         {onRefresh ? (
           <Pressable
             onPress={onRefresh}
@@ -208,7 +210,7 @@ export function ModelSheet({
         </Pressable>
       </View>
       {subtitle ? (
-        <Text style={[styles.sub, { color: t.colors.muted }]} numberOfLines={1}>
+        <Text style={[t.typography.caption, styles.sub, { color: t.colors.muted }]} numberOfLines={1}>
           {subtitle}
         </Text>
       ) : null}
@@ -220,13 +222,13 @@ export function ModelSheet({
 const styles = StyleSheet.create({
   sheet: { paddingHorizontal: 12 },
   head: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8 },
-  title: { flex: 1, fontSize: 16, fontWeight: '600' },
-  sub: { fontSize: 12.5, paddingHorizontal: 8, marginTop: 2, marginBottom: 6 },
+  title: { flex: 1, fontWeight: '600' },
+  sub: { paddingHorizontal: 8, marginTop: 2, marginBottom: 6 },
   reload: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   bots: { marginBottom: 8 },
-  botsTitle: { fontSize: 11.5, fontWeight: '600', letterSpacing: 0.4, paddingHorizontal: 8, marginBottom: 4, textTransform: 'uppercase' },
+  botsTitle: { fontWeight: '600', paddingHorizontal: 8, marginBottom: 4 },
   botsRow: { gap: 6, paddingHorizontal: 8 },
-  bot: { borderWidth: StyleSheet.hairlineWidth * 2, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 5, maxWidth: 180 },
-  botName: { fontSize: 13.5, fontWeight: '600' },
-  botModel: { fontSize: 11, marginTop: 1 },
+  bot: { borderWidth: StyleSheet.hairlineWidth * 2, paddingHorizontal: 10, paddingVertical: 5, maxWidth: 180 },
+  botName: { fontWeight: '600' },
+  botModel: { marginTop: 1 },
 });

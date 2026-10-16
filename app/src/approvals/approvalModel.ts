@@ -40,7 +40,7 @@ export type ApprovalInput = {
 
 export type RiskLevel = 'normal' | 'elevated' | 'high';
 
-/** `denyPrimary` = filled danger button: the recommended action of a high-risk request. */
+/** `denyPrimary` = Deny as the primary (ink) button: the recommended action of a high-risk request. `danger` = the quiet Deny. */
 export type ChoiceKind = 'primary' | 'secondary' | 'danger' | 'denyPrimary';
 
 export type ChoiceView = {

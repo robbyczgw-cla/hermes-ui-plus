@@ -3,7 +3,7 @@
  * the per-message highlight scope the text renderers (Markdown runs, user bubbles) read.
  */
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
-import { Text } from 'react-native';
+import { Text } from '../ui/primitives/Text';
 import { useTheme } from '../ui';
 import { splitMatches } from './findInChat';
 

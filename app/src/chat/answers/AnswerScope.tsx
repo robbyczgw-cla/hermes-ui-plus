@@ -9,11 +9,12 @@
  */
 import * as Clipboard from 'expo-clipboard';
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '../../ui/primitives/Text';
 import { useOptionalActionRunner } from '../../actions';
 import { useT } from '../../i18n';
 import type { Segment } from '../../protocol/types';
-import { SheetGrabber, SheetModal, haptic, useTheme } from '../../ui';
+import { Button, SheetGrabber, SheetModal, useTheme } from '../../ui';
 import { Favicon } from '../../ui/components/modules/Sources';
 import { domainOf } from '../../ui/components/modules/a/misc.ts';
 import { useToast } from '../Toast';
@@ -86,7 +87,7 @@ function SheetFrame({ title, icon, onClose, children }: { title: string; icon?: 
       <SheetGrabber style={styles.grabber} />
       <View style={styles.head}>
         {icon}
-        <Text style={[styles.title, { color: t.colors.text }]} accessibilityRole="header" numberOfLines={3}>
+        <Text style={[t.typography.headline, styles.title, { color: t.colors.text }]} accessibilityRole="header" numberOfLines={3}>
           {title}
         </Text>
       </View>
@@ -98,26 +99,14 @@ function SheetFrame({ title, icon, onClose, children }: { title: string; icon?: 
 }
 
 function SheetButton({ icon, label, onPress, primary }: { icon: AnswerIconName; label: string; onPress(): void; primary?: boolean }) {
-  const t = useTheme();
   return (
-    <Pressable
-      onPress={() => {
-        haptic('selection');
-        onPress();
-      }}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      style={({ pressed }) => [
-        styles.btn,
-        primary ? { backgroundColor: t.colors.accent } : { backgroundColor: pressed ? t.colors.surfacePressed : t.colors.surfaceAlt },
-        primary && pressed && { opacity: 0.85 },
-      ]}
-    >
-      <AnswerIcon name={icon} size={18} color={primary ? t.colors.onAccent : t.colors.text} />
-      <Text style={[styles.btnText, { color: primary ? t.colors.onAccent : t.colors.text }]} numberOfLines={1}>
-        {label}
-      </Text>
-    </Pressable>
+    <Button
+      label={label}
+      icon={(color, size) => <AnswerIcon name={icon} size={size} color={color} />}
+      variant={primary ? 'primary' : 'secondary'}
+      haptic="selection"
+      onPress={onPress}
+    />
   );
 }
 
@@ -148,7 +137,7 @@ function EntitySheet({ entity: e, onClose }: { entity: HuiEntity; onClose(): voi
     case 'place': {
       const where = e.lat !== undefined ? { query: e.q || undefined, lat: e.lat, lng: e.lng } : { query: e.q };
       buttons = [
-        <SheetButton key="maps" primary icon="pin" label={tr('chat.answers.act.openMaps')} onPress={() => act({ type: 'maps', ...where })} />,
+        <SheetButton key="maps" icon="pin" primary label={tr('chat.answers.act.openMaps')} onPress={() => act({ type: 'maps', ...where })} />,
         <SheetButton key="route" icon="route" label={tr('chat.answers.act.route')} onPress={() => act({ type: 'maps', ...where, mode: 'driving' })} />,
         copyBtn,
       ];
@@ -168,13 +157,13 @@ function EntitySheet({ entity: e, onClose }: { entity: HuiEntity; onClose(): voi
       break;
     case 'tel':
       buttons = [
-        <SheetButton key="call" primary icon="phone" label={tr('chat.answers.act.call')} onPress={() => act({ type: 'call', phone: e.n })} />,
+        <SheetButton key="call" icon="phone" primary label={tr('chat.answers.act.call')} onPress={() => act({ type: 'call', phone: e.n })} />,
         <SheetButton key="sms" icon="message" label={tr('chat.answers.act.sms')} onPress={() => act({ type: 'sms', to: [e.n] })} />,
         copyBtn,
       ];
       break;
     case 'email':
-      buttons = [<SheetButton key="mail" primary icon="mail" label={tr('chat.answers.act.mail')} onPress={() => act({ type: 'email', to: [e.to] })} />, copyBtn];
+      buttons = [<SheetButton key="mail" icon="mail" primary label={tr('chat.answers.act.mail')} onPress={() => act({ type: 'email', to: [e.to] })} />, copyBtn];
       break;
     case 'price':
       buttons = [
@@ -203,7 +192,7 @@ function EntitySheet({ entity: e, onClose }: { entity: HuiEntity; onClose(): voi
         </View>
       }
     >
-      <Text style={[styles.kind, { color: t.colors.muted }]}>{sub ? `${tr(`chat.answers.kind.${e.kind}`)} · ${sub}` : tr(`chat.answers.kind.${e.kind}`)}</Text>
+      <Text style={[t.typography.caption, { color: t.colors.muted }]}>{sub ? `${tr(`chat.answers.kind.${e.kind}`)} · ${sub}` : tr(`chat.answers.kind.${e.kind}`)}</Text>
       <View style={styles.btnCol}>{buttons}</View>
     </SheetFrame>
   );
@@ -225,15 +214,15 @@ function FootnoteSheet({ n, target, onClose }: { n: number; target: FootnoteTarg
         </View>
       }
     >
-      <Text style={[styles.kind, { color: t.colors.muted }]}>
+      <Text style={[t.typography.caption, { color: t.colors.muted }]}>
         {[tr('chat.answers.footnoteTitle', { n }), target?.siteName, domain].filter(Boolean).join(' · ')}
       </Text>
       {target?.snippet ? (
-        <Text style={[styles.snippet, { color: t.colors.text }]} selectable>
+        <Text style={[t.typography.body, styles.snippet, { color: t.colors.text }]} selectable>
           {target.snippet}
         </Text>
       ) : null}
-      {!target ? <Text style={[styles.snippet, { color: t.colors.muted }]}>{tr('chat.answers.footnoteMissing')}</Text> : null}
+      {!target ? <Text style={[t.typography.body, styles.snippet, { color: t.colors.muted }]}>{tr('chat.answers.footnoteMissing')}</Text> : null}
       {url ? (
         <View style={styles.btnCol}>
           <SheetButton
@@ -257,10 +246,7 @@ const styles = StyleSheet.create({
   head: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 },
   badge: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   favWrap: { width: 34, alignItems: 'center' },
-  title: { flex: 1, fontSize: 17, fontWeight: '600', lineHeight: 22 },
-  kind: { fontSize: 13, lineHeight: 18 },
-  snippet: { fontSize: 15, lineHeight: 21, marginTop: 6 },
+  title: { flex: 1 },
+  snippet: { marginTop: 6 },
   btnCol: { gap: 8, marginTop: 12 },
-  btn: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 48, borderRadius: 12, paddingHorizontal: 14 },
-  btnText: { fontSize: 15.5, fontWeight: '600', flexShrink: 1 },
 });

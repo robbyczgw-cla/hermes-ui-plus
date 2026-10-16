@@ -46,8 +46,20 @@ Extends docs/SPEC.md, SPEC-modules-v2.md, SPEC-modules-v3.md. Same rules as befo
 - Must not regress the streaming perf work (no per-frame React state).
 
 ### A6 Share as image, pref `answers.shareImage`
-- Action-row button "Als Bild teilen" renders the answer (or a single card via its overflow) to a PNG with a clean frame (theme background, small app wordmark, no chrome) and opens the share sheet.
-- Native: `react-native-view-shot` (add via `npx expo install`). Web: hide the option unless a dependency-free approach is reliable.
+- Action-row button "Als Bild teilen" (also in the "⋯" / long-press menu and the macOS right-click menu) opens a sheet
+  with a live preview of the image: the answer as rendered (text + cards in their current state: ticked items, chosen
+  option) at a fixed 390 px column on the theme background, the user's question as a small bubble on top (toggle in
+  the sheet), a quiet footer (mark, "HUI+ · interactive chat for Hermes Agent", hermesui.xyz). No chat chrome.
+- Capture mode (`ui/lib/capture.tsx`): no motion, rails as grids, >2 compare columns stacked, map = static sketch
+  (pins at relative positions, no tiles), mindmap / checklist without their tool buttons; photos hold the capture
+  until drawn, after 5 s they show their fallback tile. Sandboxed HTML widgets cannot be captured: a placeholder marks
+  their place and the sheet says so; an answer that is only a widget offers no image. Long answers: full height up to
+  1500 px, then a fade + "continues in the chat".
+- Native: `react-native-view-shot` → system share sheet (`expo-sharing`). Web: `modern-screenshot` (lazy, PNG at 3×)
+  → download, Web Share with files where supported, clipboard image where supported; photos are drawn from local
+  `blob:` copies (`ui/lib/captureImage.ts`). Desktop app: save to Downloads (`desktop_save_image`) or copy.
+- Nothing leaves the device before the user picks an action. Logic: `chat/answers/shareModel.ts` (tested); sample
+  shots of the real web flow: `scripts/ux-check/share-shots.mjs`.
 
 ## B. New modules
 

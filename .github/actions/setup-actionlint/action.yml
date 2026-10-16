@@ -1,0 +1,26 @@
+name: setup-actionlint
+description: >-
+  Installs the pinned actionlint release into ~/.local/bin after verifying its SHA-256 (workflow linter; no secrets).
+
+runs:
+  using: composite
+  steps:
+    - name: Install actionlint (checksum-verified)
+      shell: bash
+      env:
+        ACTIONLINT_VERSION: 1.7.12
+        # sha256 of actionlint_1.7.12_linux_amd64.tar.gz, from the release's actionlint_1.7.12_checksums.txt
+        ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+      run: |
+        set -euo pipefail
+        tmp="$(mktemp -d)"
+        archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+        curl --fail --silent --show-error --location --retry 3 -o "$tmp/$archive" \
+          "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/$archive"
+        echo "$ACTIONLINT_SHA256  $tmp/$archive" | sha256sum -c -
+        tar -xzf "$tmp/$archive" -C "$tmp" actionlint
+        mkdir -p "$HOME/.local/bin"
+        install -m755 "$tmp/actionlint" "$HOME/.local/bin/actionlint"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        "$HOME/.local/bin/actionlint" -version
+        rm -rf "$tmp"

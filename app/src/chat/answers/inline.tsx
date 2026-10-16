@@ -4,7 +4,8 @@
  * Rendered as inline Views inside <Text>; the sheet they open is hosted by the answer's AnswerScope.
  */
 import { createContext, useContext } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
+import { Text } from '../../ui/primitives/Text';
 import { useT } from '../../i18n';
 import { useTheme } from '../../ui';
 import { AnswerIcon } from './answerIcons';
@@ -33,10 +34,10 @@ export function FootnotePill({ n, raw }: { n: number; raw: string }) {
         hitSlop={{ top: 14, bottom: 14, left: 10, right: 10 }}
         accessibilityRole="button"
         accessibilityLabel={tr('chat.answers.footnoteA11y', { n })}
-        style={({ pressed }) => [styles.pill, { backgroundColor: pressed ? t.colors.accent : t.colors.accentSoft }]}
+        style={({ pressed }) => [styles.pill, { borderRadius: t.radii.pill }, { backgroundColor: pressed ? t.colors.accent : t.colors.accentSoft }]}
       >
         {({ pressed }) => (
-          <Text style={[styles.pillText, { color: pressed ? t.colors.onAccent : t.colors.accent }]} accessibilityLabel={raw}>
+          <Text style={[t.typography.micro, styles.pillText, { color: pressed ? t.colors.onAccent : t.colors.accentText }]} accessibilityLabel={raw}>
             {n}
           </Text>
         )}
@@ -58,10 +59,10 @@ export function EntityChip({ entity, fontSize }: { entity: HuiEntity; fontSize: 
         accessibilityRole="button"
         accessibilityLabel={`${tr(`chat.answers.kind.${entity.kind}`)}: ${entity.label}`}
         accessibilityHint={tr('chat.answers.entityHint')}
-        style={({ pressed }) => [styles.chip, { backgroundColor: pressed ? t.colors.surfacePressed : t.colors.accentSoft, borderRadius: 7 }]}
+        style={({ pressed }) => [styles.chip, { backgroundColor: pressed ? t.colors.surfacePressed : t.colors.accentSoft, borderRadius: t.radii.inline }]}
       >
         <AnswerIcon name={entityIcon(entity.kind)} size={Math.round(fontSize * 0.85)} color={t.colors.accent} strokeWidth={2} />
-        <Text style={{ color: t.colors.accent, fontSize: fontSize - 1, lineHeight: Math.round(fontSize * 1.3), fontWeight: '500' }} numberOfLines={1}>
+        <Text style={{ color: t.colors.accentText, fontSize: fontSize - 1, lineHeight: Math.round(fontSize * 1.3), fontWeight: '500' }} numberOfLines={1}>
           {entity.label}
         </Text>
       </Pressable>
@@ -72,8 +73,8 @@ export function EntityChip({ entity, fontSize }: { entity: HuiEntity; fontSize: 
 
 const styles = StyleSheet.create({
   pillWrap: { marginHorizontal: 1, transform: [{ translateY: -3 }] },
-  pill: { minWidth: 17, height: 17, paddingHorizontal: 4, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
-  pillText: { fontSize: 11, lineHeight: 14, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  pill: { minWidth: 17, height: 17, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center' },
+  pillText: { fontWeight: '700', fontVariant: ['tabular-nums'] },
   chipWrap: { transform: [{ translateY: 3 }] },
   // no vertical padding: the chip must not grow the line it sits in (B6)
   chip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 6, paddingVertical: 0, maxWidth: 280 },

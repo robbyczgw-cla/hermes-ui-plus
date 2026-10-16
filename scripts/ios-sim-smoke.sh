@@ -33,16 +33,20 @@ mkdir -p "$OUT"
 
 "${SSH[@]}" "rm -rf $Q_SMOKE && mkdir -p $Q_SMOKE/shots"
 rsync -a "$ROOT/scripts/ios-sim/" "$MAC_HOST:$REMOTE_DIR/smoke/"
+# one heavy job at a time on the Mac (scripts/lib/maclock.sh, shared with the builds and the Android lane)
+"${SSH[@]}" "mkdir -p hui-lane" && rsync -a "$ROOT/scripts/lib/maclock.sh" "$MAC_HOST:hui-lane/maclock.sh"
 
 case "${HUI_APPEARANCE:-}" in ''|light|dark) ;; *) echo "HUI_APPEARANCE must be light or dark" >&2; exit 2 ;; esac
-printf -v REMOTE_ENV '%q=%q ' REMOTE_DIR "$REMOTE_DIR" SIM_DEVICE "${SIM_DEVICE:-}" HUI_LANG "${HUI_LANG:-en}" HUI_APPEARANCE "${HUI_APPEARANCE:-}"
+printf -v REMOTE_ENV '%q=%q ' REMOTE_DIR "$REMOTE_DIR" SIM_DEVICE "${SIM_DEVICE:-}" HUI_LANG "${HUI_LANG:-en}" HUI_APPEARANCE "${HUI_APPEARANCE:-}" HUI_MAC_LOCK_WAIT "${HUI_MAC_LOCK_WAIT:-2700}"
 remote_rc=0
 "${SSH[@]}" "${REMOTE_ENV}bash -s" <<'REMOTE' || remote_rc=$?
 set -euo pipefail
 export PATH="$HOME/.local/node/bin:$HOME/.local/ruby/bin:$HOME/.local/cocoapods/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export GEM_HOME="$HOME/.local/cocoapods" GEM_PATH="$HOME/.local/cocoapods" LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
 B="$REMOTE_DIR"; S="$B/smoke"; SH="$S/shots"
-trap 'rm -rf "$S/DD" "$S/Smoke.xcodeproj"' EXIT
+. "$HOME/hui-lane/maclock.sh"
+maclock_acquire ios-sim "$HUI_MAC_LOCK_WAIT" || exit 3
+trap 'rm -rf "$S/DD" "$S/Smoke.xcodeproj"; maclock_release' EXIT
 APP="$(ls -d "$B"/sim/*.app 2>/dev/null | head -1 || true)"
 [ -n "$APP" ] || { echo "no simulator app in $REMOTE_DIR/sim (run scripts/build-ios.sh --simulator first)"; exit 1; }
 BID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")"
@@ -66,7 +70,7 @@ if [ -n "$HUI_APPEARANCE" ]; then
 fi
 xcrun simctl bootstatus "$UDID" -b >/dev/null
 # store-style screenshots: clean status bar (9:41, full battery/signal); cleared at the end
-trap 'rm -rf "$S/DD" "$S/Smoke.xcodeproj"; xcrun simctl status_bar "$UDID" clear 2>/dev/null || true' EXIT
+trap 'rm -rf "$S/DD" "$S/Smoke.xcodeproj"; maclock_release; xcrun simctl status_bar "$UDID" clear 2>/dev/null || true' EXIT
 xcrun simctl status_bar "$UDID" override --time 9:41 --dataNetwork wifi --wifiMode active --wifiBars 3 \
   --cellularMode active --cellularBars 4 --batteryState charged --batteryLevel 100 2>/dev/null || true
 xcrun simctl terminate "$UDID" "$BID" 2>/dev/null || true

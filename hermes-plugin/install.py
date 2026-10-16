@@ -57,8 +57,9 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"""
 Next steps (owner):
-  1. hermes plugins enable {PLUGIN_NAME}      (or add it to plugins.enabled in config.yaml)
-  2. restart the Hermes gateway (back up config.yaml first)
+  1. back up config.yaml, .env and installs/ of this Hermes home, then add {PLUGIN_NAME} to plugins.enabled
+     in config.yaml (not `hermes plugins enable`: it can switch the gateway to a new environment under installs/)
+  2. restart the Hermes gateway and check that it still runs from its usual Python environment
   3. bridge env: BRIDGE_HERMES_PLUGIN_URL=http://127.0.0.1:{DEFAULT_PORT}
                  BRIDGE_HERMES_PLUGIN_SECRET_FILE={secret_path}
 Kill switch: HERMES_UI_PLUS_DISABLE=1 in the gateway environment, then restart.""")

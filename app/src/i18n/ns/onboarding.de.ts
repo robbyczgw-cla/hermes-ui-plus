@@ -1,6 +1,6 @@
 import { diag, guided } from './onboardingGuided.de.ts';
 // Namespace 'onboarding' (German, source of truth). Keys: <area>.<element>. See ../README.md.
-// Demo scenario content (onboarding/demo) stays German-only data and is not part of this dictionary.
+// Demo scenario content (onboarding/demo) is scripted data in en/de/es inside the scenario files and is not part of this dictionary; only the start-screen cards below live here.
 export const onboarding = {
   guided,
   diag,
@@ -13,12 +13,12 @@ export const onboarding = {
   },
   welcome: {
     badge: 'Inoffizieller Community-Client für Hermes Agent',
-    title: 'Willkommen bei {app}',
+    title: 'Willkommen bei {appShort}',
     lead: 'Ein Chat für deinen eigenen Hermes Agent – mit Diagrammen, Tabellen, Formularen und kleinen Apps direkt in der Antwort.',
     start: 'Los geht’s',
     demoLink: 'Erst mal nur umsehen',
     point1: {
-      title: 'Antworten, die man anfassen kann',
+      title: 'Antworten zum Anfassen',
       text: 'Hermes antwortet mit echten Bedienelementen statt nur Text.',
     },
     point2: {
@@ -47,6 +47,21 @@ export const onboarding = {
       text: 'Offline-Demo mit Beispielantworten. Keine Verbindung nötig.',
     },
   },
+  agentSetup: {
+    option: { title: 'Lass deinen Agenten das einrichten', text: 'Hermes oder ein Coding-Agent wie Claude Code installiert die Bridge und schickt dir einen Kopplungslink.' },
+    title: 'Lass deinen Agenten das einrichten',
+    lead: 'Dein Hermes oder Coding-Agent installiert die {bridge} auf deinem Server und schickt dir einen Kopplungslink.',
+    lead2: 'Gib ihm dazu diesen Prompt in einem privaten Chat (Telegram, Hermes CLI, Claude Code …).',
+    promptLabel: 'Setup-Prompt (Englisch)',
+    copy: 'Prompt kopieren',
+    copied: 'Prompt kopiert',
+    share: 'Teilen',
+    shareTitle: '{bridge} für {appShort} einrichten',
+    copiedInstead: 'Teilen geht hier nicht, der Prompt wurde stattdessen kopiert.',
+    failed: 'Kopieren hat nicht geklappt. Markiere den Text und kopiere ihn von Hand.',
+    linkHint: 'Wenn dein Agent den Kopplungslink schickt, öffne ihn auf diesem Gerät oder füge ihn hier ein.',
+    pasteLink: 'Kopplungslink einfügen',
+  },
   scan: {
     title: 'QR-Code scannen',
     lead: 'Öffne auf deinem Server die Kopplungsseite der Bridge und halte die Kamera auf den Code.',
@@ -67,7 +82,7 @@ export const onboarding = {
   redeem: {
     busy: 'Kopplung wird bestätigt …',
     pending: 'Der Link gilt nur einmal: Erst wenn du auf „Verbinden“ tippst, holt sich die App damit ihren eigenen Zugang. Bis dahin bleibt er gültig (höchstens eine Stunde nach dem Erzeugen).',
-    expired: 'Kopplungslink abgelaufen oder schon benutzt. Einen neuen erzeugst du auf dem Rechner mit der Bridge mit „npx hermes-ui-plus-bridge devices add Telefon“ (oder bitte deinen Hermes-Agenten darum) – dann den neuen QR-Code scannen.',
+    expired: 'Kopplungslink abgelaufen oder schon benutzt. Einen neuen erzeugst du auf dem Rechner, auf dem die Bridge läuft, mit „npx hermes-ui-plus-bridge devices add Telefon“ (oder bitte deinen Hermes-Agenten darum) – dann den neuen QR-Code scannen.',
     'rate-limited': 'Zu viele Versuche. Warte kurz und erzeuge dann einen neuen Kopplungslink.',
     network: 'Die Bridge ist nicht erreichbar. Prüfe die Verbindung (z. B. Tailscale) und tippe erneut auf „Verbinden“ – ist der Link inzwischen abgelaufen, erzeuge einen neuen.',
     failed: 'Die Kopplung hat nicht geklappt. Erzeuge einen neuen Kopplungslink.',
@@ -158,7 +173,7 @@ export const onboarding = {
     },
     refused: {
       title: 'Verbindung abgelehnt',
-      message: 'Unter {host} ist erreichbar, aber auf diesem Port lauscht nichts.',
+      message: '{host} ist erreichbar, aber auf diesem Port lauscht nichts.',
       hint1: 'Ist der Hermes-API-Server gestartet (platforms.api_server in der Konfiguration)?',
       hint2: 'Stimmt der Port?',
       hint3: 'Hört der Server nur auf 127.0.0.1? Dann ist er von anderen Geräten nicht erreichbar.',
@@ -295,20 +310,30 @@ export const onboarding = {
       subtitle: 'Temperaturverlauf einer Woche',
       prompt: 'Zeig mir ein Diagramm zum Temperaturverlauf.',
     },
-    compare: {
-      title: 'Vergleich',
-      subtitle: 'zwei Tarife nebeneinander',
-      prompt: 'Mach einen Vergleich von zwei Tarifen.',
+    approval: {
+      title: 'Freigabe',
+      subtitle: 'du entscheidest vor dem Löschen',
+      prompt: 'Räum den Cache auf, mit Freigabe',
     },
-    loan: {
-      title: 'Kreditrechner',
-      subtitle: 'interaktiv mit Schiebereglern',
-      prompt: 'Bau mir einen Kreditrechner.',
+    checklist: {
+      title: 'Einkaufsliste',
+      subtitle: 'zum Abhaken',
+      prompt: 'Mach mir eine Einkaufsliste fürs Wochenende',
     },
-    mixed: {
-      title: 'Gemischter Bericht',
-      subtitle: 'Kennzahlen, Tabelle, Werkzeuge',
-      prompt: 'Erstelle einen gemischten Bericht für diese Woche.',
+    products: {
+      title: 'Produktvergleich',
+      subtitle: 'Kopfhörer, „Das nehme ich“',
+      prompt: 'Vergleiche Kopfhörer mit Geräuschunterdrückung',
+    },
+    recipe: {
+      title: 'Kochen mit Timern',
+      subtitle: 'Spaghetti Carbonara',
+      prompt: 'Koch mit mir Spaghetti Carbonara – Schritt für Schritt, mit Timern.',
+    },
+    explain: {
+      title: 'Antwort umformen',
+      subtitle: 'Wärmepumpe: kürzer, als Tabelle …',
+      prompt: 'Erkläre mir Schritt für Schritt, wie eine Wärmepumpe funktioniert.',
     },
   },
 };

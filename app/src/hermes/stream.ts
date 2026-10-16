@@ -6,6 +6,7 @@ import { withDeadline } from '../net/deadline.ts';
 import { authErrorText } from './authError.ts';
 import { makeT, type TFn, type TKey, type Vars } from '../i18n/core.ts';
 import { createSseParser, createUtf8Decoder } from './sse.ts';
+import { PERF, perfMark, perfNow, perfSpan } from '../perf/probe.ts';
 import { appendCapped, MAX_MESSAGE_TEXT } from './chatState.ts';
 import { mapApproval, mapFrame, parseJson } from './events.ts';
 import { answerBlocked, type RunStatus } from './approvals.ts';
@@ -20,6 +21,7 @@ import type {
   HermesConn,
   HermesErrorKind,
   HermesEvent,
+  Usage,
 } from './types';
 
 export type FetchResponseLike = {
@@ -51,6 +53,11 @@ export class HermesError extends Error {
    * (HTTP 200 headers in): the turn most likely keeps running server-side (recovery.ts), it is not a failed answer
    */
   accepted?: boolean;
+  /**
+   * the UI bridge refused to continue this (accepted, resumable) stream for good: `resume_unavailable` (record gone,
+   * turn broken), `turn_unrecorded` (over the buffer) or another refusal. Absent when the resume window ran out offline.
+   */
+  resumeCode?: string;
 
   constructor(
     kind: HermesErrorKind,
@@ -111,20 +118,46 @@ export type StreamChatParams = {
   idleTimeoutMs?: number;
   /** per-chat reasoning/fast options → body `model_options` (omitted when all default) */
   modelOptions?: HermesChatOptions;
-  /** called once the server accepted the request (HTTP 200 headers in, before the first event) */
-  onAccepted?: () => void;
+  /**
+   * called once the server accepted the request (HTTP 200 headers in, before the first event). `resumable`: the UI
+   * bridge recorded this turn under `idempotencyKey` (`X-Hermes-UI-Resume: 1`), a lost stream can re-attach later.
+   */
+  onAccepted?: (info: { resumable: boolean }) => void;
   /** follow-up suggestions wanted (Settings → Chat). `false` adds the FOLLOWUPS_OFF_MESSAGE; default on */
   followups?: boolean;
   /** `Idempotency-Key` of this send (bridge: no second turn on a retry, resumable stream) */
   idempotencyKey?: string;
-  /** pauses before each resume attempt (tests); default RESUME_DELAYS_MS */
+  /** pauses before each resume attempt, the last one repeats (tests); default RESUME_DELAYS_MS */
   resumeDelaysMs?: readonly number[];
+  /** how long a lost resumable stream keeps trying to re-attach (offline); default RESUME_WINDOW_MS */
+  resumeWindowMs?: number;
+  /**
+   * re-attach instead of sending: the first request already continues the bridge's recording of `idempotencyKey` at
+   * this byte offset (0 = the whole turn again; an app restart with an unfinished answer). Never starts a turn: an
+   * unknown / expired key is refused (409, HermesError `code`).
+   */
+  resumeFrom?: number;
+  /** subscribe to "try now" signals (network back, app in the foreground): a resume pause ends early */
+  wake?: (fn: () => void) => () => void;
+  /** a resumable stream was lost and is re-attaching (`lost`), or bytes arrive again (`resumed`) */
+  onConnection?: (state: 'lost' | 'resumed') => void;
   /**
    * a prepared request instead of `buildRequest(conn, …)` (quick answers: POST /bridge/quick/v1/chat/completions
    * with their own short history, quick/stream.ts). Same streaming, error and abort handling.
    */
   request?: { url: string; headers: Record<string, string>; body: string };
+  /**
+   * reachability check on a fresh connection while the request waits for its response headers (HEADER_PROBE_AFTER_MS,
+   * then every HEADER_PROBE_EVERY_MS): `ok: false` ends the request as a network failure right away. Without it only
+   * the idle timeout ends a request written into a connection the network dropped silently (client.ts: probeServer).
+   */
+  probeReachable?: (signal: AbortSignal) => Promise<ReachProbe>;
+  /** first check and repeat interval of `probeReachable` (tests); default HEADER_PROBE_AFTER_MS / HEADER_PROBE_EVERY_MS */
+  headerProbeMs?: { after: number; every: number };
 };
+
+/** outcome of a reachability check: the server answered (any HTTP status), or why it did not */
+export type ReachProbe = { ok: true } | { ok: false; detail: string };
 
 export type StreamChatResult = {
   /** session id to use for the next message (response header, falls back to the one sent) */
@@ -225,24 +258,89 @@ export async function errorFromResponse(res: FetchResponseLike): Promise<HermesE
 }
 
 /**
- * Pauses before re-attaching to a lost stream (UI bridge with Idempotency-Key, `X-Hermes-UI-Resume: 1`). Each attempt
- * continues at the byte offset the app has; afterwards the normal recovery (live inbox / stored session) takes over.
+ * Pauses before re-attaching to a lost stream (UI bridge with Idempotency-Key, `X-Hermes-UI-Resume: 1`); the last one
+ * repeats until RESUME_WINDOW_MS. Each attempt continues at the byte offset the app has, so an airplane-mode minute or a
+ * network switch continues live within a few seconds of the network coming back. Only when the bridge refuses
+ * (`409 resume_unavailable` / `turn_unrecorded`) or the window runs out does the normal recovery take over.
  */
-export const RESUME_DELAYS_MS: readonly number[] = [500, 1500, 3000];
+export const RESUME_DELAYS_MS: readonly number[] = [250, 750, 1500, 2500];
+/** a lost resumable stream keeps re-attaching this long (from the loss) before the turn counts as interrupted */
+export const RESUME_WINDOW_MS = 120_000;
+/** a re-attach request that gets no response headers within this time is retried (half-open network after a switch) */
+export const RESUME_CONNECT_TIMEOUT_MS = 15_000;
 /** request header: continue the recorded stream of this Idempotency-Key at this byte offset (bridge/src/replay.mjs) */
 export const RESUME_OFFSET_HEADER = 'X-Hermes-UI-Resume-Offset';
+/** current upstream clock on reattachment, independent of a proxy-replaced HTTP Date */
+export const SERVER_TIME_HEADER = 'X-Hermes-UI-Server-Time';
+/**
+ * A request without response headers after this long gets a reachability check on a fresh connection, repeated every
+ * HEADER_PROBE_EVERY_MS. A keep-alive connection that a network loss did not reset (an interface that keeps its address,
+ * e.g. a VPN tunnel or the emulator in airplane mode) takes the request without an error; the request would otherwise
+ * wait for the idle timeout ("Taking a little longer…" instead of "Answer failed"). A reachable server is never cut off.
+ */
+export const HEADER_PROBE_AFTER_MS = 4000;
+export const HEADER_PROBE_EVERY_MS = 10_000;
+/** budget of one reachability check (the first probe of the chat header's health check, healthMachine.FIRST_PROBE_MS) */
+export const REACH_PROBE_MS = 8000;
 
-/** resolves after `ms` or as soon as `signal` aborts (never rejects) */
-function pause(ms: number, signal?: AbortSignal): Promise<void> {
+/**
+ * GET /health on the server of `baseUrl` (root, then the base), bounded by `timeoutMs`: any HTTP answer is reachable.
+ * `fetchImpl` should not share the chat's connection pool, so the check opens a fresh connection.
+ */
+export async function probeServerCore(
+  fetchImpl: (url: string, init: { headers: Record<string, string>; signal: AbortSignal }) => Promise<{ status: number }>,
+  baseUrl: string,
+  apiKey: string,
+  signal: AbortSignal,
+  timeoutMs = REACH_PROBE_MS
+): Promise<ReachProbe> {
+  const headers: Record<string, string> = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
+  let detail = 'server not reachable';
+  try {
+    return await withDeadline(
+      timeoutMs,
+      async (s) => {
+        for (const url of new Set([joinUrl(serverRootOf(baseUrl), '/health'), joinUrl(baseUrl, '/health')])) {
+          try {
+            await fetchImpl(url, { headers, signal: s });
+            return { ok: true } as const;
+          } catch (e) {
+            if (s.aborted) throw e;
+            detail = scrubHosts(e instanceof Error ? e.message : String(e));
+          }
+        }
+        return { ok: false, detail } as const;
+      },
+      signal
+    );
+  } catch (e) {
+    const timedOut = e instanceof Error && e.name === 'TimeoutError';
+    return { ok: false, detail: timedOut ? 'health check timed out' : detail };
+  }
+}
+
+/** resumed responses that ended without a byte in a row before giving up (a recording that ended without finish) */
+const MAX_EMPTY_RESUMES = 2;
+
+/** bridge answers to a re-attach that are worth another attempt: still starting, busy, restarting proxy */
+function transientRefusal(e: HermesError): boolean {
+  return e.code === 'idempotency_in_progress' || e.status === 429 || e.status === 502 || e.status === 503 || e.status === 504;
+}
+
+/** resolves after `ms`, as soon as `signal` aborts or `wake` fires (never rejects) */
+function pause(ms: number, signal?: AbortSignal, wake?: (fn: () => void) => () => void): Promise<void> {
   return new Promise((resolve) => {
     if (signal?.aborted) return resolve();
+    let unwake: (() => void) | undefined;
     const done = () => {
       clearTimeout(t);
       signal?.removeEventListener('abort', done);
+      unwake?.();
       resolve();
     };
     const t = setTimeout(done, ms);
     signal?.addEventListener('abort', done);
+    unwake = wake?.(done);
   });
 }
 
@@ -253,7 +351,13 @@ export async function streamChatCore(
   const { conn, text, sessionId, onEvent } = params;
   const idleMs = params.idleTimeoutMs ?? 45000;
   const resumeDelays = params.resumeDelaysMs ?? RESUME_DELAYS_MS;
+  const resumeWindow = params.resumeWindowMs ?? RESUME_WINDOW_MS;
+  const probeAfter = params.headerProbeMs?.after ?? HEADER_PROBE_AFTER_MS;
+  const probeEvery = params.headerProbeMs?.every ?? HEADER_PROBE_EVERY_MS;
   const req = params.request ?? buildRequest(conn, params.content ?? text, sessionId, params.modelOptions, params.followups, params.idempotencyKey);
+  // a re-attach never needs the message again (the bridge ignores the body): without it, a bridge that does not
+  // know the resume header (BRIDGE_RESUME=off) gets a request Hermes refuses (400) instead of asking it a second time
+  const resumeBody = JSON.stringify({ model: splitProviderModel(conn.model || 'hermes-agent').model, stream: true, messages: [] });
   if (params.signal?.aborted) return { sessionId, text: '', aborted: true };
 
   // One HTTP connection at a time (the request, then resumed streams): its own AbortController, idle timer and a
@@ -264,43 +368,97 @@ export async function streamChatCore(
   let timer: ReturnType<typeof setTimeout> | null = null;
   let abortPromise: Promise<never> = Promise.reject();
   abortPromise.catch(() => {});
-  const kick = () => {
+  const kick = (ms = idleMs) => {
     if (timer) clearTimeout(timer);
     const c = ctrl;
     timer = setTimeout(() => {
       timedOut = true;
       c.abort();
-    }, idleMs);
+    }, ms);
   };
   const onExternalAbort = () => ctrl.abort();
   params.signal?.addEventListener('abort', onExternalAbort);
-  const open = async (extraHeaders: Record<string, string>): Promise<FetchResponseLike> => {
+  /** `offset`: a re-attach at this byte offset (same key, no message) instead of the request itself */
+  /** the reachability check failed while this connection waited for headers (its detail), see HEADER_PROBE_AFTER_MS */
+  let unreachable: string | undefined;
+  const failure = (e: unknown, signal: AbortSignal) =>
+    unreachable !== undefined
+      ? keyedHermesError('network', 'backends.hermes.errors.networkDetail', { detail: unreachable })
+      : wrapFetchError(e, signal, timedOut);
+  /** probes the server while `c` waits for its response headers; returns the stop function */
+  const watchHeaders = (c: AbortController): (() => void) => {
+    const probe = params.probeReachable;
+    if (!probe) return () => {};
+    let stopped = false;
+    let t: ReturnType<typeof setTimeout> | undefined;
+    let inFlight: AbortController | undefined;
+    const check = async () => {
+      inFlight = new AbortController();
+      const r = await probe(inFlight.signal).catch((e: unknown): ReachProbe => ({ ok: false, detail: String(e) }));
+      if (stopped) return;
+      if (!r.ok) {
+        unreachable = r.detail;
+        c.abort();
+        return;
+      }
+      t = setTimeout(() => void check(), probeEvery);
+    };
+    t = setTimeout(() => void check(), probeAfter);
+    return () => {
+      stopped = true;
+      clearTimeout(t);
+      inFlight?.abort();
+    };
+  };
+  const open = async (offset?: number): Promise<FetchResponseLike> => {
     const c = (ctrl = new AbortController());
     timedOut = false;
+    unreachable = undefined;
     abortPromise = new Promise<never>((_, reject) => {
-      c.signal.addEventListener('abort', () => reject(wrapFetchError(undefined, c.signal, timedOut)));
+      c.signal.addEventListener('abort', () => reject(failure(undefined, c.signal)));
     });
     abortPromise.catch(() => {});
     if (params.signal?.aborted) c.abort();
-    kick();
+    const resuming = offset !== undefined;
+    kick(resuming ? Math.min(idleMs, RESUME_CONNECT_TIMEOUT_MS) : idleMs);
+    const headers = resuming ? { ...req.headers, [RESUME_OFFSET_HEADER]: String(offset) } : req.headers;
+    // re-attaches have their own short connect timeout (RESUME_CONNECT_TIMEOUT_MS)
+    const stopWatch = resuming ? () => {} : watchHeaders(c);
+    perfMark('request');
     try {
       return await Promise.race([
-        fetchImpl(req.url, { method: 'POST', headers: { ...req.headers, ...extraHeaders }, body: req.body, signal: c.signal }),
+        fetchImpl(req.url, { method: 'POST', headers, body: resuming ? resumeBody : req.body, signal: c.signal }),
         abortPromise,
       ]);
     } catch (e) {
-      throw wrapFetchError(e, c.signal, timedOut);
+      throw failure(e, c.signal);
+    } finally {
+      stopWatch();
     }
   };
 
   const result: StreamChatResult = { sessionId, text: '', aborted: false };
+  let replaying = params.resumeFrom !== undefined && !!params.idempotencyKey;
+  let serverClockOffset: number | undefined;
+  const observeServerClock = (res: FetchResponseLike, recorded: boolean) => {
+    const raw = res.headers.get(SERVER_TIME_HEADER);
+    const clock = raw !== null && /^\d{1,15}$/.test(raw) ? Number(raw) : undefined;
+    // Older bridges replay Date unchanged: retain an original live anchor instead of treating it as current.
+    const serverNow = clock ?? (recorded ? NaN : Date.parse(res.headers.get('date') ?? ''));
+    if (Number.isFinite(serverNow)) serverClockOffset = serverNow - Date.now();
+  };
   let sawFinish = false;
   let sawDone = false;
   let sawError = false;
   let accepted = false;
   let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   /** body bytes received for this turn (the resume offset) */
-  let received = 0;
+  let received = params.resumeFrom ?? 0;
+  /** start of the current outage of a resumable stream (0 = connected) */
+  let lostAt = 0;
+  /** the current connection is a re-attach that has not delivered a byte yet */
+  let resumedEmpty = false;
+  let emptyResumes = 0;
 
   const emit = (ev: HermesEvent) => {
     switch (ev.type) {
@@ -329,6 +487,11 @@ export async function streamChatCore(
         result.error = ev.message;
         break;
       case 'approval':
+        // Recorded events may be minutes old: the hook must restore their original approval deadline.
+        if (replaying) ev = { ...ev, approval: {
+          ...ev.approval, restored: true,
+          ...(serverClockOffset !== undefined ? { serverNowMs: Date.now() + serverClockOffset } : {}),
+        } };
         params.onApproval?.(ev.approval);
         break;
       default:
@@ -357,8 +520,18 @@ export async function streamChatCore(
       }
       if (r.done) break;
       kick();
+      if (resumedEmpty && r.value.byteLength) {
+        resumedEmpty = false;
+        emptyResumes = 0;
+        if (lostAt) {
+          lostAt = 0;
+          params.onConnection?.('resumed');
+        }
+      }
       received += r.value.byteLength;
+      const t0 = PERF ? perfNow() : 0;
       handle(decoder.decode(r.value));
+      if (PERF) perfSpan('stream.chunk', t0);
       if (sawDone) break;
     }
   };
@@ -370,42 +543,71 @@ export async function streamChatCore(
     reader = null;
     ctrl.abort();
   };
-  let resumeAttempt = 0;
-  /** re-attach at `received` (same Idempotency-Key); null when the bridge cannot continue this stream */
+  const isSse = (res: FetchResponseLike) => !!res.body && (res.headers.get('content-type') || '').toLowerCase().includes('text/event-stream');
+  /** the bridge's final refusal of a re-attach (its error code), set when resume() gave up because of it */
+  let refusal: string | undefined;
+  /**
+   * re-attach at `received` (same Idempotency-Key) until it works, the bridge refuses or the window of this outage
+   * ran out (offline); null then
+   */
   const resume = async (): Promise<FetchResponseLike | null> => {
-    while (resumeAttempt < resumeDelays.length) {
+    if (!lostAt) {
+      lostAt = Date.now();
+      params.onConnection?.('lost');
+    }
+    for (let attempt = 0; ; attempt++) {
       closeConnection();
-      await pause(resumeDelays[resumeAttempt++], params.signal);
+      const left = lostAt + resumeWindow - Date.now();
+      if (left <= 0) return null;
+      await pause(Math.min(resumeDelays[Math.min(attempt, resumeDelays.length - 1)], left), params.signal, params.wake);
       if (params.signal?.aborted) return null;
       let res: FetchResponseLike;
       try {
-        res = await open({ [RESUME_OFFSET_HEADER]: String(received) });
+        res = await open(received);
       } catch (e) {
-        if (isTransportFailure(e)) continue; // still offline: next attempt
+        if (isTransportFailure(e)) continue; // still offline / no answer: next attempt
         return null;
       }
-      if (res.ok && res.body && (res.headers.get('content-type') || '').toLowerCase().includes('text/event-stream')) {
+      if (res.ok && isSse(res)) {
         kick();
+        resumedEmpty = true;
+        replaying = true;
+        observeServerClock(res, true);
         return res;
       }
+      let err: HermesError;
+      try {
+        err = await Promise.race([errorFromResponse(res), abortPromise]);
+      } catch {
+        return null; // stopped meanwhile
+      }
+      if (transientRefusal(err)) continue;
       // 409 resume_unavailable (bridge restarted, turn broken or expired), turn_unrecorded (over the buffer) or anything else
-      res.text().catch(() => {});
+      refusal = err.code ?? `http_${err.status ?? 0}`;
       return null;
     }
-    return null;
   };
 
   try {
-    let res = await open({});
+    const reattach = params.resumeFrom !== undefined && !!params.idempotencyKey;
+    let res = await open(reattach ? received : undefined);
     kick();
     if (!res.ok) throw await Promise.race([errorFromResponse(res), abortPromise]);
-
+    // a re-attach that got anything but the recorded stream (an old bridge, a proxy): no answer of this turn
+    if (reattach && !isSse(res)) {
+      void res.body?.cancel().catch(() => {});
+      throw new HermesError('bad_request', 'Resume answered without a stream', { status: res.status, code: 'resume_unavailable' });
+    }
     const sid = res.headers.get('x-hermes-session-id');
     if (sid) result.sessionId = sid;
     accepted = true;
-    params.onAccepted?.();
     // UI bridge recorded this turn under our Idempotency-Key: a lost stream can be continued at a byte offset
     const resumable = !!params.idempotencyKey && res.headers.get('x-hermes-ui-resume') === '1';
+    // A deduplicated send can replay the turn even when the caller did not explicitly request resumeFrom.
+    if (res.headers.get('x-hermes-ui-resumed') !== null) replaying = true;
+    resumedEmpty = replaying;
+    observeServerClock(res, replaying);
+    params.onAccepted?.({ resumable });
 
     const contentType = (res.headers.get('content-type') || '').toLowerCase();
     if (contentType.includes('application/json') || !res.body) {
@@ -442,13 +644,18 @@ export async function streamChatCore(
       if (failure === null && (sawFinish || sawDone || sawError)) break;
       // the body ended or broke before the turn did: continue where it stopped (parser state is kept, no flush)
       const lost = failure === null || isTransportFailure(failure);
-      if (resumable && lost && !sawFinish && !sawError && !params.signal?.aborted) {
+      // a re-attach that ended cleanly without a byte, again: the recording ended without the turn's end
+      const exhausted = failure === null && resumedEmpty && ++emptyResumes >= MAX_EMPTY_RESUMES;
+      if (resumable && lost && !exhausted && !sawFinish && !sawError && !params.signal?.aborted) {
         const next = await resume();
         if (next?.body) {
           body = next.body;
           continue;
         }
         if (params.signal?.aborted) throw keyedHermesError('aborted', 'backends.hermes.errors.aborted');
+        const err = isTransportFailure(failure) ? failure : keyedHermesError('stream', 'backends.hermes.errors.streamUnexpected');
+        if (refusal) err.resumeCode = refusal;
+        throw err;
       }
       if (failure !== null) throw failure;
       break;
@@ -479,8 +686,9 @@ export async function streamChatCore(
     if (reader) {
       // Closing the body is what makes Hermes interrupt the agent (see docs/HERMES-API.md)
       reader.cancel().catch(() => {});
-      ctrl.abort();
     }
+    // Also close responses refused before pump() acquired a reader.
+    ctrl.abort();
   }
 }
 
@@ -594,8 +802,30 @@ export async function fetchRunStatusCore(fetchImpl: FetchLike, conn: HermesConn,
       const a = mapApproval(o.approval as Record<string, unknown>);
       out.approval = a.runId ? a : { ...a, runId };
     }
+    const usage = parseRunUsage(o.usage);
+    if (usage) out.usage = usage;
     return out;
   });
+}
+
+/**
+ * `usage` of a run status: Hermes runs report `{input_tokens, output_tokens, total_tokens}`, chat completions
+ * `{prompt_tokens, completion_tokens, total_tokens}`. Undefined unless both counts are there (a footer "0 in" would lie).
+ */
+export function parseRunUsage(raw: unknown): Usage | undefined {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined;
+  const u = raw as Record<string, unknown>;
+  const num = (...keys: string[]) => {
+    for (const k of keys) {
+      const v = u[k];
+      if (typeof v === 'number' && Number.isFinite(v) && v >= 0) return v;
+    }
+    return undefined;
+  };
+  const promptTokens = num('input_tokens', 'prompt_tokens');
+  const completionTokens = num('output_tokens', 'completion_tokens');
+  if (promptTokens === undefined || completionTokens === undefined || promptTokens + completionTokens === 0) return undefined;
+  return { promptTokens, completionTokens, totalTokens: num('total_tokens') ?? promptTokens + completionTokens };
 }
 
 /**

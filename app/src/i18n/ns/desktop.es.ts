@@ -47,6 +47,7 @@ export const desktop = {
     readAloud: 'Leer en voz alta',
     stopReading: 'Dejar de leer',
     share: 'Compartir…',
+    shareImage: 'Compartir como imagen…',
     branch: 'Continuar en un chat nuevo',
   },
   untitled: 'Nuevo chat',

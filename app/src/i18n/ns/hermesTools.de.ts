@@ -14,7 +14,6 @@ export const hermesTools = {
   delegate: {
     title: 'Unteragent',
     many: '{count} Unteragenten',
-    withGoal: 'Unteragent: {goal}',
   },
   cron: {
     create: 'Erinnerung anlegen',
@@ -90,6 +89,5 @@ export const hermesTools = {
     deleteMessage: 'Bitte lösche die Erinnerung {name}.',
     today: 'heute {time}',
     tomorrow: 'morgen {time}',
-    a11y: '{title}, {when}, {text}',
   },
 };

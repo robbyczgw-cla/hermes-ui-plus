@@ -7,11 +7,13 @@
  */
 import { useSurfaceBackground } from '../desktop/chrome';
 import { useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { BackHandler, Modal, Pressable, SectionList, StyleSheet, TextInput, View } from 'react-native';
+import { BackHandler, Modal, Pressable, SectionList, StyleSheet, View } from 'react-native';
+import { TextInput } from '../ui/primitives/Text';
+import { noOutline, webNoTab } from '../ui/lib/webStyle';
 import Animated, { FadeOut, ReduceMotion } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useT, type TFn, type TKey } from '../i18n';
-import { Badge, bestOn, haptic, HText, Icon, PressableScale, useTheme } from '../ui';
+import { Badge, Button, haptic, HText, Icon, useTheme } from '../ui';
 import { Loader } from '../ui/loaders';
 import { applyListFilter, EMPTY_SELECTION, selectableIds, selectionReducer } from './bulkDelete';
 import { filterDrawer, shownInDrawer } from './drawerFilter';
@@ -20,10 +22,12 @@ import { BulkDeleteDialog, SelectionBox, useRunningIds } from './BulkDeleteDialo
 import { useConversations } from './ConversationsProvider';
 import { SelectionBottomBar, SelectionHeader, type SelectionFilters } from './SelectionBars';
 import { localizePreview } from './messages';
+import { displayTitle } from './title';
 import { unreadStore } from '../background/noticeState';
 import { GROUP_KEYS, groupConversations } from './group';
 import { ConvIcon } from './icons';
 import { type ConversationMeta, type ProfileKind, type SearchHit } from './types';
+import { a11yState } from '../ui/lib/a11yState';
 
 const KIND_KEYS: Record<ProfileKind, TKey> = {
   hermes: 'conversations.profileKind.hermes',
@@ -191,6 +195,9 @@ export function ConversationList({ onSelect, onNewChat, onDeleted, activeId, pro
   // macOS app: no own background inside the translucent sidebar (desktop/chrome.ts)
   const surfaceBg = useSurfaceBackground(t.colors.bg);
   const searching = query.trim().length > 0;
+  // empty state: first line is the title, the rest a hint ("No chats yet.\nStart with “New chat”.")
+  const [emptyTitle, ...emptyRest] = (searching ? tr('conversations.list.noHits') : tr('conversations.list.empty')).split('\n');
+  const emptyBody = emptyRest.join(' ').trim();
   // older chats on the server: not while searching / selecting (the row would page for results nobody sees)
   const pager = older?.available && !hits && !sel.active ? older : undefined;
   const loadOlder = pager?.load;
@@ -201,7 +208,7 @@ export function ConversationList({ onSelect, onNewChat, onDeleted, activeId, pro
     <Wrapper style={[styles.root, { backgroundColor: surfaceBg }]} edges={['top', 'bottom']}>
       {header}
       <View style={styles.top}>
-        <View style={[styles.search, { backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.pill }]}>
+        <View style={[styles.search, { backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.control }]}>
           <ConvIcon name="search" size={16} color={t.colors.subtle} />
           <TextInput
             ref={searchRef}
@@ -209,7 +216,7 @@ export function ConversationList({ onSelect, onNewChat, onDeleted, activeId, pro
             onChangeText={setQuery}
             placeholder={tr('conversations.list.search')}
             placeholderTextColor={t.colors.subtle}
-            style={[styles.input, { color: t.colors.text, fontFamily: t.fonts.sans }]}
+            style={[t.typography.body, styles.input, { color: t.colors.text, fontFamily: t.fonts.sans }]}
             returnKeyType="search"
             autoCorrect={false}
             autoCapitalize="none"
@@ -231,29 +238,9 @@ export function ConversationList({ onSelect, onNewChat, onDeleted, activeId, pro
           />
         ) : (
           <Animated.View exiting={FadeOut.duration(120).reduceMotion(ReduceMotion.System)} style={styles.topRow}>
-            <PressableScale
-              onPress={onNewChat}
-              accessibilityLabel={tr('conversations.list.newChat')}
-              style={[styles.newBtn, styles.flex, { backgroundColor: t.colors.text, borderRadius: t.radii.pill }]}
-            >
-              <Icon name="plus" size={16} color={t.colors.bg} strokeWidth={2.2} />
-              <HText variant="callout" weight="600" style={{ color: t.colors.bg }}>
-                {tr('conversations.list.newChat')}
-              </HText>
-            </PressableScale>
+            <Button label={tr('conversations.list.newChat')} icon="plus" variant="primary" grow onPress={onNewChat} />
             {allVisible.length ? (
-              <Pressable
-                onPress={() => enterSelection()}
-                accessibilityRole="button"
-                accessibilityLabel={tr('conversations.list.select')}
-                accessibilityHint={tr('conversations.list.selectHint')}
-                style={({ pressed }) => [styles.selectBtn, { borderRadius: t.radii.pill, backgroundColor: pressed ? t.colors.surfacePressed : t.colors.surfaceAlt }]}
-              >
-                <ConvIcon name="select" size={17} color={t.colors.text} />
-                <HText variant="callout" weight="600">
-                  {tr('conversations.list.select')}
-                </HText>
-              </Pressable>
+              <Button label={tr('conversations.list.select')} icon={(color, size) => <ConvIcon name="select" size={size} color={color} />} accessibilityHint={tr('conversations.list.selectHint')} onPress={() => enterSelection()} />
             ) : null}
           </Animated.View>
         )}
@@ -272,8 +259,8 @@ export function ConversationList({ onSelect, onNewChat, onDeleted, activeId, pro
           section.archive ? (
             <ArchiveHeader count={archivedVisible.length} open={archiveOpen} onToggle={() => setArchiveOpen((o) => !o)} />
           ) : section.title ? (
-            <HText variant="micro" color="subtle" style={styles.sectionTitle}>
-              {section.title.toUpperCase()}
+            <HText variant="caption" weight="600" color="subtle" style={styles.sectionTitle}>
+              {section.title}
             </HText>
           ) : null
         }
@@ -298,9 +285,14 @@ export function ConversationList({ onSelect, onNewChat, onDeleted, activeId, pro
         ListEmptyComponent={
           <View style={styles.empty}>
             <ConvIcon name="chat" size={28} color={t.colors.subtle} />
-            <HText variant="callout" color="muted" align="center">
-              {searching ? tr('conversations.list.noHits') : tr('conversations.list.empty')}
+            <HText variant="heroCompact" align="center">
+              {emptyTitle}
             </HText>
+            {emptyBody ? (
+              <HText variant="body" color="muted" align="center">
+                {emptyBody}
+              </HText>
+            ) : null}
           </View>
         }
       />
@@ -334,6 +326,7 @@ export function ConversationList({ onSelect, onNewChat, onDeleted, activeId, pro
       {onOpenSettings && !sel.active ? (
         <Pressable
           onPress={onOpenSettings}
+          testID="drawer-settings"
           accessibilityRole="button"
           accessibilityLabel={tr('conversations.list.settings')}
           style={({ pressed }) => [styles.footer, { borderTopColor: t.colors.border }, pressed && { backgroundColor: t.colors.surfacePressed }]}
@@ -398,7 +391,7 @@ function OlderRow({ loading, error, onPress }: { loading: boolean; error?: strin
         disabled={loading}
         accessibilityRole="button"
         accessibilityLabel={label}
-        accessibilityState={{ busy: loading, disabled: loading }}
+        {...a11yState({ busy: loading, disabled: loading })}
         style={({ pressed }) => [styles.olderRow, { borderRadius: t.radii.pill, backgroundColor: pressed ? t.colors.surfacePressed : t.colors.surfaceAlt }]}
       >
         {loading ? <Loader kind="dots" size={16} /> : <ConvIcon name="chevronDown" size={16} color={t.colors.muted} />}
@@ -456,7 +449,7 @@ function Row({
   const unread = !active && unreadSet.has(meta.id);
   // the "⋯" button is a sibling of the row button (nested <button>s are invalid on web)
   return (
-    <View style={[styles.row, { backgroundColor: active ? t.colors.surfaceAlt : 'transparent', borderRadius: t.radii.m }]}>
+    <View style={[styles.row, { backgroundColor: active ? t.colors.surfaceAlt : 'transparent', borderRadius: t.radii.control }]}>
       {selecting ? (
         <View style={styles.check} pointerEvents="none">
           <SelectionBox checked={!!selected} disabled={running} />
@@ -469,18 +462,18 @@ function Row({
         delayLongPress={350}
         disabled={selecting && running}
         accessibilityRole={selecting ? 'checkbox' : 'button'}
-        accessibilityState={selecting ? { checked: !!selected, disabled: !!running } : undefined}
+        {...a11yState(selecting ? { checked: !!selected, disabled: !!running } : undefined)}
         accessibilityLabel={tr('conversations.list.rowLabel', {
-          title: meta.title,
+          title: displayTitle(meta.title, tr('conversations.list.newChat')),
           source: (source ?? kindLabel(tr, meta.profileKind)) + (meta.hermesProfile ? `, ${tr('bots.drawer.badgeA11y', { name: meta.hermesProfile })}` : ''),
         })}
         accessibilityHint={selecting ? (running ? tr('conversations.list.running') : tr('conversations.list.rowSelectHint')) : tr('conversations.list.rowHint')}
-        style={({ pressed }) => [styles.rowMain, selecting && styles.rowMainSelecting, pressed && !active && { backgroundColor: t.colors.surfacePressed, borderRadius: t.radii.m }]}
+        style={({ pressed }) => [styles.rowMain, selecting && styles.rowMainSelecting, pressed && !active && { backgroundColor: t.colors.surfacePressed, borderRadius: t.radii.control }]}
       >
         <View style={styles.titleLine}>
           {meta.pinned ? <ConvIcon name="pin" size={13} color={t.colors.subtle} /> : null}
           <HText variant="bodyStrong" numberOfLines={1} style={styles.flex}>
-            {meta.title}
+            {displayTitle(meta.title, tr('conversations.list.newChat'))}
           </HText>
           {running ? (
             <View style={styles.liveTag} accessibilityLabel={tr('chat.background.running')}>
@@ -574,15 +567,17 @@ function Dialogs({
 
   return (
     <Modal transparent animationType="fade" visible onRequestClose={close} statusBarTranslucent>
-      <Pressable style={[styles.scrim, { backgroundColor: t.colors.overlay }]} onPress={close} accessibilityLabel={tr('actions.close')}>
-        <Pressable
-          onPress={() => {}}
-          style={[styles.dialog, { backgroundColor: t.colors.surface, borderColor: t.colors.border, borderRadius: t.radii.l }, t.shadows.lg]}
+      {/* backdrop button behind the dialog (sibling): a wrapping scrim merged the menu items into one VoiceOver "Close" element */}
+      <View style={[styles.scrim, { backgroundColor: t.colors.overlay }]}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={close} accessibilityRole="button" accessibilityLabel={tr('actions.close')} {...webNoTab} />
+        <View
+          onAccessibilityEscape={close}
+          style={[styles.dialog, { backgroundColor: t.colors.surface, borderColor: t.colors.border, borderRadius: t.radii.card }, t.shadows.lg]}
         >
           {dialog.kind === 'menu' ? (
             <>
               <HText variant="headline" numberOfLines={1} style={styles.dialogTitle}>
-                {m.title}
+                {displayTitle(m.title, tr('conversations.list.newChat'))}
               </HText>
               {item(tr('conversations.menu.rename'), 'edit', () => setDialog({ kind: 'rename', meta: m }))}
               {item(m.pinned ? tr('conversations.menu.unpin') : tr('conversations.menu.pin'), 'pin', () => {
@@ -633,8 +628,9 @@ function Dialogs({
                   : tr('conversations.delete.inHermes', { title: m.title, remoteAction: tr('conversations.delete.remoteAction') })}
               </HText>
               <View style={styles.btnCol}>
-                <DialogButton
+                <Button
                   label={tr('conversations.delete.removeLocal')}
+                  numberOfLines={2}
                   disabled={busy}
                   onPress={() => {
                     onDelete(m);
@@ -642,10 +638,12 @@ function Dialogs({
                   }}
                 />
                 {canDeleteRemote(m) ? (
-                  <DialogButton
+                  <Button
                     label={busy ? tr('conversations.delete.remoteBusy') : tr('conversations.delete.remoteAction')}
-                  danger
-                  disabled={busy}
+                    variant="primary"
+                    tone="seal"
+                    numberOfLines={2}
+                    disabled={busy}
                   onPress={() => {
                     setBusy(true);
                     void onDeleteRemote(m).then((err) => {
@@ -656,7 +654,7 @@ function Dialogs({
                   }}
                   />
                 ) : null}
-                <DialogButton label={tr('actions.cancel')} onPress={close} disabled={busy} />
+                <Button label={tr('actions.cancel')} variant="tertiary" onPress={close} disabled={busy} />
               </View>
             </>
           ) : null}
@@ -670,7 +668,7 @@ function Dialogs({
                 {dialog.text}
               </HText>
               <View style={styles.btnRow}>
-                <DialogButton label={tr('actions.ok')} primary onPress={close} />
+                <Button label={tr('actions.ok')} variant="primary" onPress={close} />
               </View>
             </>
           ) : null}
@@ -684,10 +682,11 @@ function Dialogs({
                 {tr('conversations.delete.localOnly', { title: m.title })}
               </HText>
               <View style={styles.btnRow}>
-                <DialogButton label={tr('actions.cancel')} onPress={close} />
-                <DialogButton
+                <Button label={tr('actions.cancel')} variant="tertiary" onPress={close} />
+                <Button
                   label={tr('actions.delete')}
-                  danger
+                  variant="primary"
+                  tone="seal"
                   onPress={() => {
                     onDelete(m);
                     close();
@@ -696,8 +695,8 @@ function Dialogs({
               </View>
             </>
           ) : null}
-        </Pressable>
-      </Pressable>
+        </View>
+      </View>
     </Modal>
   );
 }
@@ -719,12 +718,12 @@ function RenameBody({ initial, onCancel, onSave }: { initial: string; onCancel: 
         maxLength={80}
         returnKeyType="done"
         onSubmitEditing={() => draft.trim() && onSave(draft)}
-        style={[styles.renameInput, { color: t.colors.text, borderColor: t.colors.borderStrong, backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.m, fontFamily: t.fonts.sans }]}
+        style={[t.typography.body, styles.renameInput, { color: t.colors.text, borderColor: t.colors.borderControl, backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.control, fontFamily: t.fonts.sans }]}
         accessibilityLabel={tr('conversations.rename.field')}
       />
       <View style={styles.btnRow}>
-        <DialogButton label={tr('actions.cancel')} onPress={onCancel} />
-        <DialogButton label={tr('actions.save')} primary disabled={!draft.trim()} onPress={() => onSave(draft)} />
+        <Button label={tr('actions.cancel')} variant="tertiary" onPress={onCancel} />
+        <Button label={tr('actions.save')} variant="primary" disabled={!draft.trim()} onPress={() => onSave(draft)} />
       </View>
     </>
   );
@@ -741,30 +740,17 @@ function ArchiveHeader({ count, open, onToggle }: { count: number; open: boolean
         onToggle();
       }}
       accessibilityRole="button"
-      accessibilityState={{ expanded: open }}
+      {...a11yState({ expanded: open })}
       accessibilityLabel={tr('menus.archive.sectionA11y', { count })}
       accessibilityHint={open ? tr('menus.archive.collapseHint') : tr('menus.archive.expandHint')}
-      style={({ pressed }) => [styles.archiveHead, { borderRadius: t.radii.m }, pressed && { backgroundColor: t.colors.surfacePressed }]}
+      style={({ pressed }) => [styles.archiveHead, { borderRadius: t.radii.control }, pressed && { backgroundColor: t.colors.surfacePressed }]}
     >
       <ConvIcon name="archive" size={16} color={t.colors.subtle} />
-      <HText variant="micro" color="subtle" style={[styles.flex, { letterSpacing: 0.6 }]}>
-        {`${tr('menus.archive.section').toUpperCase()} (${count})`}
+      <HText variant="caption" weight="600" color="subtle" style={styles.flex}>
+        {`${tr('menus.archive.section')} (${count})`}
       </HText>
       <ConvIcon name={open ? 'chevronDown' : 'chevronRight'} size={15} color={t.colors.subtle} />
     </Pressable>
-  );
-}
-
-function DialogButton({ label, onPress, primary, danger, disabled }: { label: string; onPress: () => void; primary?: boolean; danger?: boolean; disabled?: boolean }) {
-  const t = useTheme();
-  const bg = danger ? t.colors.danger : primary ? t.colors.text : t.colors.surfaceAlt;
-  const fg = danger ? bestOn(t.colors.danger, ['#FFFFFF', t.colors.bg]) : primary ? t.colors.bg : t.colors.text;
-  return (
-    <PressableScale onPress={onPress} disabled={disabled} style={[styles.dialogBtn, { backgroundColor: bg, borderRadius: t.radii.pill }]}>
-      <HText variant="callout" weight="600" style={{ color: fg }}>
-        {label}
-      </HText>
-    </PressableScale>
   );
 }
 
@@ -773,13 +759,11 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   top: { paddingHorizontal: 12, paddingTop: 12, gap: 10 },
   search: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, height: 40 },
-  input: { flex: 1, fontSize: 15, paddingVertical: 0, height: 40, outlineStyle: 'none' as never },
+  input: { flex: 1, paddingVertical: 0, height: 40, ...noOutline },
   topRow: { flexDirection: 'row', gap: 8 },
-  newBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 44 },
-  selectBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 44, paddingHorizontal: 14 },
   check: { width: 40, alignItems: 'center', justifyContent: 'center', paddingLeft: 6 },
   rowMainSelecting: { paddingLeft: 4, paddingRight: 8 },
-  sectionTitle: { paddingHorizontal: 18, paddingTop: 16, paddingBottom: 6, letterSpacing: 0.6 },
+  sectionTitle: { paddingHorizontal: 18, paddingTop: 16, paddingBottom: 6 },
   row: { flexDirection: 'row', alignItems: 'stretch', marginHorizontal: 6, paddingRight: 4, minHeight: 64 },
   rowMain: { flex: 1, gap: 2, paddingLeft: 12, paddingVertical: 8, justifyContent: 'center' },
   titleLine: { flexDirection: 'row', alignItems: 'center', gap: 6 },
@@ -790,15 +774,15 @@ const styles = StyleSheet.create({
   archiveHead: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, marginTop: 12, marginHorizontal: 6, paddingHorizontal: 12 },
   empty: { alignItems: 'center', gap: 10, paddingTop: 48, paddingHorizontal: 24 },
   olderWrap: { paddingHorizontal: 12, paddingTop: 8, gap: 6 },
-  olderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 40, paddingHorizontal: 16 },
-  footer: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, height: 52, borderTopWidth: StyleSheet.hairlineWidth },
+  olderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 40, paddingVertical: 6, paddingHorizontal: 16 },
+  footer: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, minHeight: 52, paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth },
   scrim: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
   dialog: { width: '100%', maxWidth: 340, paddingVertical: 8, borderWidth: StyleSheet.hairlineWidth },
   dialogTitle: { paddingHorizontal: 18, paddingTop: 12, paddingBottom: 8 },
   dialogBody: { paddingHorizontal: 18, paddingBottom: 12 },
-  menuItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 18, height: 48 },
-  renameInput: { marginHorizontal: 18, marginBottom: 14, paddingHorizontal: 12, height: 44, fontSize: 15, borderWidth: StyleSheet.hairlineWidth },
+  // text-holding rows: minHeight (not height) so a label wrapped by large system text grows the box
+  menuItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 18, minHeight: 48, paddingVertical: 8 },
+  renameInput: { marginHorizontal: 18, marginBottom: 14, paddingHorizontal: 12, height: 44, borderWidth: StyleSheet.hairlineWidth },
   btnRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 14, paddingBottom: 10, justifyContent: 'flex-end' },
   btnCol: { gap: 8, paddingHorizontal: 14, paddingBottom: 10, alignItems: 'stretch' },
-  dialogBtn: { height: 40, paddingHorizontal: 18, justifyContent: 'center', alignItems: 'center' },
 });

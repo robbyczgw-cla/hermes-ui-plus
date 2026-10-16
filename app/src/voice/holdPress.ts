@@ -31,6 +31,14 @@ export type HoldController = {
   dispose(): void;
 };
 
+/** What a plain tap on the mic does (also the keyboard's Enter / Space, micKeys.ts). */
+export function tapDictation(d: Pick<PressDictation, 'phase' | 'start' | 'stop' | 'cancel'>): void {
+  if (d.phase === 'idle') void d.start('tap');
+  else if (d.phase === 'recording') void d.stop();
+  else if (d.phase === 'starting') d.cancel();
+  // transcribing: cancel via the RecordingBar ×
+}
+
 type Timers = { set(fn: () => void, ms: number): unknown; clear(t: unknown): void };
 const realTimers: Timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (t) => clearTimeout(t as ReturnType<typeof setTimeout>) };
 
@@ -43,12 +51,7 @@ export function createHoldController(setPressed: (v: boolean) => void, onCancelF
   let startX = 0;
 
   const tap = () => {
-    const d = o?.dictation;
-    if (!d) return;
-    if (d.phase === 'idle') void d.start('tap');
-    else if (d.phase === 'recording') void d.stop();
-    else if (d.phase === 'starting') d.cancel();
-    // transcribing: cancel via the RecordingBar ×
+    if (o) tapDictation(o.dictation);
   };
   const clearHold = () => {
     if (holdTimer !== null) timers.clear(holdTimer);

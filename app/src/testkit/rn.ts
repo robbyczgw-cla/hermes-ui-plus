@@ -80,6 +80,7 @@ const STUBBED = new Set([
   'expo-linking',
   'expo-localization',
   'expo-haptics',
+  'expo-clipboard',
 ]);
 
 export function installRnStubs(extra: Record<string, Obj> = {}): RnStubs {

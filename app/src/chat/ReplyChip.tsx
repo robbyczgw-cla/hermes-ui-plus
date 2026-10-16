@@ -1,7 +1,7 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { Text } from '../ui/primitives/Text';
 import { useT } from '../i18n';
 import { useTheme } from '../ui';
-import { scaledText } from '../settings/preferences';
 
 /**
  * Compact right-aligned "↩ Reisezeit, Klima" chip for a protocol reply in the user's bubble column
@@ -10,17 +10,16 @@ import { scaledText } from '../settings/preferences';
 export function ReplyChip({ text }: { text: string }) {
   const t = useTheme();
   const tr = useT();
-  const size = scaledText(13, 18, t.fontScale);
   return (
     <View
       accessible
       accessibilityLabel={tr('chat.reply.a11y', { text })}
-      style={[styles.chip, { backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.l }]}
+      style={[styles.chip, { backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.card }]}
     >
-      <Text style={[styles.arrow, size, { color: t.colors.subtle }]} aria-hidden>
+      <Text style={[t.typography.caption, styles.arrow, { color: t.colors.subtle }]} aria-hidden>
         ↩
       </Text>
-      <Text style={[styles.text, size, { color: t.colors.muted }]} numberOfLines={2}>
+      <Text style={[t.typography.caption, styles.text, { color: t.colors.muted }]} numberOfLines={2}>
         {text}
       </Text>
     </View>

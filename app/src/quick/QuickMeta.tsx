@@ -3,12 +3,12 @@
  * "Mit Hermes weitermachen" pill (last answer of the quick thread only; every answer has it in the ⋯ menu).
  */
 import { memo } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { Text } from '../ui/primitives/Text';
 import { Icon } from '../chat/icons';
 import type { QuickStamp } from '../hermes/types';
 import { useLocale, useT } from '../i18n';
-import { scaledText } from '../settings/preferences';
-import { useTheme } from '../ui';
+import { Button, useTheme } from '../ui';
 import { shortModel } from './core';
 
 export const QuickMetaLine = memo(function QuickMetaLine({ stamp }: { stamp: QuickStamp }) {
@@ -23,7 +23,7 @@ export const QuickMetaLine = memo(function QuickMetaLine({ stamp }: { stamp: Qui
     <View style={styles.row} accessible accessibilityLabel={a11y}>
       <Icon name="boltFilled" size={11} color={t.colors.accent} strokeWidth={1.4} />
       {line ? (
-        <Text style={[styles.text, scaledText(12, 16, t.fontScale), { color: t.colors.subtle }]} numberOfLines={1}>
+        <Text style={[t.typography.caption, styles.text, { color: t.colors.subtle }]} numberOfLines={1}>
           {line}
         </Text>
       ) : null}
@@ -32,32 +32,20 @@ export const QuickMetaLine = memo(function QuickMetaLine({ stamp }: { stamp: Qui
 });
 
 export function HandOffButton({ onPress }: { onPress(): void }) {
-  const t = useTheme();
   const tr = useT();
   return (
-    <Pressable
+    <Button
+      label={tr('quick.handOff.action')}
+      size="small"
       onPress={onPress}
-      hitSlop={6}
-      accessibilityRole="button"
-      accessibilityLabel={tr('quick.handOff.action')}
       accessibilityHint={tr('quick.handOff.a11y')}
-      style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
-        styles.pill,
-        { borderColor: t.colors.borderStrong },
-        (pressed || hovered) && { backgroundColor: pressed ? t.colors.surfacePressed : t.colors.surfaceAlt },
-      ]}
-    >
-      <Text style={[styles.pillText, scaledText(13, 17, t.fontScale), { color: t.colors.text }]} numberOfLines={1}>
-        {tr('quick.handOff.action')}
-      </Text>
-      <Icon name="chevronRight" size={14} color={t.colors.muted} strokeWidth={2.2} />
-    </Pressable>
+      style={styles.pill}
+    />
   );
 }
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start', marginTop: 8, paddingVertical: 2 },
-  text: { fontSize: 12, lineHeight: 16, fontVariant: ['tabular-nums'], flexShrink: 1 },
-  pill: { flexDirection: 'row', alignItems: 'center', gap: 3, marginLeft: 'auto', minHeight: 32, paddingLeft: 12, paddingRight: 8, borderRadius: 999, borderWidth: StyleSheet.hairlineWidth },
-  pillText: { fontSize: 13, fontWeight: '600' },
+  text: { fontVariant: ['tabular-nums'], flexShrink: 1 },
+  pill: { marginLeft: 'auto' },
 });

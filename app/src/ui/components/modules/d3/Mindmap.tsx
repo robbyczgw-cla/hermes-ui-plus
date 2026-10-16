@@ -46,6 +46,8 @@ import {
   type View as Vp,
 } from './mindmapModel.ts';
 import { useKeyboardHints } from '../../../lib/useKeyboardHints';
+import { a11yState } from '../../../lib/a11yState';
+import { useCaptureMode } from '../../../lib/capture';
 
 type MindState = { c: Collapse; view?: 'map' | 'outline' };
 const INITIAL: MindState = { c: {} };
@@ -74,6 +76,9 @@ export function Mindmap({ node }: { node: Partial<HuiMindmap> }) {
   const keyboardHints = useKeyboardHints(); // mouse/keyboard hint only on desktop web, never the phone layout
   const t = useTheme();
   const { streaming } = useHui();
+  // share-as-image: the map fills the box, without zoom buttons, view switch and gesture hint
+  const capture = useCaptureMode();
+  const toolbarW = capture ? 0 : TOOLBAR_W;
   const id = useModuleId('mindmap', node as Record<string, unknown>);
   const { title, root, count } = useMemo(() => readMindmap(node as Record<string, unknown>), [node]);
   const [st, setSt] = useNodeState<MindState>(id, INITIAL);
@@ -93,8 +98,8 @@ export function Mindmap({ node }: { node: Partial<HuiMindmap> }) {
 
   if (!root || !layouts) return streaming ? <MindmapSkeleton /> : null;
 
-  const layout = vw ? pickLayout(layouts, vw - TOOLBAR_W, MAX_H) : layouts[0];
-  const vh = vw ? viewportHeight(layout, vw - TOOLBAR_W, MIN_H, MAX_H) : MIN_H;
+  const layout = vw ? pickLayout(layouts, vw - toolbarW, MAX_H) : layouts[0];
+  const vh = vw ? viewportHeight(layout, vw - toolbarW, MIN_H, MAX_H) : MIN_H;
   const toggle = (nid: string) => {
     const n = findNode(root, nid);
     if (!n || !n.children.length) return;
@@ -109,16 +114,18 @@ export function Mindmap({ node }: { node: Partial<HuiMindmap> }) {
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s }}>
         <D3Icon name="mindmap" size={18} color={t.colors.muted} />
         <InlineText variant="headline" text={title || root.label || tr('ui.mindmap.title')} style={{ flex: 1 }} numberOfLines={2} accessibilityRole="header" />
-        <ViewSwitch t={t} value={view} onChange={(v) => setSt((s) => ({ ...s, view: v }))} />
+        {capture ? null : <ViewSwitch t={t} value={view} onChange={(v) => setSt((s) => ({ ...s, view: v }))} />}
       </View>
       {view === 'outline' ? (
         <Outline t={t} root={root} collapsed={collapsed} onOpen={setSheet} onToggle={toggle} />
       ) : (
         <View onLayout={(e: LayoutChangeEvent) => setVw(Math.round(e.nativeEvent.layout.width))}>
-          {vw ? <Canvas t={t} layout={layout} vw={vw} vh={vh} onOpen={setSheet} onToggle={toggle} /> : <View style={{ height: MIN_H }} />}
-          <HText variant="micro" color="subtle" align="center" style={{ marginTop: 6 }}>
-            {keyboardHints ? tr('ui.mindmap.hintWeb') : tr('ui.mindmap.hintTouch')}
-          </HText>
+          {vw ? <Canvas t={t} layout={layout} vw={vw} vh={vh} onOpen={setSheet} onToggle={toggle} bare={capture} /> : <View style={{ height: MIN_H }} />}
+          {capture ? null : (
+            <HText variant="micro" color="subtle" align="center" style={{ marginTop: 6 }}>
+              {keyboardHints ? tr('ui.mindmap.hintWeb') : tr('ui.mindmap.hintTouch')}
+            </HText>
+          )}
         </View>
       )}
       {sheetNode ? (
@@ -184,7 +191,7 @@ function ViewSwitch({ t, value, onChange }: { t: Theme; value: 'map' | 'outline'
 
 /* ───────────── canvas ───────────── */
 
-function Canvas({ t, layout, vw, vh, onOpen, onToggle }: { t: Theme; layout: Layout; vw: number; vh: number; onOpen: (id: string) => void; onToggle: (id: string) => void }) {
+function Canvas({ t, layout, vw, vh, onOpen, onToggle, bare }: { t: Theme; layout: Layout; vw: number; vh: number; onOpen: (id: string) => void; onToggle: (id: string) => void; /** no zoom toolbar (share-as-image) */ bare?: boolean }) {
   const tr = useT();
   const reduced = useMotionReduced();
   const s = useSharedValue(1);
@@ -209,7 +216,7 @@ function Canvas({ t, layout, vw, vh, onOpen, onToggle }: { t: Theme; layout: Lay
     [reduced, s, tx, ty],
   );
   // keep the zoom toolbar (right edge) clear when fitting
-  const fit = useCallback((animate: boolean) => animateTo(fitView(W, H, vw - TOOLBAR_W, vh), animate), [animateTo, W, H, vw, vh]);
+  const fit = useCallback((animate: boolean) => animateTo(fitView(W, H, vw - (bare ? 0 : TOOLBAR_W), vh), animate), [animateTo, W, H, vw, vh, bare]);
 
   // (re)fit when the visible tree or the viewport changes (first time without animation)
   const first = useRef(true);
@@ -252,7 +259,7 @@ function Canvas({ t, layout, vw, vh, onOpen, onToggle }: { t: Theme; layout: Lay
 
   const nodes = layout.nodes;
   return (
-    <View ref={viewport} style={{ height: vh, borderRadius: t.radii.m, backgroundColor: t.colors.surfaceAlt, overflow: 'hidden' }}>
+    <View ref={viewport} style={{ height: vh, borderRadius: t.radii.control, backgroundColor: t.colors.surfaceAlt, overflow: 'hidden' }}>
       <GestureDetector gesture={gesture}>
         <View style={{ flex: 1 }} collapsable={false}>
           <Animated.View style={[{ position: 'absolute', left: 0, top: 0, width: W, height: H }, content]}>
@@ -267,7 +274,7 @@ function Canvas({ t, layout, vw, vh, onOpen, onToggle }: { t: Theme; layout: Lay
           </Animated.View>
         </View>
       </GestureDetector>
-      <View style={{ position: 'absolute', right: 6, top: 6, gap: 6 }}>
+      {bare ? null : <View style={{ position: 'absolute', right: 6, top: 6, gap: 6 }}>
         <ToolBtn t={t} icon="zoomIn" label={tr('ui.mindmap.zoomIn')} onPress={() => zoom(1.3)} />
         <ToolBtn t={t} icon="zoomOut" label={tr('ui.mindmap.zoomOut')} onPress={() => zoom(1 / 1.3)} />
         <ToolBtn
@@ -279,7 +286,7 @@ function Canvas({ t, layout, vw, vh, onOpen, onToggle }: { t: Theme; layout: Lay
             fit(true);
           }}
         />
-      </View>
+      </View>}
     </View>
   );
 }
@@ -384,7 +391,7 @@ function NodeBox({ t, n, onOpen, onToggle }: { t: Theme; n: LaidNode; onOpen: (i
           onPress={() => onToggle(n.id)}
           accessibilityRole="button"
           accessibilityLabel={`${n.label}: ${n.collapsed ? tr('ui.mindmap.expand') : tr('ui.mindmap.collapse')}`}
-          accessibilityState={{ expanded: !n.collapsed }}
+          {...a11yState({ expanded: !n.collapsed })}
           hitSlop={11}
           style={({ pressed }) => ({
             position: 'absolute',
@@ -440,7 +447,7 @@ function Outline({ t, root, collapsed, onOpen, onToggle }: { t: Theme; root: Min
               accessibilityRole="button"
               accessibilityLabel={`${r.path ? `${r.path} ` : ''}${r.label}${r.note ? `. ${r.note}` : ''}`}
               accessibilityHint={tr('ui.mindmap.nodeHint')}
-              style={{ flex: 1, minHeight: 44, justifyContent: 'center', paddingHorizontal: t.spacing.s, paddingVertical: 6, borderRadius: t.radii.s }}
+              style={{ flex: 1, minHeight: 44, justifyContent: 'center', paddingHorizontal: t.spacing.s, paddingVertical: 6, borderRadius: t.radii.control }}
               pressedStyle={{ backgroundColor: t.colors.surfacePressed }}
             >
               <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6 }}>
@@ -496,13 +503,13 @@ function NodeSheet({ t, node, parentLabel, collapsed, disabled, onToggle, onClos
     <Modal visible transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
       <View style={{ flex: 1, justifyContent: 'flex-end' }}>
         <Pressable style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: t.colors.overlay }} onPress={onClose} accessibilityRole="button" accessibilityLabel={tr('ui.mindmap.close')} />
-        <View style={{ backgroundColor: t.colors.surface, borderTopLeftRadius: t.radii.xl, borderTopRightRadius: t.radii.xl, maxHeight: '80%', paddingBottom: insets.bottom + t.spacing.m, width: '100%', maxWidth: 640, alignSelf: 'center' }}>
+        <View style={{ backgroundColor: t.colors.surface, borderTopLeftRadius: t.radii.card, borderTopRightRadius: t.radii.card, maxHeight: '80%', paddingBottom: insets.bottom + t.spacing.m, width: '100%', maxWidth: 640, alignSelf: 'center' }}>
           <View style={{ alignItems: 'center', paddingTop: t.spacing.s }}>
             <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: t.colors.borderStrong }} />
           </View>
           <ScrollView contentContainerStyle={{ padding: t.spacing.l, gap: t.spacing.m }}>
             {parentLabel ? (
-              <HText variant="micro" color="muted" style={{ textTransform: 'uppercase', letterSpacing: 0.6 }} numberOfLines={1}>
+              <HText variant="caption" weight="600" color="muted" numberOfLines={1}>
                 {parentLabel}
               </HText>
             ) : null}

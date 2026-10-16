@@ -1,7 +1,7 @@
 import { StyleSheet, View } from 'react-native';
 import { FadeIn, HText, useTheme } from '../ui';
 import { useT } from '../i18n';
-import { Button, OnbIcon, OnbScreen, SmallLink } from './ui';
+import { Button, OnbIcon, OnbScreen, SmallLink, HeroText } from './ui';
 
 const POINTS = [
   { id: 'point1', icon: 'sparkle' },
@@ -24,17 +24,15 @@ export function Welcome({ onStart, onDemo }: { onStart: () => void; onDemo: () =
       }
     >
       <FadeIn style={styles.hero}>
-        <View style={[styles.logo, { backgroundColor: t.colors.surfaceAlt }]}>
+        <View style={[styles.logo, { backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.card }]}>
           <OnbIcon name="sparkle" size={30} color={t.colors.text} />
         </View>
-        <View style={[styles.badge, { borderColor: t.colors.border }]}>
+        <View style={[styles.badge, { borderColor: t.colors.border, borderRadius: t.radii.inline }]}>
           <HText variant="micro" color="muted" align="center">
             {tr('onboarding.welcome.badge')}
           </HText>
         </View>
-        <HText variant="display" align="center" accessibilityRole="header">
-          {tr('onboarding.welcome.title')}
-        </HText>
+        <HeroText align="center">{tr('onboarding.welcome.title')}</HeroText>
         <HText variant="body" color="muted" align="center">
           {tr('onboarding.welcome.lead')}
         </HText>
@@ -42,7 +40,7 @@ export function Welcome({ onStart, onDemo }: { onStart: () => void; onDemo: () =
       <View style={{ gap: t.spacing.l, marginTop: t.spacing.xxl }}>
         {POINTS.map((p, i) => (
           <FadeIn key={p.id} delay={120 + i * 70} style={styles.point}>
-            <View style={[styles.pointIcon, { backgroundColor: t.colors.surfaceAlt }]}>
+            <View style={[styles.pointIcon, { backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.control }]}>
               <OnbIcon name={p.icon} size={18} color={t.colors.text} />
             </View>
             <View style={{ flex: 1, gap: 2 }}>
@@ -60,8 +58,8 @@ export function Welcome({ onStart, onDemo }: { onStart: () => void; onDemo: () =
 
 const styles = StyleSheet.create({
   hero: { alignItems: 'center', gap: 12, marginTop: 24 },
-  logo: { width: 64, height: 64, borderRadius: 20, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
-  badge: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
+  logo: { width: 64, height: 64, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+  badge: { borderWidth: 1, paddingHorizontal: 10, paddingVertical: 4 },
   point: { flexDirection: 'row', gap: 14, alignItems: 'flex-start' },
-  pointIcon: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  pointIcon: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
 });

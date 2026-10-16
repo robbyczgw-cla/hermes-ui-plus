@@ -4,10 +4,12 @@
 import { FLAVOR, type Flavor } from './flavor.ts';
 
 export type Brand = {
-  /** full product name (store listing, welcome screen, about) */
+  /** full product name (welcome screen, about) */
   name: string;
-  /** home-screen label / header / share wordmark (≤ 12 characters) */
+  /** short project name (docs, website); not shown as the app's name on the device */
   shortName: string;
+  /** on-device name: home-screen label / header / {appShort} / share wordmark (≤ 12 characters) */
+  displayName: string;
   /** the optional UI bridge, as named in the UI */
   bridgeName: string;
   /** deep-link scheme of the pair links this build creates (parsing accepts all of PAIR_SCHEMES) */
@@ -26,6 +28,7 @@ const BRANDS: Record<Flavor, Brand> = {
   hermes: {
     name: 'Hermes Interactive UI+',
     shortName: 'Hermes UI+',
+    displayName: 'HUI+',
     bridgeName: 'Hermes UI+ Bridge',
     scheme: 'hermesuiplus',
     homepage: 'https://hermesui.xyz',
@@ -33,7 +36,7 @@ const BRANDS: Record<Flavor, Brand> = {
     privacyUrl: 'https://hermesui.xyz/privacy',
     supportEmail: 'robby@robbyczesany.com',
   },
-  personal: { name: 'Hermes UI', shortName: 'Hermes UI', bridgeName: 'Hermes UI Bridge', scheme: 'hermesui', homepage: null, repoUrl: null, privacyUrl: null, supportEmail: null },
+  personal: { name: 'Hermes UI', shortName: 'Hermes UI', displayName: 'Hermes UI', bridgeName: 'Hermes UI Bridge', scheme: 'hermesui', homepage: null, repoUrl: null, privacyUrl: null, supportEmail: null },
 };
 
 export function brand(flavor: Flavor = FLAVOR): Brand {
@@ -43,7 +46,7 @@ export function brand(flavor: Flavor = FLAVOR): Brand {
 /** Variables every translation can use: {app} {appShort} {bridge} {scheme}. */
 export function brandVars(flavor: Flavor = FLAVOR): Record<'app' | 'appShort' | 'bridge' | 'scheme', string> {
   const b = BRANDS[flavor];
-  return { app: b.name, appShort: b.shortName, bridge: b.bridgeName, scheme: b.scheme };
+  return { app: b.name, appShort: b.displayName, bridge: b.bridgeName, scheme: b.scheme };
 }
 
 /**
@@ -53,9 +56,9 @@ export function brandVars(flavor: Flavor = FLAVOR): Record<'app' | 'appShort' | 
 export const APP_TITLE: string =
   FLAVOR === 'personal'
     ? process.env.EXPO_PUBLIC_APP_NAME || 'Hermes'
-    : process.env.EXPO_PUBLIC_APP_SHORT_NAME || BRANDS.hermes.shortName;
+    : process.env.EXPO_PUBLIC_APP_SHORT_NAME || BRANDS.hermes.displayName;
 
 /** Wordmark of the share-as-image frame (chat/answers/ShareFrame.tsx). */
 export function shareWordmark(flavor: Flavor = FLAVOR): string {
-  return flavor === 'personal' ? 'Hermes' : BRANDS.hermes.shortName;
+  return flavor === 'personal' ? 'Hermes' : BRANDS.hermes.displayName;
 }

@@ -5,7 +5,9 @@
  * summary → `[workout:<id>] 18/20 Sätze · 42 min · Kniebeuge 3×10 @ 60 kg …`. Progress persisted.
  */
 import { useCallback, useMemo, useState } from 'react';
-import { TextInput, View } from 'react-native';
+import { View } from 'react-native';
+import { TextInput } from '../../../primitives/Text';
+import { noOutline } from '../../../lib/webStyle';
 import { useTheme, type Theme } from '../../../theme';
 import { useHui } from '../../../primitives/context';
 import { FadeIn, HText, InlineText, PressableScale, Surface, textStyle } from '../../../primitives/basics';
@@ -164,7 +166,7 @@ export function Workout({ node }: { node: Partial<HuiWorkout> }) {
                 onPatch={(k, patch) => setSt((s) => ({ ...s, sets: patchSet(s.sets ?? {}, ex, k, patch) }))}
               />
             ))}
-            {streaming ? <Skeleton height={84} radius={t.radii.l} /> : null}
+            {streaming ? <Skeleton height={84} radius={t.radii.card} /> : null}
           </View>
 
           {model.cooldown ? <Phase t={t} label={tr('ui.workout.cooldown')} icon="leaf" text={model.cooldown} done={!!st.cool} onToggle={() => setSt((s) => ({ ...s, cool: !s.cool }))} /> : null}
@@ -188,7 +190,7 @@ function SessionBar({ t, started, running, elapsed, disabled, onStart, onToggle 
     return <Btn label={tr('ui.workout.start')} kind="primary" bicon="play" onPress={onStart} disabled={disabled} />;
   }
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s, paddingLeft: t.spacing.m, borderRadius: t.radii.l, backgroundColor: t.colors.surfaceAlt, minHeight: 52 }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s, paddingLeft: t.spacing.m, borderRadius: t.radii.card, backgroundColor: t.colors.surfaceAlt, minHeight: 52 }}>
       <D2Icon name="stopwatch" size={18} color={running ? t.colors.accent : t.colors.muted} />
       <View style={{ flex: 1 }} accessible accessibilityRole="timer" accessibilityLabel={`${tr('ui.workout.elapsed')}: ${formatElapsed(elapsed)}`}>
         <HText variant="micro" color="muted">
@@ -213,12 +215,12 @@ function RestPanel({ t, ctl, clock, next }: { t: Theme; ctl: ClockControls; cloc
   const time = formatCountdown(rem);
   return (
     <FadeIn>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.m, padding: t.spacing.m, borderRadius: t.radii.l, backgroundColor: t.colors.accentSoft }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.m, padding: t.spacing.m, borderRadius: t.radii.card, backgroundColor: t.colors.accentSoft }}>
         <ClockRing size={52} stroke={5} frac={progress(clock, ctl.now)} color={t.colors.accent} track={t.colors.surface}>
           <D2Icon name="timer" size={18} color={t.colors.accent} />
         </ClockRing>
         <View style={{ flex: 1, minWidth: 0 }} accessible accessibilityRole="timer" accessibilityLabel={tr('ui.workout.restA11y', { time })} accessibilityLiveRegion="none">
-          <HText variant="micro" weight="700" color="accent" style={{ textTransform: 'uppercase', letterSpacing: 0.6 }}>
+          <HText variant="caption" weight="600" color="accent">
             {tr('ui.workout.rest')}
           </HText>
           <HText variant="title" tabular>
@@ -246,7 +248,7 @@ function RestPanel({ t, ctl, clock, next }: { t: Theme; ctl: ClockControls; cloc
 function Phase({ t, label, icon, text, done, onToggle }: { t: Theme; label: string; icon: 'flame' | 'leaf'; text: string; done: boolean; onToggle: () => void }) {
   const tr = useT();
   return (
-    <View style={{ flexDirection: 'row', gap: t.spacing.s, alignItems: 'flex-start', padding: t.spacing.m, borderRadius: t.radii.l, borderWidth: 1, borderColor: t.colors.border }}>
+    <View style={{ flexDirection: 'row', gap: t.spacing.s, alignItems: 'flex-start', padding: t.spacing.m, borderRadius: t.radii.card, borderWidth: 1, borderColor: t.colors.border }}>
       <View style={{ paddingTop: 2 }}>
         <D2Icon name={icon} size={18} color={done ? t.colors.success : t.colors.muted} />
       </View>
@@ -262,7 +264,7 @@ function Phase({ t, label, icon, text, done, onToggle }: { t: Theme; label: stri
         accessibilityLabel={`${label}: ${tr('ui.workout.markDone')}`}
         style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginTop: -6, marginRight: -6 }}
       >
-        <View style={{ width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: done ? t.colors.success : 'transparent', borderWidth: done ? 0 : 1.5, borderColor: t.colors.borderStrong }}>
+        <View style={{ width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: done ? t.colors.success : 'transparent', borderWidth: done ? 0 : 1.5, borderColor: t.colors.borderControl }}>
           {done ? <Icon name="check" size={15} color={t.colors.onAccent} strokeWidth={2.8} /> : null}
         </View>
       </PressableScale>
@@ -307,7 +309,7 @@ function ExerciseCard({
   const complete = nDone === list.length;
   const nextIdx = list.findIndex((s) => !s.done);
   return (
-    <View style={{ padding: t.spacing.m, gap: t.spacing.m, borderRadius: t.radii.l, backgroundColor: t.colors.surfaceAlt }}>
+    <View style={{ padding: t.spacing.m, gap: t.spacing.m, borderRadius: t.radii.card, backgroundColor: t.colors.surfaceAlt }}>
       <View style={{ flexDirection: 'row', gap: t.spacing.m, alignItems: 'center' }}>
         {ex.imageQuery ? <Thumb query={ex.imageQuery} size={52} label={ex.name} enabled={!partial} /> : null}
         <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
@@ -346,7 +348,7 @@ function ExerciseCard({
                 minWidth: 48,
                 height: 48,
                 paddingHorizontal: 6,
-                borderRadius: 24,
+                borderRadius: t.radii.pill,
                 alignItems: 'center',
                 justifyContent: 'center',
                 backgroundColor: s.done ? t.colors.success : t.colors.surface,
@@ -357,7 +359,7 @@ function ExerciseCard({
               {s.done ? (
                 <Icon name="check" size={18} color={t.colors.onAccent} strokeWidth={2.8} />
               ) : (
-                <HText variant="callout" weight="600" tabular numberOfLines={1} maxFontSizeMultiplier={1.4} style={{ color: isNext ? t.colors.accent : t.colors.text }}>
+                <HText variant="callout" weight="600" tabular numberOfLines={1} maxFontSizeMultiplier={1.4} style={{ color: isNext ? t.colors.accentText : t.colors.text }}>
                   {label}
                 </HText>
               )}
@@ -405,7 +407,7 @@ function SmallField({ t, value, placeholder, label, onChange, numeric, grow }: {
       onBlur={() => setFocus(false)}
       style={[
         textStyle(t, 'callout'),
-        { flex: grow ? 1 : undefined, width: grow ? undefined : 68, minWidth: 0, minHeight: 44, borderRadius: t.radii.m, borderWidth: 1, borderColor: focus ? t.colors.accent : t.colors.borderStrong, paddingHorizontal: 10, color: t.colors.text, backgroundColor: t.colors.surface, fontVariant: ['tabular-nums'], outlineStyle: 'none' } as object,
+        { flex: grow ? 1 : undefined, width: grow ? undefined : 68, minWidth: 0, minHeight: 44, borderRadius: t.radii.control, borderWidth: 1, borderColor: focus ? t.colors.accent : t.colors.borderStrong, paddingHorizontal: 10, color: t.colors.text, backgroundColor: t.colors.surface, fontVariant: ['tabular-nums'], ...noOutline } as object,
       ]}
     />
   );
@@ -459,7 +461,7 @@ function Summary({ t, model, sets, elapsed, sent, onSend, onResume, disabled }: 
 
 function Stat({ t, value, label, a11y }: { t: Theme; value: string; label: string; a11y: string }) {
   return (
-    <View accessible accessibilityLabel={a11y} style={{ flex: 1, padding: t.spacing.m, borderRadius: t.radii.l, backgroundColor: t.colors.surfaceAlt, gap: 2 }}>
+    <View accessible accessibilityLabel={a11y} style={{ flex: 1, padding: t.spacing.m, borderRadius: t.radii.card, backgroundColor: t.colors.surfaceAlt, gap: 2 }}>
       <HText variant="stat" tabular>
         {value}
       </HText>

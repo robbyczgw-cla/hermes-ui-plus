@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import { AccessibilityInfo, Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { AccessibilityInfo, Pressable, ScrollView, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import type { ApprovalChoice, ApprovalRequest } from '../hermes/types';
 import { useT } from '../i18n';
 import { HText, Icon, PressableScale, haptic, useTheme } from '../ui';
@@ -66,9 +66,10 @@ export const ApprovalStack = memo(function ApprovalStack({ approvals, onRespond,
         onPress={() => setHidden(false)}
         accessibilityRole="button"
         accessibilityLabel={tr('approvals.stack.chipA11y', { count: Math.max(1, live) })}
-        style={({ pressed }) => [styles.chip, { backgroundColor: t.colors.warningSoft, borderColor: t.colors.border }, pressed && { opacity: 0.7 }]}
+        style={({ pressed }) => [styles.chip, { backgroundColor: t.colors.surface, borderColor: t.colors.borderControl }, pressed && { backgroundColor: t.colors.surfacePressed }]}
       >
-        <Icon name="alert" size={16} color={t.colors.warning} />
+        {/* the approval seal, small */}
+        <View style={[styles.sealDot, { backgroundColor: t.colors.seal }]} />
         <HText variant="callout">{tr('approvals.stack.chip', { count: Math.max(1, live) })}</HText>
       </Pressable>
     );
@@ -86,8 +87,8 @@ export const ApprovalStack = memo(function ApprovalStack({ approvals, onRespond,
             <HText variant="caption" color="muted">
               {tr('approvals.stack.position', { index: idx + 1, total })}
             </HText>
-            <View style={[styles.badge, { backgroundColor: t.colors.warning }]}>
-              <HText variant="micro" style={{ color: t.colors.bg }}>
+            <View style={[styles.badge, { backgroundColor: t.colors.sealSoft }]}>
+              <HText variant="micro" style={{ color: t.colors.seal }}>
                 {tr('approvals.stack.badge', { count: live })}
               </HText>
             </View>
@@ -97,23 +98,34 @@ export const ApprovalStack = memo(function ApprovalStack({ approvals, onRespond,
           </PressableScale>
         </View>
       ) : null}
-      <ApprovalSheet
-        key={key}
-        approval={ap}
-        onRespond={(choice) => onRespond(ap, choice)}
-        onDismiss={() => setHidden(true)}
-        onClose={onClose ? () => onClose(ap) : () => setHidden(true)}
-      />
+      {/* large system text (1.3+ on a phone, or the keyboard open) makes the card taller than the space above the
+          composer: the stack shrinks (ChatView approval column) and the card scrolls, so every choice stays reachable */}
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator>
+        <ApprovalSheet
+          key={key}
+          approval={ap}
+          onRespond={(choice) => onRespond(ap, choice)}
+          onDismiss={() => setHidden(true)}
+          onClose={onClose ? () => onClose(ap) : () => setHidden(true)}
+        />
+      </ScrollView>
     </View>
   );
 });
 
+const SHADOW_PAD = 8;
+
 const styles = StyleSheet.create({
-  wrap: { gap: 6 },
+  wrap: { gap: 6, flexShrink: 1 },
+  // the scroll box reaches SHADOW_PAD past the card on every side (padding cancels the negative margin), so the
+  // card's shadow is not cut by the scroll clip; the layout box is unchanged
+  scroll: { flexGrow: 0, flexShrink: 1, margin: -SHADOW_PAD },
+  scrollContent: { padding: SHADOW_PAD },
   pager: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   pagerText: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   navBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   badge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999 },
+  sealDot: { width: 8, height: 8, borderRadius: 4 },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',

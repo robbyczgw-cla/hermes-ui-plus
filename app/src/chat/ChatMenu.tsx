@@ -5,10 +5,12 @@
  * required) – and there is nothing comparable on the web.
  */
 import { memo, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { Text, TextInput } from '../ui/primitives/Text';
+import { displayTitle } from '../conversations/title';
 import type { ConversationMeta } from '../conversations/types';
 import { useT } from '../i18n';
-import { SheetGrabber, SheetModal, useTheme } from '../ui';
+import { Button, SheetGrabber, SheetModal, useTheme } from '../ui';
 import { ActionMenu, type MenuItem } from './ActionMenu';
 
 type Props = {
@@ -42,7 +44,7 @@ export const ChatMenu = memo(function ChatMenu({ open, onClose, meta, hasMessage
       {open ? <ActionMenu visible onClose={onClose} label={tr('menus.chat.title')} items={items} /> : null}
       {renaming && meta ? (
         <RenameSheet
-          initial={meta.title}
+          initial={displayTitle(meta.title, tr('conversations.list.newChat'))}
           onCancel={() => setRenaming(false)}
           onSave={(title) => {
             setRenaming(false);
@@ -62,7 +64,7 @@ function RenameSheet({ initial, onCancel, onSave }: { initial: string; onCancel(
   return (
     <SheetModal visible onClose={onCancel} closeLabel={tr('actions.close')} label={tr('menus.chat.renameTitle')} maxWidth={420} style={styles.sheet}>
       <SheetGrabber />
-      <Text style={[styles.title, { color: t.colors.text }]} accessibilityRole="header">
+      <Text style={[t.typography.headline, styles.title, { color: t.colors.text }]} accessibilityRole="header">
         {tr('menus.chat.renameTitle')}
       </Text>
       <TextInput
@@ -73,22 +75,12 @@ function RenameSheet({ initial, onCancel, onSave }: { initial: string; onCancel(
         maxLength={80}
         returnKeyType="done"
         onSubmitEditing={() => ok && onSave(draft.trim())}
-        style={[styles.input, { color: t.colors.text, borderColor: t.colors.borderStrong, backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.m, fontFamily: t.fonts.sans }]}
+        style={[t.typography.body, styles.input, { color: t.colors.text, borderColor: t.colors.borderControl, backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.control, fontFamily: t.fonts.sans }]}
         accessibilityLabel={tr('menus.chat.renameField')}
       />
       <View style={styles.buttons}>
-        <Pressable onPress={onCancel} accessibilityRole="button" style={({ pressed }) => [styles.btn, { backgroundColor: pressed ? t.colors.surfacePressed : t.colors.surfaceAlt }]}>
-          <Text style={[styles.btnText, { color: t.colors.text }]}>{tr('actions.cancel')}</Text>
-        </Pressable>
-        <Pressable
-          onPress={() => ok && onSave(draft.trim())}
-          disabled={!ok}
-          accessibilityRole="button"
-          accessibilityState={{ disabled: !ok }}
-          style={({ pressed }) => [styles.btn, { backgroundColor: t.colors.text, opacity: !ok ? 0.45 : pressed ? 0.85 : 1 }]}
-        >
-          <Text style={[styles.btnText, { color: t.colors.bg }]}>{tr('actions.save')}</Text>
-        </Pressable>
+        <Button label={tr('actions.cancel')} variant="tertiary" onPress={onCancel} />
+        <Button label={tr('actions.save')} variant="primary" onPress={() => ok && onSave(draft.trim())} disabled={!ok} />
       </View>
     </SheetModal>
   );
@@ -96,9 +88,7 @@ function RenameSheet({ initial, onCancel, onSave }: { initial: string; onCancel(
 
 const styles = StyleSheet.create({
   sheet: { paddingHorizontal: 18 },
-  title: { fontSize: 17, fontWeight: '600', marginBottom: 12 },
-  input: { height: 44, paddingHorizontal: 12, fontSize: 15, borderWidth: StyleSheet.hairlineWidth, marginBottom: 14 },
+  title: { marginBottom: 12 },
+  input: { height: 44, paddingHorizontal: 12, borderWidth: StyleSheet.hairlineWidth, marginBottom: 14 },
   buttons: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8 },
-  btn: { minHeight: 44, paddingHorizontal: 18, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
-  btnText: { fontSize: 15, fontWeight: '600' },
 });

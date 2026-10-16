@@ -9,12 +9,9 @@ export const compliance = {
     accept: 'Entendido, continuar',
     later: 'Más tarde',
     privacy: 'Política de privacidad',
-    needed: 'Confirma primero el aviso sobre el envío de datos.',
   },
   report: {
-    more: 'Más acciones',
     action: 'Denunciar',
-    actionA11y: 'Denunciar respuesta',
     title: 'Denunciar respuesta',
     lead: '¿Qué problema tiene esta respuesta?',
     reasons: {

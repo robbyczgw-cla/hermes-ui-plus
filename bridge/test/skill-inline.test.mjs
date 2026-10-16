@@ -141,7 +141,9 @@ test('e2e: every app turn carries the identical skill message right after the bo
     assert.equal(body.messages[1].content, skill);
     assert.equal(body.messages.filter((m) => m.content === skill).length, 1);
   }
-  assert.match(seen[0].body.messages[2].content, /^UI-ROUTER-HINT: format=compare/);
+  // named products compared: product cards with photos (the inline skill core explains the compare component)
+  assert.match(seen[0].body.messages[2].content, /^UI-ROUTER-HINT: format=products component=compare /);
+  assert.match(skill, /component=compare.*`products` with `compare:true`/);
 });
 
 test('e2e: no skill when switched off, when the bootstrap is off, or for bodies the bridge does not touch', async () => {

@@ -20,6 +20,8 @@ import { menus as menusNS } from './ns/menus.es.ts';
 import { desktop as desktopNS } from './ns/desktop.es.ts';
 import { bots as botsNS } from './ns/bots.es.ts';
 import { quick as quickNS } from './ns/quick.es.ts';
+import { support as supportNS } from './ns/support.es.ts';
+import { share as shareNS } from './ns/share.es.ts';
 
 type Dict = typeof de;
 
@@ -45,6 +47,8 @@ export const es = {
   desktop: desktopNS,
   bots: botsNS,
   quick: quickNS,
+  support: supportNS,
+  share: shareNS,
   actions: {
     send: 'Enviar',
     cancel: 'Cancelar',
@@ -63,17 +67,8 @@ export const es = {
     timeout: 'Se agotó el tiempo de espera. El servidor no responde.',
     unknown: 'Error desconocido: {message}',
   },
-  time: {
-    now: 'justo ahora',
-    seconds: '{count, plural, one {# segundo} other {# segundos}}',
-    minutes: '{count, plural, one {# minuto} other {# minutos}}',
-    hours: '{count, plural, one {# hora} other {# horas}}',
-    days: '{count, plural, one {# día} other {# días}}',
-    ago: 'hace {value}',
-  },
   language: {
     label: 'Idioma',
-    system: 'Idioma del sistema',
     de: 'Deutsch',
     en: 'English',
     es: 'Español',

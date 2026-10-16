@@ -43,14 +43,34 @@ export function withContextSeed(seed: string | undefined, text: string): string 
 
 const NOTE_RE = /\n*\[hui:note\][^\n]*\s*$/;
 
-/** the typed user text without a leading context block / trailing note (transcript matching) */
-export function stripTurnExtras(text: string): string {
+/** What the app added to a stored user message (older app versions wrote the same markers). */
+export type TurnExtras = { note?: true; context?: true };
+
+/**
+ * The typed text without a leading context block / trailing note, and which of the two were there (a compact chip
+ * on the bubble, chat/TurnExtrasChip). Unterminated blocks stay as they are.
+ */
+export function splitTurnExtras(text: string): { text: string; extras?: TurnExtras } {
   let s = text;
+  const extras: TurnExtras = {};
   if (s.startsWith(CONTEXT_OPEN)) {
     const end = s.indexOf(CONTEXT_CLOSE);
-    if (end >= 0) s = s.slice(end + CONTEXT_CLOSE.length).replace(/^\s+/, '');
+    if (end >= 0) {
+      s = s.slice(end + CONTEXT_CLOSE.length).replace(/^\s+/, '');
+      extras.context = true;
+    }
   }
-  return s.replace(NOTE_RE, '');
+  const noteless = s.replace(NOTE_RE, '');
+  if (noteless !== s) {
+    extras.note = true;
+    s = noteless;
+  }
+  return extras.note || extras.context ? { text: s, extras } : { text: s };
+}
+
+/** the typed user text without a leading context block / trailing note (transcript matching) */
+export function stripTurnExtras(text: string): string {
+  return splitTurnExtras(text).text;
 }
 
 /**

@@ -19,19 +19,22 @@ import { useModuleId, useSend } from '../a/shared';
 import { useSettledAfter } from '../../../lib/useSettledAfter';
 import { ProvenanceChip } from '../ProvenanceChip';
 import { productImageQuery } from '../../../../images';
-import { D1Icon } from './icons';
+import { D1Icon, StarGlyph } from './icons';
+import { Button } from '../../../primitives/Button';
+import { Skeleton } from '../../../primitives/Skeleton';
 import {
   buildCompareTable,
   cheapestOffer,
   displayPrice,
+  formatCount,
   formatPrice,
+  formatRating,
   normalizeProducts,
   numLang,
   productA11y,
   productKind,
   productReply,
   formatScore,
-  scoresLine,
   ratingA11y,
   shopTarget,
   toggleCompare,
@@ -41,7 +44,8 @@ import {
 } from './d1Model.ts';
 import { ImageSlotGroup } from '../../imageSlot';
 import { productImageFit, type SlotMode } from '../../../../images/slot';
-import { CardImage, DetailSheet, HeaderPill, InfoRow, PillButton, Rail, RatingRow, SNAP_START, SectionLabel, SkeletonCard, railLayout, type RailLayout } from './parts';
+import { CardImage, DetailSheet, HeaderPill, InfoRow, Rail, RatingRow, SNAP_START, SectionLabel, SkeletonCard, railLayout, starColor, type RailLayout } from './parts';
+import { useCaptureMode } from '../../../lib/capture';
 
 type ProductsState = { compare: string[]; comparing?: boolean; onlyDiff?: boolean; pick?: string };
 const INITIAL: ProductsState = { compare: [] };
@@ -53,6 +57,7 @@ export function Products({ node }: { node: Partial<HuiProducts> }) {
   const { lang } = useLocale();
   const L = numLang(lang);
   const { streaming, onAction } = useHui();
+  const capture = useCaptureMode();
   const id = useModuleId('products', node as Record<string, unknown>);
   const model = useMemo(() => normalizeProducts(node, streaming), [node, streaming]);
   const [st, setSt] = useNodeState<ProductsState>(id, INITIAL);
@@ -65,7 +70,7 @@ export function Products({ node }: { node: Partial<HuiProducts> }) {
   if (!model.items.length && !model.pending) {
     if (streaming) {
       return (
-        <View style={{ flexDirection: 'row', gap: 10, overflow: 'hidden' }} accessibilityLabel={tr('ui.products.loading')}>
+        <View style={{ flexDirection: 'row', gap: t.spacing.s, overflow: 'hidden' }} accessibilityLabel={tr('ui.products.loading')}>
           <SkeletonCard width={200} imageH={IMG} />
           <SkeletonCard width={200} imageH={IMG} />
         </View>
@@ -82,7 +87,8 @@ export function Products({ node }: { node: Partial<HuiProducts> }) {
   const sel = (st.compare ?? []).filter((k) => keys.has(k));
   const comparing = !!st.comparing && model.compare && model.items.length > 1;
   const picked = st.pick && keys.has(st.pick) ? st.pick : undefined;
-  const layout = railLayout(w, { peek: 0.6, maxCard: 230, minGridCard: 200, grid: model.layout === 'grid' });
+  // share-as-image: a grid (a rail would cut the cards off at the frame edge)
+  const layout = railLayout(w, { peek: 0.6, maxCard: 230, minGridCard: 200, grid: model.layout === 'grid' || capture });
   const count = model.items.length + (model.pending ? 1 : 0);
   const opened = openKey ? model.items.find((p) => p.key === openKey) : undefined;
 
@@ -111,7 +117,7 @@ export function Products({ node }: { node: Partial<HuiProducts> }) {
     <ImageSlotGroup>
     <View style={{ gap: t.spacing.m }} onLayout={(e) => setW(Math.round(e.nativeEvent.layout.width))}>
       {/* header */}
-      <View style={{ gap: 6 }}>
+      <View style={{ gap: t.spacing.xs }}>
         {model.title ? <InlineText variant="headline" text={model.title} accessibilityRole="header" /> : null}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -130,9 +136,9 @@ export function Products({ node }: { node: Partial<HuiProducts> }) {
 
       {comparing ? (
         <FadeIn rise={4}>
-          <View accessibilityLiveRegion="polite" style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 10, borderRadius: t.radii.m, backgroundColor: full ? t.colors.warningSoft : t.colors.accentSoft }}>
+          <View accessibilityLiveRegion="polite" style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: t.radii.control, backgroundColor: full ? t.colors.warningSoft : t.colors.accentSoft }}>
             <D1Icon name={full ? 'x' : 'compare'} size={15} color={full ? t.colors.warning : t.colors.accent} strokeWidth={2} />
-            <HText variant="caption" weight="500" style={{ flex: 1, color: full ? t.colors.warning : t.colors.accent }}>
+            <HText variant="caption" weight="500" style={{ flex: 1, color: full ? t.colors.warning : t.colors.accentText }}>
               {full ? tr('ui.products.compareMax') : sel.length ? tr('ui.products.selected', { n: sel.length }) : tr('ui.products.compareHint')}
             </HText>
           </View>
@@ -144,10 +150,10 @@ export function Products({ node }: { node: Partial<HuiProducts> }) {
         <View style={{ gap: t.spacing.s }} accessibilityLabel={tr('ui.products.carouselA11y', { n: count })}>
           {model.items.map((p, i) => (
             <Appear key={p.key} on={animateIn}>
-              <RankedRow t={t} p={p} rank={i + 1} lang={L} selecting={comparing} selected={sel.includes(p.key)} picked={picked === p.key} onPress={() => (comparing ? toggle(p) : setOpenKey(p.key))} />
+              <RankedRow t={t} p={p} rank={i + 1} lang={L} wide={w >= WIDE_RANKED} selecting={comparing} selected={sel.includes(p.key)} picked={picked === p.key} onPress={() => (comparing ? toggle(p) : setOpenKey(p.key))} />
             </Appear>
           ))}
-          {model.pending ? <SkeletonCard width="100%" imageH={0} lines={3} /> : null}
+          {model.pending ? <RankedSkeleton t={t} /> : null}
         </View>
       ) : w > 0 ? (
         <Rail layout={layout} count={count} label={tr('ui.products.carouselA11y', { n: count })} arrowTop={IMG / 2}>
@@ -186,11 +192,11 @@ export function Products({ node }: { node: Partial<HuiProducts> }) {
         footer={
           opened ? (
             <View style={{ flexDirection: 'row', gap: t.spacing.s }}>
-              {shopTarget(opened) ? <PillButton label={tr('ui.products.toShop')} icon="cart" onPress={() => shop(opened)} a11yLabel={shopA11y(opened, tr)} style={{ flex: 1 }} /> : null}
+              {shopTarget(opened) ? <Button label={tr('ui.products.toShop')} icon="external" variant="secondary" grow numberOfLines={2} onPress={() => shop(opened)} accessibilityLabel={shopA11y(opened, tr)} /> : null}
               {picked === opened.key ? (
-                <PillButton label={tr('ui.products.taken')} icon="check" kind="success" onPress={() => {}} disabled style={{ flex: 1 }} />
+                <PickedNote t={t} grow />
               ) : (
-                <PillButton label={tr('ui.products.take')} icon="check" kind="primary" onPress={() => take(opened)} disabled={streaming} a11yLabel={tr('ui.products.takeA11y', { name: opened.name })} style={{ flex: 1 }} />
+                <Button label={tr('ui.products.take')} icon="check" variant="primary" grow numberOfLines={2} onPress={() => take(opened)} disabled={streaming} accessibilityLabel={tr('ui.products.takeA11y', { name: opened.name })} />
               )}
             </View>
           ) : null
@@ -218,6 +224,147 @@ function Appear({ on, style, children }: { on: boolean; style?: object; children
   );
 }
 
+/* ───────────── shared pieces (product-specific; the places card keeps its own in parts.tsx) ───────────── */
+
+/**
+ * The one highlight a product may carry: its badge ("Testsieger") or, once chosen, "Your pick". One quiet
+ * style (soft tint + coloured text); the surface underneath keeps the translucent dark-mode tint legible
+ * over a photo.
+ */
+function Highlight({ t, text, picked }: { t: Theme; text: string; picked?: boolean }) {
+  const fg = picked ? t.colors.success : t.colors.accentText;
+  return (
+    <View style={[s.hlWrap, { borderRadius: t.radii.inline, backgroundColor: t.colors.surface }]}>
+      <View style={[s.hl, { borderRadius: t.radii.inline, backgroundColor: picked ? t.colors.successSoft : t.colors.accentSoft }]}>
+        {picked ? <D1Icon name="check" size={12} color={fg} strokeWidth={2.6} /> : null}
+        <HText variant="caption" weight="600" style={[s.shrink, { color: fg }]}>
+          {text}
+        </HText>
+      </View>
+    </View>
+  );
+}
+
+/** "★ 4,6 (2.345)": one star, the score, the count. Hidden from screen readers (the row label says it in words). */
+function RatingCompact({ t, rating, reviews, lang }: { t: Theme; rating: number; reviews?: number; lang: NumLang }) {
+  return (
+    <View style={s.rating} aria-hidden>
+      <StarGlyph fill={1} size={Math.round(13 * t.fontScale)} color={starColor(t)} track={t.colors.border} />
+      <HText variant="caption" weight="600" tabular>
+        {formatRating(rating, lang)}
+      </HText>
+      {reviews !== undefined ? (
+        <HText variant="caption" color="muted" tabular style={s.shrink}>
+          {`(${formatCount(reviews, lang)})`}
+        </HText>
+      ) : null}
+    </View>
+  );
+}
+
+/** Headline price ("ab 199 €"), or the model's display text when there is no number. Never truncated. */
+function PriceText({ p, lang, align }: { p: ProductItem; lang: NumLang; align?: 'right' }) {
+  const tr = useT();
+  const dp = displayPrice(p);
+  if (dp) {
+    const text = formatPrice(dp.price, p.currency, lang);
+    return (
+      <HText variant="headline" weight="700" tabular align={align} aria-hidden>
+        {dp.from ? tr('ui.products.from', { price: text }) : text}
+      </HText>
+    );
+  }
+  return p.priceNote ? (
+    <HText variant="callout" weight="600" align={align} aria-hidden>
+      {p.priceNote}
+    </HText>
+  ) : null;
+}
+
+type Fact = { label: string; value: string };
+
+/** Label (muted) / value (tabular, right-aligned) pairs, `cols` pairs per row: the spec table of a card. */
+function FactsTable({ t, facts, cols }: { t: Theme; facts: Fact[]; cols: 1 | 2 }) {
+  const rows: Fact[][] = [];
+  for (let i = 0; i < facts.length; i += cols) rows.push(facts.slice(i, i + cols));
+  return (
+    <View style={s.facts} aria-hidden>
+      {rows.map((r, ri) => (
+        <View key={ri} style={[s.factsRow, { columnGap: t.spacing.l }]}>
+          {Array.from({ length: cols }, (_, ci) => {
+            const f = r[ci];
+            if (!f) return <View key={ci} style={s.fact} />;
+            return (
+              <View key={ci} style={s.fact}>
+                {f.label ? (
+                  <HText variant="caption" color="muted" style={s.flex}>
+                    {f.label}
+                  </HText>
+                ) : null}
+                <HText variant="caption" weight="600" tabular align={f.label ? 'right' : undefined} style={f.label ? s.factValue : s.flex}>
+                  {f.value}
+                </HText>
+              </View>
+            );
+          })}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+/**
+ * Up to two pros and one con as quiet lines. Only the sign carries colour: "+" success, "−" muted (seal red is
+ * reserved for approval / destructive moments and danger red would read as an error).
+ */
+function ProConLines({ t, pros, cons }: { t: Theme; pros: string[]; cons: string[] }) {
+  return (
+    <View style={s.lines} aria-hidden>
+      {pros.slice(0, 2).map((x, i) => (
+        <ProConLine key={`p${i}`} t={t} kind="pro" text={x} />
+      ))}
+      {cons.slice(0, 1).map((x, i) => (
+        <ProConLine key={`c${i}`} t={t} kind="con" text={x} />
+      ))}
+    </View>
+  );
+}
+
+function ProConLine({ t, kind, text }: { t: Theme; kind: 'pro' | 'con'; text: string }) {
+  return (
+    <View style={s.line}>
+      <HText variant="caption" weight="700" style={[s.sign, { color: kind === 'pro' ? t.colors.success : t.colors.muted }]}>
+        {kind === 'pro' ? '+' : '−'}
+      </HText>
+      <HText variant="caption" color="muted" style={s.flex}>
+        {text}
+      </HText>
+    </View>
+  );
+}
+
+/** Round compare checkbox (selecting mode). */
+function SelectMark({ t, selected }: { t: Theme; selected: boolean }) {
+  return (
+    <View style={[s.selectMark, { backgroundColor: selected ? t.colors.accent : t.colors.surface, borderWidth: selected ? 0 : 1.5, borderColor: t.colors.borderControl }]}>
+      {selected ? <D1Icon name="check" size={14} color={t.colors.onAccent} strokeWidth={2.6} /> : null}
+    </View>
+  );
+}
+
+/** "Your pick" as a settled state (not a button) where the pick button was. */
+function PickedNote({ t, grow }: { t: Theme; grow?: boolean }) {
+  const tr = useT();
+  return (
+    <View style={[s.picked, grow ? s.grow : null, { borderRadius: t.radii.control, backgroundColor: t.colors.successSoft }]}>
+      <D1Icon name="check" size={15} color={t.colors.success} strokeWidth={2.4} />
+      <HText variant="callout" weight="600" color="success" numberOfLines={2} style={s.shrink}>
+        {tr('ui.products.taken')}
+      </HText>
+    </View>
+  );
+}
+
 /* ───────────── card ───────────── */
 
 function PriceLine({ p, lang, big }: { p: ProductItem; lang: NumLang; big?: boolean }) {
@@ -226,19 +373,19 @@ function PriceLine({ p, lang, big }: { p: ProductItem; lang: NumLang; big?: bool
   if (!dp) {
     // display-only price text ("ca. 229–244 USD") without a numeric price
     return p.priceNote ? (
-      <HText variant={big ? 'headline' : 'callout'} weight="600" numberOfLines={2}>
+      <HText variant={big ? 'headline' : 'callout'} weight="600">
         {p.priceNote}
       </HText>
     ) : null;
   }
   const text = formatPrice(dp.price, p.currency, lang);
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
+    <View style={s.priceLine}>
       <HText variant={big ? 'stat' : 'headline'} weight="700" tabular>
         {dp.from ? tr('ui.products.from', { price: text }) : text}
       </HText>
       {p.priceNote ? (
-        <HText variant="micro" color="muted" numberOfLines={1} style={{ flexShrink: 1 }}>
+        <HText variant="caption" color="muted" style={s.shrink}>
           {p.priceNote}
         </HText>
       ) : null}
@@ -246,30 +393,22 @@ function PriceLine({ p, lang, big }: { p: ProductItem; lang: NumLang; big?: bool
   );
 }
 
+/** Rail / grid card: photo, highlight, brand, name, price, rating, a small spec table, "Go to shop". */
 function ProductCard({ t, p, lang, layout, selecting, selected, picked, onPress, onShop }: { t: Theme; p: ProductItem; lang: NumLang; layout: RailLayout; selecting: boolean; selected: boolean; picked: boolean; onPress: () => void; onShop: () => void }) {
   const tr = useT();
   const target = shopTarget(p);
   const border = selected ? t.colors.accent : picked ? t.colors.success : t.colors.border;
   const [imgMode, setImgMode] = useState<SlotMode>('skeleton');
-  // no photo: the card starts with its text; badge / checkbox overlays keep a slim strip to sit in
+  // no photo: the card starts with its text; the compare checkbox keeps a slim strip to sit in
   const noImg = imgMode === 'collapse';
+  const specs = p.specs.slice(0, 3).map((x) => ({ label: x.label, value: x.value }));
   return (
-    <View style={{ flex: 1, width: layout.cardW, borderRadius: t.radii.l, backgroundColor: t.colors.surface, borderWidth: selected || picked ? 2 : StyleSheet.hairlineWidth, borderColor: border, overflow: 'hidden', ...t.shadows.sm }}>
-      <View style={noImg && (p.badge || picked || selecting) ? { minHeight: selecting ? 44 : 36 } : undefined}>
+    <View style={{ flex: 1, width: layout.cardW, borderRadius: t.radii.card, backgroundColor: t.colors.surface, borderWidth: selected || picked ? 2 : StyleSheet.hairlineWidth, borderColor: border, overflow: 'hidden', ...t.shadows.sm }}>
+      <View style={noImg && selecting ? s.checkStrip : undefined}>
         <CardImage query={p.imageQuery} autoQuery={productImageQuery(p)} url={p.image} webOnly kind={productKind(p.name, p.brand)} height={IMG} fit={productImageFit('card')} tile allowAsk onPress={onPress} onMode={setImgMode} />
-        {p.badge || picked ? (
-          <View pointerEvents="none" style={{ position: 'absolute', top: 8, left: 8, right: selecting ? 44 : 8, flexDirection: 'row' }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: t.radii.pill, backgroundColor: picked ? t.colors.success : t.colors.accent, maxWidth: '100%' }}>
-              {picked ? <D1Icon name="check" size={11} color={t.dark ? '#111' : '#fff'} strokeWidth={2.6} /> : null}
-              <HText variant="micro" weight="700" numberOfLines={1} style={{ color: picked ? (t.dark ? '#111' : '#fff') : t.colors.onAccent, flexShrink: 1 }}>
-                {picked ? tr('ui.products.taken') : p.badge}
-              </HText>
-            </View>
-          </View>
-        ) : null}
         {selecting ? (
-          <View pointerEvents="none" style={{ position: 'absolute', top: 8, right: 8, width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: selected ? t.colors.accent : 'rgba(255,255,255,0.92)', borderWidth: selected ? 0 : 1.5, borderColor: 'rgba(0,0,0,0.25)' }}>
-            {selected ? <D1Icon name="check" size={15} color={t.colors.onAccent} strokeWidth={2.6} /> : null}
+          <View pointerEvents="none" style={s.checkOverlay}>
+            <SelectMark t={t} selected={selected} />
           </View>
         ) : null}
       </View>
@@ -281,39 +420,37 @@ function ProductCard({ t, p, lang, layout, selecting, selected, picked, onPress,
         accessibilityState={selecting ? { checked: selected } : undefined}
         accessibilityLabel={productA11y(p, tr, lang) + (picked ? ` ${tr('ui.products.taken')}.` : '')}
         accessibilityHint={selecting ? (selected ? tr('ui.products.deselectA11y', { name: p.name }) : tr('ui.products.selectA11y', { name: p.name })) : tr('ui.places.detailsHint')}
-        style={{ flex: 1 }}
-        pressedStyle={{ opacity: 0.92 }}
+        style={s.flex}
+        pressedStyle={s.pressed}
       >
-        <View style={{ padding: t.spacing.m, paddingBottom: t.spacing.s, gap: 4 }}>
-          {p.brand ? (
-            <HText variant="micro" color="muted" numberOfLines={1} style={{ textTransform: 'uppercase', letterSpacing: 0.6 }}>
-              {p.brand}
-            </HText>
+        <View style={{ padding: t.spacing.m, paddingBottom: t.spacing.s, gap: t.spacing.xs }}>
+          {p.badge || picked ? (
+            <View style={{ marginBottom: t.spacing.xs }}>
+              <Highlight t={t} text={picked ? tr('ui.products.taken') : (p.badge as string)} picked={picked} />
+            </View>
           ) : null}
-          <HText variant="callout" weight="600" numberOfLines={2}>
-            {p.name}
-          </HText>
-          {p.rating !== undefined ? <RatingRow rating={p.rating} reviews={p.reviews} lang={lang} size={11} /> : null}
-          <View style={{ marginTop: 2 }}>
-            <PriceLine p={p} lang={lang} />
+          <View>
+            {p.brand ? (
+              <HText variant="caption" color="muted" numberOfLines={1}>
+                {p.brand}
+              </HText>
+            ) : null}
+            <HText variant="headline" numberOfLines={3}>
+              {p.name}
+            </HText>
           </View>
-          {p.specs.length ? (
-            <View style={{ gap: 2, marginTop: 4 }}>
-              {p.specs.slice(0, 3).map((s, i) => (
-                <HText key={i} variant="caption" numberOfLines={1}>
-                  {s.label ? <HText variant="caption" color="muted">{`${s.label} `}</HText> : null}
-                  <HText variant="caption" weight="500">
-                    {s.value}
-                  </HText>
-                </HText>
-              ))}
+          <PriceLine p={p} lang={lang} />
+          {p.rating !== undefined ? <RatingCompact t={t} rating={p.rating} reviews={p.reviews} lang={lang} /> : null}
+          {specs.length ? (
+            <View style={{ marginTop: t.spacing.xs }}>
+              <FactsTable t={t} facts={specs} cols={1} />
             </View>
           ) : null}
         </View>
       </PressableScale>
       {target ? (
-        <View style={{ paddingHorizontal: t.spacing.m, paddingBottom: t.spacing.m, paddingTop: 4 }}>
-          <PillButton label={tr('ui.products.toShop')} icon="cart" onPress={onShop} a11yLabel={shopA11y(p, tr)} small style={{ minHeight: 40 }} />
+        <View style={{ paddingHorizontal: t.spacing.m, paddingBottom: t.spacing.m, paddingTop: t.spacing.xs }}>
+          <Button label={tr('ui.products.toShop')} icon="external" variant="secondary" size="small" numberOfLines={2} onPress={onShop} accessibilityLabel={shopA11y(p, tr)} />
         </View>
       ) : null}
     </View>
@@ -322,113 +459,164 @@ function ProductCard({ t, p, lang, layout, selecting, selected, picked, onPress,
 
 /* ───────────── ranked row ───────────── */
 
-const RANK_IMG = 76;
+const RANK_IMG = 72;
+/** wide ranked rows: price + spec table in their own right-hand column */
+const FACTS_W = 248;
+const WIDE_RANKED = 680;
 
-function Chip({ t, text, tone }: { t: Theme; text: string; tone: 'pro' | 'con' | 'badge' }) {
-  const fg = tone === 'pro' ? t.colors.success : tone === 'con' ? t.colors.danger : t.colors.accent;
-  const bg = tone === 'pro' ? t.colors.successSoft : tone === 'con' ? t.colors.dangerSoft : t.colors.accentSoft;
-  return (
-    // B5: pro/con text wraps inside the pill instead of ending in "…" (a long point takes its own row)
-    <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 3, paddingLeft: tone === 'badge' ? 8 : 5, paddingRight: 8, paddingVertical: 3, borderRadius: t.radii.pill, backgroundColor: bg, maxWidth: '100%' }}>
-      {tone !== 'badge' ? (
-        <View style={{ paddingTop: 1 }}>
-          <D1Icon name={tone === 'pro' ? 'plus' : 'minus'} size={11} color={fg} strokeWidth={2.6} />
-        </View>
-      ) : null}
-      <HText variant="micro" weight="600" style={{ color: fg, flexShrink: 1 }}>
-        {text}
-      </HText>
-    </View>
-  );
-}
-
-/** Numbered row for `ranked` lists: rank, thumbnail, name, rating · price, verdict, scores line, badge + pros/cons chips. */
-function RankedRow({ t, p, rank, lang, selecting, selected, picked, onPress }: { t: Theme; p: ProductItem; rank: number; lang: NumLang; selecting: boolean; selected: boolean; picked: boolean; onPress: () => void }) {
+/**
+ * Numbered row for `ranked` lists, set like a buying guide: rank + brand caption, the name as headline with
+ * the price, one compact rating, the one highlight; then the verdict, the scores as a label / value table
+ * and up to two pros + one con as quiet lines. Wide (≥ WIDE_RANKED): price + table move to a right column.
+ * The header carries the row's one accessible label; the rest is a second, screen-reader-hidden tap area.
+ */
+function RankedRow({ t, p, rank, lang, wide, selecting, selected, picked, onPress }: { t: Theme; p: ProductItem; rank: number; lang: NumLang; wide: boolean; selecting: boolean; selected: boolean; picked: boolean; onPress: () => void }) {
   const tr = useT();
-  const dp = displayPrice(p);
-  const top = rank === 1;
   const border = selected ? t.colors.accent : picked ? t.colors.success : t.colors.border;
   const [imgMode, setImgMode] = useState<SlotMode>('skeleton');
   const noImg = imgMode === 'collapse';
-  return (
-    <View style={{ flexDirection: 'row', gap: t.spacing.m, padding: t.spacing.m, borderRadius: t.radii.l, backgroundColor: t.colors.surface, borderWidth: selected || picked ? 2 : StyleSheet.hairlineWidth, borderColor: border }}>
-      <View style={noImg ? undefined : { width: RANK_IMG, gap: 8 }}>
-        <CardImage query={p.imageQuery} autoQuery={productImageQuery(p)} url={p.image} webOnly kind={productKind(p.name, p.brand)} height={RANK_IMG} fit={productImageFit('rank')} tile radius={t.radii.m} iconSize={26} inline allowAsk onPress={onPress} onMode={setImgMode} style={{ borderWidth: StyleSheet.hairlineWidth, borderColor: t.colors.border }} />
-        <View pointerEvents="none" style={[{ minWidth: 26, height: 26, paddingHorizontal: 6, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: top ? t.colors.accent : t.colors.text }, noImg ? null : { position: 'absolute', top: -6, left: -6, borderWidth: 2, borderColor: t.colors.surface }]}>
-          <HText variant="micro" weight="700" tabular style={{ color: top ? t.colors.onAccent : t.colors.bg, fontSize: 12 }}>
+  const scores = p.scores.map((sc) => ({ label: sc.label, value: formatScore(sc.value, lang) }));
+  const facts = scores.length ? <FactsTable t={t} facts={scores} cols={wide ? 1 : 2} /> : null;
+  const hasPrice = !!displayPrice(p) || !!p.priceNote;
+  const hasBody = !!p.verdict || (!wide && !!facts) || p.pros.length > 0 || p.cons.length > 0;
+  const quiet = { onPress, haptic: 'selection' as const, scaleTo: 1, pressedStyle: s.pressed, accessible: false, focusable: false, importantForAccessibility: 'no-hide-descendants' as const, accessibilityElementsHidden: true, 'aria-hidden': true };
+
+  const head = (
+    <>
+      <View style={s.topLine}>
+        <View style={[s.rank, { borderRadius: t.radii.inline, backgroundColor: t.colors.surfaceAlt }]}>
+          <HText variant="caption" weight="600" tabular>
             {String(rank)}
           </HText>
         </View>
+        {p.brand ? (
+          <HText variant="caption" color="muted" style={s.shrink}>
+            {p.brand}
+          </HText>
+        ) : null}
+        {p.badge || selecting || picked ? (
+          <View style={s.topEnd}>
+            {p.badge ? <Highlight t={t} text={p.badge} /> : null}
+            {selecting ? <SelectMark t={t} selected={selected} /> : picked ? <D1Icon name="check" size={18} color={t.colors.success} strokeWidth={2.6} /> : null}
+          </View>
+        ) : null}
       </View>
-      <PressableScale
-        haptic="selection"
-        scaleTo={0.99}
-        onPress={onPress}
-        accessibilityRole={selecting ? 'checkbox' : 'button'}
-        accessibilityState={selecting ? { checked: selected } : undefined}
-        accessibilityLabel={productA11y(p, tr, lang, rank) + (picked ? ` ${tr('ui.products.taken')}.` : '')}
-        accessibilityHint={selecting ? (selected ? tr('ui.products.deselectA11y', { name: p.name }) : tr('ui.products.selectA11y', { name: p.name })) : tr('ui.places.detailsHint')}
-        style={{ flex: 1, gap: 4, minWidth: 0 }}
-        pressedStyle={{ opacity: 0.85 }}
-      >
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            {p.brand ? (
-              <HText variant="micro" color="muted" numberOfLines={1} style={{ textTransform: 'uppercase', letterSpacing: 0.6 }}>
-                {p.brand}
-              </HText>
-            ) : null}
-            <HText variant="bodyStrong" numberOfLines={2}>
-              {p.name}
-            </HText>
-          </View>
-          {selecting ? (
-            <View style={{ width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: selected ? t.colors.accent : 'transparent', borderWidth: selected ? 0 : 1.5, borderColor: t.colors.borderStrong }}>
-              {selected ? <D1Icon name="check" size={14} color={t.colors.onAccent} strokeWidth={2.6} /> : null}
-            </View>
-          ) : picked ? (
-            <D1Icon name="check" size={18} color={t.colors.success} strokeWidth={2.6} />
-          ) : null}
-        </View>
-        {p.rating !== undefined || dp || p.priceNote ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            {p.rating !== undefined ? <RatingRow rating={p.rating} reviews={p.reviews} lang={lang} size={11} /> : null}
-            {dp ? (
-              <HText variant="caption" weight="700" tabular aria-hidden>
-                {dp.from ? tr('ui.products.from', { price: formatPrice(dp.price, p.currency, lang) }) : formatPrice(dp.price, p.currency, lang)}
-              </HText>
-            ) : p.priceNote ? (
-              <HText variant="caption" weight="600" numberOfLines={1} aria-hidden>
-                {p.priceNote}
-              </HText>
-            ) : null}
-          </View>
+      <View style={[s.nameLine, { columnGap: t.spacing.m }]}>
+        <HText variant="headline" style={s.shrink}>
+          {p.name}
+        </HText>
+        {!wide && hasPrice ? <PriceText p={p} lang={lang} /> : null}
+      </View>
+      {p.rating !== undefined ? <RatingCompact t={t} rating={p.rating} reviews={p.reviews} lang={lang} /> : null}
+    </>
+  );
+  const body = (
+    <>
+      {p.verdict ? <HText variant="callout">{p.verdict}</HText> : null}
+      {wide ? null : facts}
+      {p.pros.length || p.cons.length ? <ProConLines t={t} pros={p.pros} cons={p.cons} /> : null}
+    </>
+  );
+  const main = (extra: object, children: React.ReactNode) => (
+    <PressableScale
+      haptic="selection"
+      scaleTo={1}
+      onPress={onPress}
+      accessibilityRole={selecting ? 'checkbox' : 'button'}
+      accessibilityState={selecting ? { checked: selected } : undefined}
+      accessibilityLabel={productA11y(p, tr, lang, rank) + (picked ? ` ${tr('ui.products.taken')}.` : '')}
+      accessibilityHint={selecting ? (selected ? tr('ui.products.deselectA11y', { name: p.name }) : tr('ui.products.selectA11y', { name: p.name })) : tr('ui.places.detailsHint')}
+      style={[s.flex, s.gap4, extra]}
+      pressedStyle={s.pressed}
+    >
+      {children}
+    </PressableScale>
+  );
+  const thumb = (
+    <View style={noImg ? undefined : [s.thumb, { marginRight: t.spacing.m }]}>
+      <CardImage query={p.imageQuery} autoQuery={productImageQuery(p)} url={p.image} webOnly kind={productKind(p.name, p.brand)} height={RANK_IMG} fit={productImageFit('rank')} tile radius={t.radii.control} iconSize={26} inline allowAsk onPress={onPress} onMode={setImgMode} style={{ borderWidth: StyleSheet.hairlineWidth, borderColor: t.colors.border }} />
+    </View>
+  );
+  const card = { padding: t.spacing.l, borderRadius: t.radii.card, backgroundColor: t.colors.surface, borderWidth: selected || picked ? 2 : StyleSheet.hairlineWidth, borderColor: border };
+
+  if (wide) {
+    return (
+      <View style={[card, s.row]}>
+        {thumb}
+        {main({}, (
+          <>
+            {head}
+            {hasBody ? <View style={[s.body, { marginTop: t.spacing.xs }]}>{body}</View> : null}
+          </>
+        ))}
+        {hasPrice || facts ? (
+          <PressableScale {...quiet} style={[s.factsCol, { width: FACTS_W, marginLeft: t.spacing.xl }]}>
+            {hasPrice ? <PriceText p={p} lang={lang} align="right" /> : null}
+            {facts}
+          </PressableScale>
         ) : null}
-        {p.verdict ? (
-          <HText variant="caption" numberOfLines={3} style={{ color: t.colors.text }}>
-            {p.verdict}
-          </HText>
-        ) : null}
-        {p.scores.length ? (
-          <HText variant="caption" color="muted" numberOfLines={2} tabular>
-            {scoresLine(p.scores, lang)}
-          </HText>
-        ) : null}
-        {p.badge || p.pros.length || p.cons.length ? (
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 2 }}>
-            {p.badge ? <Chip t={t} text={p.badge} tone="badge" /> : null}
-            {p.pros.slice(0, 2).map((x, i) => (
-              <Chip key={`p${i}`} t={t} text={x} tone="pro" />
-            ))}
-            {p.cons.slice(0, 1).map((x, i) => (
-              <Chip key={`c${i}`} t={t} text={x} tone="con" />
-            ))}
-          </View>
-        ) : null}
-      </PressableScale>
+      </View>
+    );
+  }
+  return (
+    <View style={card}>
+      <View style={s.row}>
+        {thumb}
+        {main({}, head)}
+      </View>
+      {hasBody ? (
+        <PressableScale {...quiet} style={[s.body, { marginTop: t.spacing.m }]}>
+          {body}
+        </PressableScale>
+      ) : null}
     </View>
   );
 }
+
+/** Placeholder for the arriving ranked row: same thumbnail + header shape, so the real row lands in place. */
+function RankedSkeleton({ t }: { t: Theme }) {
+  return (
+    <View aria-hidden style={[s.row, { padding: t.spacing.l, borderRadius: t.radii.card, backgroundColor: t.colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: t.colors.border }]}>
+      <Skeleton width={RANK_IMG} height={RANK_IMG} radius={t.radii.control} style={{ marginRight: t.spacing.m }} />
+      <View style={[s.flex, { gap: t.spacing.s, paddingTop: t.spacing.xxs }]}>
+        <Skeleton width="30%" height={10} />
+        <Skeleton width="65%" height={14} />
+        <Skeleton width="40%" height={10} />
+      </View>
+    </View>
+  );
+}
+
+const s = StyleSheet.create({
+  flex: { flex: 1, minWidth: 0 },
+  shrink: { flexShrink: 1 },
+  grow: { flexGrow: 1, flexBasis: 0 },
+  gap4: { gap: 4 },
+  row: { flexDirection: 'row', alignItems: 'flex-start' },
+  pressed: { opacity: 0.85 },
+  hlWrap: { alignSelf: 'flex-start', maxWidth: '100%' },
+  hl: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 2 },
+  rating: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  priceLine: { flexDirection: 'row', alignItems: 'baseline', columnGap: 8, flexWrap: 'wrap' },
+  facts: { gap: 4 },
+  factsRow: { flexDirection: 'row' },
+  fact: { flex: 1, flexBasis: 0, minWidth: 0, flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  factValue: { flexShrink: 1, maxWidth: '65%' },
+  lines: { gap: 2 },
+  line: { flexDirection: 'row', alignItems: 'flex-start', gap: 4 },
+  sign: { minWidth: 12, textAlign: 'center' },
+  selectMark: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  picked: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 12 },
+  checkStrip: { minHeight: 44 },
+  checkOverlay: { position: 'absolute', top: 8, right: 8 },
+  thumb: { width: RANK_IMG },
+  topLine: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
+  topEnd: { marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: 8 },
+  rank: { minWidth: 22, paddingHorizontal: 6, alignItems: 'center', justifyContent: 'center' },
+  nameLine: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'space-between', rowGap: 2 },
+  body: { gap: 8 },
+  factsCol: { gap: 8 },
+});
 
 /* ───────────── compare table ───────────── */
 
@@ -436,9 +624,8 @@ function CompareTable({ t, items, lang, onlyDiff, setOnlyDiff, picked, onTake, o
   const tr = useT();
   const table = useMemo(() => buildCompareTable(items, { price: tr('ui.products.price'), rating: tr('ui.products.rating') }, lang), [items, tr, lang]);
   const rows = onlyDiff ? table.rows.filter((r) => r.differs) : table.rows;
-  const n = items.length;
   return (
-    <View style={{ borderRadius: t.radii.l, backgroundColor: t.colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: t.colors.border, padding: t.spacing.m, gap: t.spacing.m }}>
+    <View style={{ borderRadius: t.radii.card, backgroundColor: t.colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: t.colors.border, padding: t.spacing.m, gap: t.spacing.m }}>
       <SectionLabel
         text={tr('ui.products.compareTitle')}
         right={
@@ -464,11 +651,11 @@ function CompareTable({ t, items, lang, onlyDiff, setOnlyDiff, picked, onTake, o
       {/* column heads */}
       <View style={{ flexDirection: 'row', gap: 8 }}>
         {items.map((p) => (
-          <View key={p.key} style={{ flex: 1, gap: 6 }}>
-            <CardImage query={p.imageQuery} autoQuery={productImageQuery(p)} url={p.image} webOnly kind={productKind(p.name, p.brand)} height={72} fit={productImageFit('compare')} tile radius={t.radii.m} iconSize={24} inline allowAsk onPress={() => onOpen(p)} />
+          <View key={p.key} style={{ flex: 1, gap: 4 }}>
+            <CardImage query={p.imageQuery} autoQuery={productImageQuery(p)} url={p.image} webOnly kind={productKind(p.name, p.brand)} height={72} fit={productImageFit('compare')} tile radius={t.radii.control} iconSize={24} inline allowAsk onPress={() => onOpen(p)} />
             <PressableScale haptic="selection" onPress={() => onOpen(p)} accessibilityLabel={productA11y(p, tr, lang)} accessibilityHint={tr('ui.places.detailsHint')}>
               {p.brand ? (
-                <HText variant="micro" color="muted" numberOfLines={1} style={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                <HText variant="caption" color="muted" numberOfLines={1}>
                   {p.brand}
                 </HText>
               ) : null}
@@ -485,7 +672,7 @@ function CompareTable({ t, items, lang, onlyDiff, setOnlyDiff, picked, onTake, o
         {rows.length ? (
           rows.map((r, ri) => (
             <View key={r.key} style={{ paddingVertical: 8, gap: 4, borderTopWidth: StyleSheet.hairlineWidth, borderColor: t.colors.border }} accessible accessibilityLabel={`${r.label}: ${r.cells.map((c, i) => `${table.columns[i].name} ${c ?? '–'}${r.best.includes(i) ? ` (${tr('ui.products.best')})` : ''}`).join(', ')}`}>
-              <HText variant="micro" color="muted" style={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>
+              <HText variant="caption" weight="600" color="muted">
                 {r.label}
               </HText>
               <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -514,9 +701,9 @@ function CompareTable({ t, items, lang, onlyDiff, setOnlyDiff, picked, onTake, o
       <View style={{ flexDirection: 'row', gap: 8 }}>
         {items.map((p) =>
           picked === p.key ? (
-            <PillButton key={p.key} label={tr('ui.products.taken')} icon="check" kind="success" onPress={() => {}} disabled small style={{ flex: 1 }} />
+            <PickedNote key={p.key} t={t} grow />
           ) : (
-            <PillButton key={p.key} label={tr('ui.products.take')} kind={n > 2 ? 'secondary' : 'primary'} onPress={() => onTake(p)} disabled={streaming} a11yLabel={tr('ui.products.takeA11y', { name: p.name })} small style={{ flex: 1 }} />
+            <Button key={p.key} label={tr('ui.products.take')} variant="secondary" size="small" grow numberOfLines={2} onPress={() => onTake(p)} disabled={streaming} accessibilityLabel={tr('ui.products.takeA11y', { name: p.name })} />
           ),
         )}
       </View>
@@ -534,10 +721,8 @@ function ProductHero({ p }: { p: ProductItem }) {
     <View style={noImg ? { paddingHorizontal: 16, alignItems: 'flex-start' } : undefined}>
       <CardImage query={p.imageQuery} autoQuery={productImageQuery(p)} url={p.image} webOnly kind={productKind(p.name, p.brand)} height={240} fit={productImageFit('detail')} tile iconSize={56} allowAsk onMode={setImgMode} />
       {p.badge ? (
-        <View style={{ ...(noImg ? null : { position: 'absolute' as const, left: 16, bottom: 12 }), paddingHorizontal: 10, paddingVertical: 4, borderRadius: t.radii.pill, backgroundColor: t.colors.accent }}>
-          <HText variant="caption" weight="700" style={{ color: t.colors.onAccent }}>
-            {p.badge}
-          </HText>
+        <View style={noImg ? undefined : { position: 'absolute', left: 16, bottom: 12, right: 16 }}>
+          <Highlight t={t} text={p.badge} />
         </View>
       ) : null}
     </View>
@@ -550,9 +735,9 @@ function ProductDetails({ t, p, lang, onShop, source, basis }: { t: Theme; p: Pr
   const pricedOffers = p.offers.filter((o) => o.price !== undefined).length;
   return (
     <View style={{ padding: t.spacing.l, gap: t.spacing.l }}>
-      <View style={{ gap: 6 }}>
+      <View style={{ gap: 8 }}>
         {p.brand ? (
-          <HText variant="caption" color="muted" style={{ textTransform: 'uppercase', letterSpacing: 0.7 }}>
+          <HText variant="caption" color="muted">
             {p.brand}
           </HText>
         ) : null}
@@ -569,7 +754,7 @@ function ProductDetails({ t, p, lang, onShop, source, basis }: { t: Theme; p: Pr
       </View>
 
       {p.scores.length ? (
-        <View style={{ gap: 10 }}>
+        <View style={{ gap: 8 }}>
           <SectionLabel text={tr('ui.products.scores')} />
           {p.scores.map((sc, i) => (
             <ScoreBar key={i} t={t} label={sc.label} value={sc.value} lang={lang} a11y={tr('ui.products.scoreA11y', { label: sc.label, value: formatScore(sc.value, lang) })} />
@@ -605,7 +790,7 @@ function ProductDetails({ t, p, lang, onShop, source, basis }: { t: Theme; p: Pr
                       {price}
                     </HText>
                   ) : null}
-                  <PillButton label={tr('ui.products.toShop')} icon="external" onPress={() => onShop(o.url)} a11yLabel={tr('ui.products.toShopA11y', { name: p.name, merchant: o.merchant })} small />
+                  <Button label={tr('ui.products.toShop')} icon="external" variant="secondary" size="small" onPress={() => onShop(o.url)} accessibilityLabel={tr('ui.products.toShopA11y', { name: p.name, merchant: o.merchant })} />
                 </View>
               );
             })}
@@ -637,16 +822,14 @@ function ProductDetails({ t, p, lang, onShop, source, basis }: { t: Theme; p: Pr
 }
 
 function ProsCons({ t, kind, title, items }: { t: Theme; kind: 'pro' | 'con'; title: string; items: string[] }) {
-  const fg = kind === 'pro' ? t.colors.success : t.colors.danger;
-  const bg = kind === 'pro' ? t.colors.successSoft : t.colors.dangerSoft;
   return (
     <View style={{ gap: 8 }}>
       <SectionLabel text={title} />
       {items.map((x, i) => (
-        <View key={i} style={{ flexDirection: 'row', gap: 10, alignItems: 'flex-start' }} accessible accessibilityLabel={`${title}: ${x}`}>
-          <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: bg, alignItems: 'center', justifyContent: 'center', marginTop: 1 }}>
-            <D1Icon name={kind === 'pro' ? 'plus' : 'minus'} size={13} color={fg} strokeWidth={2.6} />
-          </View>
+        <View key={i} style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-start' }} accessible accessibilityLabel={`${title}: ${x}`}>
+          <HText variant="body" weight="700" style={{ minWidth: 16, textAlign: 'center', color: kind === 'pro' ? t.colors.success : t.colors.muted }} aria-hidden>
+            {kind === 'pro' ? '+' : '−'}
+          </HText>
           <InlineText variant="body" text={x} style={{ flex: 1 }} />
         </View>
       ))}
@@ -664,7 +847,7 @@ function ScoreBar({ t, label, value, lang, a11y }: { t: Theme; label: string; va
   // settled: React owns the final fill (a dropped animated value would reset the bar to scaleX 0)
   const settled = useSettledAfter(reduced ? 0 : 500, [value, reduced]);
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }} accessible accessibilityLabel={a11y}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }} accessible accessibilityLabel={a11y}>
       <HText variant="callout" style={{ width: '34%' }} numberOfLines={1}>
         {label}
       </HText>

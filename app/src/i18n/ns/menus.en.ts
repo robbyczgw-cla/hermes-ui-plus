@@ -55,7 +55,6 @@ export const menus = {
     archived: 'Chat archived',
     unarchived: 'Chat restored',
     delete: 'Delete',
-    empty: 'No messages in this chat yet',
   },
   find: {
     placeholder: 'Find in chat',
@@ -77,7 +76,5 @@ export const menus = {
     bulkA11y: '{count, plural, one {Archive # chat} other {Archive # chats}}',
     bulkRestore: 'Restore',
     bulkRestoreA11y: '{count, plural, one {Unarchive # chat} other {Unarchive # chats}}',
-    bulkDone: '{count, plural, one {# chat archived} other {# chats archived}}',
-    bulkRestored: '{count, plural, one {# chat restored} other {# chats restored}}',
   },
 } satisfies typeof de;

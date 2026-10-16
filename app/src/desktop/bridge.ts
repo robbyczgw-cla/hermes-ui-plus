@@ -18,7 +18,7 @@ import { dedupeKey, parseDesktopEvent, sameCommandWithin, type DesktopEvent } fr
 
 export type { DesktopEvent } from './events.ts';
 
-type TauriInternals = { invoke(cmd: string, args?: Record<string, unknown>): Promise<unknown> };
+type TauriInternals = { invoke(cmd: string, args?: Record<string, unknown> | Uint8Array, options?: { headers?: Record<string, string> }): Promise<unknown> };
 
 function internals(): TauriInternals | null {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return null;
@@ -179,6 +179,21 @@ export function desktopNotifyRemove(tag: string): void {
 export async function desktopShare(text: string): Promise<boolean> {
   if (!isDesktopMac()) return false;
   return (await invokeDesktop<boolean>('desktop_share', { text })) === true;
+}
+
+/**
+ * "Share as image": the PNG into the Downloads folder (`desktop_save_image`; raw bytes, never overwrites).
+ * Returns the saved path, null when it failed or outside the desktop app.
+ */
+export async function desktopSaveImage(png: Uint8Array, fileName: string): Promise<string | null> {
+  const t = internals();
+  if (!t) return null;
+  try {
+    const path = await t.invoke('desktop_save_image', png, { headers: { 'x-file-name': fileName } });
+    return typeof path === 'string' ? path : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Is the desktop window the key window? (visibilityState stays "visible" while another app is in front) */

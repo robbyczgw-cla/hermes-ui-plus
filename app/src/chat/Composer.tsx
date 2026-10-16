@@ -5,26 +5,30 @@ import {
   Platform,
   Pressable,
   StyleSheet,
-  Text,
-  TextInput,
   View,
   type NativeSyntheticEvent,
   type TextInputKeyPressEventData,
 } from 'react-native';
+import { Text, TextInput } from '../ui/primitives/Text';
 import { AttachmentButton, AttachmentTray, draftHasErrors, useAttachmentDraft, type Attachment, type AttachmentTarget, type PendingUploads, type PickSource } from '../attachments';
 import type { ConnectionProfile } from '../settings/profiles';
 import { useLocale, useT } from '../i18n';
-import { columnMaxWidth, scaleFont, useTheme } from '../ui';
+import { columnMaxWidth, useTheme } from '../ui';
 import { usePreferences } from '../settings/PreferencesProvider';
 import { chatMaxWidth, enterAction, needsLargeAttachmentConfirm } from '../settings/preferences';
 import { DictationNotice, MicButton, RecordingBar, insertDictation, useDictation, voiceConnFromProfile } from '../voice';
 import { useDesktopFileTarget } from '../desktop/files';
+import { useShareDelivery } from '../share/useShare';
+import type { ShareDelivery } from '../share/inbox';
+import { retryShare } from '../share/inbox';
+import { shareSendDecision, type ConfirmedShare } from '../share/send';
 import { lightHaptic } from './actions';
 import { useChatShell } from './ChatShellContext';
 import { ActionMenu } from './ActionMenu';
 import { useToast } from './Toast';
 import { SlashPalette, completeRow, paletteState, pickRow, submitSlash, type CommandDef, type PaletteRow, type SlashBinding, type SlashPaletteHandle } from './commands';
 import { Icon } from './icons';
+import { a11yState } from '../ui/lib/a11yState';
 
 export type ComposerHandle = {
   focus(): void;
@@ -96,7 +100,7 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>(function Composer
   const { formatNumber } = useLocale();
   // Settings: Chat → Enter sendet / Große Anhänge bestätigen, Darstellung → Schriftgröße
   const { prefs } = usePreferences();
-  const inputSize = scaleFont(16, 22, t.fontScale);
+  const inputSize = t.typography.reading;
   // wide windows: the composer is centred and as wide as the message column (Settings → Chatbreite)
   const columnWidth = columnMaxWidth(chatMaxWidth(prefs), COMPOSER_PAD);
   const [text, setText] = useState('');
@@ -164,6 +168,36 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>(function Composer
       return v;
     },
   }));
+
+  // "Share to HUI+" (share/): a share confirmed in the share sheet for this chat lands in the draft and is sent right
+  // away – the user already tapped Send there. Anything that cannot go now (upload failed offline, a turn still
+  // running, own unsent text in this composer) stays in the draft with a notice: never sent half, never dropped.
+  const [shareSend, setShareSend] = useState<ConfirmedShare | null>(null);
+  const receiveShare = async (d: ShareDelivery) => {
+    const own = !!textRef.current.trim() || draftRef.current.attachments.length > 0;
+    const fileIds: string[] = [];
+    if (d.files.length && !canAttach) toast(tr('share.composer.noFiles'));
+    else if (d.files.length) {
+      const web = d.files.flatMap((f) => (f.webFile ? [f.webFile] : []));
+      const native = d.files.filter((f) => !f.webFile);
+      if (web.length) fileIds.push(...await draftRef.current.addFiles(web));
+      if (native.length) fileIds.push(...await draftRef.current.addShared(native));
+    }
+    if (fileIds.length !== d.files.length) {
+      // Preparation failed: keep the original payload available for another target / retry.
+      for (const id of fileIds) draftRef.current.remove(id);
+      retryShare(d);
+      toast(tr('share.composer.kept'));
+      return;
+    }
+    d.release?.();
+    if (d.text) setText((cur) => (cur.trim() ? `${cur.trimEnd()}\n\n${d.text}` : d.text));
+    if (own) toast(tr('share.composer.kept'));
+    else setShareSend({ text: d.text, fileIds });
+  };
+  // not the quick thread, and not the disabled placeholder composer shown while the session loads (ChatView): it is
+  // replaced by the real one, whose unmount would discard the draft – the share waits in the inbox for the real one
+  useShareDelivery(quickActive || disabled ? undefined : convId, receiveShare);
 
   const hasContent = !!text.trim() || draft.attachments.length > 0;
   // uploads still running do not block Send when the chat can wait for them (bubble shows the progress)
@@ -236,6 +270,20 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>(function Composer
     }
   };
 
+  // the confirmed share: send once its files are prepared (and uploaded, unless the chat can wait for uploads)
+  useEffect(() => {
+    if (!shareSend) return;
+    const decision = shareSendDecision(shareSend, { text, attachments: draft.attachments, picking: draft.picking, uploading: draft.uploading, error: draft.error, canSend, disabled: !!disabled, streaming });
+    if (decision === 'wait') return;
+    setShareSend(null);
+    if (decision === 'send') {
+      void submit(true);
+      return;
+    }
+    toast(tr('share.composer.kept'));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shareSend, text, draft.picking, draft.uploading, draft.attachments, draft.error, canSend, disabled, streaming]);
+
   // Web: Enter sends (setting "Enter sendet"), Shift+Enter = newline, Cmd/Ctrl+Enter always sends
   const onKeyPress = (e: NativeSyntheticEvent<TextInputKeyPressEventData>) => {
     if (Platform.OS !== 'web') return;
@@ -288,7 +336,7 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>(function Composer
             backgroundColor: t.dark ? t.colors.surface : t.colors.bg,
             // quick thread: a brass outline marks where this message goes
             borderColor: quickActive ? t.colors.accent : t.colors.borderStrong,
-            borderRadius: 26,
+            borderRadius: t.radii.card,
           },
           !t.dark && t.shadows.sm,
         ]}
@@ -317,15 +365,16 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>(function Composer
                 placeholder={placeholder ?? tr('chat.composer.placeholder')}
                 placeholderTextColor={t.colors.subtle}
                 multiline
-                style={[styles.input, inputSize, { color: t.colors.text, fontFamily: t.fonts.sans }, Platform.OS === 'web' && ({ outlineStyle: 'none', height: webHeight ?? 22, paddingTop: 0, paddingBottom: 0, marginVertical: 7 } as object)]}
+                style={[inputSize, styles.input, { color: t.colors.text, fontFamily: t.fonts.sans }, Platform.OS === 'web' && ({ outlineStyle: 'none', height: webHeight ?? inputSize.lineHeight, paddingTop: 0, paddingBottom: 0, marginVertical: 7 } as object)]}
                 onKeyPress={onKeyPress}
                 onContentSizeChange={
                   Platform.OS === 'web'
-                    ? (e) => setWebHeight(Math.min(MAX_HEIGHT, Math.max(22, e.nativeEvent.contentSize.height)))
+                    ? (e) => setWebHeight(Math.min(MAX_HEIGHT, Math.max(inputSize.lineHeight, e.nativeEvent.contentSize.height)))
                     : undefined
                 }
                 textAlignVertical="center"
                 accessibilityLabel={tr('chat.composer.input.a11y')}
+                testID="composer-input"
                 enterKeyHint="send"
                 submitBehavior="newline"
               />
@@ -333,20 +382,36 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>(function Composer
           )}
           {quick && (quickActive || quick.showToggle) && !dictation.active ? <QuickToggle active={quickActive} onPress={toggleQuick} /> : null}
           {/* the MicButton stays mounted for the whole recording (it is the ✓ / hold-to-talk target) */}
-          {!showStop && (dictation.active || !hasContent) ? (
+          {showStop ? (
+            // its own element (not the send button relabelled): TalkBack / VoiceOver and UI tests always find it
+            <Pressable
+              key="stop"
+              onPress={onStop}
+              testID="composer-stop"
+              accessible
+              accessibilityRole="button"
+              accessibilityLabel={tr('chat.composer.stop')}
+              hitSlop={6}
+              style={({ pressed }) => [styles.sendBtn, { backgroundColor: t.colors.text, opacity: pressed ? 0.7 : 1 }]}
+            >
+              <Icon name="stop" size={16} color={t.colors.bg} strokeWidth={2.4} />
+            </Pressable>
+          ) : dictation.active || !hasContent ? (
             <MicButton dictation={dictation} size={36} disabled={disabled || sending} />
           ) : (
             <Pressable
-              onPress={showStop ? onStop : () => void submit()}
-              onLongPress={!showStop && canSendQuick ? () => {
+              key="send"
+              onPress={() => void submit()}
+              onLongPress={canSendQuick ? () => {
                 lightHaptic();
                 setSendMenu(true);
               } : undefined}
               delayLongPress={400}
-              disabled={!showStop && !canSend}
+              disabled={!canSend}
+              testID="composer-send"
               accessibilityRole="button"
-              accessibilityLabel={showStop ? tr('chat.composer.stop') : tr('actions.send')}
-              accessibilityActions={!showStop && canSendQuick ? [{ name: 'longpress', label: tr('quick.composer.sendAsQuick') }] : undefined}
+              accessibilityLabel={tr('actions.send')}
+              accessibilityActions={canSendQuick ? [{ name: 'longpress', label: tr('quick.composer.sendAsQuick') }] : undefined}
               onAccessibilityAction={(e) => {
                 if (e.nativeEvent.actionName === 'longpress') sendQuick();
               }}
@@ -354,12 +419,12 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>(function Composer
               style={({ pressed }) => [
                 styles.sendBtn,
                 {
-                  backgroundColor: showStop || canSend ? t.colors.text : t.colors.surfacePressed,
+                  backgroundColor: canSend ? t.colors.text : t.colors.surfacePressed,
                   opacity: pressed ? 0.7 : 1,
                 },
               ]}
             >
-              <Icon name={showStop ? 'stop' : 'send'} size={showStop ? 16 : 18} color={showStop || canSend ? t.colors.bg : t.colors.subtle} strokeWidth={2.4} />
+              <Icon name="send" size={18} color={canSend ? t.colors.bg : t.colors.subtle} strokeWidth={2.4} />
             </Pressable>
           )}
         </View>
@@ -374,7 +439,7 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>(function Composer
         />
       ) : null}
       {draft.error ? (
-        <Text onPress={draft.clearError} style={[styles.error, { color: t.colors.danger }]} accessibilityRole="alert" accessibilityHint={tr('chat.composer.error.dismissHint')}>
+        <Text onPress={draft.clearError} style={[t.typography.caption, styles.error, { color: t.colors.danger }]} accessibilityRole="alert" accessibilityHint={tr('chat.composer.error.dismissHint')}>
           {draft.error}
         </Text>
       ) : null}
@@ -389,9 +454,10 @@ function QuickToggle({ active, onPress }: { active: boolean; onPress(): void }) 
   return (
     <Pressable
       onPress={onPress}
+      testID="composer-quick"
       hitSlop={6}
       accessibilityRole="switch"
-      accessibilityState={{ checked: active }}
+      {...a11yState({ checked: active })}
       accessibilityLabel={tr('quick.composer.toggle')}
       accessibilityHint={active ? tr('quick.composer.toggleOnHint') : tr('quick.composer.toggleOffHint')}
       style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
@@ -440,11 +506,9 @@ const styles = StyleSheet.create({
   inputRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
   recording: { flex: 1 },
   noAttach: { width: 6 },
-  error: { fontSize: 13, paddingHorizontal: 18, paddingTop: 4 },
+  error: { paddingHorizontal: 18, paddingTop: 4 },
   input: {
     flex: 1,
-    fontSize: 16,
-    lineHeight: 22,
     maxHeight: MAX_HEIGHT,
     paddingTop: Platform.OS === 'ios' ? 9 : 7,
     paddingBottom: Platform.OS === 'ios' ? 9 : 7,

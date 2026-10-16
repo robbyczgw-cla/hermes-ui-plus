@@ -121,9 +121,9 @@ test('countdown and command plurals render the German text and the English forms
   assert.equal(de('approvals.countdown.spoken', { minutes: 0, seconds: 5 }), 'Verbleibende Zeit etwa 5 Sekunden');
   assert.equal(en('approvals.countdown.spoken', { minutes: 4, seconds: 1 }), 'About 4 minutes 1 second remaining');
   assert.equal(en('approvals.countdown.spoken', { minutes: 0, seconds: 5 }), 'About 5 seconds remaining');
-  assert.equal(de('approvals.command.label', { count: 1 }), 'BEFEHL');
-  assert.equal(de('approvals.command.label', { count: 3 }), 'BEFEHL · 3 Zeilen');
-  assert.equal(en('approvals.command.label', { count: 3 }), 'COMMAND · 3 lines');
+  assert.equal(de('approvals.command.label', { count: 1 }), 'Befehl');
+  assert.equal(de('approvals.command.label', { count: 3 }), 'Befehl · 3 Zeilen');
+  assert.equal(en('approvals.command.label', { count: 3 }), 'Command · 3 lines');
 });
 
 test('high risk: "Ablehnen" first and highlighted, allow choices secondary; normal risk unchanged', () => {

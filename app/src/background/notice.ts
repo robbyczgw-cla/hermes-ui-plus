@@ -31,6 +31,11 @@ export type NoticeEvent = {
   message: ChatMessage;
   /** the answer arrived late (Hermes recovery) or while the chat was hidden */
   late?: boolean;
+  /**
+   * settles once the answer is in storage: the system notification waits for it (a process killed after "Antwort
+   * ist da" must not lose the answer). The route is decided at once, in the state the turn ended in.
+   */
+  written?: Promise<unknown>;
 };
 
 export function routeNotice(ev: NoticeEvent, c: NoticeContext): NoticeRoute {

@@ -2,11 +2,12 @@
 
 Start with the [README](../README.md) for an overview and quick start. The files below go deeper.
 
-## Using Hermes UI+
+## Using HUI+ (Hermes UI+)
 
 - [BRIDGE.md](BRIDGE.md): what the UI-Bridge is, why it exists, how it is secured, and where your data goes.
 - [SELF-HOSTING.md](SELF-HOSTING.md): bridge setup, Tailscale, device tokens, push, updating, troubleshooting.
 - [SETUP-WITH-AGENT.md](SETUP-WITH-AGENT.md): copy-paste prompts so Hermes, Claude Code or Codex set it up for you.
+- [SHARE-TARGET.md](SHARE-TARGET.md): sharing links, text, images and files from other apps to HUI+ (Android, web app; iOS prepared).
 - [WEB-APP.md](WEB-APP.md): installing the web app (PWA) from the release bundle, pairing, adding it to the home screen, updating, troubleshooting.
 - [../PRIVACY.md](../PRIVACY.md) and [../SECURITY.md](../SECURITY.md): privacy policy, threat model, and how to report vulnerabilities.
 
@@ -28,6 +29,7 @@ Start with the [README](../README.md) for an overview and quick start. The files
 - [IOS.md](IOS.md): iOS today (web app / PWA; the native app is prepared, TestFlight pending) and the path to TestFlight and the App Store: release config, versioning, `MODE=appstore` builds, owner checklist, review notes, privacy label.
 - [RELEASING.md](RELEASING.md): how a release is cut (tag, signed APK, web bundle, checksums, GitHub release, npm).
 - [LEAK-GUARD.md](LEAK-GUARD.md): how the repository keeps private content out (scanners, hooks, CI).
+- [E2E.md](E2E.md): the deterministic Android E2E smoke suite (emulator + scripted bridge mock, one command, report for humans and LLMs).
 
 ## Background and evaluation
 

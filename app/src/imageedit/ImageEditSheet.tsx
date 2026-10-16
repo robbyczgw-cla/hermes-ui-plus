@@ -14,22 +14,22 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
-  TextInput,
   View,
   useWindowDimensions,
   type LayoutChangeEvent,
 } from 'react-native';
+import { Text, TextInput } from '../ui/primitives/Text';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 import { deleteAttachmentFiles } from '../attachments/store';
 import { isAttachmentError, type Attachment } from '../attachments/types';
 import { validateForTarget } from '../attachments/validate';
 import { useT } from '../i18n';
-import { SheetGrabber, SheetLayer, useSheetDialog, useTheme } from '../ui';
+import { Button, SheetGrabber, SheetLayer, useSheetDialog, useTheme } from '../ui';
 import { buildEditRequestText, EDIT_SUGGESTIONS, markEditAttachment, type EditGate, type EditSource } from './core';
 import { centeredCrop, CROP_PRESETS, fitContain, moveRect, presetAspect, resizeRect, toImageRect, type CropPreset, type Rect } from './crop';
 import { applyQuickOp, prepareEditSource, prepareWorkImage, shareImageFile, workImageOf, type QuickOp, type WorkImage } from './prepare';
+import { a11yState } from '../ui/lib/a11yState';
 
 export type ImageEditSheetProps = {
   source: EditSource | null;
@@ -203,7 +203,7 @@ function SheetBody({ source, gate, backendName, history, onSend, onClose, onEnab
       <SheetLayer onClose={() => onClose(false)} closeLabel={tr('actions.close')} label={tr('imageEdit.title')} maxHeight={win.height - insets.top - 24} bottomPadding={6} style={styles.sheet}>
         <SheetGrabber style={styles.grabber} />
         <View style={styles.head}>
-          <Text style={[styles.title, { color: t.colors.text }]} accessibilityRole="header">
+          <Text style={[t.typography.headline, styles.title, { color: t.colors.text }]} accessibilityRole="header">
             {tr('imageEdit.title')}
           </Text>
           <Pressable onPress={() => onClose(false)} hitSlop={10} accessibilityRole="button" accessibilityLabel={tr('actions.close')} style={({ pressed }) => [styles.close, pressed && { backgroundColor: t.colors.surfacePressed }]}>
@@ -215,7 +215,7 @@ function SheetBody({ source, gate, backendName, history, onSend, onClose, onEnab
         <ScrollView keyboardShouldPersistTaps="handled" scrollEnabled={!crop} contentContainerStyle={styles.content}>
           {/* preview (+ crop overlay) */}
           <View
-            style={[styles.preview, { height: previewH, backgroundColor: t.colors.surfaceAlt, borderColor: t.colors.border, borderRadius: t.radii.l }]}
+            style={[styles.preview, { height: previewH, backgroundColor: t.colors.surfaceAlt, borderColor: t.colors.border, borderRadius: t.radii.card }]}
             onLayout={(e: LayoutChangeEvent) => setBox({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}
           >
             <Image source={{ uri: work?.uri ?? source.uri }} style={StyleSheet.absoluteFill} contentFit="contain" transition={120} accessibilityLabel={label} />
@@ -230,13 +230,13 @@ function SheetBody({ source, gate, backendName, history, onSend, onClose, onEnab
             {busy === 'prepare' || busy === 'op' ? (
               <View style={[StyleSheet.absoluteFill, styles.center, { backgroundColor: 'rgba(0,0,0,0.25)' }]} accessibilityLiveRegion="polite">
                 <ActivityIndicator color="#fff" />
-                <Text style={styles.busyText}>{busy === 'prepare' ? tr('imageEdit.loading') : tr('imageEdit.quick.working')}</Text>
+                <Text style={[t.typography.caption, styles.busyText]}>{busy === 'prepare' ? tr('imageEdit.loading') : tr('imageEdit.quick.working')}</Text>
               </View>
             ) : null}
           </View>
 
           {/* quick edits */}
-          <Text style={[styles.section, { color: t.colors.muted }]}>{tr('imageEdit.quick.title')}</Text>
+          <Text style={[t.typography.caption, styles.section, { color: t.colors.muted }]}>{tr('imageEdit.quick.title')}</Text>
           {crop ? (
             <View style={{ gap: 8 }}>
               <View style={styles.row}>
@@ -248,10 +248,10 @@ function SheetBody({ source, gate, backendName, history, onSend, onClose, onEnab
                   );
                 })}
               </View>
-              <Text style={[styles.hint, { color: t.colors.subtle }]}>{tr('imageEdit.quick.cropHint')}</Text>
+              <Text style={[t.typography.caption, { color: t.colors.subtle }]}>{tr('imageEdit.quick.cropHint')}</Text>
               <View style={styles.row}>
-                <ActionButton label={tr('imageEdit.quick.cancelCrop')} onPress={() => setCrop(null)} />
-                <ActionButton label={tr('imageEdit.quick.applyCrop')} onPress={() => void applyCrop()} primary />
+                <Button label={tr('imageEdit.quick.cancelCrop')} variant="tertiary" onPress={() => setCrop(null)} />
+                <Button label={tr('imageEdit.quick.applyCrop')} variant="primary" onPress={() => void applyCrop()} />
               </View>
             </View>
           ) : (
@@ -272,7 +272,7 @@ function SheetBody({ source, gate, backendName, history, onSend, onClose, onEnab
             accessibilityLabel={tr('imageEdit.inputA11y')}
             multiline
             maxLength={1000}
-            style={[styles.input, { color: t.colors.text, backgroundColor: t.colors.surfaceAlt, borderColor: t.colors.border, borderRadius: t.radii.l }]}
+            style={[t.typography.reading, styles.input, { color: t.colors.text, backgroundColor: t.colors.surfaceAlt, borderColor: t.colors.borderControl, borderRadius: t.radii.control }]}
           />
           <View style={styles.row} accessibilityLabel={tr('imageEdit.suggestionsA11y')}>
             {EDIT_SUGGESTIONS.map((id) => {
@@ -282,37 +282,31 @@ function SheetBody({ source, gate, backendName, history, onSend, onClose, onEnab
           </View>
 
           {error ? (
-            <Text style={[styles.error, { color: t.colors.danger, backgroundColor: t.colors.dangerSoft, borderRadius: t.radii.m }]} accessibilityRole="alert">
+            <Text style={[t.typography.caption, styles.error, { color: t.colors.danger, backgroundColor: t.colors.dangerSoft, borderRadius: t.radii.control }]} accessibilityRole="alert">
               {error}
             </Text>
           ) : null}
           {!gate.ok ? (
-            <View style={[styles.notice, { backgroundColor: t.colors.warningSoft, borderRadius: t.radii.m }]} accessibilityRole="alert">
-              <Text style={[styles.noticeText, { color: t.colors.text }]}>{tr(gate.reason)}</Text>
+            <View style={[styles.notice, { backgroundColor: t.colors.warningSoft, borderRadius: t.radii.control }]} accessibilityRole="alert">
+              <Text style={[t.typography.callout, { color: t.colors.text }]}>{tr(gate.reason)}</Text>
               {gate.fix === 'enableImageGen' && onEnableImageGen ? (
-                <ActionButton label={tr('imageEdit.enableImageGen')} onPress={onEnableImageGen} primary />
+                <Button label={tr('imageEdit.enableImageGen')} variant="primary" numberOfLines={2} onPress={onEnableImageGen} />
               ) : null}
             </View>
           ) : null}
 
-          <Pressable
-            onPress={() => void send('ai')}
+          <Button
+            label={tr('imageEdit.send')}
+            icon="sparkle"
+            variant="primary"
+            loading={busy === 'send'}
             disabled={!canAi || busy !== null}
-            accessibilityRole="button"
             accessibilityLabel={tr('imageEdit.sendA11y', { name: backendName })}
-            accessibilityState={{ disabled: !canAi || busy !== null, busy: busy === 'send' }}
-            style={({ pressed }) => [
-              styles.send,
-              { backgroundColor: t.colors.accent, borderRadius: t.radii.pill },
-              (!canAi || busy !== null) && { opacity: 0.45 },
-              pressed && { opacity: 0.8 },
-            ]}
-          >
-            {busy === 'send' ? <ActivityIndicator color={t.colors.onAccent} /> : <Text style={[styles.sendText, { color: t.colors.onAccent }]}>{`✨ ${tr('imageEdit.send')}`}</Text>}
-          </Pressable>
+            onPress={() => void send('ai')}
+          />
           <View style={styles.row}>
-            <ActionButton label={tr('imageEdit.quick.sendNew')} onPress={() => void send('plain')} disabled={!gate.ok || !ready || !!crop} grow />
-            <ActionButton label={tr('imageEdit.quick.saveShare')} onPress={() => void share()} disabled={!ready || !!crop} grow />
+            <Button label={tr('imageEdit.quick.sendNew')} grow numberOfLines={2} onPress={() => void send('plain')} disabled={!gate.ok || !ready || !!crop} />
+            <Button label={tr('imageEdit.quick.saveShare')} grow numberOfLines={2} onPress={() => void share()} disabled={!ready || !!crop} />
           </View>
         </ScrollView>
       </SheetLayer>
@@ -404,36 +398,13 @@ function Chip({ label, onPress, active, a11y }: { label: string; onPress(): void
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={a11y}
-      accessibilityState={active !== undefined ? { selected: active } : undefined}
+      {...a11yState(active !== undefined ? { selected: active } : undefined, 'button')}
       style={({ pressed }) => [
-        styles.chip,
-        { borderColor: active ? t.colors.accent : t.colors.border, backgroundColor: active ? t.colors.accentSoft : pressed ? t.colors.surfacePressed : t.colors.surfaceAlt },
+        styles.chip, { borderRadius: t.radii.pill },
+        { borderColor: active ? t.colors.accent : t.colors.borderControl, backgroundColor: active ? t.colors.accentSoft : pressed ? t.colors.surfacePressed : t.colors.surfaceAlt },
       ]}
     >
-      <Text style={[styles.chipText, { color: active ? t.colors.accent : t.colors.text }]} numberOfLines={1}>
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
-function ActionButton({ label, onPress, primary, disabled, grow }: { label: string; onPress(): void; primary?: boolean; disabled?: boolean; grow?: boolean }) {
-  const t = useTheme();
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ disabled: !!disabled }}
-      style={({ pressed }) => [
-        styles.action,
-        grow && { flexGrow: 1, flexBasis: 200 },
-        { borderRadius: t.radii.pill, borderColor: primary ? t.colors.accent : t.colors.borderStrong, backgroundColor: primary ? t.colors.accent : pressed ? t.colors.surfacePressed : 'transparent' },
-        disabled && { opacity: 0.45 },
-      ]}
-    >
-      <Text style={[styles.actionText, { color: primary ? t.colors.onAccent : t.colors.text }]} numberOfLines={1}>
+      <Text style={[t.typography.caption, styles.chipText, { color: active ? t.colors.accentText : t.colors.text }]} numberOfLines={1}>
         {label}
       </Text>
     </Pressable>
@@ -453,7 +424,7 @@ function ToolButton({ icon, label, a11y, onPress, disabled }: { icon: ToolIcon; 
       accessibilityRole="button"
       accessibilityLabel={a11y}
       accessibilityState={{ disabled: !!disabled }}
-      style={({ pressed }) => [styles.tool, { borderColor: t.colors.border, borderRadius: t.radii.m, backgroundColor: pressed ? t.colors.surfacePressed : t.colors.surfaceAlt }, disabled && { opacity: 0.45 }]}
+      style={({ pressed }) => [styles.tool, { borderColor: t.colors.borderControl, borderRadius: t.radii.control, backgroundColor: pressed ? t.colors.surfacePressed : t.colors.surfaceAlt }, disabled && { opacity: 0.45 }]}
     >
       <Svg width={20} height={20} viewBox="0 0 24 24">
         {icon === 'rotate' ? (
@@ -478,7 +449,7 @@ function ToolButton({ icon, label, a11y, onPress, disabled }: { icon: ToolIcon; 
           </>
         )}
       </Svg>
-      <Text style={[styles.toolText, { color: c }]} numberOfLines={1}>
+      <Text style={[t.typography.callout, styles.toolText, { color: c }]} numberOfLines={1}>
         {label}
       </Text>
     </Pressable>
@@ -489,27 +460,21 @@ const styles = StyleSheet.create({
   sheet: { paddingHorizontal: 0 },
   grabber: { marginBottom: 6 },
   head: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 4 },
-  title: { flex: 1, fontSize: 17, fontWeight: '600' },
+  title: { flex: 1, fontWeight: '600' },
   close: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   content: { paddingHorizontal: 14, paddingBottom: 4, gap: 10 },
   preview: { width: '100%', overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth },
   center: { alignItems: 'center', justifyContent: 'center', gap: 8 },
-  busyText: { color: '#fff', fontSize: 13, fontWeight: '500' },
-  section: { fontSize: 12.5, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.4, marginTop: 2 },
+  busyText: { color: '#fff', fontWeight: '500' },
+  section: { fontWeight: '600', marginTop: 2 },
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  hint: { fontSize: 12.5 },
   tool: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, minHeight: 44, borderWidth: StyleSheet.hairlineWidth },
-  toolText: { fontSize: 14, fontWeight: '500' },
-  input: { minHeight: 48, maxHeight: 120, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 12, fontSize: 16, borderWidth: StyleSheet.hairlineWidth, textAlignVertical: 'top' },
-  chip: { paddingHorizontal: 12, minHeight: 36, justifyContent: 'center', borderRadius: 999, borderWidth: StyleSheet.hairlineWidth, maxWidth: '100%' },
-  chipText: { fontSize: 13.5, fontWeight: '500' },
-  error: { fontSize: 13.5, paddingHorizontal: 12, paddingVertical: 8 },
+  toolText: { fontWeight: '500' },
+  input: { minHeight: 48, maxHeight: 120, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 12, borderWidth: StyleSheet.hairlineWidth, textAlignVertical: 'top' },
+  chip: { paddingHorizontal: 12, minHeight: 36, justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth, maxWidth: '100%' },
+  chipText: { fontWeight: '500' },
+  error: { paddingHorizontal: 12, paddingVertical: 8 },
   notice: { padding: 12, gap: 10 },
-  noticeText: { fontSize: 14, lineHeight: 20 },
-  send: { minHeight: 48, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 18 },
-  sendText: { fontSize: 16, fontWeight: '600' },
-  action: { minHeight: 44, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16, borderWidth: 1 },
-  actionText: { fontSize: 14.5, fontWeight: '600' },
   cropFrame: { position: 'absolute', borderWidth: 2, borderColor: '#fff' },
   third: { position: 'absolute', backgroundColor: 'rgba(255,255,255,0.6)' },
   handle: { position: 'absolute', width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },

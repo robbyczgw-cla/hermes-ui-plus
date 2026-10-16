@@ -63,6 +63,8 @@
 #                                           entitlements (build copy only; the app only uses local notifications).
 #                                           If -exportArchive refuses, the signed .app from the archive is zipped.
 #   PUBLIC_BASE [$IOS_PUBLIC_BASE]  URL of dist/share/ios/ (e.g. https://<build-host>.<tailnet>.ts.net/hermes/ios), required
+#   HUI_MAC_LOCK_WAIT [2700]        seconds to wait for the Mac's single heavy-job lock (scripts/lib/maclock.sh: iOS, desktop
+#                                   and Android builds / emulator never overlap on the Mac); 0 = refuse at once
 #   MIN_FREE_GB [8]                 refuse to start below this much free disk on the Mac
 #   KEEP_CACHE=1                    keep node_modules, Pods and caches on the Mac (faster rebuild, ~2-3 GB)
 #   REMOTE_DIR [/Users/Shared/hermes-ui-build]  absolute build dir on the Mac (mode 700). Deliberately NOT under the
@@ -226,14 +228,21 @@ if [ "$UPLOAD" = 1 ]; then
   trap rm_asc_key EXIT
   "${SSH[@]}" "rm -rf $REMOTE_DIR/asc && mkdir -m 700 $REMOTE_DIR/asc && umask 077 && cat > $REMOTE_DIR/asc/AuthKey_$ASC_KEY_ID.p8" < "$ASC_KEY_PATH"
 fi
-"${SSH[@]}" "REMOTE_DIR='$REMOTE_DIR' MODE='$MODE' bash -s" <<'LAUNCH'
+# the Mac runs one heavy job at a time (this build, the desktop build, the Android lane): the lock is taken on the Mac
+# itself and held by the launcher below for the whole build (scripts/lib/maclock.sh)
+"${SSH[@]}" "mkdir -p hui-lane" && rsync -a "$ROOT/scripts/lib/maclock.sh" "$MAC_HOST:hui-lane/maclock.sh"
+"${SSH[@]}" "REMOTE_DIR='$REMOTE_DIR' MODE='$MODE' HUI_MAC_LOCK_WAIT='${HUI_MAC_LOCK_WAIT:-2700}' bash -s" <<'LAUNCH'
 set -euo pipefail
+. "$HOME/hui-lane/maclock.sh"
+maclock_acquire ios "$HUI_MAC_LOCK_WAIT" || exit 3
+trap 'maclock_release' EXIT
 B="$REMOTE_DIR"; RUN=(/bin/bash -c "source '$B/remote-build.env'; exec /bin/bash '$B/remote-build.sh'")
-[ "$MODE" = simulator ] && { echo "(simulator build: no signing, building directly)"; exec "${RUN[@]}"; }
+run_build() { local rc=0; "${RUN[@]}" || rc=$?; exit "$rc"; }   # no exec: this shell keeps the lock until the build is done
+[ "$MODE" = simulator ] && { echo "(simulator build: no signing, building directly)"; run_build; }
 IDENT="$(security find-identity -v -p codesigning | awk '/Apple Development/{print $2; exit}')"
 T="$(mktemp)"; cp /usr/bin/true "$T"
 if [ -n "$IDENT" ] && codesign --force -s "$IDENT" "$T" >/dev/null 2>&1; then
-  rm -f "$T"; echo "(signing works over ssh, building directly)"; exec "${RUN[@]}"
+  rm -f "$T"; echo "(signing works over ssh, building directly)"; run_build
 fi
 rm -f "$T"
 launchctl print "gui/$(id -u)" >/dev/null 2>&1 || { echo "keychain locked over ssh and nobody logged in at the Mac's screen: log in once (or run the build in Terminal on the Mac)"; exit 1; }
@@ -250,7 +259,7 @@ cat > "$PL" <<X
 </dict></plist>
 X
 launchctl bootout "gui/$(id -u)/$L" 2>/dev/null || true
-trap 'launchctl bootout "gui/$(id -u)/$L" 2>/dev/null || true; rm -f "$PL"' EXIT
+trap 'launchctl bootout "gui/$(id -u)/$L" 2>/dev/null || true; rm -f "$PL"; maclock_release' EXIT
 launchctl bootstrap "gui/$(id -u)" "$PL"
 tail -n +1 -f "$LOGF" & TP=$!
 while [ ! -s "$RC" ]; do sleep 2; done

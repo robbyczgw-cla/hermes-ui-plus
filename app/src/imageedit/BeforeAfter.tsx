@@ -6,9 +6,11 @@
 import { Image } from 'expo-image';
 import { useAttachmentUri } from '../attachments/useAttachmentUri';
 import { useMemo, useRef, useState } from 'react';
-import { PanResponder, Platform, Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
+import { PanResponder, Platform, Pressable, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
+import { Text } from '../ui/primitives/Text';
 import { useT } from '../i18n';
 import { useTheme } from '../ui';
+import { a11yState } from '../ui/lib/a11yState';
 
 const MAX_W = 420;
 
@@ -30,14 +32,14 @@ export function BeforeAfter({ before: beforeUri, after: afterUri }: { before: st
       <Pressable
         onPress={() => setOpen((o) => !o)}
         accessibilityRole="button"
-        accessibilityState={{ expanded: open }}
+        {...a11yState({ expanded: open })}
         accessibilityLabel={open ? tr('imageEdit.compare.hideA11y') : tr('imageEdit.compare.showA11y')}
         style={({ pressed }) => [
-          styles.chip,
+          styles.chip, { borderRadius: t.radii.pill },
           { borderColor: open ? t.colors.accent : t.colors.border, backgroundColor: open ? t.colors.accentSoft : pressed ? t.colors.surfacePressed : t.colors.surfaceAlt },
         ]}
       >
-        <Text style={[styles.chipText, { color: open ? t.colors.accent : t.colors.text }]}>{tr('imageEdit.compare.show')}</Text>
+        <Text style={[t.typography.caption, styles.chipText, { color: open ? t.colors.accentText : t.colors.text }]}>{tr('imageEdit.compare.show')}</Text>
       </Pressable>
       {open ? (
         <Slider before={before} after={after} aspect={aspect} onAspect={setAspect} />
@@ -85,7 +87,7 @@ function Slider({ before, after, aspect, onAspect }: { before: string; after: st
       onAccessibilityAction={(e) => setPos((p) => clampFraction(p + (e.nativeEvent.actionName === 'increment' ? 0.1 : -0.1)))}
       style={[
         styles.box,
-        { height: height || 240, borderRadius: t.radii.l, borderColor: t.colors.border, backgroundColor: t.colors.surfaceAlt },
+        { height: height || 240, borderRadius: t.radii.card, borderColor: t.colors.border, backgroundColor: t.colors.surfaceAlt },
         Platform.OS === 'web' ? ({ cursor: 'ew-resize', touchAction: 'pan-y', userSelect: 'none' } as object) : null,
       ]}
     >
@@ -105,12 +107,12 @@ function Slider({ before, after, aspect, onAspect }: { before: string; after: st
       </View>
       <View pointerEvents="none" style={[styles.divider, { left: cut - 1 }]} />
       <View pointerEvents="none" style={[styles.knob, { left: cut - 16, top: (height || 240) / 2 - 16 }]}>
-        <Text style={styles.knobText}>{'‹ ›'}</Text>
+        <Text style={[t.typography.caption, styles.knobText]}>{'‹ ›'}</Text>
       </View>
-      <Text pointerEvents="none" style={[styles.tag, { left: 8 }]}>
+      <Text pointerEvents="none" style={[t.typography.caption, styles.tag, { borderRadius: t.radii.inline, left: 8 }]}>
         {tr('imageEdit.compare.before')}
       </Text>
-      <Text pointerEvents="none" style={[styles.tag, { right: 8 }]}>
+      <Text pointerEvents="none" style={[t.typography.caption, styles.tag, { borderRadius: t.radii.inline, right: 8 }]}>
         {tr('imageEdit.compare.after')}
       </Text>
     </View>
@@ -118,8 +120,8 @@ function Slider({ before, after, aspect, onAspect }: { before: string; after: st
 }
 
 const styles = StyleSheet.create({
-  chip: { alignSelf: 'flex-start', paddingHorizontal: 12, minHeight: 34, justifyContent: 'center', borderRadius: 999, borderWidth: StyleSheet.hairlineWidth },
-  chipText: { fontSize: 13.5, fontWeight: '600' },
+  chip: { alignSelf: 'flex-start', paddingHorizontal: 12, minHeight: 34, justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth },
+  chipText: { fontWeight: '600' },
   box: { width: '100%', overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth },
   clip: { position: 'absolute', left: 0, top: 0, bottom: 0, overflow: 'hidden' },
   divider: { position: 'absolute', top: 0, bottom: 0, width: 2, backgroundColor: '#fff' },
@@ -134,17 +136,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(0,0,0,0.2)',
   },
-  knobText: { color: '#222', fontSize: 13, fontWeight: '700', marginTop: -1 },
+  knobText: { color: '#222', fontWeight: '700', marginTop: -1 },
   tag: {
     position: 'absolute',
     bottom: 8,
     color: '#fff',
-    fontSize: 12,
     fontWeight: '600',
     backgroundColor: 'rgba(0,0,0,0.55)',
     paddingHorizontal: 8,
     paddingVertical: 3,
-    borderRadius: 8,
     overflow: 'hidden',
   },
 });

@@ -9,20 +9,36 @@ function asciiJson(v) {
 }
 
 /**
- * @param {{keepaliveMs?: number, maxPerUser?: number, log?: (m: string, f?: object) => void}} [o]
+ * @param {{keepaliveMs?: number, maxPerUser?: number, maxBufferedBytes?: number, log?: (m: string, f?: object) => void}} [o]
  */
 export function createInboxHub(o = {}) {
   const keepaliveMs = o.keepaliveMs ?? 15_000;
   const maxPerUser = o.maxPerUser ?? 5;
+  const maxBufferedBytes = o.maxBufferedBytes ?? 256 * 1024;
   const log = o.log ?? (() => {});
   /** @type {Map<string, Set<{res: any, filter: (ev: any) => boolean, timer: any}>>} */
   const clients = new Map();
 
-  function write(c, event, data) {
+  function detach(user, c) {
+    clearInterval(c.timer);
+    const set = clients.get(user);
+    set?.delete(c);
+    if (set && !set.size) clients.delete(user);
+  }
+
+  function send(user, c, frame) {
     if (c.res.writableEnded || c.res.destroyed) return false;
-    c.res.write(`event: ${event}\ndata: ${asciiJson(data)}\n\n`);
+    // SSE has no acknowledgement/retransmission queue here. A stalled reader must reconnect and
+    // recover from session sync; continuing to write would grow Node's response queue without limit.
+    if (c.res.writableLength + Buffer.byteLength(frame) > maxBufferedBytes) {
+      detach(user, c);
+      c.res.destroy();
+      return false;
+    }
+    c.res.write(frame);
     return true;
   }
+  const write = (user, c, event, data) => send(user, c, `event: ${event}\ndata: ${asciiJson(data)}\n\n`);
 
   return {
     /**
@@ -34,8 +50,10 @@ export function createInboxHub(o = {}) {
       if (set.size >= maxPerUser) {
         // drop the oldest stream of this user (stale app instance)
         const oldest = set.values().next().value;
-        oldest?.res.end();
-        set.delete(oldest);
+        if (oldest) {
+          detach(user, oldest);
+          oldest.res.destroy();
+        }
       }
       res.writeHead(200, {
         'Content-Type': 'text/event-stream; charset=utf-8',
@@ -46,20 +64,16 @@ export function createInboxHub(o = {}) {
       });
       res.flushHeaders?.();
       const c = { res, filter, timer: null };
-      c.timer = setInterval(() => !res.writableEnded && res.write(': keepalive\n\n'), keepaliveMs);
+      c.timer = setInterval(() => send(user, c, ': keepalive\n\n'), keepaliveMs);
       c.timer.unref?.();
       set.add(c);
       clients.set(user, set);
-      write(c, 'hui.ready', ready);
-      const detach = () => {
-        clearInterval(c.timer);
-        set.delete(c);
-        if (!set.size) clients.delete(user);
-      };
-      req.on('close', detach);
-      res.on('close', detach);
+      const onClose = () => detach(user, c);
+      req.on('close', onClose);
+      res.on('close', onClose);
+      write(user, c, 'hui.ready', ready);
       log('inbox attach', { user, streams: set.size });
-      return detach;
+      return onClose;
     },
     /** Number of streams of `user` that would receive `ev` (0 = nobody listening -> use push). */
     listeners(user, ev) {
@@ -70,7 +84,7 @@ export function createInboxHub(o = {}) {
     /** Publish to the user's streams. Returns the number of streams that got it. */
     publish(user, ev, event = 'hui.message') {
       let n = 0;
-      for (const c of clients.get(user) ?? []) if (c.filter(ev) && write(c, event, ev)) n++;
+      for (const c of clients.get(user) ?? []) if (c.filter(ev) && write(user, c, event, ev)) n++;
       return n;
     },
     connected: (user) => (clients.get(user)?.size ?? 0) > 0,

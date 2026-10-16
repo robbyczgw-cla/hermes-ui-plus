@@ -1,7 +1,15 @@
-// Bundled HTML for the demo's hui-html scenarios, ported verbatim from mock-server/scenarios.mjs.
-// (generated once; keep in sync by hand if the mock changes)
+// Bundled HTML for the demo's hui-html scenarios, ported from mock-server/scenarios.mjs. The widgets run in a
+// sandbox without the app's dictionary, so their few UI words and the number format are baked in per chat language.
+import type { DemoLang } from './kit.ts';
 
-export const CALCULATOR_HTML = `<div class="calc">
+const S = {
+  de: { error: 'Fehler', locale: 'de-DE', title: 'Kreditrechner &ndash; monatliche Rate', amount: 'Kreditsumme', rate: 'Sollzins p.&nbsp;a.', term: 'Laufzeit', year: 'Jahr', years: 'Jahre', monthly: 'Monatliche Rate', interest: 'Zinskosten', total: 'Gesamtbetrag', principal: 'Tilgung', interestLegend: 'Zinsen', balance: 'Restschuld über die Laufzeit', yearCol: 'Jahr', balanceCol: 'Restschuld', note: 'Annuitätendarlehen, monatliche Raten, Zins gebunden über die gesamte Laufzeit.' },
+  en: { error: 'Error', locale: 'en-IE', title: 'Loan calculator &ndash; monthly payment', amount: 'Loan amount', rate: 'Interest rate p.&nbsp;a.', term: 'Term', year: 'year', years: 'years', monthly: 'Monthly payment', interest: 'Interest cost', total: 'Total', principal: 'Principal', interestLegend: 'Interest', balance: 'Remaining balance over the term', yearCol: 'Year', balanceCol: 'Balance', note: 'Annuity loan, monthly payments, interest fixed for the whole term.' },
+  es: { error: 'Error', locale: 'es-ES', title: 'Calculadora de préstamos &ndash; cuota mensual', amount: 'Importe', rate: 'Interés anual', term: 'Plazo', year: 'año', years: 'años', monthly: 'Cuota mensual', interest: 'Coste de intereses', total: 'Total', principal: 'Amortización', interestLegend: 'Intereses', balance: 'Saldo pendiente durante el plazo', yearCol: 'Año', balanceCol: 'Saldo', note: 'Préstamo de anualidad, cuotas mensuales, interés fijo durante todo el plazo.' },
+} as const;
+
+/** Pocket calculator (only the error word depends on the language). */
+export const calculatorHtml = (lang: DemoLang): string => `<div class="calc">
   <style>
     .calc { font-family: var(--h-font, system-ui); background: var(--h-surface, #f4f4f5); color: var(--h-text, #111);
       border: 1px solid var(--h-border, #ddd); border-radius: var(--h-radius, 12px); padding: 12px; max-width: 320px; }
@@ -19,8 +27,8 @@ export const CALCULATOR_HTML = `<div class="calc">
     keys.forEach(function (k) {
       const b = document.createElement('button'); b.textContent = k; if ('/*-+='.indexOf(k) >= 0) b.className = 'op';
       b.onclick = function () {
-        if (k === '=') { try { expr = String(Function('"use strict";return (' + (expr || '0') + ')')()); } catch (e) { expr = 'Fehler'; } }
-        else { if (expr === 'Fehler') expr = ''; expr += k; }
+        if (k === '=') { try { expr = String(Function('"use strict";return (' + (expr || '0') + ')')()); } catch (e) { expr = '${S[lang].error}'; } }
+        else { if (expr === '${S[lang].error}') expr = ''; expr += k; }
         d.textContent = expr || '0';
       };
       g.appendChild(b);
@@ -30,8 +38,14 @@ export const CALCULATOR_HTML = `<div class="calc">
   </script>
 </div>`;
 
-// Close to what Claude produces for "Bau mir einen Rechner für die monatliche Kreditrate …".
-export const LOAN_HTML = `<style>
+// Close to what a model produces for "build me a loan calculator"; texts and number formats follow the chat language.
+export const loanHtml = (lang: DemoLang): string => {
+  const s = S[lang];
+  const eur = new Intl.NumberFormat(s.locale, { style: 'currency', currency: 'EUR' });
+  const amount0 = eur.format(20000).replace(/[.,]00$/, '').replace(/\s/g, '&nbsp;');
+  const rate0 = new Intl.NumberFormat(s.locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(6.5);
+  const fmt = (n: number) => eur.format(n).replace(/\s/g, '&nbsp;');
+  return `<style>
   .loan { display: grid; gap: 14px; }
   .loan .field { display: grid; gap: 4px; }
   .loan .field-head { display: flex; justify-content: space-between; align-items: baseline; }
@@ -46,45 +60,45 @@ export const LOAN_HTML = `<style>
   .loan table td:not(:first-child), .loan table th:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
 </style>
 <div class="loan card">
-  <h3 style="margin:0">Kreditrechner &ndash; monatliche Rate</h3>
+  <h3 style="margin:0">${s.title}</h3>
   <div class="field">
-    <div class="field-head"><label for="amount">Kreditsumme</label><output id="amountOut">20.000&nbsp;€</output></div>
+    <div class="field-head"><label for="amount">${s.amount}</label><output id="amountOut">${amount0}</output></div>
     <input type="range" id="amount" min="1000" max="100000" step="500" value="20000">
   </div>
   <div class="field">
-    <div class="field-head"><label for="rate">Sollzins p.&nbsp;a.</label><output id="rateOut">6,50&nbsp;%</output></div>
+    <div class="field-head"><label for="rate">${s.rate}</label><output id="rateOut">${rate0}&nbsp;%</output></div>
     <input type="range" id="rate" min="0.5" max="15" step="0.05" value="6.5">
   </div>
   <div class="field">
-    <div class="field-head"><label for="years">Laufzeit</label><output id="yearsOut">5 Jahre</output></div>
+    <div class="field-head"><label for="years">${s.term}</label><output id="yearsOut">5 ${s.years}</output></div>
     <input type="range" id="years" min="1" max="10" step="1" value="5">
   </div>
   <div class="result">
-    <div class="stat"><div class="stat-label">Monatliche Rate</div><div class="stat-value" id="monthly">391,32&nbsp;€</div></div>
-    <div class="stat"><div class="stat-label">Zinskosten</div><div class="stat-value" id="interest">3.479,20&nbsp;€</div></div>
-    <div class="stat"><div class="stat-label">Gesamtbetrag</div><div class="stat-value" id="total">23.479,20&nbsp;€</div></div>
+    <div class="stat"><div class="stat-label">${s.monthly}</div><div class="stat-value" id="monthly">${fmt(391.32)}</div></div>
+    <div class="stat"><div class="stat-label">${s.interest}</div><div class="stat-value" id="interest">${fmt(3479.2)}</div></div>
+    <div class="stat"><div class="stat-label">${s.total}</div><div class="stat-value" id="total">${fmt(23479.2)}</div></div>
   </div>
   <div class="bar"><span id="barP" style="width:85%;background:var(--h-chart-1)"></span><span id="barI" style="width:15%;background:var(--h-chart-2)"></span></div>
-  <div class="legend"><span><i style="background:var(--h-chart-1)"></i>Tilgung</span><span><i style="background:var(--h-chart-2)"></i>Zinsen</span></div>
-  <svg id="chart" viewBox="0 0 300 120" preserveAspectRatio="none" aria-label="Restschuld über die Laufzeit"></svg>
+  <div class="legend"><span><i style="background:var(--h-chart-1)"></i>${s.principal}</span><span><i style="background:var(--h-chart-2)"></i>${s.interestLegend}</span></div>
+  <svg id="chart" viewBox="0 0 300 120" preserveAspectRatio="none" aria-label="${s.balance}"></svg>
   <table>
-    <thead><tr><th>Jahr</th><th>Zinsen</th><th>Tilgung</th><th>Restschuld</th></tr></thead>
+    <thead><tr><th>${s.yearCol}</th><th>${s.interestLegend}</th><th>${s.principal}</th><th>${s.balanceCol}</th></tr></thead>
     <tbody id="plan"></tbody>
   </table>
-  <p class="muted" style="margin:0;font-size:.85em">Annuitätendarlehen, monatliche Raten, Zins gebunden über die gesamte Laufzeit.</p>
+  <p class="muted" style="margin:0;font-size:.85em">${s.note}</p>
 </div>
 <script>
   (function () {
-    var eur = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' });
-    var pct = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    var eur = new Intl.NumberFormat('${s.locale}', { style: 'currency', currency: 'EUR' });
+    var pct = new Intl.NumberFormat('${s.locale}', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     var $ = function (id) { return document.getElementById(id); };
     function calc() {
       var P = +$('amount').value, r = +$('rate').value / 100 / 12, n = +$('years').value * 12;
       var m = r === 0 ? P / n : (P * r) / (1 - Math.pow(1 + r, -n));
       var total = m * n, interest = total - P;
-      $('amountOut').textContent = eur.format(P).replace(',00', '');
+      $('amountOut').textContent = eur.format(P).replace(/[.,]00$/, '');
       $('rateOut').textContent = pct.format(+$('rate').value) + ' %';
-      $('yearsOut').textContent = $('years').value + ($('years').value === '1' ? ' Jahr' : ' Jahre');
+      $('yearsOut').textContent = $('years').value + ($('years').value === '1' ? ' ${s.year}' : ' ${s.years}');
       $('monthly').textContent = eur.format(m);
       $('interest').textContent = eur.format(interest);
       $('total').textContent = eur.format(total);
@@ -104,3 +118,4 @@ export const LOAN_HTML = `<style>
     calc();
   })();
 </script>`;
+};

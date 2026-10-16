@@ -20,7 +20,7 @@ import { createAuth } from './auth.mjs'; // BRIDGE_TOKEN (admin) + per-device to
 import { createDeviceStore } from './devices.mjs';
 import { createDeviceAdmin } from './device-admin.mjs';
 import { checkRequestPath } from './paths.mjs';
-import { createStatic } from './static.mjs'; // optional web app: BRIDGE_WEB_DIR (src/static.mjs)
+import { createStatic, isLandingRequest, serveLanding } from './static.mjs'; // optional web app: BRIDGE_WEB_DIR (src/static.mjs)
 import { createProfiles } from './profiles.mjs'; // Hermes profiles under /p/<name>/ (BRIDGE_PROFILES)
 
 /** Where device tokens live: BRIDGE_STATE_DIR, else systemd's $STATE_DIRECTORY (first entry), else none. */
@@ -81,6 +81,17 @@ export function createServer(env = process.env, o = {}) {
   const images = createImages(config, { env, logger, fetch: o.fetch, providers: o.imageProviders, proxy: imageProxy });
   // --- web app hook-in: GET/HEAD outside /v1, /api, /bridge, /health when BRIDGE_WEB_DIR is set (no auth: public bundle).
   const web = createStatic({ dir: env.BRIDGE_WEB_DIR, logger, csp: env.BRIDGE_WEB_CSP });
+  // Without Bearer auth, CORS response headers alone cannot prevent a browser's simple POST from
+  // invoking the user's agent. Same-origin web clients and explicitly configured origins are allowed.
+  const openModeOriginAllowed = (req) => {
+    const origin = req.headers.origin;
+    if (!origin) return !['cross-site', 'same-site'].includes(req.headers['sec-fetch-site']);
+    if (typeof origin !== 'string' || origin === 'null') return false;
+    if (config.corsOrigins.includes('*') || config.corsOrigins.includes(origin)) return true;
+    const scheme = req.socket.encrypted ? 'https' : 'http';
+    if (origin === `${scheme}://${req.headers.host}`) return true;
+    try { return origin === new URL(env.BRIDGE_PUBLIC_URL).origin; } catch { return false; }
+  };
   // Server timeouts: headersTimeout / requestTimeout bound how long a client may take to SEND its request (slowloris,
   // a body that never ends). They do not touch responses, so SSE chat answers and the inbox stream can run for hours.
   // keepAliveTimeout: idle keep-alive sockets. BRIDGE_REQUEST_TIMEOUT_MS covers slow uploads (default 5 min).
@@ -90,6 +101,12 @@ export function createServer(env = process.env, o = {}) {
     headersTimeout: Math.min(30_000, requestTimeout),
     connectionsCheckingInterval: o.connectionsCheckingIntervalMs ?? 10_000,
   }, (req, res) => {
+    if (!config.token && config.allowNoAuth && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)
+      && !openModeOriginAllowed(req)) {
+      req.resume();
+      res.writeHead(403, { 'content-type': 'application/json', 'cache-control': 'no-store', 'connection': 'close' });
+      return res.end('{"error":{"message":"Origin is not allowed","type":"invalid_request_error","code":"origin_forbidden"}}');
+    }
     // M1: one path check for every route (dot segments, encoded slashes/dots, double encoding → 400)
     if (!checkRequestPath(req.url).ok) {
       res.writeHead(400, { 'content-type': 'application/json', 'x-hermes-ui-bridge': '1' });
@@ -106,6 +123,7 @@ export function createServer(env = process.env, o = {}) {
     if (voice.matches(req)) return voice.handle(req, res);
     if (push.matches(req)) return void push.handle(req, res).catch((e) => { logger.error('push failed', { err: e.message }); if (!res.headersSent) res.writeHead(500); res.end(); });
     if (web.matches(req)) return web.handle(req, res);
+    if (!web.enabled && isLandingRequest(req)) return serveLanding(req, res); // fixed status page, no state, no secrets
     return bridgeHandler(req, res);
   });
   server.timeout = 0; // no socket inactivity timeout: SSE answers can be silent for minutes (tool calls)

@@ -143,7 +143,7 @@ export function IconBtn({ icon, label, onPress, filled, disabled, size = 44, t, 
       onPress={onPress}
       accessibilityLabel={label}
       hitSlop={Math.max(0, (44 - size) / 2)}
-      style={{ width: size, height: size, borderRadius: size / 2, alignItems: 'center', justifyContent: 'center', backgroundColor: filled ? t.colors.accent : 'transparent', borderWidth: filled ? 0 : 1, borderColor: t.colors.borderStrong }}
+      style={{ width: size, height: size, borderRadius: size / 2, alignItems: 'center', justifyContent: 'center', backgroundColor: filled ? t.colors.accent : 'transparent', borderWidth: filled ? 0 : 1, borderColor: t.colors.borderControl }}
       pressedStyle={{ backgroundColor: filled ? t.colors.accent : t.colors.surfacePressed, opacity: filled ? 0.86 : 1 }}
     >
       <D2Icon name={icon} size={Math.round(size * 0.4)} color={fg} />
@@ -177,7 +177,7 @@ export function DoneAlert({ text, onDismiss, t }: { text: string; onDismiss: () 
     <View
       accessibilityRole="alert"
       accessibilityLiveRegion="assertive"
-      style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s, paddingLeft: t.spacing.m, borderRadius: t.radii.m, backgroundColor: t.colors.successSoft, minHeight: 44 }}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s, paddingLeft: t.spacing.m, borderRadius: t.radii.control, backgroundColor: t.colors.successSoft, minHeight: 44 }}
     >
       <D2Icon name="bell" size={16} color={t.colors.success} />
       <HText variant="callout" weight="600" style={{ flex: 1, color: t.colors.success, paddingVertical: 8 }}>
@@ -192,11 +192,11 @@ export function DoneAlert({ text, onDismiss, t }: { text: string; onDismiss: () 
   );
 }
 
-/** Uppercase micro label for sections. */
+/** Section label (sentence case). */
 export function SectionLabel({ text, t, style }: { text: string; t: Theme; style?: StyleProp<ViewStyle> }) {
   return (
     <View style={style}>
-      <HText variant="micro" color="muted" weight="600" style={{ textTransform: 'uppercase', letterSpacing: 0.6 }} accessibilityRole="header">
+      <HText variant="caption" color="muted" weight="600" accessibilityRole="header">
         {text}
       </HText>
     </View>
@@ -206,10 +206,10 @@ export function SectionLabel({ text, t, style }: { text: string; t: Theme; style
 /** Tip / warning box. */
 export function NoteBox({ kind, text, t }: { kind: 'tip' | 'warning'; text: string; t: Theme }) {
   const tr = useT();
-  const fg = kind === 'warning' ? t.colors.warning : t.colors.accent;
+  const fg = kind === 'warning' ? t.colors.warning : t.colors.accentText;
   const bg = kind === 'warning' ? t.colors.warningSoft : t.colors.accentSoft;
   return (
-    <View style={{ flexDirection: 'row', gap: t.spacing.s, padding: t.spacing.m, borderRadius: t.radii.m, backgroundColor: bg }}>
+    <View style={{ flexDirection: 'row', gap: t.spacing.s, padding: t.spacing.m, borderRadius: t.radii.control, backgroundColor: bg }}>
       <View style={{ paddingTop: 2 }}>{kind === 'warning' ? <Icon name="alert" size={16} color={fg} /> : <D2Icon name="lightbulb" size={16} color={fg} />}</View>
       <View style={{ flex: 1, gap: 2 }}>
         <HText variant="caption" weight="700" style={{ color: fg }}>

@@ -4,13 +4,18 @@ import { useImagesAllowed } from '../images';
 import { ImageLightbox, Photo, useNaturalAspect, type LightboxItem } from '../ui/components/imageParts';
 import { resolveImageUrl } from './imageUrl';
 import { useMarkdownImageBase } from './MarkdownImageContext';
-import { Linking, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions, type TextStyle } from 'react-native';
+import { Linking, Platform, Pressable, StyleSheet, View, useWindowDimensions, type TextStyle } from 'react-native';
+import { Text } from '../ui/primitives/Text';
+import { bindAfterCode, nowrapCode } from '../ui/lib/inlineCode';
 import { keepTogether, markdownColumnWidth } from '../ui/lib/tableMath';
 import { NARROW_TEXT_PROPS } from '../ui/lib/textWrap';
 import { useT } from '../i18n';
-import { FadeIn, haptic, scaleFont, useCopiedFlash, useMotionReduced, useTheme, type Theme } from '../ui';
+import { FadeIn, haptic, useCopiedFlash, useMotionReduced, useTheme, type Theme } from '../ui';
 import { usePreferences } from '../settings/PreferencesProvider';
+import { EdgeScroll } from '../ui/components/EdgeScroll';
 import { Icon } from './icons';
+import { PERF, perfNow, perfSpan } from '../perf/probe';
+import { perfWrap } from '../perf/react';
 import { dropFinalNewline, inlineToPlain, parseInline, parseMarkdownIncremental, safeHref, type Align, type Inline, type MdBlock, type MdListItem, type MdParseState } from './markdown';
 import { enterBlockPropsEqual, enterDelay } from './enterBlock';
 import { useToast } from './Toast';
@@ -43,13 +48,15 @@ type Props = {
 export const Markdown = memo(function Markdown({ text, streaming = false, collapse = false, run }: Props) {
   const t = useTheme();
   const tr = useT();
-  const s = useMdStyles(t);
   const prefs = usePreferences().prefs;
+  const s = useMdStyles(t, prefs.chatWidth === 'normal');
   const reduced = useMotionReduced();
   const parsed = useRef<MdParseState | null>(null);
   const blocks = useMemo(() => {
     // finished text: shared with every other mount of it (parse cache); streaming: only the tail is re-parsed
+    const t0 = PERF ? perfNow() : 0;
     const st = streaming ? parseMarkdownIncremental(text, parsed.current, run) : finishedMarkdown(text, parsed.current);
+    if (PERF) perfSpan(streaming ? 'md.parse' : 'md.final', t0);
     parsed.current = st;
     return st.blocks;
   }, [text, streaming, run]);
@@ -139,36 +146,49 @@ export const Markdown = memo(function Markdown({ text, streaming = false, collap
 
 type MdStyles = ReturnType<typeof makeStyles>;
 
-function useMdStyles(t: Theme): MdStyles {
-  return useMemo(() => makeStyles(t), [t]);
+function useMdStyles(t: Theme, measure: boolean): MdStyles {
+  return useMemo(() => makeStyles(t, measure), [t, measure]);
 }
 
+const WEB = Platform.OS === 'web';
 const BODY_SIZE = 16;
-const BODY_LINE = 25;
+/**
+ * Reading measure of prose (paragraphs, headings, lists, quotes) on wide screens, scaled with the font size: keeps
+ * lines well under ~90 characters while code, tables, images and cards use the whole column. Only for the "Normal"
+ * chat width – "Wide"/"Full" are an explicit choice for longer lines, "Narrow" is below it anyway.
+ */
+export const READING_MAX_WIDTH = 680;
 
-function makeStyles(t: Theme) {
+function makeStyles(t: Theme, measure = false) {
   const c = t.colors;
-  // Settings → Darstellung → Schriftgröße (t.fontScale); RN applies the OS font scale on top
-  const fs = (size: number, line: number) => scaleFont(size, line, t.fontScale);
-  const body = fs(BODY_SIZE, BODY_LINE);
+  // reading tokens of the type scale (ui/theme.ts), already scaled by Settings → Darstellung → Schriftgröße
+  // (t.fontScale); RN applies the OS font scale on top
+  const ty = t.typography;
+  const size = (k: keyof typeof ty) => ({ fontSize: ty[k].fontSize, lineHeight: ty[k].lineHeight });
+  const body = size('reading');
   return StyleSheet.create({
     p: { color: c.text, ...body, fontFamily: t.fonts.sans },
+    measure: { maxWidth: measure ? Math.round(READING_MAX_WIDTH * t.fontScale) : undefined },
     block: { marginTop: 12 },
     first: { marginTop: 0 },
-    h1: { ...fs(22, 29), fontWeight: '700', letterSpacing: -0.4, marginTop: 20 },
-    h2: { ...fs(19, 26), fontWeight: '700', letterSpacing: -0.3, marginTop: 18 },
-    h3: { ...fs(17, 24), fontWeight: '600', marginTop: 16 },
-    h4: { ...fs(16, 23), fontWeight: '600', marginTop: 14 },
+    // H1 24 / H2 20 / H3 17 over body 16: levels differ by size first, then weight; space above grows with the level
+    h1: { ...size('readingH1'), fontWeight: ty.readingH1.fontWeight, letterSpacing: ty.readingH1.letterSpacing, marginTop: 22 },
+    h2: { ...size('readingH2'), fontWeight: ty.readingH2.fontWeight, letterSpacing: ty.readingH2.letterSpacing, marginTop: 20 },
+    h3: { ...size('readingH3'), fontWeight: ty.readingH3.fontWeight, marginTop: 14 },
+    h4: { ...body, fontWeight: '600', color: c.muted, marginTop: 12 },
     strong: { fontWeight: '700' },
     em: { fontStyle: 'italic' },
     del: { textDecorationLine: 'line-through', color: c.muted },
-    link: { color: c.accent, textDecorationLine: 'underline' },
+    link: { color: c.accentText, textDecorationLine: 'underline' },
     icode: {
       fontFamily: t.fonts.mono,
-      fontSize: fs(14.5, 21).fontSize,
+      fontSize: ty.readingSmall.fontSize,
       backgroundColor: c.surfaceAlt,
       color: c.text,
     },
+    // react-native-web passes these CSS properties through (not in the RN style types)
+    icodeWeb: { paddingHorizontal: 4, borderRadius: 4, boxDecorationBreak: 'clone', WebkitBoxDecorationBreak: 'clone' } as TextStyle,
+    icodeNowrap: { whiteSpace: 'nowrap' } as TextStyle,
     codeWrap: { borderRadius: t.radii.m, backgroundColor: c.codeBg, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, overflow: 'hidden' },
     codeHead: {
       flexDirection: 'row',
@@ -178,10 +198,10 @@ function makeStyles(t: Theme) {
       paddingVertical: 6,
       backgroundColor: c.surfaceAlt,
     },
-    codeLang: { color: c.muted, fontSize: 12, fontWeight: '500' },
+    codeLang: { color: c.muted, fontSize: ty.caption.fontSize, fontWeight: '500' },
     codeCopy: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 2, paddingHorizontal: 4 },
-    codeCopyText: { color: c.muted, fontSize: 12 },
-    codeText: { fontFamily: t.fonts.mono, ...fs(13.5, 20), color: c.codeText, padding: 12 },
+    codeCopyText: { color: c.muted, fontSize: ty.caption.fontSize },
+    codeText: { fontFamily: t.fonts.mono, ...size('code'), color: c.codeText, padding: 12 },
     codeChunks: { padding: 12 },
     codeChunk: { padding: 0 },
     listRow: { flexDirection: 'row', marginTop: 4 },
@@ -190,16 +210,16 @@ function makeStyles(t: Theme) {
     listBody: { flex: 1, minWidth: 0 },
     quote: { borderLeftWidth: 3, borderLeftColor: c.borderStrong, paddingLeft: 12 },
     hr: { height: StyleSheet.hairlineWidth, backgroundColor: c.borderStrong, marginVertical: 8 },
-    table: { borderWidth: StyleSheet.hairlineWidth, borderColor: c.borderStrong, borderRadius: t.radii.s, overflow: 'hidden' },
+    table: { borderWidth: StyleSheet.hairlineWidth, borderColor: c.borderControl, borderRadius: t.radii.s, overflow: 'hidden' },
     tr: { flexDirection: 'row' },
     th: { backgroundColor: c.surfaceAlt },
     td: { paddingHorizontal: 10, paddingVertical: 7, borderColor: c.border, borderRightWidth: StyleSheet.hairlineWidth, borderTopWidth: StyleSheet.hairlineWidth },
-    tdText: { color: c.text, ...fs(14.5, 21) },
-    thText: { color: c.text, ...fs(14.5, 21), fontWeight: '600' },
-    caret: { color: c.text, fontSize: 13 },
-    fnRaw: { color: c.muted, fontSize: fs(12, 16).fontSize },
+    tdText: { color: c.text, ...size('readingSmall') },
+    thText: { color: c.text, ...size('readingSmall'), fontWeight: '600' },
+    caret: { color: c.text, fontSize: ty.caption.fontSize },
+    fnRaw: { color: c.muted, fontSize: ty.caption.fontSize },
     readMore: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', minHeight: 44, marginTop: 4, paddingRight: 8 },
-    readMoreText: { color: c.accent, ...fs(15, 21), fontWeight: '600' },
+    readMoreText: { color: c.accentText, ...size('bodyStrong'), fontWeight: '600' },
   });
 }
 
@@ -211,7 +231,7 @@ type BlockProps = { block: MdBlock; s: MdStyles; first: boolean; live: boolean }
  */
 const EnterBlock = memo(function EnterBlock({ block, s, first, live, enter, delay }: BlockProps & { enter: boolean; delay: number }) {
   const [mountDelay] = useState(delay);
-  const view = <BlockView block={block} s={s} first={first} live={live} />;
+  const view = perfWrap(`md.${block.type}${live ? '' : '.done'}`, <BlockView block={block} s={s} first={first} live={live} />);
   return enter ? <FadeIn delay={mountDelay}>{view}</FadeIn> : view;
 }, enterBlockPropsEqual);
 
@@ -221,7 +241,7 @@ const BlockView = memo(
     switch (block.type) {
       case 'paragraph':
         return (
-          <Text style={[s.p, spacing]} selectable>
+          <Text style={[s.p, s.measure, spacing]} selectable>
             <InlineText text={block.text} partial={live} s={s} d={!live} />
             {live ? <Caret s={s} /> : null}
           </Text>
@@ -229,7 +249,7 @@ const BlockView = memo(
       case 'heading': {
         const hs = block.level === 1 ? s.h1 : block.level === 2 ? s.h2 : block.level === 3 ? s.h3 : s.h4;
         return (
-          <Text style={[s.p, hs, first && s.first]} accessibilityRole="header" selectable>
+          <Text style={[s.p, s.measure, hs, first && s.first]} accessibilityRole="header" selectable>
             <InlineText text={block.text} partial={live} s={s} d={!live} />
             {live ? <Caret s={s} /> : null}
           </Text>
@@ -243,13 +263,13 @@ const BlockView = memo(
         );
       case 'list':
         return (
-          <View style={spacing}>
+          <View style={[s.measure, spacing]}>
             <ListView block={block} s={s} live={live} depth={0} />
           </View>
         );
       case 'quote':
         return (
-          <View style={[s.quote, spacing]}>
+          <View style={[s.quote, s.measure, spacing]}>
             {block.blocks.map((b, i) => (
               <BlockView key={i} block={b} s={s} first={i === 0} live={live && i === block.blocks.length - 1} />
             ))}
@@ -299,10 +319,13 @@ function InlineView({ nodes, s, d = false }: { nodes: Inline[]; s: MdStyles; d?:
   const detect = d && f.entities;
   return nodes.map((n, i) => {
     switch (n.t) {
-      case 'text':
+      case 'text': {
+        // "." / "," / ")" right after inline code stays on the code's line
+        const text = i > 0 && nodes[i - 1].t === 'code' ? bindAfterCode(n.s) : n.s;
         // "Im Chat suchen": matches marked (entity chips are skipped in a run with a match)
-        if (hl && n.s) return <Highlighted key={i} text={n.s} hl={hl} />;
-        return detect ? <DetectedText key={i} text={n.s} s={s} /> : n.s;
+        if (hl && text) return <Highlighted key={i} text={text} hl={hl} />;
+        return detect ? <DetectedText key={i} text={text} s={s} /> : text;
+      }
       case 'fn':
         return f.footnotes ? (
           <FootnotePill key={i} n={n.n} raw={n.raw} />
@@ -314,7 +337,13 @@ function InlineView({ nodes, s, d = false }: { nodes: Inline[]; s: MdStyles; d?:
       case 'br':
         return '\n';
       case 'code':
-        return (
+        // web: CSS padding (no padding spaces to break at or to copy) and short commands never split;
+        // native has no per-span nowrap/padding, so the chip keeps its padding spaces
+        return WEB ? (
+          <Text key={i} style={[s.icode, s.icodeWeb, nowrapCode(n.s) && s.icodeNowrap]}>
+            {n.s}
+          </Text>
+        ) : (
           <Text key={i} style={s.icode}>
             {` ${n.s} `}
           </Text>
@@ -428,7 +457,7 @@ function ImagesView({ items }: { items: { alt: string; href: string }[] }) {
         accessibilityLabel={imgs.length > 1 ? tr('ui.image.tapToLoadN', { count: imgs.length }) : tr('ui.image.tapToLoad')}
         style={({ pressed }) => [{ borderRadius: t.radii.m, borderWidth: StyleSheet.hairlineWidth, borderColor: t.colors.border, backgroundColor: pressed ? t.colors.surfacePressed : t.colors.surfaceAlt, padding: 14 }]}
       >
-        <Text style={{ color: t.colors.accent, fontSize: 15, fontWeight: '600' }}>{imgs.length > 1 ? tr('ui.image.tapToLoadN', { count: imgs.length }) : tr('ui.image.tapToLoad')}</Text>
+        <Text style={{ color: t.colors.accentText, fontSize: 15, fontWeight: '600' }}>{imgs.length > 1 ? tr('ui.image.tapToLoadN', { count: imgs.length }) : tr('ui.image.tapToLoad')}</Text>
         {imgs[0].alt && imgs.length === 1 ? <Text style={{ color: t.colors.muted, fontSize: 13, marginTop: 2 }}>{imgs[0].alt}</Text> : null}
       </Pressable>
     );
@@ -538,9 +567,9 @@ export function CodeBlock({ lang, code, s }: { lang: string; code: string; s: Md
       {wrap ? (
         <CodeText code={code} s={s} />
       ) : (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} bounces={false}>
+        <EdgeScroll fadeColor={t.colors.codeBg} hintLabel={tr('chat.code.scrollRight')} hintTop={12}>
           <CodeText code={code} s={s} />
-        </ScrollView>
+        </EdgeScroll>
       )}
     </View>
   );
@@ -616,14 +645,16 @@ function sameNumbers(a: number[], b: number[]): boolean {
 function TableView({ block, s }: { block: Extract<MdBlock, { type: 'table' }>; s: MdStyles }) {
   // the text grows with the app setting AND the OS font scale (RN applies it on top): so must the columns,
   // or numbers and ranges break mid-digit at 1.3 ("c. 1011–1 / 021")
-  const fontScale = useTheme().fontScale * (useWindowDimensions().fontScale || 1);
+  const t = useTheme();
+  const tr = useT();
+  const fontScale = t.fontScale * (useWindowDimensions().fontScale || 1);
   const widths = useMemo(
     () => block.header.map((h, ci) => markdownColumnWidth([h, ...block.rows.map((r) => r[ci] ?? '')], fontScale)),
     [block, fontScale],
   );
   const alignStyle = (ci: number): TextStyle => ({ textAlign: block.align[ci] ?? 'left' });
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} bounces={false}>
+    <EdgeScroll fadeColor={t.colors.bg} hintLabel={tr('ui.table.scrollRight')}>
       <View style={s.table}>
         <View style={[s.tr, s.th]}>
           {block.header.map((h, ci) => (
@@ -638,6 +669,6 @@ function TableView({ block, s }: { block: Extract<MdBlock, { type: 'table' }>; s
           <TableRow key={ri} row={row} widths={widths} align={block.align} s={s} />
         ))}
       </View>
-    </ScrollView>
+    </EdgeScroll>
   );
 }

@@ -1,0 +1,27 @@
+name: setup-gitleaks
+description: >-
+  Installs the pinned gitleaks release (same version as docs/LEAK-GUARD.md) into ~/.local/bin after verifying its
+  SHA-256. scripts/scan-artifact.sh and the release workflow need the binary on PATH. No secrets, no third-party action.
+
+runs:
+  using: composite
+  steps:
+    - name: Install gitleaks (checksum-verified)
+      shell: bash
+      env:
+        GITLEAKS_VERSION: 8.30.1
+        # sha256 of gitleaks_8.30.1_linux_x64.tar.gz, from the release's gitleaks_8.30.1_checksums.txt
+        GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+      run: |
+        set -euo pipefail
+        tmp="$(mktemp -d)"
+        archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+        curl --fail --silent --show-error --location --retry 3 -o "$tmp/$archive" \
+          "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/$archive"
+        echo "$GITLEAKS_SHA256  $tmp/$archive" | sha256sum -c -
+        tar -xzf "$tmp/$archive" -C "$tmp" gitleaks
+        mkdir -p "$HOME/.local/bin"
+        install -m755 "$tmp/gitleaks" "$HOME/.local/bin/gitleaks"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        "$HOME/.local/bin/gitleaks" version
+        rm -rf "$tmp"

@@ -30,7 +30,7 @@ export function capStoredText(text: string, max = STORED_TEXT_MAX): { text: stri
  * Drop transient/derived fields. A message that was still streaming when we persist it (app killed,
  * conversation switched, page reloaded offline) can never resume -> store it as `stopped`; its tools that were
  * still running are stored as cancelled ("abgebrochen", not "✓ fertig").
- * Dropped: statusNote, approval / pendingApprovals (runtime only – rebuilt from GET /v1/runs/{id} on open; the
+ * Dropped: statusNote, reconnecting, approval / pendingApprovals (runtime only – rebuilt from GET /v1/runs/{id} on open; the
  * persistent `approvalLog` history stays).
  * Reasoning is kept – also of an unfinished answer, so already streamed text stays visible after a reload –
  * capped to REASONING_STORE_MAX chars (stored Hermes sessions and offline viewing need it). Tool details /
@@ -43,7 +43,7 @@ export function capStoredText(text: string, max = STORED_TEXT_MAX): { text: stri
  */
 export function stripMessage(src: ChatMessage): ChatMessage {
   const m = src.sendPending || src.sendUnacked ? queuedForStorage(src) : src;
-  const { reasoning, statusNote, approval, pendingApprovals, ...rest } = compactDetails(m);
+  const { reasoning, statusNote, approval, pendingApprovals, reconnecting, ...rest } = compactDetails(m);
   const out: ChatMessage = { ...rest };
   if (reasoning) {
     out.reasoning = reasoning.length > REASONING_STORE_MAX ? reasoning.slice(0, REASONING_STORE_MAX) + '…' : reasoning;

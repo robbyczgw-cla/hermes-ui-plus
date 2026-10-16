@@ -20,6 +20,8 @@ import { menus as menusNS } from './ns/menus.en.ts';
 import { desktop as desktopNS } from './ns/desktop.en.ts';
 import { bots as botsNS } from './ns/bots.en.ts';
 import { quick as quickNS } from './ns/quick.en.ts';
+import { support as supportNS } from './ns/support.en.ts';
+import { share as shareNS } from './ns/share.en.ts';
 
 type Dict = typeof de;
 
@@ -45,6 +47,8 @@ export const en = {
   desktop: desktopNS,
   bots: botsNS,
   quick: quickNS,
+  support: supportNS,
+  share: shareNS,
   actions: {
     send: 'Send',
     cancel: 'Cancel',
@@ -63,17 +67,8 @@ export const en = {
     timeout: 'Timed out. The server is not responding.',
     unknown: 'Unknown error: {message}',
   },
-  time: {
-    now: 'just now',
-    seconds: '{count, plural, one {# second} other {# seconds}}',
-    minutes: '{count, plural, one {# minute} other {# minutes}}',
-    hours: '{count, plural, one {# hour} other {# hours}}',
-    days: '{count, plural, one {# day} other {# days}}',
-    ago: '{value} ago',
-  },
   language: {
     label: 'Language',
-    system: 'System language',
     de: 'Deutsch',
     en: 'English',
     es: 'Español',

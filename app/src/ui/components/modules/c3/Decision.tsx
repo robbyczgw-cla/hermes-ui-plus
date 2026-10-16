@@ -131,7 +131,7 @@ export function Decision({ node }: { node: Partial<HuiDecision> }) {
 
 function SectionLabel({ t, text }: { t: Theme; text: string }) {
   return (
-    <HText variant="micro" color="muted" style={{ textTransform: 'uppercase', letterSpacing: 0.6 }} accessibilityRole="header">
+    <HText variant="caption" weight="600" color="muted" accessibilityRole="header">
       {text}
     </HText>
   );
@@ -197,7 +197,7 @@ function BarRow({ t, r, top, tie, selected, lang, disabled, onPress }: { t: Them
           alignItems: 'center',
           gap: t.spacing.s,
           paddingHorizontal: t.spacing.s + 2,
-          borderRadius: t.radii.m,
+          borderRadius: t.radii.control,
           borderWidth: win || selected ? 1.5 : 1,
           borderColor: selected ? t.colors.accent : win ? withAlpha(t.colors.accent, 0.55) : t.colors.border,
           backgroundColor: selected || win ? t.colors.accentSoft : t.colors.surface,
@@ -230,7 +230,7 @@ function BarRow({ t, r, top, tie, selected, lang, disabled, onPress }: { t: Them
             <Animated.View style={[{ height: 6, width: '100%', borderRadius: 3, backgroundColor: fillColor, transformOrigin: 'left' } as object, bar, settled ? { transform: [{ scaleX: Math.max(0.0001, (r.score ?? 0) / 10) }] } : null]} />
           </View>
         </View>
-        <HText variant="headline" tabular style={{ minWidth: 34, textAlign: 'right', color: win ? t.colors.accent : t.colors.text }}>
+        <HText variant="headline" tabular style={{ minWidth: 34, textAlign: 'right', color: win ? t.colors.accentText : t.colors.text }}>
           {scoreText}
         </HText>
       </PressableScale>
@@ -249,7 +249,7 @@ function Breakdown({ t, model, optionKey, weights, lang, onClose }: { t: Theme; 
   const anyScored = rows.some((r) => r.contribution !== null && r.weight > 0);
   return (
     <FadeIn>
-      <View style={{ borderRadius: t.radii.m, borderWidth: 1, borderColor: t.colors.border, backgroundColor: t.colors.surfaceAlt, padding: t.spacing.m, gap: t.spacing.s }} accessibilityLiveRegion="polite">
+      <View style={{ borderRadius: t.radii.control, borderWidth: 1, borderColor: t.colors.border, backgroundColor: t.colors.surfaceAlt, padding: t.spacing.m, gap: t.spacing.s }} accessibilityLiveRegion="polite">
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s }}>
           <HText variant="callout" weight="600" style={{ flex: 1 }} numberOfLines={2}>
             {tr('ui.decision.breakdownTitle', { label: option.label })}
@@ -323,8 +323,8 @@ function WeightRow({ t, c, value, onChange }: { t: Theme; c: DecisionCriterion; 
         <HText variant="caption" weight="500" style={{ flex: 1 }} numberOfLines={1}>
           {c.label}
         </HText>
-        <View style={{ minWidth: 30, height: 24, paddingHorizontal: 6, borderRadius: t.radii.s, backgroundColor: value > 0 ? t.colors.accentSoft : t.colors.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
-          <HText variant="caption" weight="600" tabular style={{ color: value > 0 ? t.colors.accent : t.colors.subtle }}>
+        <View style={{ minWidth: 30, height: 24, paddingHorizontal: 6, borderRadius: t.radii.control, backgroundColor: value > 0 ? t.colors.accentSoft : t.colors.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
+          <HText variant="caption" weight="600" tabular style={{ color: value > 0 ? t.colors.accentText : t.colors.subtle }}>
             {String(value)}
           </HText>
         </View>

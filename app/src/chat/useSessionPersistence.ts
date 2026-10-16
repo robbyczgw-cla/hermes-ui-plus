@@ -16,6 +16,11 @@ const PARTIAL_SAVE_MS = 2500;
  * restore `sessionId` + transcript, persist at the end of every turn (also when the session is
  * unmounted mid-stream: the hook aborts and reports `stopped`) and right after a user message
  * was added (crash safety; `save()` is throttled and skips unchanged lists).
+ *
+ * The end of a turn is written at once (`flush`), not on the repo's debounce timer: in the Android background JS
+ * timers run only while the keep-alive service does, and that service ends with the turn – a finished answer would
+ * stay on disk as the last partial save (stored as `stopped`) until the app is opened again. The service is held
+ * until the write is done (`turnRegistry.settle`), and the "Antwort ist da" notification is shown only after it.
  */
 export function sessionOptions(conv: UseConversation): UseHermesChatOptions {
   return {
@@ -24,9 +29,11 @@ export function sessionOptions(conv: UseConversation): UseHermesChatOptions {
     onTurnEnd: (messages, sid) => {
       conv.save(messages);
       if (sid && sid !== conv.meta?.hermesSessionId) conv.setSessionId(sid);
-      // "Antwort ist da" (background/noticeState): live turn end or a recovered answer; de-duplicated by message id
+      const written = turnRegistry.settle(conv.flush());
+      // "Antwort ist da" (background/noticeState): live turn end or a recovered answer; de-duplicated by message id.
+      // Routed now (open chat, scrolled to the end …); the system notification waits for `written`
       const last = messages[messages.length - 1];
-      if (conv.meta?.id && last && isFresh(last, Date.now())) emitAnswerReady({ conversationId: conv.meta.id, message: last, late: last.recoveredAt !== undefined });
+      if (conv.meta?.id && last && isFresh(last, Date.now())) emitAnswerReady({ conversationId: conv.meta.id, message: last, late: last.recoveredAt !== undefined, written });
     },
     // a new chat's session id is stored before the first answer: a killed app (or a lost stream) can still match
     // the stored Hermes session / the live inbox event to THIS conversation instead of creating a new one

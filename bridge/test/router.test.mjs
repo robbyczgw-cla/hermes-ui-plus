@@ -83,12 +83,12 @@ test('taxonomy v2: formats, renderers, components, hint line', async () => {
 test('prompt v2: lists every format with a definition and the v2 decision rules', async () => {
   const { ROUTER_SYSTEM_PROMPT, ROUTE_JSON_SCHEMA, PROMPT_VERSION } = await import('../src/router/prompt.mjs');
   const { ROUTE_FORMATS } = await import('../src/router/taxonomy.mjs');
-  assert.equal(PROMPT_VERSION, 'r6');
+  assert.equal(PROMPT_VERSION, 'r7');
   for (const f of ROUTE_FORMATS) assert.ok(ROUTER_SYSTEM_PROMPT.includes(`- ${f}: `), f);
   assert.deepEqual(ROUTE_JSON_SCHEMA.schema.properties.format.enum, [...ROUTE_FORMATS]);
   assert.match(ROUTER_SYSTEM_PROMPT, /machine replies/);
-  // budget grows by about one definition per new format (v5 paths: ~20.3k, r6 blocks: ~21.0k); the overall cap is in router-v4.test.mjs
-  assert.ok(ROUTER_SYSTEM_PROMPT.length < 21500);
+  // budget grows by about one definition per new format (v5 paths: ~20.3k, r6 blocks: ~21.0k, r7 coding views + products compare: ~23.2k); the overall cap is in router-v4.test.mjs
+  assert.ok(ROUTER_SYSTEM_PROMPT.length < 23500);
   for (const w of ['translation', 'poll', 'agenda', 'weather', 'decision', 'rank', 'scale', 'radar', 'gauge', 'heatmap', 'waterfall', 'hbar', 'stacked', 'scatter']) assert.ok(ROUTER_SYSTEM_PROMPT.includes(w), w);
 });
 

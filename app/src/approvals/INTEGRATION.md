@@ -31,8 +31,11 @@ event / advertised timeout → + 300 s. Restored requests measure their age on t
 
 - Stack: one card at a time, "Freigabe 1 von 3" with ‹ › (44 pt) and a count badge; hidden → chip with the count. A new
   request reveals the stack and is announced (VoiceOver/TalkBack).
-- Card: server reason ("Grund laut Hermes"), command in a scrollable mono box with copy, risk pill (client heuristic,
-  labelled "geschätzt"; smart-denied = Hermes' own verdict), countdown, high risk → "Ablehnen" primary.
+- Card (1 px frame, a faint seal-red edge only at elevated / high / flagged risk): seal mark + title, risk as one quiet
+  line (seal dot + "Erhöhtes Risiko · von der App geschätzt, nicht von Hermes"; smart-denied = Hermes' own verdict), the
+  command in a mono block with copy (wraps, scrolls vertically), server reason ("Grund laut Hermes"), countdown (brass
+  bar). Actions: "Einmal erlauben" (primary) + "Für diesen Auftrag" (secondary) in one row (stacked when they do not
+  fit), "Ablehnen" quiet below, "Immer erlauben" behind "Weitere Optionen"; high risk → "Ablehnen" is the primary.
   At the deadline: "Abgelaufen – abgelehnt", buttons disabled, "Schließen".
 - Scopes (only those the server sends): `once` "Einmal erlauben"; `session` "Für diesen Auftrag" (on the API path the
   approval key is the completion id – the next message asks again); `always` "Immer erlauben (überall, auch Telegram)"

@@ -28,8 +28,11 @@ The bridge records keyed chat turns itself (`bridge/src/replay.mjs`), within its
   (`app/src/hermes/idempotency.ts`).
 - The bridge records the bytes of a `200` SSE turn per device token + key. The same key re-attaches instead of starting
   a turn; `X-Hermes-UI-Resume-Offset: <bytes>` continues a broken stream at the byte the app has. The app keeps its SSE
-  parser state across the reconnect, so each event is applied once (`app/src/hermes/stream.ts`, 3 attempts), and falls
-  back to the existing inbox / session recovery when the bridge answers `409 resume_unavailable`.
+  parser state across the reconnect, so each event is applied once (`app/src/hermes/stream.ts`: attempts for up to
+  2 min, at once on foreground / network back), and falls back to the existing inbox / session recovery only when the
+  bridge refuses (`409 resume_unavailable` / `turn_unrecorded`). An answer still unfinished after that, or persisted
+  unfinished by an app that was killed, re-attaches at byte 0 and is replayed into a fresh copy of the message
+  (`app/src/hermes/reattach.ts`), so it continues live after a restart too.
 - A keyed turn whose upstream stream broke (`aborted`) gave no answer: a plain retry with the same key (no resume
   offset) runs it anew. A turn that ran but has no recording (over the per-turn buffer, bytes evicted) answers
   `409 turn_unrecorded`: never a second turn; the app runs session recovery. A plain send refused with

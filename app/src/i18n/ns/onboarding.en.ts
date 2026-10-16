@@ -14,7 +14,7 @@ export const onboarding = {
   },
   welcome: {
     badge: 'Unofficial community client for Hermes Agent',
-    title: 'Welcome to {app}',
+    title: 'Welcome to {appShort}',
     lead: 'A chat for your own Hermes Agent, with charts, tables, forms and small apps right in the reply.',
     start: 'Get started',
     demoLink: 'Just take a look around',
@@ -28,6 +28,21 @@ export const onboarding = {
     pair: { title: 'Pair with Bridge (QR)', text: 'Scan the QR code of the {bridge}, the fastest way.', badge: 'Recommended' },
     direct: { title: 'Hermes directly', text: 'Enter the address and API key of your Hermes API server.' },
     demo: { title: 'Just try it (demo)', text: 'Offline demo with sample replies. No connection needed.' },
+  },
+  agentSetup: {
+    option: { title: 'Let your agent set it up', text: 'Hermes or a coding agent like Claude Code installs the bridge and sends you a pairing link.' },
+    title: 'Let your agent set it up',
+    lead: 'Your Hermes or coding agent installs the {bridge} on your server and sends you a pairing link.',
+    lead2: 'Just give it this prompt in a private chat (Telegram, Hermes CLI, Claude Code …).',
+    promptLabel: 'Setup prompt (English)',
+    copy: 'Copy prompt',
+    copied: 'Prompt copied',
+    share: 'Share',
+    shareTitle: 'Set up the {bridge} for {appShort}',
+    copiedInstead: 'Sharing is not available here, so the prompt was copied instead.',
+    failed: 'Could not copy. Select the text and copy it by hand.',
+    linkHint: 'When your agent sends the pairing link, open it on this device or paste it here.',
+    pasteLink: 'Paste the pairing link',
   },
   scan: {
     title: 'Scan QR code',
@@ -256,9 +271,35 @@ export const onboarding = {
     capabilities: { title: 'What can you do?', subtitle: 'Tools and abilities', prompt: 'What can you do? Show me your most important tools.' },
   },
   demoStarters: {
-    chart: { title: 'Chart', subtitle: 'a week of temperatures', prompt: 'Show me a chart of the temperature trend.' },
-    compare: { title: 'Comparison', subtitle: 'two plans side by side', prompt: 'Compare two plans.' },
-    loan: { title: 'Loan calculator', subtitle: 'interactive with sliders', prompt: 'Build me a loan calculator.' },
-    mixed: { title: 'Mixed report', subtitle: 'key figures, table, tools', prompt: 'Create a mixed report for this week.' },
+    chart: {
+      title: 'Chart',
+      subtitle: 'a week of temperatures',
+      prompt: 'Show me a chart of the temperature trend.',
+    },
+    approval: {
+      title: 'Approval',
+      subtitle: 'you decide before it deletes',
+      prompt: 'Clean up the cache, with approval',
+    },
+    checklist: {
+      title: 'Shopping list',
+      subtitle: 'to tick off',
+      prompt: 'Make me a shopping list for the weekend',
+    },
+    products: {
+      title: 'Product compare',
+      subtitle: 'headphones, “I’ll take this”',
+      prompt: 'Compare noise cancelling headphones',
+    },
+    recipe: {
+      title: 'Cook with timers',
+      subtitle: 'spaghetti carbonara',
+      prompt: 'Cook spaghetti carbonara with me – step by step, with timers.',
+    },
+    explain: {
+      title: 'Reshape an answer',
+      subtitle: 'heat pump: shorter, as a table …',
+      prompt: 'Explain step by step how a heat pump works.',
+    },
   },
 } satisfies typeof de;

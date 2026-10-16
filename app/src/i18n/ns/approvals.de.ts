@@ -8,8 +8,12 @@ export const approvals = {
     flagged: 'Von Hermes als gefährlich eingestuft',
     high: 'Hohes Risiko (geschätzt)',
     elevated: 'Erhöhtes Risiko (geschätzt)',
-    estimateNote: 'Risiko von der App geschätzt, nicht von Hermes',
     normal: 'Bestätigung nötig',
+    short: {
+      high: 'Hohes Risiko',
+      elevated: 'Erhöhtes Risiko',
+    },
+    byApp: 'von der App geschätzt, nicht von Hermes',
   },
   choice: {
     once: {
@@ -32,6 +36,8 @@ export const approvals = {
       a11y: 'Befehl ablehnen',
     },
     retry: '{label} – erneut versuchen',
+    more: 'Weitere Optionen',
+    less: 'Weniger Optionen',
   },
   confirm: {
     title: 'Wirklich immer erlauben?',
@@ -42,7 +48,7 @@ export const approvals = {
   error: {
     notPending: 'Diese Anfrage wurde schon beantwortet oder ist abgelaufen.',
     runEnded: 'Der Lauf ist bereits beendet. Die Anfrage ist nicht mehr offen.',
-    auth: 'Anmeldung fehlgeschlagen. Bitte API-Key prüfen.',
+    auth: 'Anmeldung fehlgeschlagen. Bitte API-Schlüssel prüfen.',
     network: 'Keine Verbindung zu Hermes. Antwort wurde nicht gesendet.',
     busy: 'Hermes ist gerade ausgelastet. Bitte erneut versuchen.',
     generic: 'Antwort konnte nicht gesendet werden.',
@@ -87,7 +93,7 @@ export const approvals = {
   command: {
     unusual: 'Befehl enthält ungewöhnliche Zeichen',
     unusualHint: 'Unsichtbare Steuerzeichen sind als \\u…-Codes sichtbar gemacht, Nicht-ASCII-Zeichen können echten ähneln. Prüfe den Befehl genau.',
-    label: '{count, plural, =1 {BEFEHL} other {BEFEHL · # Zeilen}}',
+    label: '{count, plural, =1 {Befehl} other {Befehl · # Zeilen}}',
     a11y: 'Befehl: {command}',
     copy: 'Kopieren',
     copied: 'Kopiert',

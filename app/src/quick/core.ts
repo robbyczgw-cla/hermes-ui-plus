@@ -1,10 +1,11 @@
 /**
  * Quick answers ("Schnellfrage") – pure logic, tested in core.test.ts.
  *
- *   GET  {origin}/bridge/quick/config               Bearer → {available, model, provider, limits, allowModelOverride, streaming}
+ *   GET  {origin}/bridge/quick/config               Bearer → {available, reason?, model, provider, limits, allowModelOverride, streaming}
+ *                                                   (reason when off, e.g. profile_scope_unavailable: the plugin's self-test)
  *   POST {origin}/bridge/quick/v1/chat/completions  Bearer, {messages (≤ 6 turns, ≤ 4000 chars each), stream, provider?, model?}
  *                                                   → OpenAI-compatible SSE (chat.completion.chunk … usage … [DONE])
- *   errors {error:{message,type,code}}: 404 feature_off (Hermes plugin absent / off), 429 rate_limited + Retry-After,
+ *   errors {error:{message,type,code}}: 404 feature_off (Hermes plugin absent / off / self-test failed, `reason`), 429 rate_limited + Retry-After,
  *   400 unknown_model / unknown_provider / override_disabled, 503 catalog_unavailable, 504 timeout.
  *
  * Backend: bridge/src/quick.mjs → the optional Hermes plugin (hermes-plugin/, docs/HERMES-PLUGIN.md). Quick answers are
@@ -43,6 +44,8 @@ export type QuickConfig = {
   perDay?: number;
   /** the server accepts a provider/model override */
   allowModelOverride: boolean;
+  /** why it is off (machine-readable, from the bridge or the Hermes plugin's self-test, e.g. profile_scope_unavailable) */
+  reason?: string;
 };
 
 /** a picked quick model (Settings → Schnellfrage); undefined = the server default ("Hermes-Standard") */
@@ -80,12 +83,14 @@ export function quickProfileFor<T extends ProfileLike>(p: T | null | undefined, 
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined);
 const strOrNull = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null);
 
+const QUICK_REASON_RE = /^[a-z][a-z0-9_]{0,63}$/;
+
 /** Body of GET /bridge/quick/config → QuickConfig; anything unexpected = not available. */
 export function parseQuickConfig(json: unknown): QuickConfig {
   const off: QuickConfig = { available: false, model: null, provider: null, allowModelOverride: false };
   if (!json || typeof json !== 'object') return off;
   const j = json as Record<string, unknown>;
-  if (j.available !== true) return off;
+  if (j.available !== true) return typeof j.reason === 'string' && QUICK_REASON_RE.test(j.reason) ? { ...off, reason: j.reason } : off;
   const limits = j.limits && typeof j.limits === 'object' ? (j.limits as Record<string, unknown>) : {};
   return {
     available: true,

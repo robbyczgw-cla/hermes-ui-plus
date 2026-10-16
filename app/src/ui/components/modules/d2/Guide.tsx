@@ -5,12 +5,15 @@
  * `[guide:<id>] Schritt 3 („…“): Ich hänge fest – …`, finish celebration → `[guide:<id>] Fertig`.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { TextInput, View } from 'react-native';
+import { View } from 'react-native';
+import { TextInput } from '../../../primitives/Text';
+import { noOutline } from '../../../lib/webStyle';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useMotionReduced, useTheme, type Theme } from '../../../theme';
 import { useHui } from '../../../primitives/context';
 import { FadeIn, HText, InlineText, PressableScale, Surface, textStyle } from '../../../primitives/basics';
+import { Button } from '../../../primitives/Button';
 import { Icon } from '../../../primitives/Icon';
 import { haptic } from '../../../primitives/haptics';
 import { Skeleton } from '../../../primitives/Skeleton';
@@ -282,7 +285,7 @@ function StepPager({
       <GestureDetector gesture={swipe}>
         <Animated.View style={[{ gap: t.spacing.m }, anim]} accessibilityHint={tr('ui.guide.swipeHint')}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s }}>
-            <HText variant="micro" color="accent" weight="700" style={{ textTransform: 'uppercase', letterSpacing: 0.6 }}>
+            <HText variant="caption" color="accent" weight="600">
               {tr('ui.guide.step', { n: index + 1, total: count })}
             </HText>
             {isDone ? <Icon name="checkCircle" size={14} color={t.colors.success} /> : null}
@@ -331,30 +334,21 @@ function nextOpenOr(steps: GuideStep[], done: string[], i: number): number {
 function DoneButton({ t, done, onPress }: { t: Theme; done: boolean; onPress: () => void }) {
   const tr = useT();
   return (
-    <PressableScale
-      haptic={false}
+    <Button
+      label={done ? tr('ui.guide.isDone') : tr('ui.guide.markDone')}
+      icon={done ? 'check' : undefined}
       onPress={onPress}
-      accessibilityRole="checkbox"
-      accessibilityState={{ checked: done }}
       accessibilityLabel={tr('ui.guide.markDone')}
       accessibilityHint={done ? tr('ui.guide.undoDone') : tr('ui.guide.markDoneHint')}
-      style={{ minHeight: 48, borderRadius: t.radii.m, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: done ? t.colors.successSoft : 'transparent', borderWidth: done ? 0 : 1.5, borderColor: t.colors.success }}
-      pressedStyle={{ opacity: 0.85 }}
-    >
-      <View style={{ width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: done ? t.colors.success : 'transparent', borderWidth: done ? 0 : 1.5, borderColor: t.colors.success }}>
-        {done ? <Icon name="check" size={14} color={t.colors.onAccent} strokeWidth={2.8} /> : null}
-      </View>
-      <HText variant="callout" weight="600" style={{ color: t.colors.success }}>
-        {done ? tr('ui.guide.isDone') : tr('ui.guide.markDone')}
-      </HText>
-    </PressableScale>
+      accessibilityState={{ checked: done }}
+    />
   );
 }
 
 function AlertLine({ t, text, onDismiss }: { t: Theme; text: string; onDismiss: () => void }) {
   const tr = useT();
   return (
-    <PressableScale haptic="selection" onPress={onDismiss} accessibilityRole="alert" accessibilityLiveRegion="assertive" accessibilityLabel={`${text}. ${tr('ui.timer.dismiss')}`} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, paddingHorizontal: t.spacing.m, borderRadius: t.radii.m, backgroundColor: t.colors.successSoft }}>
+    <PressableScale haptic="selection" onPress={onDismiss} accessibilityRole="alert" accessibilityLiveRegion="assertive" accessibilityLabel={`${text}. ${tr('ui.timer.dismiss')}`} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, paddingHorizontal: t.spacing.m, borderRadius: t.radii.control, backgroundColor: t.colors.successSoft }}>
       <D2Icon name="bell" size={16} color={t.colors.success} />
       <HText variant="callout" weight="600" style={{ flex: 1, color: t.colors.success }}>
         {text}
@@ -383,12 +377,7 @@ function Stuck({ t, stepNo, sent, onSend, label }: { t: Theme; stepNo: number; s
   }
   if (!open) {
     return (
-      <PressableScale haptic="selection" onPress={() => setOpen(true)} accessibilityLabel={label || tr('ui.guide.stuck')} style={{ minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, alignSelf: 'center', paddingHorizontal: t.spacing.m }}>
-        <D2Icon name="help" size={16} color={t.colors.accent} />
-        <HText variant="callout" weight="500" color="accent">
-          {label || tr('ui.guide.stuck')}
-        </HText>
-      </PressableScale>
+      <Button label={label || tr('ui.guide.stuck')} variant="tertiary" onPress={() => setOpen(true)} style={{ alignSelf: 'center' }} />
     );
   }
   const submit = () => {
@@ -399,7 +388,7 @@ function Stuck({ t, stepNo, sent, onSend, label }: { t: Theme; stepNo: number; s
   };
   return (
     <FadeIn>
-      <View style={{ gap: t.spacing.s, padding: t.spacing.m, borderRadius: t.radii.l, backgroundColor: t.colors.surfaceAlt }}>
+      <View style={{ gap: t.spacing.s, padding: t.spacing.m, borderRadius: t.radii.card, backgroundColor: t.colors.surfaceAlt }}>
         <HText variant="callout" weight="600">
           {tr('ui.guide.stuckTitle', { n: stepNo })}
         </HText>
@@ -416,7 +405,7 @@ function Stuck({ t, stepNo, sent, onSend, label }: { t: Theme; stepNo: number; s
           onBlur={() => setFocus(false)}
           style={[
             textStyle(t, 'body'),
-            { minHeight: 64, borderRadius: t.radii.m, borderWidth: 1, borderColor: focus ? t.colors.accent : t.colors.borderStrong, paddingHorizontal: t.spacing.m, paddingVertical: 10, color: t.colors.text, backgroundColor: t.colors.surface, textAlignVertical: 'top', outlineStyle: 'none' } as object,
+            { minHeight: 64, borderRadius: t.radii.control, borderWidth: 1, borderColor: focus ? t.colors.accent : t.colors.borderStrong, paddingHorizontal: t.spacing.m, paddingVertical: 10, color: t.colors.text, backgroundColor: t.colors.surface, textAlignVertical: 'top', ...noOutline } as object,
           ]}
         />
         <View style={{ flexDirection: 'row', gap: t.spacing.s, justifyContent: 'flex-end', flexWrap: 'wrap' }}>

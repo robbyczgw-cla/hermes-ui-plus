@@ -86,7 +86,7 @@ export function Slots({ node }: { node: Partial<HuiSlots> }) {
         {groups.map((g, gi) => (
           <View key={gi} style={{ gap: 6 }}>
             {g.day ? (
-              <HText variant="micro" color="muted" style={{ textTransform: 'uppercase', letterSpacing: 0.6 }} accessibilityRole="header">
+              <HText variant="caption" weight="600" color="muted" accessibilityRole="header">
                 {g.day}
               </HText>
             ) : null}
@@ -97,7 +97,7 @@ export function Slots({ node }: { node: Partial<HuiSlots> }) {
             ))}
           </View>
         ))}
-        {streaming ? <Skeleton height={52} radius={t.radii.m} /> : null}
+        {streaming ? <Skeleton height={52} radius={t.radii.control} /> : null}
         {!streaming ? (
           <PressableScale
             haptic={false}
@@ -111,7 +111,7 @@ export function Slots({ node }: { node: Partial<HuiSlots> }) {
               gap: t.spacing.m,
               minHeight: 48,
               paddingHorizontal: t.spacing.m,
-              borderRadius: t.radii.m,
+              borderRadius: t.radii.control,
               borderWidth: 1,
               borderStyle: 'dashed',
               borderColor: picked === NONE ? t.colors.accent : t.colors.borderStrong,
@@ -160,7 +160,7 @@ function SlotRow({ t, slot, on, disabled, onPress }: { t: Theme; slot: SlotView;
         minHeight: 52,
         paddingHorizontal: t.spacing.m,
         paddingVertical: t.spacing.s,
-        borderRadius: t.radii.m,
+        borderRadius: t.radii.control,
         borderWidth: on ? 1.5 : 1,
         borderColor: on ? t.colors.accent : t.colors.border,
         backgroundColor: on ? t.colors.accentSoft : t.colors.surface,

@@ -1,9 +1,8 @@
 import { useMemo, useState } from 'react';
 import { ActivityIndicator, View, type LayoutChangeEvent, type TextStyle } from 'react-native';
-import Animated, { LinearTransition } from 'react-native-reanimated';
 import * as Clipboard from 'expo-clipboard';
 import { useLocale, useT } from '../../../../i18n';
-import { useMotionReduced, useTheme, type Theme } from '../../../theme';
+import { useTheme, type Theme } from '../../../theme';
 import { useHui } from '../../../primitives/context';
 import { FadeIn, HText, PressableScale, Surface } from '../../../primitives/basics';
 import { Icon } from '../../../primitives/Icon';
@@ -29,7 +28,6 @@ export function Translation({ node }: { node: Partial<HuiTranslation> }) {
   const { lang } = useLocale();
   const ui = lang as UiLang;
   const t = useTheme();
-  const reduced = useMotionReduced();
   const { streaming } = useHui();
   const id = useModuleId('translation', node as Record<string, unknown>);
   const model = useMemo(() => readTranslation(node), [node]);
@@ -51,7 +49,7 @@ export function Translation({ node }: { node: Partial<HuiTranslation> }) {
       <View onLayout={(e: LayoutChangeEvent) => setWidth(Math.round(e.nativeEvent.layout.width))} style={{ gap: t.spacing.m }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s, minHeight: 36 }}>
           <C1Icon name="globe" size={16} color={t.colors.muted} />
-          <HText variant="micro" color="muted" accessibilityLabel={headerA11y} style={{ flex: 1, textTransform: 'uppercase', letterSpacing: 0.6 }} numberOfLines={1}>
+          <HText variant="caption" weight="600" color="muted" accessibilityLabel={headerA11y} style={{ flex: 1 }} numberOfLines={1}>
             {routeText || tr('ui.translation.title')}
           </HText>
           {canSwap ? (
@@ -76,7 +74,7 @@ export function Translation({ node }: { node: Partial<HuiTranslation> }) {
               pressedStyle={{ backgroundColor: t.colors.surfacePressed }}
             >
               <C1Icon name="swap" size={15} color={swapped ? t.colors.accent : t.colors.text} />
-              <HText variant="caption" weight="600" style={{ color: swapped ? t.colors.accent : t.colors.text }}>
+              <HText variant="caption" weight="600" style={{ color: swapped ? t.colors.accentText : t.colors.text }}>
                 {tr('ui.translation.swap')}
               </HText>
             </PressableScale>
@@ -85,11 +83,11 @@ export function Translation({ node }: { node: Partial<HuiTranslation> }) {
 
         <View style={{ flexDirection: sideBySide ? 'row' : 'column', gap: t.spacing.s }}>
           {panes.map((p, i) => (
-            <Animated.View key={p.key} layout={reduced ? undefined : LinearTransition.duration(260)} style={sideBySide ? { flex: 1 } : undefined}>
+            <View key={p.key} style={sideBySide ? { flex: 1 } : undefined}>
               <FadeIn delay={streaming ? 0 : Math.min(i, 4) * 60} style={sideBySide ? { flex: 1 } : undefined}>
                 <Pane t={t} ui={ui} nodeId={id} pane={p} busy={streaming && i === panes.length - 1} />
               </FadeIn>
-            </Animated.View>
+            </View>
           ))}
           {streaming && !model.targets.length ? <PaneSkeleton t={t} /> : null}
         </View>
@@ -109,10 +107,11 @@ export function Translation({ node }: { node: Partial<HuiTranslation> }) {
   );
 }
 
-function sizeStyle(size: ReturnType<typeof textSize>): TextStyle {
-  if (size === 'large') return { fontSize: 22, lineHeight: 30, fontWeight: '500', letterSpacing: -0.3 };
-  if (size === 'medium') return { fontSize: 18, lineHeight: 26, fontWeight: '400', letterSpacing: -0.1 };
-  return { fontSize: 16, lineHeight: 24, fontWeight: '400' };
+function sizeStyle(size: ReturnType<typeof textSize>, t: Theme): TextStyle {
+  const ty = t.typography;
+  if (size === 'large') return { fontSize: ty.title.fontSize, lineHeight: ty.title.lineHeight, fontWeight: '500', letterSpacing: ty.title.letterSpacing };
+  if (size === 'medium') return { fontSize: ty.headline.fontSize, lineHeight: ty.headline.lineHeight, fontWeight: '400', letterSpacing: ty.headline.letterSpacing };
+  return { fontSize: ty.reading.fontSize, lineHeight: ty.reading.lineHeight, fontWeight: '400' };
 }
 
 function Pane({ t, ui, nodeId, pane, busy }: { t: Theme; ui: UiLang; nodeId: string; pane: TranslationPane; busy: boolean }) {
@@ -149,7 +148,7 @@ function Pane({ t, ui, nodeId, pane, busy }: { t: Theme; ui: UiLang; nodeId: str
   return (
     <View
       style={{
-        borderRadius: t.radii.m,
+        borderRadius: t.radii.control,
         backgroundColor: pane.isSource ? t.colors.surfaceAlt : t.colors.accentSoft,
         paddingVertical: t.spacing.m,
         paddingLeft: t.spacing.m,
@@ -160,7 +159,7 @@ function Pane({ t, ui, nodeId, pane, busy }: { t: Theme; ui: UiLang; nodeId: str
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
         <View style={{ flex: 1, flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', columnGap: 6 }}>
-          <HText variant="micro" weight="700" style={{ color: tint, textTransform: 'uppercase', letterSpacing: 0.7 }} numberOfLines={1}>
+          <HText variant="caption" weight="600" style={{ color: tint }} numberOfLines={1}>
             {name}
           </HText>
           {native ? (
@@ -212,7 +211,7 @@ function Pane({ t, ui, nodeId, pane, busy }: { t: Theme; ui: UiLang; nodeId: str
           selectable
           accessibilityLanguage={pane.lang !== 'und' ? pane.lang : undefined}
           numberOfLines={collapsed ? LONG_TEXT_LINES : undefined}
-          style={[sizeStyle(textSize(pane.text)), { color: t.colors.text }, rtl ? { writingDirection: 'rtl', textAlign: 'right' } : null]}
+          style={[sizeStyle(textSize(pane.text), t), { color: t.colors.text }, rtl ? { writingDirection: 'rtl', textAlign: 'right' } : null]}
         >
           {pane.text}
         </HText>
@@ -249,7 +248,7 @@ function Pane({ t, ui, nodeId, pane, busy }: { t: Theme; ui: UiLang; nodeId: str
 
 function PaneSkeleton({ t }: { t: Theme }) {
   return (
-    <View style={{ borderRadius: t.radii.m, backgroundColor: t.colors.accentSoft, padding: t.spacing.m, gap: t.spacing.s }}>
+    <View style={{ borderRadius: t.radii.control, backgroundColor: t.colors.accentSoft, padding: t.spacing.m, gap: t.spacing.s }}>
       <Skeleton width={72} height={10} />
       <Skeleton width="85%" height={18} />
       <Skeleton width="55%" height={18} />
@@ -264,7 +263,7 @@ function TranslationSkeleton() {
     <Surface style={{ gap: t.spacing.m }}>
       <View accessible accessibilityLabel={tr('ui.translation.loading')} style={{ gap: t.spacing.s }}>
         <Skeleton width={110} height={10} />
-        <View style={{ borderRadius: t.radii.m, backgroundColor: t.colors.surfaceAlt, padding: t.spacing.m, gap: t.spacing.s }}>
+        <View style={{ borderRadius: t.radii.control, backgroundColor: t.colors.surfaceAlt, padding: t.spacing.m, gap: t.spacing.s }}>
           <Skeleton width={64} height={10} />
           <Skeleton width="70%" height={18} />
         </View>

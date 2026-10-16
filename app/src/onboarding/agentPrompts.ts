@@ -16,7 +16,7 @@ export type AgentPrompt = {
 /** npm package of the bridge (app/brand/identity.json `bridgePackage`). */
 export const BRIDGE_PACKAGE = 'hermes-ui-plus-bridge';
 
-const HERMES_EN = `Please set up Hermes UI+ (the Hermes Interactive UI+ app) on this machine, the one you run on. Work step by step and report back briefly after each step.
+const HERMES_EN = `Please set up HUI+ (Hermes UI+, the Hermes Interactive UI+ app) on this machine, the one you run on. Work step by step and report back briefly after each step.
 
 1. Check that Node.js 22 or newer is installed (\`node --version\`). If not, stop and tell me how to install it.
 2. Preview: run \`npx -y hermes-ui-plus-bridge@latest setup --dry-run --json\` and summarize the plan: Hermes API server status, skill install, env file, service, Tailscale URL, warnings. Never show keys or tokens.
@@ -31,7 +31,7 @@ Rules:
 - Tailnet only: never use \`tailscale funnel\`, port forwarding or a public address for the bridge or Hermes.
 - If a step fails, stop and show me the error with secrets removed.`;
 
-const HERMES_DE = `Bitte richte Hermes UI+ (die App Hermes Interactive UI+) auf diesem Rechner ein, also dort, wo du läufst. Arbeite Schritt für Schritt und melde dich nach jedem Schritt kurz.
+const HERMES_DE = `Bitte richte HUI+ (Hermes UI+, die App Hermes Interactive UI+) auf diesem Rechner ein, also dort, wo du läufst. Arbeite Schritt für Schritt und melde dich nach jedem Schritt kurz.
 
 1. Prüfe, ob Node.js 22 oder neuer installiert ist (\`node --version\`). Wenn nicht: abbrechen und mir sagen, wie ich es installiere.
 2. Vorschau: führe \`npx -y hermes-ui-plus-bridge@latest setup --dry-run --json\` aus und fasse den Plan zusammen: Hermes-API-Server, Skill, Env-Datei, Dienst, Tailscale-URL, Warnungen. Zeig nie Schlüssel oder Tokens.
@@ -46,7 +46,7 @@ Regeln:
 - Nur Tailnet: nie \`tailscale funnel\`, Portweiterleitung oder eine öffentliche Adresse für Bridge oder Hermes.
 - Schlägt ein Schritt fehl, hör auf und zeig mir den Fehler ohne Geheimnisse.`;
 
-const HERMES_ES = `Configura Hermes UI+ (la app Hermes Interactive UI+) en esta máquina, la misma en la que te ejecutas. Trabaja paso a paso y infórmame brevemente después de cada paso.
+const HERMES_ES = `Configura HUI+ (Hermes UI+, la app Hermes Interactive UI+) en esta máquina, la misma en la que te ejecutas. Trabaja paso a paso y infórmame brevemente después de cada paso.
 
 1. Comprueba que Node.js 22 o posterior está instalado (\`node --version\`). Si no, detente y dime cómo instalarlo.
 2. Vista previa: ejecuta \`npx -y hermes-ui-plus-bridge@latest setup --dry-run --json\` y resume el plan: servidor API de Hermes, skill, archivo env, servicio, URL de Tailscale, avisos. Nunca muestres claves ni tokens.
@@ -61,7 +61,7 @@ Reglas:
 - Solo tailnet: nunca \`tailscale funnel\`, redirección de puertos ni una dirección pública para el bridge o Hermes.
 - Si un paso falla, detente y muéstrame el error sin secretos.`;
 
-const CLI_EN = `You are on the server that runs my Hermes Agent. Set up the Hermes UI+ Bridge (npm package hermes-ui-plus-bridge, docs: https://github.com/robbyczgw-cla/hermes-ui-plus) so my phone can use the Hermes UI+ app.
+const CLI_EN = `You are on the server that runs my Hermes Agent. Set up the Hermes UI+ Bridge (npm package hermes-ui-plus-bridge, docs: https://github.com/robbyczgw-cla/hermes-ui-plus) so my phone can use the HUI+ app.
 
 1. Check \`node --version\` (22 or newer), \`tailscale status\`, and that Hermes lives here (\`~/.hermes\` or $HERMES_HOME).
 2. Run \`npx -y hermes-ui-plus-bridge@latest setup --dry-run --json\` and show me a short summary of the plan. The report masks keys and tokens; never print them yourself.
@@ -72,7 +72,7 @@ const CLI_EN = `You are on the server that runs my Hermes Agent. Set up the Herm
 
 Rules: ask before restarting Hermes, editing its config or installing system packages. Tailnet only: no \`tailscale funnel\`, no port forwarding, no public binding. Never commit, paste or log secrets. On errors stop and report.`;
 
-const CLI_DE = `Du bist auf dem Server, auf dem mein Hermes Agent läuft. Richte die Hermes UI+ Bridge ein (npm-Paket hermes-ui-plus-bridge, Doku: https://github.com/robbyczgw-cla/hermes-ui-plus), damit mein Handy die App Hermes UI+ nutzen kann.
+const CLI_DE = `Du bist auf dem Server, auf dem mein Hermes Agent läuft. Richte die Hermes UI+ Bridge ein (npm-Paket hermes-ui-plus-bridge, Doku: https://github.com/robbyczgw-cla/hermes-ui-plus), damit mein Handy die App HUI+ nutzen kann.
 
 1. Prüfe \`node --version\` (22 oder neuer), \`tailscale status\` und ob Hermes hier liegt (\`~/.hermes\` oder $HERMES_HOME).
 2. Führe \`npx -y hermes-ui-plus-bridge@latest setup --dry-run --json\` aus und zeig mir eine kurze Zusammenfassung. Der Bericht maskiert Schlüssel und Tokens; gib sie nie selbst aus.
@@ -83,7 +83,7 @@ const CLI_DE = `Du bist auf dem Server, auf dem mein Hermes Agent läuft. Richte
 
 Regeln: frag vor einem Hermes-Neustart, Config-Änderungen oder Systempaketen. Nur Tailnet: kein \`tailscale funnel\`, keine Portweiterleitung, keine öffentliche Bindung. Geheimnisse nie committen, einfügen oder loggen. Bei Fehlern aufhören und berichten.`;
 
-const CLI_ES = `Estás en el servidor donde se ejecuta mi Hermes Agent. Configura el Hermes UI+ Bridge (paquete npm hermes-ui-plus-bridge, documentación: https://github.com/robbyczgw-cla/hermes-ui-plus) para que mi móvil pueda usar la app Hermes UI+.
+const CLI_ES = `Estás en el servidor donde se ejecuta mi Hermes Agent. Configura el Hermes UI+ Bridge (paquete npm hermes-ui-plus-bridge, documentación: https://github.com/robbyczgw-cla/hermes-ui-plus) para que mi móvil pueda usar la app HUI+.
 
 1. Comprueba \`node --version\` (22 o posterior), \`tailscale status\` y que Hermes está aquí (\`~/.hermes\` o $HERMES_HOME).
 2. Ejecuta \`npx -y hermes-ui-plus-bridge@latest setup --dry-run --json\` y muéstrame un resumen breve del plan. El informe enmascara claves y tokens; nunca los imprimas tú.
@@ -94,7 +94,7 @@ const CLI_ES = `Estás en el servidor donde se ejecuta mi Hermes Agent. Configur
 
 Reglas: pregunta antes de reiniciar Hermes, editar su configuración o instalar paquetes del sistema. Solo tailnet: sin \`tailscale funnel\`, sin redirección de puertos, sin direcciones públicas. Nunca subas, pegues ni registres secretos. Ante errores, detente e informa.`;
 
-const TROUBLE_EN = `The Hermes UI+ app cannot connect to my Hermes. Diagnose it on this server. Read-only first: change nothing until I agree to a fix. Never print tokens or API keys (mask them).
+const TROUBLE_EN = `The HUI+ app cannot connect to my Hermes. Diagnose it on this server. Read-only first: change nothing until I agree to a fix. Never print tokens or API keys (mask them).
 
 Check each item and report OK or the problem:
 1. Bridge service: \`systemctl --user status hermes-ui-plus-bridge\` (or \`sudo systemctl status hermes-ui-plus-bridge\`, or \`docker compose ps\`) and the last 50 log lines (\`journalctl --user -u hermes-ui-plus-bridge -n 50\`).
@@ -109,7 +109,7 @@ Check each item and report OK or the problem:
 
 Then tell me the most likely cause and the smallest fix, and wait for my OK. Ask before restarting Hermes or changing its config. Tailnet only: never \`tailscale funnel\` or port forwarding.`;
 
-const TROUBLE_DE = `Die App Hermes UI+ verbindet sich nicht mit meinem Hermes. Untersuche das auf diesem Server. Zuerst nur lesen: ändere nichts, bis ich einem Fix zustimme. Tokens und API-Schlüssel nie ausgeben (maskieren).
+const TROUBLE_DE = `Die App HUI+ verbindet sich nicht mit meinem Hermes. Untersuche das auf diesem Server. Zuerst nur lesen: ändere nichts, bis ich einem Fix zustimme. Tokens und API-Schlüssel nie ausgeben (maskieren).
 
 Prüfe jeden Punkt und melde OK oder das Problem:
 1. Bridge-Dienst: \`systemctl --user status hermes-ui-plus-bridge\` (oder \`sudo systemctl status hermes-ui-plus-bridge\` oder \`docker compose ps\`) und die letzten 50 Logzeilen (\`journalctl --user -u hermes-ui-plus-bridge -n 50\`).
@@ -124,7 +124,7 @@ Prüfe jeden Punkt und melde OK oder das Problem:
 
 Nenne mir dann die wahrscheinlichste Ursache und den kleinsten Fix und warte auf mein OK. Frag vor einem Hermes-Neustart oder Config-Änderungen. Nur Tailnet: nie \`tailscale funnel\` oder Portweiterleitung.`;
 
-const TROUBLE_ES = `La app Hermes UI+ no consigue conectarse a mi Hermes. Diagnostícalo en este servidor. Primero solo lectura: no cambies nada hasta que acepte una solución. Nunca imprimas tokens ni claves API (enmascáralos).
+const TROUBLE_ES = `La app HUI+ no consigue conectarse a mi Hermes. Diagnostícalo en este servidor. Primero solo lectura: no cambies nada hasta que acepte una solución. Nunca imprimas tokens ni claves API (enmascáralos).
 
 Revisa cada punto e informa OK o el problema:
 1. Servicio del bridge: \`systemctl --user status hermes-ui-plus-bridge\` (o \`sudo systemctl status hermes-ui-plus-bridge\`, o \`docker compose ps\`) y las últimas 50 líneas de log (\`journalctl --user -u hermes-ui-plus-bridge -n 50\`).

@@ -1,6 +1,9 @@
 import { useMemo, useState } from 'react';
-import { TextInput, View } from 'react-native';
+import { View } from 'react-native';
+import { TextInput } from '../../primitives/Text';
+import { noOutline } from '../../lib/webStyle';
 import { useTheme, type Theme } from '../../theme';
+import { scaleFont } from '../../themes';
 import { useHui } from '../../primitives/context';
 import { BlockTitle, FadeIn, HText, InlineText, PressableScale, Surface, textStyle } from '../../primitives/basics';
 import { Icon } from '../../primitives/Icon';
@@ -215,7 +218,7 @@ function Options({
                 }}
                 pressedStyle={{ backgroundColor: on ? t.colors.accent : t.colors.surfacePressed }}
               >
-                {on ? <Icon name="check" size={14} color={t.colors.onAccent} strokeWidth={2.5} /> : o.icon ? <HText style={{ fontSize: 15 }}>{o.icon}</HText> : null}
+                {on ? <Icon name="check" size={14} color={t.colors.onAccent} strokeWidth={2.5} /> : o.icon ? <HText style={scaleFont(15, 20, t.fontScale)}>{o.icon}</HText> : null}
                 <HText variant="callout" weight="500" style={{ color: on ? t.colors.onAccent : t.colors.text }}>
                   {o.label}
                 </HText>
@@ -235,8 +238,8 @@ function Options({
         {all.map((o, i) => {
           const on = selected.includes(o.key);
           const iconTile = (
-            <View style={{ height: 56, borderRadius: t.radii.s, backgroundColor: t.colors.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
-              {o.icon ? <HText style={{ fontSize: 28, lineHeight: 34 }}>{o.icon}</HText> : <Icon name={o.key === OTHER ? 'plus' : 'sparkle'} size={20} color={t.colors.subtle} />}
+            <View style={{ height: 56, borderRadius: t.radii.control, backgroundColor: t.colors.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
+              {o.icon ? <HText style={scaleFont(28, 34, t.fontScale)}>{o.icon}</HText> : <Icon name={o.key === OTHER ? 'plus' : 'sparkle'} size={20} color={t.colors.subtle} />}
             </View>
           );
           return (
@@ -249,7 +252,7 @@ function Options({
                 accessibilityState={{ checked: on, selected: on }}
                 accessibilityLabel={S.choice.a11yOption(o.label, on, multiple)}
                 style={{
-                  borderRadius: t.radii.m,
+                  borderRadius: t.radii.control,
                   borderWidth: on ? 2 : 1,
                   borderColor: on ? t.colors.accent : t.colors.border,
                   backgroundColor: on ? t.colors.accentSoft : t.colors.surface,
@@ -278,7 +281,7 @@ function Options({
             </FadeIn>
           );
         })}
-        {streaming ? <Skeleton width="47%" height={120} radius={t.radii.m} style={{ flexGrow: 1 }} /> : null}
+        {streaming ? <Skeleton width="47%" height={120} radius={t.radii.control} style={{ flexGrow: 1 }} /> : null}
       </View>
       </ImageSlotGroup>
     );
@@ -306,7 +309,7 @@ function Options({
                 minHeight: 48,
                 paddingHorizontal: t.spacing.m,
                 paddingVertical: t.spacing.s + 2,
-                borderRadius: t.radii.m,
+                borderRadius: t.radii.control,
                 borderWidth: 1,
                 borderColor: on ? t.colors.accent : t.colors.border,
                 backgroundColor: on ? t.colors.accentSoft : t.colors.surface,
@@ -315,9 +318,9 @@ function Options({
             >
               <Indicator t={t} on={on} multiple={multiple} />
               {o.imageQuery ? (
-                <Thumb query={o.imageQuery} size={44} selectOnTap label={o.label} enabled={!streaming || i < options.length - 1} whenCollapsed={o.icon ? <HText style={{ fontSize: 20, lineHeight: 26 }}>{o.icon}</HText> : null} />
+                <Thumb query={o.imageQuery} size={44} selectOnTap label={o.label} enabled={!streaming || i < options.length - 1} whenCollapsed={o.icon ? <HText style={scaleFont(20, 26, t.fontScale)}>{o.icon}</HText> : null} />
               ) : o.icon ? (
-                <HText style={{ fontSize: 20, lineHeight: 26 }}>{o.icon}</HText>
+                <HText style={scaleFont(20, 26, t.fontScale)}>{o.icon}</HText>
               ) : null}
               <View style={{ flex: 1, gap: 2 }}>
                 <InlineText variant={o.description ? 'bodyStrong' : 'body'} text={o.label} />
@@ -328,7 +331,7 @@ function Options({
         );
       })}
       {/* next option shimmers; with few options, extra rows keep the skeleton's height */}
-      {streaming ? Array.from({ length: Math.max(1, 3 - options.length) }, (_, i) => <Skeleton key={`sk${i}`} height={48} radius={t.radii.m} />) : null}
+      {streaming ? Array.from({ length: Math.max(1, 3 - options.length) }, (_, i) => <Skeleton key={`sk${i}`} height={48} radius={t.radii.control} />) : null}
     </View>
     </ImageSlotGroup>
   );
@@ -342,7 +345,7 @@ function Indicator({ t, on, multiple }: { t: Theme; on: boolean; multiple: boole
         height: 22,
         borderRadius: multiple ? 6 : 11,
         borderWidth: on ? 0 : 1.5,
-        borderColor: t.colors.borderStrong,
+        borderColor: t.colors.borderControl,
         backgroundColor: on ? t.colors.accent : 'transparent',
         alignItems: 'center',
         justifyContent: 'center',
@@ -375,13 +378,13 @@ function OtherInput({ t, value, onChange, onSubmit }: { t: Theme; value: string;
           {
             flex: 1,
             minHeight: 44,
-            borderRadius: t.radii.m,
+            borderRadius: t.radii.control,
             borderWidth: 1,
             borderColor: focus ? t.colors.accent : t.colors.borderStrong,
             paddingHorizontal: t.spacing.m,
             color: t.colors.text,
             backgroundColor: t.colors.surface,
-            outlineStyle: 'none',
+            ...noOutline,
           } as object,
         ]}
       />
@@ -391,9 +394,9 @@ function OtherInput({ t, value, onChange, onSubmit }: { t: Theme; value: string;
           disabled={!value.trim()}
           onPress={onSubmit}
           accessibilityLabel={S.choice.otherSend}
-          style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: t.colors.accent, alignItems: 'center', justifyContent: 'center' }}
+          style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: t.colors.ink, alignItems: 'center', justifyContent: 'center' }}
         >
-          <Icon name="send" size={18} color={t.colors.onAccent} strokeWidth={2.25} />
+          <Icon name="send" size={18} color={t.colors.onInk} strokeWidth={2.25} />
         </PressableScale>
       ) : null}
     </View>

@@ -1,11 +1,11 @@
 import * as Clipboard from 'expo-clipboard';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AccessibilityInfo, ActivityIndicator, ScrollView, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { AccessibilityInfo, ScrollView, StyleSheet, View, useWindowDimensions, type StyleProp, type ViewStyle } from 'react-native';
 import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withSpring } from 'react-native-reanimated';
 import { useT } from '../i18n';
-import { HText, Icon, PressableScale, haptic, useTheme, type IconName, type Theme } from '../ui';
-import { bestOn } from '../ui/color';
+import { Button, HText, Icon, PressableScale, haptic, useTheme, withAlpha } from '../ui';
 import { FADE_IN_SETTLED } from '../ui/lib/fadeIn';
+import { scaledLineLimit } from '../ui/lib/fontScaleLayout';
 import { useSettledAfter } from '../ui/lib/useSettledAfter';
 import {
   beginSubmit,
@@ -22,7 +22,6 @@ import {
   type ApprovalChoiceValue,
   type ApprovalInput,
   type ChoiceView,
-  type RiskLevel,
   type SubmitState,
 } from './approvalModel';
 
@@ -39,17 +38,6 @@ export type ApprovalSheetProps = {
   timeoutSeconds?: number;
   style?: StyleProp<ViewStyle>;
 };
-
-function riskColors(t: Theme, level: RiskLevel) {
-  switch (level) {
-    case 'high':
-      return { fg: t.colors.danger, bg: t.colors.dangerSoft, icon: 'alertOctagon' as IconName };
-    case 'elevated':
-      return { fg: t.colors.warning, bg: t.colors.warningSoft, icon: 'alert' as IconName };
-    default:
-      return { fg: t.colors.accent, bg: t.colors.accentSoft, icon: 'info' as IconName };
-  }
-}
 
 function useNow(active: boolean, intervalMs = 1000): number {
   const [now, setNow] = useState(() => Date.now());
@@ -75,6 +63,8 @@ export function ApprovalSheet({ approval, onRespond, onDismiss, onClose, timeout
   const [copied, setCopied] = useState(false);
   // high risk + "always": second explicit step (global allowlist, all channels)
   const [confirming, setConfirming] = useState<ApprovalChoiceValue | null>(null);
+  // "More options" disclosure (holds "Always allow")
+  const [moreOpen, setMoreOpen] = useState(false);
   const lock = useRef(false); // synchronous guard: two taps in the same frame
   const mounted = useRef(true);
   const stateRef = useRef<SubmitState>(IDLE);
@@ -96,6 +86,7 @@ export function ApprovalSheet({ approval, onRespond, onDismiss, onClose, timeout
     setState(IDLE);
     setCopied(false);
     setConfirming(null);
+    setMoreOpen(false);
     setView(toApprovalView(approval, { timeoutSeconds }));
   }, [requestKey, approval, timeoutSeconds]);
 
@@ -182,20 +173,36 @@ export function ApprovalSheet({ approval, onRespond, onDismiss, onClose, timeout
     return () => clearTimeout(id);
   }, [copied]);
 
-  const rc = riskColors(t, view.risk.level);
   const busy = state.phase === 'sending';
+  const activeChoice = state.phase === 'idle' ? null : state.choice;
   const done = state.phase === 'sent';
   const failed = state.phase === 'error' ? state : null;
-  const barColor = left <= 30 ? t.colors.danger : rc.fg;
   const close = onClose ?? onDismiss;
-  const estimatedRisk = view.risk.level !== 'normal' && !view.smartDenied;
+  const level = view.risk.level;
+  const estimatedRisk = level !== 'normal' && !view.smartDenied;
+  const c = t.colors;
+
+  // action groups: the main row (the primary + its equal alternatives), Deny as a quiet way out, "always" behind
+  // "More options" (Hermes' global allowlist: never one tap away). High risk: Deny is the primary of the main row.
+  const main = view.choices.filter((ch) => ch.value !== 'always' && (ch.value !== 'deny' || ch.kind === 'denyPrimary'));
+  const quietDeny = view.choices.find((ch) => ch.value === 'deny' && ch.kind !== 'denyPrimary');
+  const always = view.choices.find((ch) => ch.value === 'always');
+  const showSessionNote = main.some((ch) => ch.value === 'session');
+  const moreShown = !!always && (moreOpen || activeChoice === 'always');
+  const choiceProps = (ch: ChoiceView) => ({
+    choice: ch,
+    sending: busy && activeChoice === ch.value,
+    retry: failed?.choice === ch.value && failed.error.retryable,
+    disabled: expired || (busy && activeChoice !== ch.value) || done || (!!failed && !failed.error.retryable),
+    onPress: () => submit(ch.value),
+  });
 
   return (
     <Animated.View
       style={[
         styles.card,
-        t.shadows.md,
-        { backgroundColor: t.colors.surface, borderColor: view.risk.level === 'normal' ? t.colors.borderStrong : rc.fg, borderRadius: t.radii.xl },
+        t.shadows.sm,
+        { backgroundColor: c.surface, borderColor: level === 'normal' ? c.border : withAlpha(c.seal, 0.4), borderRadius: t.radii.card },
         enterStyle,
         style,
         enterSettled ? FADE_IN_SETTLED : null,
@@ -203,20 +210,35 @@ export function ApprovalSheet({ approval, onRespond, onDismiss, onClose, timeout
       accessibilityViewIsModal={false}
       accessibilityLabel={tr('approvals.sheet.a11y', { risk: tr(view.risk.labelKey) })}
     >
-      {/* header */}
+      {/* header: the approval seal + title; risk as one quiet line (seal mark + text), never a pill */}
       <View style={styles.header}>
-        <View style={[styles.iconWrap, { backgroundColor: rc.bg }]}>
-          <Icon name={rc.icon} size={20} color={rc.fg} />
+        <View style={[styles.seal, { backgroundColor: c.seal }]} accessible={false} importantForAccessibility="no-hide-descendants">
+          {/* an unbroken wax seal (pressed rim, no glyph): a check here would read as "already allowed" */}
+          <View style={[styles.sealRim, { borderColor: withAlpha(c.onSeal, 0.6) }]} />
         </View>
         <View style={styles.headerText}>
-          <HText variant="headline" accessibilityRole="header" numberOfLines={2}>
+          <HText variant="headline" accessibilityRole="header" numberOfLines={4}>
             {tr(view.titleKey)}
           </HText>
-          <View style={[styles.riskPill, { backgroundColor: rc.bg }]}>
-            <HText variant="micro" style={{ color: rc.fg }}>
-              {tr(view.risk.labelKey).toUpperCase()}
-            </HText>
-          </View>
+          {level !== 'normal' ? (
+            <View style={styles.riskRow}>
+              <View style={[styles.riskDot, { backgroundColor: c.seal }]} />
+              <HText variant="caption" color="muted" style={styles.flex1}>
+                {view.smartDenied ? (
+                  <HText variant="caption" weight="600">
+                    {tr('approvals.risk.flagged')}
+                  </HText>
+                ) : (
+                  <>
+                    <HText variant="caption" weight="600">
+                      {tr(level === 'high' ? 'approvals.risk.short.high' : 'approvals.risk.short.elevated')}
+                    </HText>
+                    {estimatedRisk ? ` · ${tr('approvals.risk.byApp')}` : ''}
+                  </>
+                )}
+              </HText>
+            </View>
+          ) : null}
         </View>
         {onDismiss ? (
           <PressableScale
@@ -225,62 +247,17 @@ export function ApprovalSheet({ approval, onRespond, onDismiss, onClose, timeout
             hitSlop={8}
             disabled={busy}
             accessibilityLabel={expired ? tr('approvals.sheet.close') : tr('approvals.sheet.dismiss')}
-            style={[styles.closeBtn, { backgroundColor: t.colors.surfaceAlt }]}
+            style={[styles.closeBtn, { backgroundColor: c.surfaceAlt }]}
           >
-            <Icon name="x" size={16} color={t.colors.muted} />
+            <Icon name="x" size={16} color={c.muted} />
           </PressableScale>
         ) : null}
       </View>
 
-      {/* countdown */}
-      <View
-        style={styles.countdownRow}
-        accessible
-        accessibilityLabel={
-          expired ? tr('approvals.countdown.expired') : tr('approvals.countdown.spoken', { minutes: Math.floor(left / 60), seconds: left % 60 })
-        }
-      >
-        <View style={[styles.track, { backgroundColor: t.colors.surfaceAlt }]}>
-          <View style={[styles.bar, { width: `${Math.round(frac * 100)}%`, backgroundColor: barColor }]} />
-        </View>
-        <HText variant="caption" tabular color={expired ? 'danger' : left <= 30 ? 'danger' : 'muted'}>
-          {expired
-            ? tr('approvals.countdown.expired')
-            : view.deadlineEstimated
-              ? tr('approvals.countdown.left', { time: formatCountdown(left) })
-              : tr('approvals.countdown.leftExact', { time: formatCountdown(left) })}
-        </HText>
-      </View>
-      {expired && !failed ? (
-        <View accessibilityRole="alert" style={[styles.errorBox, { backgroundColor: t.colors.dangerSoft, borderRadius: t.radii.m }]}>
-          <Icon name="alert" size={16} color={t.colors.danger} />
-          <HText variant="callout" color="danger" style={styles.flex1}>
-            {tr('approvals.countdown.expiredNote')}
-          </HText>
-        </View>
-      ) : null}
-
-      {/* reason (server text) + risk source */}
-      {view.description ? (
-        <View style={styles.reason}>
-          <HText variant="micro" color="subtle">
-            {tr('approvals.reason.label')}
-          </HText>
-          <HText variant="body" selectable>
-            {view.description}
-          </HText>
-        </View>
-      ) : null}
-      {estimatedRisk ? (
-        <HText variant="caption" color="muted">
-          {tr('approvals.risk.estimateNote')}
-        </HText>
-      ) : null}
-
       {/* command: invisible / control characters are escaped (approvalModel.displayCommand); anything unusual is flagged */}
       {view.command && view.commandUnusual ? (
-        <View accessibilityRole="alert" style={[styles.errorBox, { backgroundColor: t.colors.warningSoft, borderRadius: t.radii.m }]}>
-          <Icon name="alert" size={16} color={t.colors.warning} />
+        <View accessibilityRole="alert" style={[styles.noteBox, { backgroundColor: c.warningSoft, borderRadius: t.radii.control }]}>
+          <Icon name="alert" size={16} color={c.warning} />
           <View style={styles.flex1}>
             <HText variant="callout" weight="600">
               {tr('approvals.command.unusual')}
@@ -292,9 +269,9 @@ export function ApprovalSheet({ approval, onRespond, onDismiss, onClose, timeout
         </View>
       ) : null}
       {view.command ? (
-        <View style={[styles.cmdBox, { backgroundColor: t.colors.codeBg, borderColor: t.colors.border, borderRadius: t.radii.m }]}>
+        <View style={[styles.cmdBox, { backgroundColor: c.codeBg, borderColor: c.border, borderRadius: t.radii.control }]}>
           <View style={styles.cmdHead}>
-            <HText variant="micro" color="subtle">
+            <HText variant="caption" weight="600" color="muted" style={styles.flex1}>
               {tr('approvals.command.label', { count: view.lineCount })}
             </HText>
             <PressableScale
@@ -304,17 +281,58 @@ export function ApprovalSheet({ approval, onRespond, onDismiss, onClose, timeout
               accessibilityLabel={copied ? tr('approvals.command.copiedA11y') : tr('approvals.command.copyA11y')}
               style={styles.copyBtn}
             >
-              <Icon name={copied ? 'check' : 'copy'} size={14} color={copied ? t.colors.success : t.colors.muted} />
+              <Icon name={copied ? 'check' : 'copy'} size={14} color={copied ? c.success : c.muted} />
               <HText variant="caption" color={copied ? 'success' : 'muted'}>
                 {copied ? tr('approvals.command.copied') : tr('approvals.command.copy')}
               </HText>
             </PressableScale>
           </View>
-          <ScrollView style={styles.cmdScroll} nestedScrollEnabled showsVerticalScrollIndicator>
-            <HText variant="mono" selectable accessibilityLabel={tr('approvals.command.a11y', { command: view.commandDisplay })} style={{ fontFamily: t.fonts.mono }}>
+          {/* long lines wrap (no horizontal scroll); very long commands scroll vertically inside the block */}
+          <ScrollView style={[styles.cmdScroll, { maxHeight: Math.round(150 * t.fontScale) }]} nestedScrollEnabled showsVerticalScrollIndicator>
+            <HText variant="code" selectable accessibilityLabel={tr('approvals.command.a11y', { command: view.commandDisplay })} style={{ fontFamily: t.fonts.mono, color: c.codeText }}>
               {view.commandDisplay}
             </HText>
           </ScrollView>
+        </View>
+      ) : null}
+
+      {/* reason (server text) */}
+      {view.description ? (
+        <View style={styles.reason}>
+          <HText variant="caption" color="muted">
+            {tr('approvals.reason.label')}
+          </HText>
+          <HText variant="body" selectable>
+            {view.description}
+          </HText>
+        </View>
+      ) : null}
+
+      {/* countdown: brass progress (accent = progress), the text turns to danger in the last 30 s */}
+      <View
+        style={styles.countdownRow}
+        accessible
+        accessibilityLabel={
+          expired ? tr('approvals.countdown.expired') : tr('approvals.countdown.spoken', { minutes: Math.floor(left / 60), seconds: left % 60 })
+        }
+      >
+        <View style={[styles.track, { backgroundColor: c.surfaceAlt }]}>
+          <View style={[styles.bar, { width: `${Math.round(frac * 100)}%`, backgroundColor: c.accent }]} />
+        </View>
+        <HText variant="caption" tabular color={expired || left <= 30 ? 'danger' : 'muted'}>
+          {expired
+            ? tr('approvals.countdown.expired')
+            : view.deadlineEstimated
+              ? tr('approvals.countdown.left', { time: formatCountdown(left) })
+              : tr('approvals.countdown.leftExact', { time: formatCountdown(left) })}
+        </HText>
+      </View>
+      {expired && !failed ? (
+        <View accessibilityRole="alert" style={[styles.noteBox, { backgroundColor: c.dangerSoft, borderRadius: t.radii.control }]}>
+          <Icon name="alert" size={16} color={c.danger} />
+          <HText variant="callout" color="danger" style={styles.flex1}>
+            {tr('approvals.countdown.expiredNote')}
+          </HText>
         </View>
       ) : null}
 
@@ -323,9 +341,9 @@ export function ApprovalSheet({ approval, onRespond, onDismiss, onClose, timeout
         <View
           accessibilityRole="alert"
           accessibilityLiveRegion="assertive"
-          style={[styles.errorBox, { backgroundColor: t.colors.dangerSoft, borderRadius: t.radii.m }]}
+          style={[styles.noteBox, { backgroundColor: c.dangerSoft, borderRadius: t.radii.control }]}
         >
-          <Icon name="alert" size={16} color={t.colors.danger} />
+          <Icon name="alert" size={16} color={c.danger} />
           <HText variant="callout" color="danger" style={styles.flex1}>
             {tr(failed.error.messageKey)}
           </HText>
@@ -333,58 +351,77 @@ export function ApprovalSheet({ approval, onRespond, onDismiss, onClose, timeout
       ) : null}
       {done ? (
         <View accessibilityLiveRegion="polite" style={styles.sentRow}>
-          <Icon name="check" size={16} color={t.colors.success} />
+          <Icon name="check" size={16} color={c.success} />
           <HText variant="callout" color="success">
             {tr('approvals.sheet.sent')}
           </HText>
         </View>
       ) : null}
 
-      {/* second step for "always" at high risk */}
+      {/* second step for "always" at high risk: "Back" is the recommended way */}
       {confirming && !expired ? (
-        <View accessibilityRole="alert" style={[styles.confirmBox, { borderColor: t.colors.danger, backgroundColor: t.colors.dangerSoft, borderRadius: t.radii.m }]}>
-          <HText variant="bodyStrong" color="danger">
+        <View accessibilityRole="alert" style={[styles.confirmBox, { borderColor: withAlpha(c.seal, 0.4), backgroundColor: c.sealSoft, borderRadius: t.radii.control }]}>
+          <HText variant="bodyStrong" style={{ color: c.seal }}>
             {tr('approvals.confirm.title')}
           </HText>
           <HText variant="callout">{tr('approvals.confirm.body')}</HText>
-          <PressableScale
-            onPress={() => setConfirming(null)}
-            haptic="selection"
-            accessibilityLabel={tr('approvals.confirm.back')}
-            style={[styles.btn, { backgroundColor: t.colors.danger, borderColor: t.colors.danger }]}
-          >
-            <HText variant="bodyStrong" style={{ color: bestOn(t.colors.danger) }}>
-              {tr('approvals.confirm.back')}
-            </HText>
-          </PressableScale>
-          <PressableScale
-            onPress={() => submit(confirming, true)}
-            haptic="medium"
-            accessibilityLabel={tr('approvals.confirm.yes')}
-            style={[styles.btn, { backgroundColor: t.colors.surfaceAlt, borderColor: t.colors.border }]}
-          >
-            <HText variant="bodyStrong">{tr('approvals.confirm.yes')}</HText>
-          </PressableScale>
+          <View style={styles.actionRow}>
+            <Button label={tr('approvals.confirm.back')} variant="primary" haptic="selection" numberOfLines={2} onPress={() => setConfirming(null)} style={styles.flowBtn} />
+            <Button
+              label={tr('approvals.confirm.yes')}
+              variant="secondary"
+              tone="seal"
+              haptic="medium"
+              numberOfLines={2}
+              onPress={() => submit(confirming, true)}
+              style={styles.flowBtn}
+            />
+          </View>
         </View>
       ) : null}
 
       {/* choices */}
       {confirming && !expired ? null : (
         <View style={styles.choices}>
-          {view.choices.map((c) => (
-            <ChoiceButton
-              key={c.value}
-              choice={c}
-              sending={busy && state.choice === c.value}
-              retry={failed?.choice === c.value && failed.error.retryable}
-              disabled={expired || (busy && state.choice !== c.value) || done || (!!failed && !failed.error.retryable)}
-              onPress={() => submit(c.value)}
-            />
-          ))}
+          {/* side by side while both labels fit, otherwise stacked (wrap) – never truncated */}
+          <View style={styles.actionRow}>
+            {main.map((ch) => (
+              <ChoiceButton key={ch.value} {...choiceProps(ch)} />
+            ))}
+          </View>
+          {showSessionNote ? (
+            <HText variant="caption" color="muted">
+              {tr('approvals.choice.session.label')}: {tr('approvals.choice.session.hint')}
+            </HText>
+          ) : null}
+          {quietDeny || always ? (
+            <View style={styles.quietRow}>
+              {quietDeny ? <ChoiceButton {...choiceProps(quietDeny)} /> : <View />}
+              {always ? (
+                <Button
+                  label={moreShown ? tr('approvals.choice.less') : tr('approvals.choice.more')}
+                  variant="tertiary"
+                  icon={moreShown ? 'chevronDown' : 'chevronRight'}
+                  numberOfLines={2}
+                  disabled={activeChoice === 'always' && (busy || done)}
+                  onPress={() => setMoreOpen((o) => !o)}
+                  accessibilityState={{ expanded: moreShown }}
+                />
+              ) : null}
+            </View>
+          ) : null}
+          {always && moreShown ? (
+            <View style={[styles.more, { borderColor: c.border, borderRadius: t.radii.control }]}>
+              <ChoiceButton {...choiceProps(always)} />
+              {always.hintKey ? (
+                <HText variant="caption" color="muted">
+                  {tr(always.hintKey)}
+                </HText>
+              ) : null}
+            </View>
+          ) : null}
           {(expired || (failed && !failed.error.retryable)) && close ? (
-            <PressableScale onPress={close} haptic="selection" accessibilityLabel={tr('actions.close')} style={[styles.btn, { backgroundColor: t.colors.surfaceAlt }]}>
-              <HText variant="bodyStrong">{tr('actions.close')}</HText>
-            </PressableScale>
+            <Button label={tr('actions.close')} variant="secondary" haptic="selection" onPress={close} />
           ) : null}
         </View>
       )}
@@ -392,68 +429,57 @@ export function ApprovalSheet({ approval, onRespond, onDismiss, onClose, timeout
   );
 }
 
+/** One answer as a `Button`: primary (the recommended answer), secondary (alternatives), tertiary (quiet Deny). */
 function ChoiceButton({ choice, sending, retry, disabled, onPress }: { choice: ChoiceView; sending: boolean; retry: boolean; disabled: boolean; onPress: () => void }) {
   const t = useTheme();
   const tr = useT();
-  const c = t.colors;
-  const [bg, fg, border] =
-    choice.kind === 'primary'
-      ? [c.accent, c.onAccent, c.accent]
-      : choice.kind === 'denyPrimary'
-        ? [c.danger, bestOn(c.danger), c.danger]
-        : choice.kind === 'danger'
-          ? [c.dangerSoft, c.danger, c.danger]
-          : [c.surfaceAlt, c.text, c.border];
   const label = tr(choice.labelKey);
-  const shownLabel = retry ? tr('approvals.choice.retry', { label }) : label;
+  const variant = choice.kind === 'primary' || choice.kind === 'denyPrimary' ? 'primary' : choice.kind === 'danger' ? 'tertiary' : 'secondary';
+  // the label says what gets allowed ("Always allow (everywhere, …)"): more lines at large text instead of cutting it
+  const labelLines = scaledLineLimit(3, t.fontScale * (useWindowDimensions().fontScale || 1));
   return (
-    <PressableScale
+    <Button
+      label={retry ? tr('approvals.choice.retry', { label }) : label}
+      variant={variant}
       onPress={onPress}
+      loading={sending}
       disabled={disabled}
+      numberOfLines={labelLines}
       haptic={choice.kind === 'danger' || choice.kind === 'denyPrimary' ? 'medium' : 'light'}
       accessibilityLabel={tr(choice.a11yKey)}
       accessibilityHint={choice.hintKey ? tr(choice.hintKey) : undefined}
-      accessibilityState={{ busy: sending, disabled }}
-      style={[styles.btn, { backgroundColor: bg, borderColor: border }]}
-    >
-      <View style={styles.btnInner}>
-        {sending ? <ActivityIndicator size="small" color={fg} /> : null}
-        <View style={styles.btnText}>
-          <HText variant="bodyStrong" style={{ color: fg }} numberOfLines={2}>
-            {shownLabel}
-          </HText>
-          {choice.hintKey && !sending ? (
-            <HText variant="micro" style={{ color: fg, opacity: 0.75 }} numberOfLines={1}>
-              {tr(choice.hintKey)}
-            </HText>
-          ) : null}
-        </View>
-      </View>
-    </PressableScale>
+      accessibilityState={{ busy: sending }}
+      style={variant === 'tertiary' ? null : styles.flowBtn}
+    />
   );
 }
 
 const styles = StyleSheet.create({
-  card: { borderWidth: 1.5, padding: 16, gap: 12, alignSelf: 'stretch' },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  headerText: { flex: 1, gap: 4, alignItems: 'flex-start' },
-  iconWrap: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  riskPill: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999 },
-  closeBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  card: { borderWidth: 1, padding: 16, gap: 12, alignSelf: 'stretch' },
+  header: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  // the seal sits on the title's first line (headline 23 px line: (23 - 20) / 2 ≈ 2)
+  seal: { width: 20, height: 20, borderRadius: 10, marginTop: 2, alignItems: 'center', justifyContent: 'center' },
+  sealRim: { width: 12, height: 12, borderRadius: 6, borderWidth: 1.5 },
+  headerText: { flex: 1, gap: 2 },
+  riskRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  riskDot: { width: 6, height: 6, borderRadius: 3 },
+  closeBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', marginTop: -10, marginRight: -6 },
   countdownRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   track: { flex: 1, height: 4, borderRadius: 2, overflow: 'hidden' },
   bar: { height: 4, borderRadius: 2 },
-  cmdBox: { borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 12, paddingTop: 8, paddingBottom: 10, gap: 6 },
-  cmdHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  copyBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 44, minWidth: 44, paddingHorizontal: 6, justifyContent: 'center' },
+  cmdBox: { borderWidth: StyleSheet.hairlineWidth, paddingLeft: 12, paddingRight: 4, paddingBottom: 10, gap: 2 },
+  cmdHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  copyBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 44, minWidth: 44, paddingHorizontal: 8, justifyContent: 'center' },
+  cmdScroll: { flexGrow: 0, paddingRight: 8 },
   reason: { gap: 2 },
   confirmBox: { borderWidth: 1, padding: 12, gap: 8 },
-  cmdScroll: { maxHeight: 150, flexGrow: 0 },
-  errorBox: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10 },
+  noteBox: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10 },
   sentRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   flex1: { flex: 1 },
   choices: { gap: 8 },
-  btn: { minHeight: 52, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 16, paddingVertical: 8, justifyContent: 'center' },
-  btnInner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
-  btnText: { alignItems: 'center', flexShrink: 1 },
+  actionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  // natural width first (both in one row when they fit), then grow; a label too long for half the row wraps the button onto its own line
+  flowBtn: { flexGrow: 1, flexBasis: 'auto', maxWidth: '100%' },
+  quietRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 4, marginHorizontal: -10 },
+  more: { borderWidth: StyleSheet.hairlineWidth, padding: 10, gap: 6 },
 });

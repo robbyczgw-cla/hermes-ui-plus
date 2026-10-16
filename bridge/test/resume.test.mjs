@@ -4,7 +4,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { once } from 'node:events';
+import { once, EventEmitter } from 'node:events';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { createServer } from '../src/server.mjs';
 import { silentLogger } from '../src/log.mjs';
@@ -60,7 +60,7 @@ before(async () => {
   await once(upstream, 'listening');
   ctx = createServer({
     HERMES_BASE_URL: `http://127.0.0.1:${upstream.address().port}/v1`, BRIDGE_TOKEN: TOKEN,
-    BRIDGE_BOOTSTRAP: 'off', BRIDGE_ROUTER: 'heuristic', BRIDGE_RESUME_TURN_KB: '64',
+    BRIDGE_BOOTSTRAP: 'off', BRIDGE_ROUTER: 'heuristic', BRIDGE_RESUME_TURN_KB: '64', BRIDGE_CORS_ORIGINS: 'https://example.com',
   }, { logger: silentLogger, backend: null });
   ctx.server.listen(0, '127.0.0.1');
   await once(ctx.server, 'listening');
@@ -72,11 +72,12 @@ after(() => { ctx.push.stop(); for (const s of [ctx.server, upstream]) { s.close
  * POST a chat turn. `cutAfter`: destroy the connection once at least that many body bytes arrived.
  * @returns {Promise<{status: number, headers: any, body: Buffer, cut: boolean}>}
  */
-function chat(text, { key, session = 'hui-resume-1', offset, cutAfter } = {}) {
+function chat(text, { key, session = 'hui-resume-1', offset, cutAfter, origin } = {}) {
   return new Promise((resolve, reject) => {
     const headers = { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json', 'x-hermes-session-id': session };
     if (key) headers['idempotency-key'] = key;
     if (offset !== undefined) headers['x-hermes-ui-resume-offset'] = String(offset);
+    if (origin) headers.origin = origin;
     const req = http.request({ host: '127.0.0.1', port, path: '/v1/chat/completions', method: 'POST', headers, agent: false }, (res) => {
       const parts = [];
       let size = 0;
@@ -101,13 +102,18 @@ function chat(text, { key, session = 'hui-resume-1', offset, cutAfter } = {}) {
 
 test('a keyed turn is marked resumable; the same key replays it byte for byte without a second Hermes turn', async () => {
   seen = [];
-  const first = await chat('hallo', { key: 'turn-a-1' });
+  const first = await chat('hallo', { key: 'turn-a-1', origin: 'https://example.com' });
   assert.equal(first.status, 200);
   assert.equal(first.headers['x-hermes-ui-resume'], '1');
   assert.match(first.body.toString(), /data: \[DONE\]/);
-  const again = await chat('hallo', { key: 'turn-a-1' });
+  const again = await chat('hallo', { key: 'turn-a-1', origin: 'https://example.com' });
   assert.equal(again.status, 200);
   assert.equal(again.headers['x-hermes-ui-resumed'], '0');
+  assert.equal(again.headers.date, first.headers.date, 'the recorded upstream Date stays the clock origin');
+  assert.ok(Number(again.headers['x-hermes-ui-server-time']) >= Date.parse(first.headers.date));
+  const exposed = again.headers['access-control-expose-headers'].toLowerCase().split(/,\s*/);
+  assert.ok(exposed.includes('date'));
+  assert.ok(exposed.includes('x-hermes-ui-server-time'), 'web clients can read the current server clock');
   assert.equal(again.headers['x-hermes-session-id'], 'hui-resume-1');
   assert.deepEqual(again.body, first.body, 'identical bytes, incl. the bridge route frame');
   assert.equal(seen.length, 1, 'Hermes saw one turn');
@@ -299,4 +305,24 @@ test('replay store: an evicted broken turn is forgotten, only an aborted record 
   assert.equal(store.get('s\0a'), undefined);
   b.end();
   assert.equal(store.rerunnable(b), false, 'ended');
+});
+
+for (const hasDate of [true, false]) test(`replay store: recorded server clock ${hasDate ? 'is advanced since response headers' : 'is absent without an upstream Date'}`, () => {
+  let now = 0;
+  const store = createReplayStore({ now: () => now });
+  const turn = store.begin('test-scope', 'hui-test');
+  now = 5000; // the turn waited for the upstream response
+  const date = new Date(1_800_000_000_000).toUTCString();
+  turn.start({ status: 200, headers: { ...(hasDate ? { date } : {}), 'x-hermes-ui-server-time': '999999999' } });
+  turn.end();
+  now = 125_000;
+  let sent;
+  const res = Object.assign(new EventEmitter(), {
+    writeHead(_status, headers) { sent = headers; },
+    flushHeaders() {},
+    end() { this.emit('close'); },
+  });
+  assert.equal(turn.attach(/** @type {any} */ (res), 0), null);
+  assert.equal(sent['x-hermes-ui-server-time'], hasDate ? String(Date.parse(date) + 120_000) : undefined);
+  assert.equal(sent.date, hasDate ? date : undefined);
 });

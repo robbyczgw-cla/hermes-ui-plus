@@ -30,7 +30,7 @@ export function networkFailureKind(text: string): NetworkFailureKind | null {
 }
 
 /** raw texts that are clearly a transport failure (unkeyed errors: server texts must not be re-labelled) */
-const RAW_NETWORK = /\bjava(x)?\.net\.|okhttp|Network request failed|Failed to fetch|NetworkError when attempting|ECONN(REFUSED|RESET|ABORTED)|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|EHOSTUNREACH|ENETUNREACH|ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_|ERR_INTERNET_DISCONNECTED|appears to be offline|NSURLErrorDomain/i;
+export const RAW_NETWORK = /\bjava(x)?\.net\.|okhttp|Network request failed|Failed to fetch|NetworkError when attempting|ECONN(REFUSED|RESET|ABORTED)|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|EHOSTUNREACH|ENETUNREACH|ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_|ERR_INTERNET_DISCONNECTED|appears to be offline|NSURLErrorDomain/i;
 
 /** first labels of Java / Kotlin / RN package names in exception text – not host names */
 const PACKAGE_ROOTS = new Set(['java', 'javax', 'android', 'androidx', 'kotlin', 'kotlinx', 'okhttp3', 'okio', 'sun', 'dalvik', 'libcore', 'expo', 'com', 'org']);

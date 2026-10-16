@@ -1,7 +1,8 @@
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '../ui/primitives/Text';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useT } from '../i18n';
-import { useTheme } from '../ui';
+import { Button, useTheme } from '../ui';
 import { Icon } from './icons';
 
 export type ChatErrorScreenProps = {
@@ -31,20 +32,7 @@ export function ChatErrorScreen({ error, onRetry, onNewChat, onResetChat, onSwit
   const tr = useT();
   const insets = useSafeAreaInsets();
   const btn = (label: string, onPress: () => void, primary = false) => (
-    <Pressable
-      key={label}
-      onPress={onPress}
-      accessibilityRole="button"
-      style={({ pressed }) => [
-        styles.btn,
-        primary
-          ? { backgroundColor: t.colors.text, borderColor: t.colors.text }
-          : { borderColor: t.colors.borderStrong },
-        { opacity: pressed ? 0.7 : 1 },
-      ]}
-    >
-      <Text style={[styles.btnText, { color: primary ? t.colors.bg : t.colors.text }]}>{label}</Text>
-    </Pressable>
+    <Button key={label} label={label} variant={primary ? 'primary' : 'secondary'} onPress={onPress} />
   );
   return (
     <ScrollView
@@ -54,10 +42,10 @@ export function ChatErrorScreen({ error, onRetry, onNewChat, onResetChat, onSwit
       <View style={[styles.icon, { backgroundColor: t.colors.dangerSoft }]}>
         <Icon name="alert" size={26} color={t.colors.danger} />
       </View>
-      <Text style={[styles.title, { color: t.colors.text }]} accessibilityRole="header">
+      <Text style={[t.typography.title, styles.title, { color: t.colors.text }]} accessibilityRole="header">
         {tr('chat.errorScreen.title')}
       </Text>
-      <Text style={[styles.msg, { color: t.colors.muted }]} numberOfLines={4} selectable>
+      <Text style={[t.typography.callout, styles.msg, { color: t.colors.muted }]} numberOfLines={4} selectable>
         {messageOf(error)}
       </Text>
       <View style={styles.col}>
@@ -66,7 +54,7 @@ export function ChatErrorScreen({ error, onRetry, onNewChat, onResetChat, onSwit
         {onResetChat ? btn(tr('chat.errorScreen.resetChat'), onResetChat) : null}
         {onSwitchConnection ? btn(tr('chat.errorScreen.switchConnection'), onSwitchConnection) : null}
       </View>
-      {onNewChat ? <Text style={[styles.hint, { color: t.colors.muted }]}>{tr('chat.errorScreen.hint')}</Text> : null}
+      {onNewChat ? <Text style={[t.typography.caption, styles.hint, { color: t.colors.muted }]}>{tr('chat.errorScreen.hint')}</Text> : null}
     </ScrollView>
   );
 }
@@ -74,10 +62,8 @@ export function ChatErrorScreen({ error, onRetry, onNewChat, onResetChat, onSwit
 const styles = StyleSheet.create({
   wrap: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28, gap: 12 },
   icon: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
-  title: { fontSize: 19, fontWeight: '600', textAlign: 'center' },
-  msg: { fontSize: 14, lineHeight: 20, textAlign: 'center' },
+  title: { textAlign: 'center' },
+  msg: { textAlign: 'center' },
   col: { width: '100%', maxWidth: 360, gap: 10, marginTop: 8 },
-  btn: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 999, paddingHorizontal: 16, height: 46, alignItems: 'center', justifyContent: 'center' },
-  btnText: { fontSize: 15, fontWeight: '600' },
-  hint: { fontSize: 13, textAlign: 'center', marginTop: 4 },
+  hint: { textAlign: 'center', marginTop: 4 },
 });

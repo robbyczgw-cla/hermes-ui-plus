@@ -37,6 +37,46 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## Pi Pocket (MIT)
+
+- Project: https://github.com/TannerMidd/pi-pocket (commit de612d5)
+- Copyright (c) 2026 Tanner Middleton
+- Used for: pure logic ported to TypeScript (per-file headers name the exact sources):
+  - `app/src/pi/pocket/turns.ts` (from `web/turns.js`: step summary line, test outcome, diff counts, grep matches,
+    short errors, stop detection) and its tests `app/src/pi/pocket/turns.test.ts` (from `test/turns.test.ts`)
+  - `app/src/pi/pocket/calls.ts` (from `web/calls.js`: `describeCall`)
+  - `app/src/pi/outcome.ts` (per-tool outcome rules adapted from `outcome()` in `web/transcript.js`)
+  - `app/src/ui/components/modules/e2/pocketDiff.ts` (from `web/diff-parse.js`: `unquote`, `cleanPath`, `headerPaths`,
+    `parseEditDiff`, pairing by likeness `bigrams` / `likeness` / `alignRun`, `fingerprint`, `changeCells`), used by
+    `diffModel.ts` (edit-card lines in the incremental parser follow `parseEditDiff`; `hunkRows` pairs a change's
+    lines with `alignRun` and highlights words per pair like Pocket's `hunkRows`, with Pocket's `wordDiff` token
+    pattern) and `Changes.tsx`
+  - `app/src/pi/StepSummary.tsx` renders the summary of `app/src/pi/outcome.ts` (no Pocket code of its own)
+
+```
+MIT License
+
+Copyright (c) 2026 Tanner Middleton
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## idiomorph (BSD-2-Clause)
 
 - Project: https://github.com/bigskysoftware/idiomorph (version 0.3.0)
@@ -44,6 +84,17 @@ SOFTWARE.
 - Used for: the minified DOM-morphing runtime inlined verbatim in `app/src/sandbox/idiomorph.ts`, so the sandbox
   needs no network access to morph the DOM. The file header names the source.
 - License: BSD 2-Clause "Simplified" License. The license text is available in the upstream repository.
+
+## Fonts: Atkinson Hyperlegible Next, Gloock, JetBrains Mono (SIL OFL 1.1)
+
+- Atkinson Hyperlegible Next: https://github.com/googlefonts/atkinson-hyperlegible-next, Copyright 2020-2024 The
+  Atkinson Hyperlegible Next Project Authors
+- Gloock: https://github.com/duartp/gloock, Copyright 2022 The Gloock Project Authors
+- JetBrains Mono: https://github.com/JetBrains/JetBrainsMono, Copyright 2020 The JetBrains Mono Project Authors
+- Used for: the app's text, display and code faces, bundled as Latin subsets (`scripts/subset-fonts.sh`): static TTF
+  in `app/assets/fonts/` (Android, iOS), variable WOFF2 in `app/public/fonts/` (web, desktop) and in
+  `website/fonts/`. Subsetting is a modification under the licence; none of the three declares a Reserved Font Name.
+- License: SIL Open Font License 1.1, full texts next to the files (`OFL-*.txt`).
 
 ## Leaflet and map tiles (loaded at runtime)
 

@@ -279,7 +279,7 @@ test('parseInline stays linear on unclosed openers / brackets / many h-words', (
     return s;
   };
   // quadratic before: ~0.3 s (JIT) / several s (jitless) per 100 KB string; linear now: a few ms.
-  // Scaling ratio (25 KB vs 100 KB) instead of an absolute budget: robust on a loaded host.
+  // CPU-time ratio 12.5 KB vs 200 KB (testing/scaling.test.ts) instead of an absolute budget: robust on a loaded host.
   for (const [unit, every] of [['*hinweis ', 8], ['[a ', 10], ['hier haben ', 2], ['**fett ', 6]] as const) {
     assertLinear(unit, build(unit, every), (s) => {
       parseInline(s, { partial: true });
@@ -336,7 +336,7 @@ test('footnotes: [^n] / 【n】 become fn nodes, everything else parses exactly 
 });
 
 test('footnotes: linear on many refs / unclosed refs', () => {
-  // scaling ratio (25 KB vs 100 KB) instead of an absolute budget: robust on a loaded host
+  // CPU-time ratio 12.5 KB vs 200 KB (testing/scaling.test.ts) instead of an absolute budget: robust on a loaded host
   for (const unit of ['[^1] ', '[^12 ', '【3】', '【99 ', '[^']) {
     assertLinear(unit, repeatTo(unit + 'wort '), (s) => {
       parseInline(s, { partial: true });

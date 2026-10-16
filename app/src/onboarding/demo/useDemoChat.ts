@@ -60,13 +60,17 @@ export function useDemoChat(options: UseHermesChatOptions = {}): UseHermesChat {
       setError(undefined);
       const sid = sessionRef.current;
       const current = () => abortRef.current === ctrl;
-      const turn = messagesRef.current.filter((m) => m.role === 'user').length;
+      const users = messagesRef.current.filter((m) => m.role === 'user');
+      const turn = users.length;
+      // earlier user messages, newest first (the current one is the last): lets "Shorter" / "As a table" find the answer they reshape
+      const priorUserTexts = users.slice(0, -1).map((m) => m.text).reverse();
       let failure: string | undefined;
       try {
         const r = await runDemoTurn({
           text,
           sessionId: sid,
           turn,
+          history: priorUserTexts,
           lang: langRef.current,
           signal: ctrl.signal,
           onEvent: (ev) => {

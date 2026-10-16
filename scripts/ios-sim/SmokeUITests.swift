@@ -1,4 +1,4 @@
-// UI smoke test of the installed Hermes UI+ simulator build (scripts/ios-sim-smoke.sh). Drives the app by bundle id
+// UI smoke test of the installed HUI+ (Hermes UI+) simulator build (scripts/ios-sim-smoke.sh). Drives the app by bundle id
 // (XCUIApplication(bundleIdentifier:)), so the app itself needs no test target. Fresh install expected (onboarding).
 // Env (via TEST_RUNNER_*): HUI_BUNDLE_ID, HUI_SHOT_DIR (screenshots + results.txt), HUI_LANG (en|de, default en).
 // Soft checks: every step is recorded as OK/FAIL in results.txt and the run continues, so all screenshots exist.
@@ -138,7 +138,7 @@ final class SmokeUITests: XCTestCase {
     sleep(3); dismissAlerts()
 
     // Welcome (guided onboarding): brand, mini demo card, Connect + demo
-    waitFor("Hermes Interactive UI+", 20)
+    waitFor("HUI+", 20)
     waitFor(de ? "Verbinden" : "Connect")
     shot("welcome")
     // Connect -> setup choices (QR/link, no bridge, no Hermes); the hermes flavor offers no other backends

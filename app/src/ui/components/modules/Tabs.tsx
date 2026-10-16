@@ -33,7 +33,7 @@ export function Tabs({ node }: { node: Partial<HuiTabs> }) {
   const fits = tabs.length <= 3;
 
   const bar = (
-    <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.m, padding: 3, gap: 3, ...(fits ? {} : { alignSelf: 'flex-start' }) }}>
+    <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.control, padding: 3, gap: 3, ...(fits ? {} : { alignSelf: 'flex-start' }) }}>
       {tabs.map((tb, i) => {
         const on = i === idx;
         const label = asString(tb.label) || `${i + 1}`;
@@ -50,7 +50,7 @@ export function Tabs({ node }: { node: Partial<HuiTabs> }) {
               ...(fits ? { flex: 1 } : {}),
               minHeight: 36,
               paddingHorizontal: 14,
-              borderRadius: t.radii.s,
+              borderRadius: t.radii.control,
               alignItems: 'center',
               justifyContent: 'center',
               backgroundColor: on ? t.colors.surface : 'transparent',

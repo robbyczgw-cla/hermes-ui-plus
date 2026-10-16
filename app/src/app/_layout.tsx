@@ -16,11 +16,14 @@ import { useStackHeaderInset, useWindowVibrancy } from '../desktop/chrome';
 import { I18nProvider, useT } from '../i18n';
 import { NodeStateProvider } from '../nodestate';
 import { RouteMemory } from '../navigation/RouteMemory';
+import { ShareHost } from '../share/ShareHost';
 import { OnboardingHost } from '../onboarding/OnboardingHost';
 import { PushHost } from '../push';
 import { AppearanceProvider } from '../settings/Appearance';
 import { ConnectionProvider } from '../settings/ConnectionProvider';
+import { UpdateHost } from '../support/UpdateHost';
 import { useTheme } from '../ui';
+import { installWebA11y, setFocusColor } from '../ui/lib/webA11y';
 
 /** header + web document title (browser tab); build-time override for the PWA, see brand.ts / scripts/build-web.sh */
 const APP_NAME = APP_TITLE;
@@ -45,12 +48,21 @@ export default function RootLayout() {
 function ThemedRoot() {
   const t = useTheme();
   const tr = useT();
+  // web: Space on checkbox / radio / switch, a keyboard focus ring for inputs, focus back to the opener after dialogs
+  useEffect(() => (Platform.OS === 'web' ? installWebA11y() : undefined), []);
+  useEffect(() => {
+    if (Platform.OS === 'web') setFocusColor(t.colors.accent);
+  }, [t.colors.accent]);
   // macOS app with the sidebar material behind a transparent window: the root paints nothing, the chat screen
   // paints its own column (desktop/chrome.ts)
   const vibrancy = useWindowVibrancy();
   // macOS app: the gallery's back button sits right of the traffic lights (like the chat header)
   const headerInset = useStackHeaderInset();
   const rootBg = vibrancy ? 'transparent' : t.colors.bg;
+  // web: the keyboard focus ring (public/index.html :focus-visible) is the accent, like selection and progress
+  useEffect(() => {
+    if (Platform.OS === 'web') document.documentElement.style.setProperty('--hui-focus', t.colors.accent);
+  }, [t.colors.accent]);
   const navTheme = useMemo(() => {
     const base = t.dark ? DarkTheme : DefaultTheme;
     return {
@@ -79,6 +91,8 @@ function ThemedRoot() {
                     <PushHost>
                     {/* running answers: Android foreground service, "Antwort ist da" notices (background/) */}
                     <BackgroundTurnHost />
+                    {/* daily update check on foreground + one chat toast per new version (support/) */}
+                    <UpdateHost />
                     {/* macOS desktop app: menus, keys, dock, notification actions, files, lock (no-op elsewhere) */}
                     <DesktopHost />
                     {/* reopens Settings & co. after an Android activity recreation (system font size change) */}
@@ -99,6 +113,8 @@ function ThemedRoot() {
                         />
                       </Stack>
                     </OnboardingHost>
+                    {/* "Share to HUI+": content shared from other apps → sheet → the chosen chat (share/) */}
+                    <ShareHost />
                     {/* consent requested outside the chat composer: remote voice (voice/consentGate.ts) */}
                     <ConsentHost />
                     </PushHost>

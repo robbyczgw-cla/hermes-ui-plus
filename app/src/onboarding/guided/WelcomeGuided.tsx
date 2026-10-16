@@ -3,7 +3,7 @@ import { Image, StyleSheet, View } from 'react-native';
 import { brand } from '../../brand';
 import { useT } from '../../i18n';
 import { FadeIn, HText, useTheme } from '../../ui';
-import { Button, OnbIcon, OnbScreen, type OnbIconName } from '../ui';
+import { Button, OnbIcon, OnbScreen, HeroText, type OnbIconName } from '../ui';
 import { MiniDemo } from './MiniDemo';
 
 const POINTS: readonly { id: 'point1' | 'point2' | 'point3'; icon: OnbIconName | 'sparkle' }[] = [
@@ -24,19 +24,20 @@ export function WelcomeGuided({ onConnect, onDemo }: { onConnect: () => void; on
       footer={
         <>
           <Button label={tr('onboarding.guided.welcome.start')} onPress={onConnect} />
-          <Button variant="ghost" label={tr('onboarding.guided.welcome.demo')} onPress={onDemo} />
+          <Button variant="tertiary" label={tr('onboarding.guided.welcome.demo')} onPress={onDemo} />
         </>
       }
     >
       <FadeIn style={styles.hero}>
-        <Image source={ICON} style={[styles.logo, { borderRadius: 16 }]} accessibilityIgnoresInvertColors accessible={false} />
-        <HText variant="display" align="center" accessibilityRole="header">
+        <Image source={ICON} style={[styles.logo, { borderRadius: t.radii.card }]} accessibilityIgnoresInvertColors accessible={false} />
+        <HeroText align="center">{brand().displayName}</HeroText>
+        <HText variant="callout" color="muted" align="center">
           {brand().name}
         </HText>
         <HText variant="body" color="muted" align="center">
           {tr('onboarding.guided.welcome.tagline')}
         </HText>
-        <View style={[styles.badge, { borderColor: t.colors.border }]}>
+        <View style={[styles.badge, { borderColor: t.colors.border, borderRadius: t.radii.inline }]}>
           <HText variant="micro" color="muted" align="center">
             {tr('onboarding.guided.welcome.disclaimer')}
           </HText>
@@ -50,7 +51,7 @@ export function WelcomeGuided({ onConnect, onDemo }: { onConnect: () => void; on
       <View style={{ gap: t.spacing.m, marginTop: t.spacing.xl }}>
         {POINTS.map((p, i) => (
           <FadeIn key={p.id} delay={220 + i * 70} style={styles.point}>
-            <View style={[styles.pointIcon, { backgroundColor: t.colors.surfaceAlt }]}>
+            <View style={[styles.pointIcon, { backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.control }]}>
               <OnbIcon name={p.icon} size={18} color={t.colors.text} />
             </View>
             <View style={{ flex: 1 }}>
@@ -70,7 +71,7 @@ export function WelcomeGuided({ onConnect, onDemo }: { onConnect: () => void; on
 const styles = StyleSheet.create({
   hero: { alignItems: 'center', gap: 6 },
   logo: { width: 60, height: 60, marginBottom: 8 },
-  badge: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, marginTop: 6 },
+  badge: { borderWidth: 1, paddingHorizontal: 10, paddingVertical: 4, marginTop: 6 },
   point: { flexDirection: 'row', gap: 14, alignItems: 'flex-start' },
-  pointIcon: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  pointIcon: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
 });

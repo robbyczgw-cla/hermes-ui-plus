@@ -31,6 +31,8 @@ export type DemoTurnParams = {
   lang?: DemoLang;
   /** 1-based number of this turn in the session */
   turn: number;
+  /** earlier user messages, newest first (a reformat chip reshapes the last answer that is not itself a reformat) */
+  history?: string[];
   signal?: AbortSignal;
   onEvent: (ev: HermesEvent) => void;
   /** resolves with the user's choice for an approval request (DemoSession wires the approval sheet) */
@@ -106,7 +108,8 @@ export async function runDemoTurn(p: DemoTurnParams): Promise<DemoTurnResult> {
   const sleep = p.sleep ?? defaultSleep;
   const { name, scenario } = pickScenario(p.text);
   const lang = p.lang ?? 'de';
-  const steps: DemoStep[] = scenario.steps({ userText: p.text, turn: p.turn, sessionId: p.sessionId, now: (p.now ?? (() => new Date()))(), lang });
+  const previousScenario = (p.history ?? []).map((h) => pickScenario(h).name).find((n) => n !== 'reformat');
+  const steps: DemoStep[] = scenario.steps({ userText: p.text, turn: p.turn, sessionId: p.sessionId, now: (p.now ?? (() => new Date()))(), lang, previousScenario });
   const id = completionId();
   const model = 'hermes-demo';
   const created = Math.floor(Date.now() / 1000);
@@ -130,7 +133,7 @@ export async function runDemoTurn(p: DemoTurnParams): Promise<DemoTurnResult> {
 
   try {
     await wait(120);
-    write(frame({ format: scenario.format, confidence: scenario.format === 'text' ? 0.62 : 0.93, reason: `Demo-Szenario „${name}“`, model: 'demo-router', ms: 0 }, 'hermes.ui.route'));
+    write(frame({ format: scenario.format, confidence: scenario.format === 'text' ? 0.62 : 0.93, reason: L({ lang }, `Demo-Szenario „${name}“`, `Demo scenario “${name}”`, `Escenario de demo «${name}»`), model: 'demo-router', ms: 0 }, 'hermes.ui.route'));
     write(frame(chunk({ role: 'assistant' })));
     await wait(250);
 
@@ -165,22 +168,23 @@ export async function runDemoTurn(p: DemoTurnParams): Promise<DemoTurnResult> {
               pattern_key: a.pattern_key,
               pattern_keys: a.pattern_keys,
               description: a.description,
-              allow_permanent: true,
-              allow_session: true,
+              // the demo offers exactly "Allow once" / "Deny": a global allowlist makes no sense without a server
+              allow_permanent: false,
+              allow_session: false,
               request_id: `req-${id}`,
               run_id: id,
               timestamp: Date.now() / 1000,
               session_id: p.sessionId,
-              choices: ['once', 'session', 'always', 'deny'],
+              choices: ['once', 'deny'],
             },
             'approval.request',
           ),
         );
         const choice = await raceAbort(p.waitForApproval(id), p.signal);
-        const follow: DemoStep[] =
-          choice === 'deny' || choice === 'timeout'
-            ? [{ text: L({ lang }, `\n\nOkay, der Befehl wurde ${choice === 'deny' ? 'abgelehnt' : 'nicht freigegeben'}; ich lasse alles unverändert.`, `\n\nOkay, the command was ${choice === 'deny' ? 'denied' : 'not approved'}; I am leaving everything unchanged.`, `\n\nDe acuerdo, el comando fue ${choice === 'deny' ? 'denegado' : 'no aprobado'}; dejo todo sin cambios.`) }]
-            : [{ tool: { name: 'terminal', label: a.command, emoji: '\u{1F4BB}', ms: 800 } }, { text: L({ lang }, `\n\nErledigt (Freigabe: \`${choice}\`). Im Demo-Modus wurde natürlich nichts gelöscht.`, `\n\nDone (approval: \`${choice}\`). Of course nothing was deleted in demo mode.`, `\n\nHecho (aprobación: \`${choice}\`). Por supuesto, en el modo demo no se borró nada.`) }];
+        const denied = choice === 'deny' || choice === 'timeout';
+        const follow: DemoStep[] = denied
+          ? (a.deny ?? [{ text: L({ lang }, '\n\nOkay, der Befehl wurde abgelehnt; ich lasse alles unverändert.', '\n\nOkay, the command was denied; I am leaving everything unchanged.', '\n\nDe acuerdo, el comando fue denegado; dejo todo sin cambios.') }])
+          : (a.allow ?? [{ tool: { name: 'terminal', label: a.command, emoji: '\u{1F4BB}', ms: 800 } }, { text: L({ lang }, '\n\nErledigt. Im Demo-Modus wurde natürlich nichts ausgeführt.', '\n\nDone. Of course nothing was run in demo mode.', '\n\nHecho. Por supuesto, en el modo demo no se ejecutó nada.') }]);
         steps.splice(i + 1, 0, ...follow);
       } else if ('fail' in step) {
         const msg = L({ lang }, 'Demo-Fehler: Werkzeug terminal wurde mit Exit-Code 1 beendet.', 'Demo error: the terminal tool exited with code 1.', 'Error de demo: la herramienta terminal terminó con el código 1.');

@@ -1,0 +1,12 @@
+[Unit]
+Description=HUI+ nightly fast-path cross-check (fast vs full test APK)
+
+[Service]
+Type=oneshot
+ExecStart=@HARNESS_DIR@/nightly-fastpath-check.sh
+Environment=PATH=@PATH@
+Environment=HUI_PRIVATE_DIR=@PRIVATE_DIR@
+Nice=10
+IOSchedulingClass=idle
+# the check waits up to 60 min for a quiet host, then two builds (about 25 min); this only stops a hung run
+TimeoutStartSec=14400

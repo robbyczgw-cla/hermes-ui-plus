@@ -4,14 +4,18 @@
  * accessible roles/values, haptics on native.
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Platform, TextInput, View, type GestureResponderEvent, type StyleProp, type ViewStyle } from 'react-native';
+import { Platform, View, type GestureResponderEvent, type StyleProp, type ViewStyle } from 'react-native';
+import { TextInput } from '../../../primitives/Text';
+import { noOutline } from '../../../lib/webStyle';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 import { useTheme } from '../../../theme';
 import { HText, PressableScale, textStyle } from '../../../primitives/basics';
+import { Button } from '../../../primitives/Button';
 import { Icon, type IconName } from '../../../primitives/Icon';
 import { haptic } from '../../../primitives/haptics';
 import { sliderWebProps } from '../../../lib/sliderKeys';
+import { useCaptureMode } from '../../../lib/capture';
 
 /* ───────────── icons ───────────── */
 
@@ -95,7 +99,12 @@ function IconAny({ icon, bicon, color, size = 16 }: AnyIcon & { color: string; s
 
 /* ───────────── buttons ───────────── */
 
-export function Btn({
+/**
+ * Labelled button of the b/c/d modules on top of the one `Button`: primary = ink, secondary = outline, ghost = text only.
+ * `success` is a state (done / active), not a colour: it reads as secondary. `bicon` icons are drawn by BIcon, `iconRight`
+ * puts the icon after the label.
+ */
+function BtnInner({
   label,
   onPress,
   kind = 'secondary',
@@ -117,43 +126,23 @@ export function Btn({
   /** icon after the label (e.g. "Weiter ›") */
   iconRight?: boolean;
 }) {
-  const t = useTheme();
-  const bg = kind === 'primary' ? t.colors.accent : kind === 'success' ? t.colors.successSoft : 'transparent';
-  const fg = kind === 'primary' ? t.colors.onAccent : kind === 'success' ? t.colors.success : kind === 'ghost' ? t.colors.accent : t.colors.text;
   return (
-    <PressableScale
-      haptic={kind === 'primary' ? false : 'selection'}
-      disabled={disabled}
+    <Button
+      label={label}
       onPress={onPress}
-      accessibilityLabel={label}
+      variant={kind === 'primary' ? 'primary' : kind === 'ghost' ? 'tertiary' : 'secondary'}
+      size={compact ? 'small' : 'regular'}
+      icon={icon ?? (bicon ? (color: string, size: number) => <BIcon name={bicon} size={size} color={color} /> : undefined)}
+      iconPosition={iconRight ? 'end' : 'start'}
+      disabled={disabled}
       accessibilityHint={accessibilityHint}
-      style={[
-        {
-          minHeight: compact ? 36 : 44,
-          borderRadius: t.radii.pill,
-          backgroundColor: bg,
-          borderWidth: kind === 'secondary' ? 1 : 0,
-          borderColor: t.colors.borderStrong,
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexDirection: 'row',
-          gap: 6,
-          paddingHorizontal: compact ? t.spacing.m : t.spacing.l,
-        },
-        style,
-      ]}
-      pressedStyle={kind === 'primary' ? { opacity: 0.88 } : { backgroundColor: t.colors.surfacePressed }}
-    >
-      {iconRight ? null : <IconAny icon={icon} bicon={bicon} color={fg} size={compact ? 15 : 16} />}
-      <HText variant="callout" weight={kind === 'primary' ? '600' : '500'} style={{ color: fg }} numberOfLines={1}>
-        {label}
-      </HText>
-      {iconRight ? <IconAny icon={icon} bicon={bicon} color={fg} size={compact ? 15 : 16} /> : null}
-    </PressableScale>
+      style={style}
+    />
   );
 }
 
-export function RoundBtn({ label, onPress, disabled, icon, bicon, size = 40, filled }: AnyIcon & { label: string; onPress: () => void; disabled?: boolean; size?: number; filled?: boolean }) {
+/** `expanded`: the button shows / hides a panel (announced as expanded / collapsed) */
+function RoundBtnInner({ label, onPress, disabled, icon, bicon, size = 40, filled, expanded }: AnyIcon & { label: string; onPress: () => void; disabled?: boolean; size?: number; filled?: boolean; expanded?: boolean }) {
   const t = useTheme();
   return (
     <PressableScale
@@ -161,6 +150,7 @@ export function RoundBtn({ label, onPress, disabled, icon, bicon, size = 40, fil
       disabled={disabled}
       onPress={onPress}
       accessibilityLabel={label}
+      accessibilityState={expanded === undefined ? undefined : { expanded }}
       hitSlop={Math.max(0, (44 - size) / 2)}
       style={{ width: size, height: size, borderRadius: size / 2, alignItems: 'center', justifyContent: 'center', backgroundColor: filled ? t.colors.accent : t.colors.surfaceAlt }}
       pressedStyle={{ backgroundColor: filled ? t.colors.accent : t.colors.surfacePressed, opacity: filled ? 0.85 : 1 }}
@@ -304,7 +294,7 @@ export function NumField({
         flexDirection: 'row',
         alignItems: 'center',
         minHeight: compact ? 38 : 44,
-        borderRadius: t.radii.m,
+        borderRadius: t.radii.control,
         borderWidth: 1,
         borderColor: border,
         backgroundColor: error ? t.colors.dangerSoft : t.colors.surface,
@@ -327,7 +317,7 @@ export function NumField({
           onBlur?.();
         }}
         returnKeyType="done"
-        style={[textStyle(t, 'body'), { flex: 1, minWidth: 0, width: '100%', color: t.colors.text, paddingVertical: compact ? 6 : 10, fontVariant: ['tabular-nums'], outlineStyle: 'none' } as object]}
+        style={[textStyle(t, 'body'), { flex: 1, minWidth: 0, width: '100%', color: t.colors.text, paddingVertical: compact ? 6 : 10, fontVariant: ['tabular-nums'], ...noOutline } as object]}
       />
       {unit ? (
         <HText variant="callout" color="muted">
@@ -352,11 +342,11 @@ export function Chips<V extends string | number>({ options, value, onChange, lab
             haptic="selection"
             onPress={() => onChange(o.value)}
             accessibilityRole="radio"
-            accessibilityState={{ selected: active }}
+            accessibilityState={{ selected: active, checked: active }}
             accessibilityLabel={o.label}
             style={{ minHeight: 36, paddingHorizontal: 14, justifyContent: 'center', borderRadius: t.radii.pill, borderWidth: 1, borderColor: active ? t.colors.accent : t.colors.borderStrong, backgroundColor: active ? t.colors.accentSoft : t.colors.surface }}
           >
-            <HText variant="callout" weight={active ? '600' : '400'} style={{ color: active ? t.colors.accent : t.colors.text }} numberOfLines={1}>
+            <HText variant="callout" weight={active ? '600' : '400'} style={{ color: active ? t.colors.accentText : t.colors.text }} numberOfLines={1}>
               {o.label}
             </HText>
           </PressableScale>
@@ -372,7 +362,7 @@ export function Disclosure({ title, children, initiallyOpen = false, icon = 'inf
   const t = useTheme();
   const [open, setOpen] = useState(initiallyOpen);
   return (
-    <View style={{ borderRadius: t.radii.m, backgroundColor: t.colors.surfaceAlt, overflow: 'hidden' }}>
+    <View style={{ borderRadius: t.radii.control, backgroundColor: t.colors.surfaceAlt, overflow: 'hidden' }}>
       <PressableScale
         haptic="selection"
         scaleTo={1}
@@ -393,4 +383,14 @@ export function Disclosure({ title, children, initiallyOpen = false, icon = 'inf
       {open ? <View style={{ paddingHorizontal: t.spacing.m, paddingBottom: t.spacing.m, gap: t.spacing.s }}>{children}</View> : null}
     </View>
   );
+}
+
+/** share-as-image (capture mode): an app-only control, not part of the picture */
+export function Btn(props: Parameters<typeof BtnInner>[0]) {
+  return useCaptureMode() ? null : <BtnInner {...props} />;
+}
+
+/** share-as-image (capture mode): an app-only control, not part of the picture */
+export function RoundBtn(props: Parameters<typeof RoundBtnInner>[0]) {
+  return useCaptureMode() ? null : <RoundBtnInner {...props} />;
 }

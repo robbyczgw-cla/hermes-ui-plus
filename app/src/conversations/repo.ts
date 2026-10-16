@@ -22,6 +22,7 @@
 import type { ChatMessage } from '../hermes/types.ts';
 import { migrateIndex, migrateMessages } from './migrate.ts';
 import { attachmentUris, messagesFileJson, prepareForStorage, searchTextOf } from './messages.ts';
+import { PERF, perfNow, perfSpan } from '../perf/probe.ts';
 import { SCHEMA_VERSION } from './types.ts';
 import type { IndexFile, IndexState, MessagesFile } from './types.ts';
 
@@ -342,7 +343,10 @@ export function createRepo(storage: StorageLike, options: RepoOptions = {}) {
       }
       try {
         // = JSON.stringify({ v, messages }) with the JSON of unchanged messages reused (messages.ts)
-        await blobs.setItem(msgsKey(id), messagesFileJson(SCHEMA_VERSION, list));
+        const t0 = PERF ? perfNow() : 0;
+        const json = messagesFileJson(SCHEMA_VERSION, list);
+        if (PERF) perfSpan('save.json', t0);
+        await blobs.setItem(msgsKey(id), json);
         if (pendingMessages.get(id) === list) pendingMessages.delete(id);
         failedAt.delete(id);
       } catch (e) {

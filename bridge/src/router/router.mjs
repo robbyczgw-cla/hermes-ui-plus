@@ -2,7 +2,7 @@
 // @anthropic-ai/sdk only), so other servers can vendor it as a copy.
 // Router core: context -> cache -> primary backend (with time budget) -> heuristic fallback.
 import { contextHash } from './context.mjs';
-import { classifyHeuristic, HEURISTIC_MODEL } from './backends/heuristic.mjs';
+import { classifyHeuristic, HEURISTIC_MODEL, looksLikeProductComparison } from './backends/heuristic.mjs';
 import { PROMPT_VERSION } from './prompt.mjs';
 import { neutralDecision, normalizeDecision } from './taxonomy.mjs';
 import { LruCache } from './lru.mjs';
@@ -13,6 +13,9 @@ import { silentLogger } from './log.mjs';
  * @typedef {{id: string, model: string, label?: string, decide: (turns: any[], o?: {signal?: AbortSignal}) => Promise<any>}} Backend
  * @typedef {import('./taxonomy.mjs').RouteDecision} RouteDecision
  */
+
+/** @param {{role: string, content: string}[]} turns */
+const latestUserText = (turns) => [...turns].reverse().find((t) => t.role === 'user')?.content ?? '';
 
 /**
  * @param {{backend?: Backend|null, timeoutMs?: number, cache?: LruCache|null,
@@ -96,6 +99,13 @@ export function createRouter(opts = {}) {
         if (!d.component) {
           const h = fast ?? classifyHeuristic(turns);
           if (h.format === d.format && h.component) d.component = h.component;
+        }
+        // Named buyable products compared: product cards (photos, prices, specs table) instead of generic compare
+        // columns, also when the model or a coarse backend says compare.
+        if (d.format === 'compare' && looksLikeProductComparison(latestUserText(turns))) {
+          d.format = 'products';
+          d.component = 'compare';
+          d.reason = `${d.reason ? `${d.reason}; ` : ''}named products → products compare`.slice(0, 160);
         }
       } catch (err) {
         const e = /** @type {any} */ (err);

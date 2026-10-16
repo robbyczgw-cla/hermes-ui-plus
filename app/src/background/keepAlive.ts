@@ -5,7 +5,9 @@
  * The dataSync foreground service runs for exactly as long as ANY turn runs (all backends: direct ones have no
  * server-side continuation; for Hermes it saves the recovery round trip). It is started when the turn starts –
  * the app is visible then, which Android 12+ requires for starting a foreground service – and stopped on
- * finish / error / stop. Android shows the notification only after ~10 s, so short answers never show one.
+ * finish / error / stop – once the ended turns' final transcript writes are done (`registry.settle`): a stopped
+ * service lets Android freeze or kill the app at once. Android shows the notification only after ~10 s, so short
+ * answers never show one.
  *
  * While it runs, a headless JS task is active: React Native pauses JS timers in the background otherwise
  * (JavaTimerManager), which would freeze throttled saves and stream watchdogs.
@@ -24,12 +26,34 @@ export type KeepAliveTexts = {
 
 export type KeepAliveDeps = {
   module: Pick<StreamKeepAliveModule, 'start' | 'update' | 'stop' | 'addListener'>;
-  registry: Pick<TurnRegistry, 'snapshot' | 'subscribe' | 'stopAll'>;
+  registry: Pick<TurnRegistry, 'snapshot' | 'subscribe' | 'stopAll'> & Partial<Pick<TurnRegistry, 'saving'>>;
   /** setting "Antworten im Hintergrund fertigstellen" */
   enabled(): boolean;
   texts(): KeepAliveTexts;
   log?(msg: string): void;
 };
+
+/**
+ * The service's headless task body: one per JS runtime (AppRegistry.registerHeadlessTask), handed between keep-alive
+ * controllers. Android relaunches the activity on a configuration change (system dark mode): the new React surface
+ * mounts BEFORE the old one unmounts, so the old host's cleanup must not reset the body the new host already claimed.
+ * Otherwise the next service's task ends at once and Android stops the service right after it started.
+ */
+export function createTaskSlot() {
+  const idle = () => Promise.resolve();
+  let body: () => Promise<void> = idle;
+  return {
+    /** the registered headless task: the current owner's body, or end at once */
+    run: () => body(),
+    /** install `fn`; the returned release resets the slot only while `fn` still owns it */
+    claim(fn: () => Promise<void>): () => void {
+      body = fn;
+      return () => {
+        if (body === fn) body = idle;
+      };
+    },
+  };
+}
 
 export function createKeepAliveController(d: KeepAliveDeps) {
   let state: 'idle' | 'starting' | 'running' = 'idle';
@@ -54,8 +78,11 @@ export function createKeepAliveController(d: KeepAliveDeps) {
 
   const sync = async () => {
     const running = d.registry.snapshot();
+    const saving = d.registry.saving?.() ?? 0;
     if (!running.length) suppressed = false;
     const want = running.length > 0 && d.enabled() && !suppressed;
+    // the last turn ended, its final write is still in flight: keep the service (and the headless task) until it is done
+    if (!want && saving > 0 && (state === 'running' || state === 'starting')) return;
     if (want && state === 'idle') {
       state = 'starting';
       const t = textFor(running);
@@ -130,7 +157,7 @@ export function createKeepAliveController(d: KeepAliveDeps) {
     sync: () => void sync(),
     /** body of the headless JS task: resolves when no turn is running anymore */
     task(): Promise<void> {
-      if (!d.registry.snapshot().length) return Promise.resolve();
+      if (!d.registry.snapshot().length && !(d.registry.saving?.() ?? 0)) return Promise.resolve();
       return new Promise<void>((resolve) => taskDone.push(resolve));
     },
     state: () => state,

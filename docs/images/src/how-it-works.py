@@ -184,7 +184,7 @@ def build(c):
     body = "".join(p)
     defs = "".join(f'<path id="{f.key}-{n}" d="{d}"/>' for f in (SERIF, SANS, SANS_B, MONO)
                    for n, d in f.used.items() if d)
-    title = ("How it works: the Hermes UI+ app talks over HTTPS with a device token to the UI-Bridge, which runs "
+    title = ("How it works: the HUI+ app talks over HTTPS with a device token to the UI-Bridge, which runs "
              "next to Hermes and keeps the Hermes API key; the bridge talks HTTP with the API key to the Hermes "
              "Agent API server with the hermes-ui skill.")
     return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}" '

@@ -1171,6 +1171,99 @@ export interface HuiBlocks extends HuiBase, HuiProvenance {
   caption?: string;
 }
 
+// coding views (diff, terminal, changes) ──
+/** What happened to a file: canonical git-style status (`created` / `new` → added, `moved` → renamed …). */
+export type HuiFileStatus = 'added' | 'modified' | 'deleted' | 'renamed';
+export const HUI_FILE_STATUSES: readonly HuiFileStatus[] = ['added', 'modified', 'deleted', 'renamed'];
+export interface HuiDiffHunk {
+  /** first line number on the old / new side (1-based; 0 for an empty side) */
+  oldStart: number;
+  newStart: number;
+  /** text after the second `@@` (function context), ≤ 200 chars */
+  header?: string;
+  /** unified lines with their prefix: `" ctx"`, `"+add"`, `"-del"`, `"\\ No newline at end of file"` (≤ MAX_DIFF_LINES per file) */
+  lines: string[];
+}
+export interface HuiDiffFile {
+  /** path after the change (the old path for a deleted file) */
+  path: string;
+  /** path before a rename */
+  oldPath?: string;
+  status?: HuiFileStatus;
+  /** code language for the header ("ts"), else guessed from the extension */
+  language?: string;
+  binary?: boolean;
+  /** structured hunks … */
+  hunks?: HuiDiffHunk[];
+  /** … or this file's unified diff text (headers optional) … */
+  patch?: string;
+  /** … or the whole old / new text: the app computes the line diff (≤ MAX_DIFF_TEXT chars each) */
+  before?: string;
+  after?: string;
+}
+/**
+ * Unified diff of one or more files. Either `patch` (standard unified diff text, also what a ```diff fence
+ * holds) or structured `files`. Display-only; per-file collapse / copy / split view are local UI state.
+ */
+export interface HuiDiff extends HuiBase {
+  type: 'diff';
+  title?: string;
+  /** standard unified diff text (git diff / diff -u), possibly several files */
+  patch?: string;
+  files?: HuiDiffFile[];
+  /** preferred layout; `split` only takes effect on wide screens. Default auto (unified on phones). */
+  view?: 'unified' | 'split';
+}
+
+export type HuiTerminalStatus = 'running' | 'done' | 'error';
+/** A shell command and its output (ANSI SGR colours, `\r` progress lines). Display-only. */
+export interface HuiTerminal extends HuiBase {
+  type: 'terminal';
+  title?: string;
+  /** the command line as typed (multi-line allowed) */
+  command?: string;
+  /** working directory shown before the prompt */
+  cwd?: string;
+  /** raw output (stdout + stderr) incl. ANSI escapes; ≤ MAX_TERMINAL_OUTPUT chars (the tail is kept) */
+  output?: string;
+  /** absolute offset of `output[0]` in the whole output when `output` is a retained tail window (live tool output:
+   * the host drops chars from the front); lets the view keep earlier lines and parse only what was appended */
+  outputStart?: number;
+  /** chars cut from the head of a longer output (`true`: an unknown amount) */
+  truncated?: number | true;
+  exitCode?: number;
+  durationMs?: number;
+  /** default: `running` without an exit code while the answer streams, else done / error from the exit code */
+  status?: HuiTerminalStatus;
+}
+
+export interface HuiChangedFile {
+  path: string;
+  oldPath?: string;
+  status: HuiFileStatus;
+  additions?: number;
+  deletions?: number;
+  /** the file's unified diff (tap opens it) */
+  patch?: string;
+  hunks?: HuiDiffHunk[];
+  binary?: boolean;
+  /** touched by the agent in this session (the "<agent> only" filter); unset = unknown */
+  byAgent?: boolean;
+}
+/** Files touched by an agent turn with +/- counts; a file with a diff opens it on tap. Display-only. */
+export interface HuiChanges extends HuiBase {
+  type: 'changes';
+  title?: string;
+  /** one line under the title ("Refactored the stream parser") */
+  summary?: string;
+  /** ≤ MAX_CHANGED_FILES */
+  files: HuiChangedFile[];
+  /** combined unified diff; files without their own patch / hunks take theirs from it (by path) */
+  patch?: string;
+  /** display name of the agent for the "<agent> only" filter ("Hermes"); default "Agent" */
+  agent?: string;
+}
+
 export type HuiKnownNode =
   | HuiCard
   | HuiStack
@@ -1219,7 +1312,10 @@ export type HuiKnownNode =
   | HuiVocab
   | HuiMindmap
   | HuiPaths
-  | HuiBlocks;
+  | HuiBlocks
+  | HuiDiff
+  | HuiTerminal
+  | HuiChanges;
 
 /**
  * Discriminated union on `type`.
@@ -1283,6 +1379,9 @@ export const HUI_NODE_TYPES: readonly HuiNodeType[] = [
   'mindmap',
   'paths',
   'blocks',
+  'diff',
+  'terminal',
+  'changes',
 ];
 
 /**
@@ -1292,7 +1391,7 @@ export const HUI_NODE_TYPES: readonly HuiNodeType[] = [
 export const INTERACTIVE_NODE_TYPES: ReadonlySet<HuiNodeType> = new Set<HuiNodeType>([
   'form', 'choice', 'checklist', 'calc', 'recipe', 'quiz', 'flashcards', 'timer', 'slots', 'confirm',
   'poll', 'agenda', 'decision', 'rank', 'scale',
-  'places', 'products', 'map', 'guide', 'workout', 'studyplan', 'vocab', 'mindmap', 'paths',
+  'places', 'products', 'map', 'guide', 'workout', 'studyplan', 'vocab', 'mindmap', 'paths', 'changes',
 ]);
 
 export function isInteractiveNodeType(t: string): boolean {
@@ -1352,7 +1451,10 @@ export type RouteFormat =
   | 'vocab'
   | 'mindmap'
   | 'paths'
-  | 'blocks';
+  | 'blocks'
+  | 'diff'
+  | 'terminal'
+  | 'changes';
 
 export interface RouteDecision {
   format: RouteFormat;
@@ -1369,4 +1471,5 @@ export const ROUTE_FORMATS: readonly RouteFormat[] = [
   'choice', 'checklist', 'recipe', 'quiz', 'calc', 'timer',
   'translation', 'poll', 'agenda', 'weather', 'decision', 'rank', 'scale',
   'places', 'products', 'guide', 'workout', 'studyplan', 'vocab', 'mindmap', 'paths', 'blocks',
+  'diff', 'terminal', 'changes',
 ];

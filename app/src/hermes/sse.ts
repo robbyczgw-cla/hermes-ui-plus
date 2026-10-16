@@ -144,20 +144,24 @@ export function createSseParser(options: SseParserOptions = {}): SseParser {
 
     let start = 0;
     const len = text.length;
-    for (let i = 0; i < len; i++) {
-      const c = text.charCodeAt(i);
-      if (c === 10 /* \n */ || c === 13 /* \r */) {
-        if (skipLine) skipLine = false; // end of the over-long line: its tail is dropped too
-        else processLine(text.slice(start, i), out);
-        if (c === 13) {
-          if (i + 1 < len) {
-            if (text.charCodeAt(i + 1) === 10) i++;
-          } else {
-            lastWasCR = true; // maybe the LF arrives in the next chunk
-          }
+    // line ends found with native indexOf, not a per-character loop (each delta frame is ~200 chars of JSON for a few
+    // chars of text, and this runs in the Hermes interpreter on every network read; docs/PERF.md)
+    let lf = text.indexOf('\n');
+    let cr = text.indexOf('\r');
+    while (lf !== -1 || cr !== -1) {
+      const i = lf === -1 ? cr : cr === -1 ? lf : lf < cr ? lf : cr;
+      if (skipLine) skipLine = false; // end of the over-long line: its tail is dropped too
+      else processLine(text.slice(start, i), out);
+      start = i + 1;
+      if (i === cr) {
+        if (i + 1 < len) {
+          if (text.charCodeAt(i + 1) === 10) start = i + 2;
+        } else {
+          lastWasCR = true; // maybe the LF arrives in the next chunk
         }
-        start = i + 1;
       }
+      if (lf !== -1 && lf < start) lf = text.indexOf('\n', start);
+      if (cr !== -1 && cr < start) cr = text.indexOf('\r', start);
     }
     buffer = skipLine ? '' : text.slice(start);
     if (buffer.length > max) {
@@ -196,6 +200,18 @@ export type Utf8Decoder = {
   flush(): string;
 };
 
+const NON_ASCII = /[\u0080-\u00ff]/;
+const LATIN1_CHUNK = 4096;
+
+/** one char per byte (Latin-1); for ASCII bytes this IS the UTF-8 decoding */
+function bytesToLatin1(bytes: Uint8Array): string {
+  const n = bytes.length;
+  if (n <= LATIN1_CHUNK) return String.fromCharCode.apply(null, bytes as unknown as number[]);
+  let s = '';
+  for (let i = 0; i < n; i += LATIN1_CHUNK) s += String.fromCharCode.apply(null, bytes.subarray(i, i + LATIN1_CHUNK) as unknown as number[]);
+  return s;
+}
+
 export function createUtf8Decoder(): Utf8Decoder {
   let pending: number[] = []; // bytes of an incomplete sequence from the previous call
 
@@ -208,6 +224,12 @@ export function createUtf8Decoder(): Utf8Decoder {
   }
 
   function decode(bytes: Uint8Array): string {
+    // fast path: nothing carried over and pure ASCII (the norm for SSE JSON): one native conversion per 4 KB and a
+    // native check instead of a per-byte interpreter loop (docs/PERF.md); anything else takes the exact path below
+    if (pending.length === 0) {
+      const latin1 = bytesToLatin1(bytes);
+      if (!NON_ASCII.test(latin1)) return latin1;
+    }
     let src: ArrayLike<number> = bytes;
     if (pending.length > 0) {
       const merged = new Array<number>(pending.length + bytes.length);

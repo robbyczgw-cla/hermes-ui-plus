@@ -23,7 +23,7 @@ export const push = {
     checking: 'Comprobando el servidor…',
     unsupportedBridge: 'Este perfil no admite notificaciones. Necesita el {bridge}.',
     notConfigured: 'El servidor aún no tiene credenciales para {platform}. Los mensajes nuevos llegan en directo mientras la app esté abierta.',
-    registered: 'Activas en este dispositivo ({platform}).',
+    registered: 'Activadas en este dispositivo ({platform}).',
     denied: 'Las notificaciones están bloqueadas en los ajustes del sistema.',
     webUnsupported: 'Este navegador no admite notificaciones web push. iPhone/iPad: añade la página a la pantalla de inicio (iOS 16.4 o posterior) y ábrela desde allí.',
     noToken: 'No se pudo registrar este dispositivo: {error}',

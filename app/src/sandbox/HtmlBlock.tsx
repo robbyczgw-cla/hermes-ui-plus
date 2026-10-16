@@ -12,7 +12,8 @@
 // long-lived WebView instead of separate preview/final iframes.
 import * as Clipboard from 'expo-clipboard';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Linking, Platform, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import { Linking, Platform, Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { Text } from '../ui/primitives/Text';
 import Animated, {
   Easing,
   FadeOut,
@@ -307,7 +308,7 @@ export function HtmlBlock({
             accessibilityRole="button"
             accessibilityLabel={tr('sandbox.block.reloadA11y')}
             hitSlop={8}
-            style={({ pressed }) => [styles.reload, { borderColor: c.borderStrong, borderRadius: theme.radii.s, opacity: pressed ? 0.6 : 1 }]}
+            style={({ pressed }) => [styles.reload, { borderColor: c.borderControl, borderRadius: theme.radii.s, opacity: pressed ? 0.6 : 1 }]}
           >
             <Text style={[theme.typography.caption, { color: c.text, fontWeight: '600' }]}>{tr('sandbox.block.reload')}</Text>
           </Pressable>

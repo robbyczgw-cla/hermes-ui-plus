@@ -44,6 +44,9 @@ const MAIN: &str = "main";
 const LOG_MAX_BYTES: u64 = 1024 * 1024;
 /// files dropped on the dock icon are read into the web app: keep that bounded
 const MAX_OPEN_FILE_BYTES: u64 = 64 * 1024 * 1024;
+/// "Share as image" PNGs written to Downloads (a 1170 px wide answer image is a few MB at most)
+const MAX_SAVE_IMAGE_BYTES: usize = 40 * 1024 * 1024;
+const PNG_MAGIC: &[u8] = b"\x89PNG\r\n\x1a\n";
 
 /// traffic lights (overlay title bar): inset of the close button, so they sit vertically centred in the
 /// app's 54 px header rows; the web side moves its first header item right of them (`titlebarInset`)
@@ -632,6 +635,53 @@ fn desktop_read_file(opened: tauri::State<'_, OpenedFiles>, path: String) -> Res
     Ok(tauri::ipc::Response::new(bytes))
 }
 
+/// file stem for a saved image: letters, digits, `-`, `_`, `.` and spaces only, no leading dots, at most 80 chars,
+/// the extension dropped ("answer" when nothing is left) – a name from the web side can never leave the folder
+fn image_stem(name: &str) -> String {
+    let base = name.rsplit(['/', '\\']).next().unwrap_or("");
+    let base = base.strip_suffix(".png").or_else(|| base.strip_suffix(".PNG")).unwrap_or(base);
+    let clean: String = base
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ' '))
+        .take(80)
+        .collect();
+    let clean = clean.trim().trim_start_matches('.').trim().to_string();
+    if clean.is_empty() { "answer".into() } else { clean }
+}
+
+/// "Share as image" in the desktop app: the PNG the web side rendered (raw request body, file name in the
+/// `x-file-name` header) → the Downloads folder, never overwriting (`-2`, `-3`, …). Returns the saved path.
+/// Only PNG bytes, size-capped, refused while the app lock is on.
+#[tauri::command]
+fn desktop_save_image(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    if is_locked(&app) {
+        return Err("locked".into());
+    }
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("expected the image bytes".into());
+    };
+    if bytes.len() > MAX_SAVE_IMAGE_BYTES || !bytes.starts_with(PNG_MAGIC) {
+        return Err("not a PNG image".into());
+    }
+    let name = request.headers().get("x-file-name").and_then(|v| v.to_str().ok()).unwrap_or("");
+    let stem = image_stem(name);
+    let dir = app.path().download_dir().map_err(|e| e.to_string())?;
+    for i in 1..100 {
+        let file = if i == 1 { format!("{stem}.png") } else { format!("{stem}-{i}.png") };
+        let path = dir.join(file);
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut f) => {
+                f.write_all(bytes).map_err(|e| e.to_string())?;
+                log(&app, "info", &format!("saved share image ({} bytes)", bytes.len()));
+                return Ok(path.to_string_lossy().into_owned());
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    Err("no free file name".into())
+}
+
 /// files dropped on the dock icon / opened with the app → attachments of the open chat
 #[allow(dead_code)] // RunEvent::Opened is macOS / iOS only
 fn on_opened(app: &AppHandle, urls: &[Url]) {
@@ -696,7 +746,7 @@ fn desktop_config_js(prefs: &DesktopPrefs) -> String {
 
 fn build_main_window(app: &AppHandle, prefs: &DesktopPrefs) -> tauri::Result<WebviewWindow> {
     let b = WebviewWindowBuilder::new(app, MAIN, WebviewUrl::App("index.html".into()))
-        .title("Hermes")
+        .title(app.package_info().name.clone())
         .inner_size(1100.0, 760.0)
         .min_inner_size(380.0, 560.0)
         .center()
@@ -753,6 +803,7 @@ pub fn run() {
             desktop_set_badge,
             desktop_context_menu,
             desktop_share,
+            desktop_save_image,
             desktop_set_login_item,
             desktop_open_login_items,
             desktop_set_prefs,
@@ -850,4 +901,26 @@ pub fn run() {
         }
         let _ = (handle, &ev);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::image_stem;
+
+    #[test]
+    fn image_stem_keeps_safe_names() {
+        assert_eq!(image_stem("hui-answer-2026-10-16-1432.png"), "hui-answer-2026-10-16-1432");
+        assert_eq!(image_stem("Answer 1.PNG"), "Answer 1");
+    }
+
+    #[test]
+    fn image_stem_never_leaves_the_folder() {
+        assert_eq!(image_stem("../../etc/passwd"), "passwd");
+        assert_eq!(image_stem("..\\..\\x.png"), "x");
+        assert_eq!(image_stem("..."), "answer");
+        assert_eq!(image_stem(".hidden.png"), "hidden");
+        assert_eq!(image_stem(""), "answer");
+        assert_eq!(image_stem("a/b\u{0}c:*?.png"), "bc");
+        assert_eq!(image_stem(&"x".repeat(300)).len(), 80);
+    }
 }

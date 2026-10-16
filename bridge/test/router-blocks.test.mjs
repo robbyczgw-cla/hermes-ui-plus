@@ -12,7 +12,7 @@ test('blocks: native hui format, defined, in prompt and strict schema', () => {
   assert.ok(DEFINITIONS.blocks.includes('at a glance'));
   assert.ok(DEFINITIONS.diagram.includes('blocks'), 'diagram definition points at blocks');
   assert.equal(COMPONENTS.blocks, null);
-  assert.equal(PROMPT_VERSION, 'r6');
+  assert.equal(PROMPT_VERSION, 'r7');
   assert.ok(ROUTER_SYSTEM_PROMPT.includes('- blocks: '));
   assert.ok(ROUTER_SYSTEM_PROMPT.includes('→ blocks'));
   assert.ok(ROUTE_JSON_SCHEMA.schema.properties.format.enum.includes('blocks'));
@@ -32,7 +32,7 @@ test('blocks heuristic: clear de/en/es cues only', () => {
 });
 
 test('blocks heuristic does not steal from compare / diagram / stats / paths / text', () => {
-  assert.equal(f('Vergleiche iPhone 17 und Pixel 11').format, 'compare');
+  assert.equal(f('Vergleiche Lissabon und Porto').format, 'compare');
   assert.equal(f('Vergleiche den Aufbau von OrbStack und Parallels').format, 'compare');
   assert.equal(f('Was ist der Unterschied zwischen Docker und VM?').format, 'compare');
   assert.equal(f('Zeichne ein Architekturdiagramm für meinen Webshop').format, 'diagram');

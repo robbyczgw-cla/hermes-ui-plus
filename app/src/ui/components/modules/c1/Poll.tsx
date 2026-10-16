@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
-import { TextInput, View, type LayoutChangeEvent } from 'react-native';
+import { View, type LayoutChangeEvent } from 'react-native';
+import { TextInput } from '../../../primitives/Text';
+import { noOutline } from '../../../lib/webStyle';
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withSequence, withSpring, withTiming } from 'react-native-reanimated';
 import { useT } from '../../../../i18n';
 import { useMotionReduced, useTheme, type Theme } from '../../../theme';
+import { scaleFont } from '../../../themes';
 import { useHui } from '../../../primitives/context';
 import { Badge, FadeIn, HText, InlineText, PressableScale, Surface, textStyle } from '../../../primitives/basics';
+import { Button } from '../../../primitives/Button';
 import { Icon } from '../../../primitives/Icon';
 import { Skeleton } from '../../../primitives/Skeleton';
 import { haptic } from '../../../primitives/haptics';
@@ -144,7 +148,7 @@ export function Poll({ node }: { node: Partial<HuiPoll> }) {
             />
           </FadeIn>
         ))}
-        {streaming ? <Skeleton height={52} radius={t.radii.m} /> : null}
+        {streaming ? <Skeleton height={52} radius={t.radii.control} /> : null}
       </View>
 
       {hideResults ? (
@@ -312,9 +316,9 @@ function VoterPanel({
   if (phase === 'vote' && st.active) {
     return (
       <FadeIn key={`vote-${st.active}`}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s, padding: t.spacing.s, paddingLeft: t.spacing.m, borderRadius: t.radii.m, backgroundColor: t.colors.accentSoft }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s, padding: t.spacing.s, paddingLeft: t.spacing.m, borderRadius: t.radii.control, backgroundColor: t.colors.accentSoft }}>
           <Avatar t={t} name={st.active} color={voterColor(t, voters, st.active)} size={32} />
-          <HText variant="bodyStrong" style={{ flex: 1, color: t.colors.accent }} accessibilityLiveRegion="polite" numberOfLines={1}>
+          <HText variant="bodyStrong" style={{ flex: 1, color: t.colors.accentText }} accessibilityLiveRegion="polite" numberOfLines={1}>
             {tr('ui.poll.votingAs', { name: st.active })}
           </HText>
           <PressableScale
@@ -336,7 +340,7 @@ function VoterPanel({
   if (phase === 'handoff' && st.next) {
     return (
       <FadeIn key={`handoff-${st.next}`}>
-        <View style={{ alignItems: 'center', gap: t.spacing.m, padding: t.spacing.l, borderRadius: t.radii.m, backgroundColor: t.colors.surfaceAlt }}>
+        <View style={{ alignItems: 'center', gap: t.spacing.m, padding: t.spacing.l, borderRadius: t.radii.control, backgroundColor: t.colors.surfaceAlt }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s }}>
             <C1Icon name="phone" size={22} color={t.colors.accent} />
             <Icon name="arrowRight" size={16} color={t.colors.subtle} />
@@ -388,7 +392,7 @@ function VoterPanel({
                 paddingRight: 14,
                 borderRadius: t.radii.pill,
                 borderWidth: 1,
-                borderColor: has ? t.colors.success : t.colors.borderStrong,
+                borderColor: has ? t.colors.success : t.colors.borderControl,
                 backgroundColor: has ? t.colors.successSoft : t.colors.surface,
               }}
               pressedStyle={{ backgroundColor: t.colors.surfacePressed }}
@@ -444,7 +448,7 @@ function OptionRow({
     <View style={{ gap: 8 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s }}>
         {selectable ? <Indicator t={t} on={selected} multiple={multiple} /> : null}
-        {row.emoji ? <HText style={{ fontSize: 20, lineHeight: 26 }}>{row.emoji}</HText> : null}
+        {row.emoji ? <HText style={scaleFont(20, 26, t.fontScale)}>{row.emoji}</HText> : null}
         <HText variant={hot ? 'bodyStrong' : 'body'} style={{ flex: 1 }} numberOfLines={2}>
           {row.label}
         </HText>
@@ -479,7 +483,7 @@ function OptionRow({
   const style = {
     paddingHorizontal: t.spacing.m,
     paddingVertical: t.spacing.s + 4,
-    borderRadius: t.radii.m,
+    borderRadius: t.radii.control,
     borderWidth: selected ? 2 : 1,
     borderColor: selected ? t.colors.accent : t.colors.border,
     backgroundColor: selected ? t.colors.accentSoft : t.colors.surface,
@@ -516,7 +520,7 @@ function Indicator({ t, on, multiple }: { t: Theme; on: boolean; multiple: boole
         height: 22,
         borderRadius: multiple ? 6 : 11,
         borderWidth: on ? 0 : 1.5,
-        borderColor: t.colors.borderStrong,
+        borderColor: t.colors.borderControl,
         backgroundColor: on ? t.colors.accent : 'transparent',
         alignItems: 'center',
         justifyContent: 'center',
@@ -541,7 +545,7 @@ function Count({ t, count, percent, hot }: { t: Theme; count: number; percent: n
   return (
     <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6 }}>
       <Animated.View style={anim}>
-        <HText variant="callout" weight="700" tabular style={{ color: hot ? t.colors.accent : t.colors.text }}>
+        <HText variant="callout" weight="700" tabular style={{ color: hot ? t.colors.accentText : t.colors.text }}>
           {count}
         </HText>
       </Animated.View>
@@ -587,18 +591,14 @@ function AddOption({ t, poll, st, setSt, onAdded }: { t: Theme; poll: ReturnType
 
   if (!open) {
     return (
-      <PressableScale
-        haptic="selection"
+      <Button
+        label={full ? tr('ui.poll.maxOptions', { max: MAX_OPTIONS }) : tr('ui.poll.addOption')}
+        variant="tertiary"
+        icon="plus"
         disabled={full}
         onPress={() => setOpen(true)}
-        accessibilityRole="button"
-        style={{ flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 44, alignSelf: 'flex-start', paddingRight: t.spacing.s }}
-      >
-        <Icon name="plus" size={16} color={t.colors.accent} strokeWidth={2.2} />
-        <HText variant="callout" weight="600" color="accent">
-          {full ? tr('ui.poll.maxOptions', { max: MAX_OPTIONS }) : tr('ui.poll.addOption')}
-        </HText>
-      </PressableScale>
+        style={{ alignSelf: 'flex-start' }}
+      />
     );
   }
 
@@ -642,13 +642,13 @@ function AddOption({ t, poll, st, setSt, onAdded }: { t: Theme; poll: ReturnType
               {
                 flex: 1,
                 minHeight: 44,
-                borderRadius: t.radii.m,
+                borderRadius: t.radii.control,
                 borderWidth: 1,
                 borderColor: err ? t.colors.danger : focus ? t.colors.accent : t.colors.borderStrong,
                 paddingHorizontal: t.spacing.m,
                 color: t.colors.text,
                 backgroundColor: t.colors.surface,
-                outlineStyle: 'none',
+                ...noOutline,
               } as object,
             ]}
           />
@@ -658,9 +658,9 @@ function AddOption({ t, poll, st, setSt, onAdded }: { t: Theme; poll: ReturnType
             onPress={submit}
             accessibilityRole="button"
             accessibilityLabel={tr('ui.poll.add')}
-            style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: t.colors.accent, alignItems: 'center', justifyContent: 'center' }}
+            style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: t.colors.ink, alignItems: 'center', justifyContent: 'center' }}
           >
-            <Icon name="plus" size={20} color={t.colors.onAccent} strokeWidth={2.4} />
+            <Icon name="plus" size={20} color={t.colors.onInk} strokeWidth={2.4} />
           </PressableScale>
         </View>
         {err ? (
@@ -682,7 +682,7 @@ function PollSkeleton() {
         <Skeleton width="60%" height={16} />
         <Skeleton width="35%" height={10} />
         {[0, 1, 2].map((k) => (
-          <Skeleton key={k} height={52} radius={t.radii.m} />
+          <Skeleton key={k} height={52} radius={t.radii.control} />
         ))}
         <Skeleton height={44} radius={t.radii.pill} />
       </View>

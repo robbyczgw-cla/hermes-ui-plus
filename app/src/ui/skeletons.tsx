@@ -113,7 +113,7 @@ export function FormSkeleton({ fields = 3 }: { fields?: number }) {
       {Array.from({ length: fields }, (_, i) => (
         <View key={i} style={{ gap: 8 }}>
           <Skeleton width="30%" height={10} />
-          <Skeleton height={42} radius={t.radii.m} />
+          <Skeleton height={42} radius={t.radii.control} />
         </View>
       ))}
       <Skeleton width={120} height={40} radius={t.radii.pill} />
@@ -124,8 +124,8 @@ export function FormSkeleton({ fields = 3 }: { fields?: number }) {
 export function ImageSkeleton({ aspect = 16 / 9 }: { aspect?: number }) {
   const t = useTheme();
   return (
-    <View style={{ width: '100%', aspectRatio: aspect, borderRadius: t.radii.l, overflow: 'hidden' }}>
-      <Skeleton height={null} width="100%" radius={t.radii.l} style={{ flex: 1 }} />
+    <View style={{ width: '100%', aspectRatio: aspect, borderRadius: t.radii.card, overflow: 'hidden' }}>
+      <Skeleton height={null} width="100%" radius={t.radii.card} style={{ flex: 1 }} />
     </View>
   );
 }
@@ -133,7 +133,7 @@ export function ImageSkeleton({ aspect = 16 / 9 }: { aspect?: number }) {
 export function CodeSkeleton() {
   const t = useTheme();
   return (
-    <View style={{ backgroundColor: t.colors.codeBg, borderRadius: t.radii.m, padding: t.spacing.l, gap: 8, borderWidth: 1, borderColor: t.colors.border }}>
+    <View style={{ backgroundColor: t.colors.codeBg, borderRadius: t.radii.control, padding: t.spacing.l, gap: 8, borderWidth: 1, borderColor: t.colors.border }}>
       <Skeleton width="40%" height={10} />
       <Skeleton width="75%" height={10} />
       <Skeleton width="58%" height={10} />
@@ -152,7 +152,7 @@ function InteractiveSkeleton({ icon, label }: { icon: IconName; label: string })
           {label}
         </HText>
       </View>
-      <Skeleton height={180} radius={t.radii.m} />
+      <Skeleton height={180} radius={t.radii.control} />
     </Surface>
   );
 }
@@ -178,9 +178,9 @@ export function ChoiceSkeleton() {
   return (
     <Surface style={{ gap: 10 }}>
       <Skeleton width="55%" height={14} />
-      <Skeleton height={44} radius={t.radii.m} />
-      <Skeleton height={44} radius={t.radii.m} />
-      <Skeleton height={44} radius={t.radii.m} />
+      <Skeleton height={44} radius={t.radii.control} />
+      <Skeleton height={44} radius={t.radii.control} />
+      <Skeleton height={44} radius={t.radii.control} />
     </Surface>
   );
 }
@@ -189,7 +189,7 @@ export function RecipeSkeleton() {
   const t = useTheme();
   return (
     <Surface style={{ gap: t.spacing.m }}>
-      <Skeleton width="100%" height={160} radius={t.radii.m} />
+      <Skeleton width="100%" height={160} radius={t.radii.control} />
       <SkeletonLines lines={4} />
     </Surface>
   );
@@ -202,7 +202,7 @@ export function QuizSkeleton() {
       <Skeleton width="30%" height={10} />
       <Skeleton width="80%" height={16} />
       {[0, 1, 2].map((k) => (
-        <Skeleton key={k} height={46} radius={t.radii.m} />
+        <Skeleton key={k} height={46} radius={t.radii.control} />
       ))}
     </Surface>
   );
@@ -213,7 +213,7 @@ export function FlashcardsSkeleton() {
   return (
     <Surface style={{ gap: 12 }}>
       <Skeleton width="40%" height={12} />
-      <Skeleton height={180} radius={t.radii.l} />
+      <Skeleton height={180} radius={t.radii.card} />
     </Surface>
   );
 }
@@ -223,7 +223,7 @@ export function SourcesSkeleton() {
   return (
     <View style={{ gap: 8 }}>
       <Skeleton width={80} height={10} />
-      <Skeleton height={56} radius={t.radii.m} />
+      <Skeleton height={56} radius={t.radii.control} />
     </View>
   );
 }
@@ -233,8 +233,8 @@ export function SlotsSkeleton() {
   return (
     <Surface style={{ gap: 10 }}>
       <Skeleton width="55%" height={14} />
-      <Skeleton height={52} radius={t.radii.m} />
-      <Skeleton height={52} radius={t.radii.m} />
+      <Skeleton height={52} radius={t.radii.control} />
+      <Skeleton height={52} radius={t.radii.control} />
     </Surface>
   );
 }
@@ -273,7 +273,7 @@ export function MapSkeleton({ title }: { title?: string }) {
   return (
     <Surface style={{ gap: t.spacing.m }}>
       {title ? <HText variant="headline">{title}</HText> : <Skeleton width="45%" height={16} />}
-      <Skeleton width="100%" height={MAP_SKELETON_HEIGHT} radius={t.radii.m} />
+      <Skeleton width="100%" height={MAP_SKELETON_HEIGHT} radius={t.radii.control} />
     </Surface>
   );
 }
@@ -351,7 +351,7 @@ export function PollSkeleton() {
     <Surface style={{ gap: 10 }}>
       <Skeleton width="65%" height={14} />
       {[0.9, 0.6, 0.35].map((w, i) => (
-        <Skeleton key={i} width={`${w * 100}%`} height={36} radius={t.radii.m} />
+        <Skeleton key={i} width={`${w * 100}%`} height={36} radius={t.radii.control} />
       ))}
     </Surface>
   );
@@ -365,7 +365,7 @@ export function AgendaSkeleton() {
       {[0, 1, 2].map((i) => (
         <View key={i} style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
           <Skeleton width={36} height={10} />
-          <Skeleton height={i === 1 ? 64 : 44} radius={t.radii.m} style={{ flex: 1 }} />
+          <Skeleton height={i === 1 ? 64 : 44} radius={t.radii.control} style={{ flex: 1 }} />
         </View>
       ))}
     </Surface>
@@ -385,7 +385,7 @@ export function WeatherSkeleton() {
       </View>
       <View style={{ flexDirection: 'row', gap: 12 }}>
         {[0, 1, 2, 3, 4].map((i) => (
-          <Skeleton key={i} width={40} height={64} radius={t.radii.m} />
+          <Skeleton key={i} width={40} height={64} radius={t.radii.control} />
         ))}
       </View>
     </Surface>
@@ -400,7 +400,7 @@ export function DecisionSkeleton() {
       {[0.9, 0.7, 0.45].map((w, i) => (
         <View key={i} style={{ gap: 6 }}>
           <Skeleton width={90} height={10} />
-          <Skeleton width={`${w * 100}%`} height={18} radius={t.radii.s} />
+          <Skeleton width={`${w * 100}%`} height={18} radius={t.radii.control} />
         </View>
       ))}
     </Surface>
@@ -415,7 +415,7 @@ export function RankSkeleton() {
       {[0, 1, 2, 3].map((i) => (
         <View key={i} style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
           <Skeleton width={24} height={24} radius={12} />
-          <Skeleton height={40} radius={t.radii.m} style={{ flex: 1 }} />
+          <Skeleton height={40} radius={t.radii.control} style={{ flex: 1 }} />
         </View>
       ))}
     </Surface>
@@ -478,7 +478,7 @@ export function ProductsSkeleton() {
     <View style={{ flexDirection: 'row', gap: t.spacing.m, overflow: 'hidden' }}>
       {[0, 1].map((i) => (
         <Surface key={i} style={{ width: 176, gap: 8 }}>
-          <Skeleton height={110} radius={t.radii.m} />
+          <Skeleton height={110} radius={t.radii.control} />
           <Skeleton width="45%" height={10} />
           <Skeleton width="85%" height={14} />
           <Skeleton width="40%" height={18} />
@@ -536,7 +536,7 @@ export function StudyPlanSkeleton() {
         </View>
       </View>
       {[0, 1, 2].map((i) => (
-        <Skeleton key={i} height={i === 0 ? 72 : 44} radius={t.radii.m} />
+        <Skeleton key={i} height={i === 0 ? 72 : 44} radius={t.radii.control} />
       ))}
     </Surface>
   );
@@ -550,7 +550,7 @@ export function VocabSkeleton() {
         <Skeleton width={72} height={32} radius={t.radii.pill} />
         <Skeleton width={72} height={32} radius={t.radii.pill} />
       </View>
-      <Skeleton height={140} radius={t.radii.l} />
+      <Skeleton height={140} radius={t.radii.card} />
       <Skeleton width="30%" height={10} />
     </Surface>
   );
@@ -615,7 +615,7 @@ export function PathsSkeleton() {
 /** One `blocks` column: centred title, a 2×2 grid of boxes, a full-width base layer. */
 export function BlocksColumnSkeleton() {
   const t = useTheme();
-  const box = <Skeleton width="48%" height={56} radius={t.radii.m} />;
+  const box = <Skeleton width="48%" height={56} radius={t.radii.control} />;
   return (
     <View style={{ gap: t.spacing.s }}>
       <View style={{ alignItems: 'center' }}>
@@ -629,7 +629,7 @@ export function BlocksColumnSkeleton() {
         {box}
         {box}
       </View>
-      <Skeleton width="100%" height={40} radius={t.radii.m} />
+      <Skeleton width="100%" height={40} radius={t.radii.control} />
     </View>
   );
 }
@@ -672,7 +672,11 @@ export function NodeSkeleton({ shape }: { shape: string }) {
     case 'gallery':
       return <ImageSkeleton />;
     case 'code':
+    case 'diff':
+    case 'terminal':
       return <CodeSkeleton />;
+    case 'changes':
+      return <ListSkeleton />;
     case 'card':
     case 'stack':
       return <CardSkeleton />;

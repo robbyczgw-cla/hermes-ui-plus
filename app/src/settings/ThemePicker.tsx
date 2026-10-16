@@ -1,7 +1,8 @@
 // Darstellung widgets: theme family cards (each a live mini preview), accent swatches + custom hex,
 // and a live preview card of the current theme (bubble style, font size, accent, chart + code colors).
 import { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
+import { Text } from '../ui/primitives/Text';
 import { Icon } from '../chat/icons';
 import { useT } from '../i18n';
 import {
@@ -11,7 +12,7 @@ import {
   normalizeHex,
   pickerFamilies,
   resolveTheme,
-  scaleFont,
+  textStyle,
   useTheme,
   useThemeConfig,
   type AccentPref,
@@ -21,6 +22,7 @@ import {
 import type { BubbleStylePref } from './preferences';
 import { Button, Field, Group } from './ui';
 import { useDesktopChrome } from '../desktop/chrome';
+import { a11yState } from '../ui/lib/a11yState';
 
 // ---------------------------------------------------------------- family cards
 
@@ -45,23 +47,23 @@ export function ThemeFamilyGrid({ value, onChange }: { value: ThemeFamilyId; onC
             key={id}
             onPress={() => onChange(id)}
             accessibilityRole="radio"
-            accessibilityState={{ selected: sel }}
+            {...a11yState({ selected: sel, checked: sel })}
             accessibilityLabel={tr('settings.themes.a11y', { name })}
             style={({ pressed }) => [
               styles.card,
-              { borderColor: sel ? t.colors.accent : t.colors.border, backgroundColor: t.colors.surface, opacity: pressed ? 0.8 : 1 },
+              { borderColor: sel ? t.colors.accent : t.colors.border, backgroundColor: t.colors.surface, borderRadius: t.radii.card, opacity: pressed ? 0.8 : 1 },
               sel && styles.cardSel,
             ]}
           >
             <MiniPreview th={darkOnly && !t.dark ? resolveTheme({ family: id, scheme: 'dark', accent: cfg.accent }) : th} />
             <View style={styles.cardFoot}>
-              <Text style={[styles.cardName, { color: t.colors.text }]} numberOfLines={1}>
+              <Text style={[styles.cardName, textStyle(t, 'caption'), { color: t.colors.text, fontWeight: '600' }]} numberOfLines={1}>
                 {name}
               </Text>
               {sel ? <Icon name="check" size={14} color={t.colors.accent} strokeWidth={2.4} /> : null}
             </View>
             {darkOnly ? (
-              <Text style={[styles.cardSub, { color: t.colors.muted }]} numberOfLines={1}>
+              <Text style={[styles.cardSub, textStyle(t, 'micro'), { color: t.colors.muted }]} numberOfLines={1}>
                 {tr('settings.themes.darkOnly')}
               </Text>
             ) : null}
@@ -73,11 +75,11 @@ export function ThemeFamilyGrid({ value, onChange }: { value: ThemeFamilyId; onC
         <Pressable
           onPress={() => setExpanded((e) => !e)}
           accessibilityRole="button"
-          accessibilityState={{ expanded }}
+          {...a11yState({ expanded })}
           hitSlop={6}
           style={({ pressed }) => [styles.moreBtn, pressed && { opacity: 0.6 }]}
         >
-          <Text style={[styles.moreText, { color: t.colors.accent }]}>{expanded ? tr('settings.themes.less') : tr('settings.themes.more', { count: hiddenCount })}</Text>
+          <Text style={[textStyle(t, 'callout'), { color: t.colors.accentText, fontWeight: '600' }]}>{expanded ? tr('settings.themes.less') : tr('settings.themes.more', { count: hiddenCount })}</Text>
           <Icon name={expanded ? 'chevronDown' : 'chevronRight'} size={14} color={t.colors.accent} />
         </Pressable>
       ) : null}
@@ -89,7 +91,7 @@ export function ThemeFamilyGrid({ value, onChange }: { value: ThemeFamilyId; onC
 function MiniPreview({ th }: { th: Theme }) {
   const c = th.colors;
   return (
-    <View style={[styles.mini, { backgroundColor: c.bg, borderColor: c.border }]} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+    <View style={[styles.mini, { backgroundColor: c.bg, borderColor: c.border, borderRadius: th.radii.control }]} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
       <View style={[styles.miniBubble, { backgroundColor: c.surfaceAlt }]} />
       <View style={[styles.miniLine, { backgroundColor: c.text, width: '78%' }]} />
       <View style={[styles.miniLine, { backgroundColor: c.muted, width: '56%' }]} />
@@ -122,12 +124,12 @@ export function AccentPicker({ value, family, onChange }: { value: AccentPref; f
       key={key}
       onPress={onPress}
       accessibilityRole="radio"
-      accessibilityState={{ selected }}
+      {...a11yState({ selected, checked: selected })}
       accessibilityLabel={label}
       hitSlop={4}
       style={({ pressed }) => [styles.swatchRing, { borderColor: selected ? t.colors.text : 'transparent', opacity: pressed ? 0.7 : 1 }]}
     >
-      <View style={[styles.swatch, { backgroundColor: color, borderColor: t.colors.borderStrong }]}>
+      <View style={[styles.swatch, { backgroundColor: color, borderColor: t.colors.borderControl }]}>
         {glyph ? <Icon name="plus" size={16} color={t.colors.text} strokeWidth={2.2} /> : null}
         {selected && !glyph ? <Icon name="check" size={15} color={resolveTheme({ scheme: t.scheme, accent: normalizeHex(color) ?? 'theme' }).colors.onAccent} strokeWidth={2.6} /> : null}
       </View>
@@ -147,7 +149,8 @@ export function AccentPicker({ value, family, onChange }: { value: AccentPref; f
               onChange('system');
             })
           : null}
-        {ACCENT_SWATCHES.map((s) =>
+        {/* a swatch equal to the family's own accent (brass in Standard, ink in Paper) is already "From theme" */}
+        {ACCENT_SWATCHES.filter((s) => value === s.id || s[t.scheme].toLowerCase() !== familyAccent.toLowerCase()).map((s) =>
           swatch(s.id, s[t.scheme], value === s.id, tr(`settings.look.swatches.${s.id}`), () => {
             setCustomOpen(false);
             onChange(s.id);
@@ -158,7 +161,7 @@ export function AccentPicker({ value, family, onChange }: { value: AccentPref; f
           : swatch('custom', t.colors.surfaceAlt, false, tr('settings.look.accentCustom'), () => setCustomOpen((o) => !o), 'plus')}
       </View>
       <View style={styles.swatchLabelRow}>
-        <Text style={[styles.swatchLabel, { color: t.colors.muted }]} numberOfLines={1}>
+        <Text style={[textStyle(t, 'caption'), { color: t.colors.muted }]} numberOfLines={1}>
           {value === 'theme' ? tr('settings.look.accentTheme') : value === 'system' ? tr('desktop.accentSystem') : isCustom ? `${tr('settings.look.accentCustom')} · ${value.toUpperCase()}` : tr(`settings.look.swatches.${value as (typeof ACCENT_SWATCHES)[number]['id']}`)}
         </Text>
       </View>
@@ -172,7 +175,7 @@ export function AccentPicker({ value, family, onChange }: { value: AccentPref; f
             autoCapitalize="characters"
             maxLength={7}
             last
-            trailing={check?.ok ? <View style={[styles.customDot, { backgroundColor: check.hex, borderColor: t.colors.borderStrong }]} /> : null}
+            trailing={check?.ok ? <View style={[styles.customDot, { backgroundColor: check.hex, borderColor: t.colors.borderControl }]} /> : null}
             hint={
               draft && check && !check.ok
                 ? tr('settings.look.accentInvalid')
@@ -184,7 +187,7 @@ export function AccentPicker({ value, family, onChange }: { value: AccentPref; f
             }
           />
           <View style={styles.customBtn}>
-            <Button kind="secondary" label={tr('settings.look.accentApply')} disabled={!check?.ok} onPress={() => check?.ok && onChange(check.hex)} />
+            <Button kind="secondary" grow label={tr('settings.look.accentApply')} disabled={!check?.ok} onPress={() => check?.ok && onChange(check.hex)} />
           </View>
         </View>
       ) : null}
@@ -204,22 +207,22 @@ export function LivePreview({ bubbleStyle }: { bubbleStyle: BubbleStylePref }) {
   const t = useTheme();
   const tr = useT();
   const c = t.colors;
-  const body = scaleFont(16, 24, t.fontScale);
-  const user = scaleFont(15, 21, t.fontScale);
-  const small = scaleFont(13, 18, t.fontScale);
+  const body = textStyle(t, 'reading');
+  const user = textStyle(t, 'body');
+  const small = textStyle(t, 'caption');
   const plain = bubbleStyle === 'plain';
   return (
     <View
-      style={[styles.preview, { backgroundColor: c.bg, borderColor: c.border, padding: t.spacing.l, gap: t.spacing.m }]}
+      style={[styles.preview, { backgroundColor: c.bg, borderColor: c.border, borderRadius: t.radii.card, padding: t.spacing.l, gap: t.spacing.m }]}
       accessibilityLabel={tr('settings.look.preview')}
     >
       <View style={{ alignItems: 'flex-end' }}>
-        <View style={plain ? [styles.pvPlain, { borderRightColor: c.accent }] : [styles.pvBubble, { backgroundColor: c.surfaceAlt }]}>
+        <View style={plain ? [styles.pvPlain, { borderRightColor: c.accent }] : [styles.pvBubble, { backgroundColor: c.surfaceAlt, borderRadius: t.radii.card }]}>
           <Text style={[user, { color: c.text, textAlign: plain ? 'right' : 'left' }]}>{tr('settings.look.previewUser')}</Text>
         </View>
       </View>
       <Text style={[body, { color: c.text }]}>{tr('settings.look.previewAnswer')}</Text>
-      <View style={[styles.pvCard, { backgroundColor: c.surface, borderColor: c.border, padding: t.spacing.m }]}>
+      <View style={[styles.pvCard, { backgroundColor: c.surface, borderColor: c.border, borderRadius: t.radii.control, padding: t.spacing.m }]}>
         <View style={styles.pvBars}>
           {c.chart.map((col, i) => (
             <View key={col} style={[styles.pvBar, { backgroundColor: col, height: 14 + ((i * 7) % 26) }]} />
@@ -228,11 +231,11 @@ export function LivePreview({ bubbleStyle }: { bubbleStyle: BubbleStylePref }) {
         {/* no code snippet: the preview shows what an everyday chat looks like (design review P1-6) */}
       </View>
       <View style={styles.pvActions}>
-        <View style={[styles.pvBtn, { backgroundColor: c.accent }]}>
-          <Text style={[small, { color: c.onAccent, fontWeight: '600' }]}>{tr('settings.look.previewButton')}</Text>
+        <View style={[styles.pvBtn, { backgroundColor: c.ink, borderRadius: t.radii.control }]}>
+          <Text style={[small, { color: c.onInk, fontWeight: '600' }]}>{tr('settings.look.previewButton')}</Text>
         </View>
-        <View style={[styles.pvChip, { backgroundColor: c.accentSoft }]}>
-          <Text style={[small, { color: c.accent, fontWeight: '500' }]} numberOfLines={1}>
+        <View style={[styles.pvChip, { backgroundColor: c.accentSoft, borderRadius: t.radii.inline }]}>
+          <Text style={[small, { color: c.accentText, fontWeight: '500' }]} numberOfLines={1}>
             {tr('settings.look.previewChip')}
           </Text>
         </View>
@@ -243,12 +246,12 @@ export function LivePreview({ bubbleStyle }: { bubbleStyle: BubbleStylePref }) {
 
 const styles = StyleSheet.create({
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  card: { flexBasis: '31%', flexGrow: 1, maxWidth: '33%', minWidth: 96, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, padding: 6, gap: 5 },
+  card: { flexBasis: '31%', flexGrow: 1, maxWidth: '33%', minWidth: 96, borderWidth: StyleSheet.hairlineWidth, padding: 6, gap: 5 },
   cardSel: { borderWidth: 2, padding: 5 },
   cardFoot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 4, paddingHorizontal: 2 },
-  cardName: { fontSize: 13, fontWeight: '600', flexShrink: 1 },
-  cardSub: { fontSize: 11, paddingHorizontal: 2, marginTop: -3 },
-  mini: { height: 66, borderRadius: 9, borderWidth: StyleSheet.hairlineWidth, padding: 7, gap: 4, overflow: 'hidden' },
+  cardName: { flexShrink: 1 },
+  cardSub: { paddingHorizontal: 2, marginTop: -3 },
+  mini: { height: 66, borderWidth: StyleSheet.hairlineWidth, padding: 7, gap: 4, overflow: 'hidden' },
   miniBubble: { alignSelf: 'flex-end', width: '46%', height: 9, borderRadius: 5 },
   miniLine: { height: 4, borderRadius: 2 },
   miniRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 3, marginTop: 'auto' },
@@ -258,20 +261,18 @@ const styles = StyleSheet.create({
   swatchRing: { borderWidth: 2, borderRadius: 21, padding: 2 },
   swatch: { width: 32, height: 32, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center' },
   swatchLabelRow: { paddingHorizontal: 14, paddingTop: 6, paddingBottom: 12 },
-  swatchLabel: { fontSize: 13 },
-  customBox: { borderTopWidth: StyleSheet.hairlineWidth, paddingBottom: 12 },
+    customBox: { borderTopWidth: StyleSheet.hairlineWidth, paddingBottom: 12 },
   customBtn: { flexDirection: 'row', paddingHorizontal: 14, paddingTop: 4 },
   customDot: { width: 22, height: 22, borderRadius: 11, borderWidth: StyleSheet.hairlineWidth },
-  preview: { borderRadius: 16, borderWidth: StyleSheet.hairlineWidth },
-  pvBubble: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 18, maxWidth: '85%' },
+  preview: { borderWidth: StyleSheet.hairlineWidth },
+  pvBubble: { paddingHorizontal: 14, paddingVertical: 8, maxWidth: '85%' },
   pvPlain: { borderRightWidth: 2, paddingRight: 10, paddingVertical: 2, maxWidth: '85%' },
-  pvCard: { borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, gap: 10 },
+  pvCard: { borderWidth: StyleSheet.hairlineWidth, gap: 10 },
   pvBars: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, height: 40 },
   pvBar: { flex: 1, borderRadius: 3 },
   gridWrap: { gap: 6 },
   moreBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', minHeight: 44, paddingHorizontal: 4 },
-  moreText: { fontSize: 14, fontWeight: '600' },
   pvActions: { flexDirection: 'row', gap: 8, alignItems: 'center', flexWrap: 'wrap' },
-  pvBtn: { borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7 },
-  pvChip: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7, flexShrink: 1 },
+  pvBtn: { paddingHorizontal: 14, paddingVertical: 7 },
+  pvChip: { paddingHorizontal: 12, paddingVertical: 7, flexShrink: 1 },
 });

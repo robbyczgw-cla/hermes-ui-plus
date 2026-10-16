@@ -21,7 +21,7 @@ const en = makeT('en', 'en-US');
 const es = makeT('es', 'es-ES');
 
 test('tag text builder: spec example + translate', () => {
-  assert.equal(reformatMessage('table', de), '[reformat:table] Bitte die letzte Antwort als Tabelle.');
+  assert.equal(reformatMessage('table', de), '[reformat:table] Bitte formuliere die letzte Antwort als Tabelle um.');
   assert.equal(reformatMessage('translate:en', de), '[reformat:translate:en] Bitte die letzte Antwort auf Englisch übersetzen.');
   assert.equal(reformatMessage('translate:de', es), '[reformat:translate:de] Por favor, traduce tu última respuesta al alemán.');
   assert.equal(reformatMessage('shorter', en), '[reformat:shorter] Please make your last answer shorter.');
@@ -69,7 +69,7 @@ test('"umgeformt" marker: the most recent answer before each reformat request', 
     { id: 'a1', role: 'assistant', text: 'Antwort 1' },
     { id: 'u2', role: 'user', text: 'Noch was' },
     { id: 'a2', role: 'assistant', text: 'Antwort 2' },
-    { id: 'u3', role: 'user', text: '[reformat:table] Bitte die letzte Antwort als Tabelle.' },
+    { id: 'u3', role: 'user', text: '[reformat:table] Bitte formuliere die letzte Antwort als Tabelle um.' },
     { id: 'a3', role: 'assistant', text: '' }, // failed / streaming placeholder
     { id: 'u4', role: 'user', text: '[reformat:shorter] Bitte kürzer.' },
   ];
@@ -79,7 +79,7 @@ test('"umgeformt" marker: the most recent answer before each reformat request', 
 
 test('direct-backend hint text', () => {
   assert.equal(reformatHint('Hallo'), null);
-  assert.match(reformatHint('[reformat:table] Bitte die letzte Antwort als Tabelle.') ?? '', /^Reformat request: reformulate your previous answer as a table \(use the hui table node\)/);
+  assert.match(reformatHint('[reformat:table] Bitte formuliere die letzte Antwort als Tabelle um.') ?? '', /^Reformat request: reformulate your previous answer as a table \(use the hui table node\)/);
   assert.match(reformatHint('[reformat:translate:en] x') ?? '', /translation into English/);
   assert.match(reformatHint('[reformat:list] x') ?? '', /checklist node only if it is a list of to-dos/);
   // merged turns: the last tag line wins
@@ -88,7 +88,7 @@ test('direct-backend hint text', () => {
 
 let clock = Date.UTC(2026, 9, 12, 12, 35);
 const msg = (role: 'user' | 'assistant', text: string): ChatMessage => ({ id: Math.random().toString(), role, text, tools: [], status: 'done', createdAt: (clock += 60_000) });
-const convo = () => [msg('user', 'Erklär X'), msg('assistant', 'Lange Antwort'), msg('user', '[reformat:table] Bitte die letzte Antwort als Tabelle.')];
+const convo = () => [msg('user', 'Erklär X'), msg('assistant', 'Lange Antwort'), msg('user', '[reformat:table] Bitte formuliere die letzte Antwort als Tabelle um.')];
 const HINT = /Reformat request: reformulate your previous answer as a table/;
 
 

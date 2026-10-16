@@ -21,6 +21,7 @@ import { Button, Field, Notice, OnbIcon, OnbScreen, Title } from '../ui';
 import { displayHost, normalizeServerUrl } from '../url';
 import { CheckResult, useConnectionCheck, type FixAction } from './Diagnostics';
 import { isProfilesReadOnlyError } from '../../settings/storage';
+import { a11yState } from '../../ui/lib/a11yState';
 
 export function ConnectCheck({
   mode,
@@ -186,7 +187,7 @@ export function ConnectCheck({
         loading={testing}
         disabled={!!keyError || !urlText.trim()}
       />
-      {failed && url.ok && !keyError ? <Button variant="ghost" label={tr('onboarding.guided.check.saveAnyway')} onPress={() => void save()} disabled={saving} /> : null}
+      {failed && url.ok && !keyError ? <Button variant="tertiary" label={tr('onboarding.guided.check.saveAnyway')} onPress={() => void save()} disabled={saving} /> : null}
     </>
   );
 
@@ -239,7 +240,7 @@ export function ConnectCheck({
         <Pressable
           onPress={() => setDetails((v) => !v)}
           accessibilityRole="button"
-          accessibilityState={{ expanded: details }}
+          {...a11yState({ expanded: details })}
           hitSlop={6}
           style={{ flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', paddingVertical: 6, marginBottom: t.spacing.m }}
         >
@@ -283,7 +284,14 @@ export function ConnectCheck({
             help={livePair?.token && key === livePair.token ? tr('onboarding.form.keyFromPair', { masked: maskKey(livePair.token) }) : tr('onboarding.form.keyHelp')}
             trailing={
               key ? (
-                <Pressable onPress={() => setShowKey((v) => !v)} hitSlop={8} accessibilityRole="button" style={{ paddingHorizontal: 10, paddingVertical: 8 }}>
+                <Pressable
+                  onPress={() => setShowKey((v) => !v)}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  // "Show" alone does not say what is shown when a screen reader lists the controls
+                  accessibilityLabel={`${showKey ? tr('onboarding.form.hide') : tr('onboarding.form.show')}: ${tr('onboarding.form.keyLabel')}`}
+                  style={{ paddingHorizontal: 10, paddingVertical: 8 }}
+                >
                   <HText variant="caption" color="accent" weight="600">
                     {showKey ? tr('onboarding.form.hide') : tr('onboarding.form.show')}
                   </HText>

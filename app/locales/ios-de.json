@@ -1,12 +1,12 @@
 {
   "ios": {
-    "NSCameraUsageDescription": "Hermes braucht die Kamera, um Fotos für deine Nachrichten aufzunehmen und Kopplungscodes (QR) zu scannen.",
-    "NSMicrophoneUsageDescription": "Hermes braucht das Mikrofon, damit du Nachrichten diktieren kannst. Die Aufnahme wird nur für die Spracherkennung verwendet.",
-    "NSSpeechRecognitionUsageDescription": "Hermes nutzt die Spracherkennung deines Geräts, um Diktate in Text umzuwandeln.",
-    "NSPhotoLibraryUsageDescription": "Hermes braucht Zugriff auf deine Fotos, um Bilder an Nachrichten anzuhängen.",
-    "NSPhotoLibraryAddUsageDescription": "Hermes speichert Bilder aus dem Chat in deiner Fotomediathek, wenn du Bild sichern wählst.",
-    "NSCalendarsUsageDescription": "Hermes trägt Termine in deinen Kalender ein, wenn du es im Chat bestätigst.",
-    "NSCalendarsFullAccessUsageDescription": "Hermes trägt Termine in deinen Kalender ein, wenn du es im Chat bestätigst.",
-    "NSLocalNetworkUsageDescription": "Hermes verbindet sich mit deinem Hermes-Server oder der Bridge im lokalen Netzwerk."
+    "NSCameraUsageDescription": "Die App braucht die Kamera, um Fotos für deine Nachrichten aufzunehmen und Kopplungscodes (QR) zu scannen.",
+    "NSMicrophoneUsageDescription": "Die App braucht das Mikrofon, damit du Nachrichten diktieren kannst. Die Aufnahme wird nur für die Spracherkennung verwendet.",
+    "NSSpeechRecognitionUsageDescription": "Die App nutzt die Spracherkennung deines Geräts, um Diktate in Text umzuwandeln.",
+    "NSPhotoLibraryUsageDescription": "Die App braucht Zugriff auf deine Fotos, um Bilder an Nachrichten anzuhängen.",
+    "NSPhotoLibraryAddUsageDescription": "Die App speichert Bilder aus dem Chat in deiner Fotomediathek, wenn du Bild sichern wählst.",
+    "NSCalendarsUsageDescription": "Die App trägt Termine in deinen Kalender ein, wenn du es im Chat bestätigst.",
+    "NSCalendarsFullAccessUsageDescription": "Die App trägt Termine in deinen Kalender ein, wenn du es im Chat bestätigst.",
+    "NSLocalNetworkUsageDescription": "Die App verbindet sich mit deinem Hermes-Server oder der Bridge im lokalen Netzwerk."
   }
 }

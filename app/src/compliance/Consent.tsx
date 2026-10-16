@@ -2,12 +2,13 @@
 // onboarding step.
 import { memo } from 'react';
 import * as WebBrowser from 'expo-web-browser';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '../ui/primitives/Text';
 import { brand } from '../brand';
 import { Icon } from '../chat/icons';
 import { useT } from '../i18n';
 import { Button, OnbScreen, Title } from '../onboarding/ui';
-import { SheetGrabber, SheetModal, haptic, useTheme } from '../ui';
+import { Button as UiButton, SheetGrabber, SheetModal, textStyle, useTheme } from '../ui';
 
 function openPrivacy() {
   const url = brand().privacyUrl;
@@ -21,11 +22,11 @@ export function ConsentText() {
   const privacy = brand().privacyUrl;
   return (
     <View style={styles.text}>
-      <Text style={[styles.body, { color: t.colors.text }]}>{tr('compliance.consent.body')}</Text>
-      <Text style={[styles.providers, { color: t.colors.muted }]}>{tr('compliance.consent.providers')}</Text>
+      <Text style={[textStyle(t, 'body'), { color: t.colors.text }]}>{tr('compliance.consent.body')}</Text>
+      <Text style={[textStyle(t, 'callout'), { color: t.colors.muted }]}>{tr('compliance.consent.providers')}</Text>
       {privacy ? (
         <Pressable onPress={openPrivacy} accessibilityRole="link" hitSlop={8} style={styles.link}>
-          <Text style={[styles.linkText, { color: t.colors.accent }]}>{tr('compliance.consent.privacy')}</Text>
+          <Text style={[textStyle(t, 'callout'), { color: t.colors.accentText, fontWeight: '600' }]}>{tr('compliance.consent.privacy')}</Text>
           <Icon name="external" size={14} color={t.colors.accent} />
         </Pressable>
       ) : null}
@@ -45,7 +46,7 @@ export const ConsentSheet = memo(function ConsentSheet({ visible, onAccept, onLa
         <View style={[styles.badge, { backgroundColor: t.colors.accentSoft }]}>
           <Icon name="shield" size={18} color={t.colors.accent} />
         </View>
-        <Text style={[styles.title, { color: t.colors.text }]} accessibilityRole="header">
+        <Text style={[styles.title, textStyle(t, 'headline'), { color: t.colors.text }]} accessibilityRole="header">
           {title}
         </Text>
       </View>
@@ -53,23 +54,8 @@ export const ConsentSheet = memo(function ConsentSheet({ visible, onAccept, onLa
         <ConsentText />
       </ScrollView>
       <View style={styles.buttons}>
-        <Pressable
-          onPress={onLater}
-          accessibilityRole="button"
-          style={({ pressed }) => [styles.btn, { backgroundColor: pressed ? t.colors.surfacePressed : t.colors.surfaceAlt }]}
-        >
-          <Text style={[styles.btnText, { color: t.colors.text }]}>{tr('compliance.consent.later')}</Text>
-        </Pressable>
-        <Pressable
-          onPress={() => {
-            haptic('light');
-            onAccept();
-          }}
-          accessibilityRole="button"
-          style={({ pressed }) => [styles.btn, styles.btnWide, { backgroundColor: t.colors.accent, opacity: pressed ? 0.85 : 1 }]}
-        >
-          <Text style={[styles.btnText, { color: t.colors.onAccent }]}>{tr('compliance.consent.accept')}</Text>
-        </Pressable>
+        <UiButton label={tr('compliance.consent.later')} variant="tertiary" onPress={onLater} grow />
+        <UiButton label={tr('compliance.consent.accept')} variant="primary" onPress={onAccept} grow style={styles.btnWide} />
       </View>
     </SheetModal>
   );
@@ -90,15 +76,10 @@ const styles = StyleSheet.create({
   sheet: { paddingHorizontal: 16 },
   head: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
   badge: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
-  title: { flex: 1, fontSize: 17, fontWeight: '600' },
+  title: { flex: 1 },
   scroll: { flexGrow: 0 },
   text: { gap: 12 },
-  body: { fontSize: 15.5, lineHeight: 22 },
-  providers: { fontSize: 13.5, lineHeight: 19 },
   link: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', paddingVertical: 2 },
-  linkText: { fontSize: 14, fontWeight: '600' },
   buttons: { flexDirection: 'row', gap: 10, marginTop: 16 },
-  btn: { flex: 1, minHeight: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12 },
-  btnWide: { flex: 2 },
-  btnText: { fontSize: 15.5, fontWeight: '600' },
+  btnWide: { flexGrow: 2 },
 });

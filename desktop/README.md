@@ -1,9 +1,9 @@
 # Hermes desktop (macOS, Linux alpha; Tauri v2)
 
-> **Availability (0.1.0-alpha.1):** the macOS app (Apple Silicon, macOS 13+) is Developer ID signed and notarized; the Linux
-> AppImage / .deb (x86_64) is an alpha. Neither is attached to the GitHub release in this alpha: build them from source with
-> the scripts below (docs/BUILD.md) or use the maintainer's download page. Notifications come from the running app; there is
-> no push to a Mac or PC that is off or has quit the app (Web Push belongs to the web app).
+> **Availability (0.1):** download from [GitHub Releases](https://github.com/robbyczgw-cla/hermes-ui-plus/releases). The
+> macOS app (`hermes-ui-plus-<version>-macos-arm64.dmg`, Apple Silicon, macOS 13+) is Developer ID signed and notarized; the
+> Linux AppImage / .deb (x86_64) is an alpha. To build them yourself, use the scripts below (docs/BUILD.md). Notifications
+> come from the running app; there is no push to a Mac or PC that is off or has quit the app (Web Push belongs to the web app).
 
 A thin native shell around the static Expo web build. The UI is the same code as the PWA
 (`app/`), bundled into the app (`frontendDist = ../dist-web`), not loaded from a server.
@@ -32,7 +32,7 @@ SKIP_WEB=1 KEEP_CACHE=1 scripts/build-desktop-linux.sh
 | `src-tauri/src/menus.rs` | menu bar, menu bar icon (tray); labels from the web app's i18n |
 | `src-tauri/src/mac.rs` | objc2: accent color, traffic lights, dock menu + "running" dot, UserNotifications with actions, Touch ID, login item, share picker |
 | `src-tauri/src/prefs.rs` | desktop prefs the shell needs before the web app runs (menu bar only, app lock) |
-| `src-tauri/tauri.conf.json` | official name/bundle id `Hermes UI+` / `xyz.hermesui.desktop` (personal builds override both, see `scripts/build-desktop-mac.sh`; the Linux script also sets `mainBinaryName`), CSP, signing, `bundle.linux` |
+| `src-tauri/tauri.conf.json` | official name/bundle id `HUI+` / `xyz.hermesui.desktop` (app name = `displayName` of `app/brand/identity.json`: `HUI+.app`, window title, menus) (personal builds override both, see `scripts/build-desktop-mac.sh`; the Linux script also sets `mainBinaryName`), CSP, signing, `bundle.linux` |
 | `src-tauri/Info.plist` | merged into the app's Info.plist (microphone / camera usage strings) |
 | `src-tauri/capabilities/default.json` | `core:default` for the main window only |
 | `src-tauri/icons/` | `app-icon-source.png` (official icon on a macOS squircle, `scripts/brand-icons.mjs`) -> `icon.icns` etc. via `tauri icon`; `tray-template.png` (menu bar template image) |
@@ -164,6 +164,16 @@ nonces to these directives, and as soon as a hash or nonce is present browsers i
 which breaks the inline scripts inside the widget frames. Tauri's own IPC scripts are injected as
 WKUserScripts and are not affected by the page CSP.
 
+## App name (0.1.1 rename)
+
+Since 0.1.1 the official app is `HUI+.app` (0.1: `Hermes UI+.app`); the bundle id `xyz.hermesui.desktop` is unchanged,
+so settings, window state, logs (`~/Library/Logs/xyz.hermesui.desktop/`) and the Touch ID lock carry over – none of
+them keys off the app name. The login item is an `SMAppService.mainAppService` registration of the bundle, not of a
+name; if Settings → Mac app shows "Launch at login" off after the update, switch it on again. Dragging
+`HUI+.app` from the dmg does not replace an old `Hermes UI+.app` in Programme / Applications: delete that one. The
+release asset keeps its name (`hermes-ui-plus-<version>-macos-arm64.dmg`); Tauri's own dmg name (`HUI+_<ver>_aarch64.dmg`)
+never leaves the build. On Linux the launcher shows HUI+; binary `hermes-ui-plus` and .deb package `hermes-ui` stay.
+
 ## Signing / Gatekeeper
 
 With the Developer ID material configured (`scripts/build-desktop-mac.sh`, docs/BUILD.md) the app is signed with
@@ -174,10 +184,10 @@ item need no entitlement.
 Without that material (or `MAC_SIGN=0`) the app is **ad-hoc signed** (`signingIdentity: "-"`, not notarized).
 Downloaded copies carry the quarantine flag, so the first launch is blocked:
 
-1. Open Hermes, dismiss the warning.
-2. System Settings → Privacy & Security → at the bottom "Hermes was blocked …" → **Open Anyway**, confirm.
+1. Open HUI+ (personal builds: Hermes), dismiss the warning.
+2. System Settings → Privacy & Security → at the bottom "HUI+ was blocked …" → **Open Anyway**, confirm.
 
-Or in Terminal: `xattr -dr com.apple.quarantine /Applications/Hermes.app`. A copy built and installed on
+Or in Terminal: `xattr -dr com.apple.quarantine /Applications/HUI+.app`. A copy built and installed on
 the same Mac by the script (`INSTALL=1`) has no quarantine flag and starts directly.
 
 ## Linux (alpha)

@@ -1,7 +1,7 @@
 {
   "name": "hermes-ui-desktop",
   "private": true,
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.1",
   "description": "Tauri v2 macOS shell for the Hermes Interactive UI+ web build",
   "scripts": {
     "tauri": "tauri",

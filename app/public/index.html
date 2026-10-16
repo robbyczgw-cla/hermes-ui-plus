@@ -9,6 +9,27 @@
       EXPO_PUBLIC_APP_SHORT_NAME / EXPO_PUBLIC_THEME_COLOR and adds the service-worker registration.
     -->
     <meta charset="utf-8" />
+    <!-- lang before the app has loaded (browser translation, screen readers): the saved UI language (AsyncStorage key
+         hui.lang), else the first de/en/es browser language, else en. The app keeps it in step afterwards
+         (src/i18n/core.ts applyDocumentLang); web-finalize.mjs makes the static default en. -->
+    <script data-pwa="lang">
+      (function () {
+        try {
+          var ok = { de: 1, en: 1, es: 1 };
+          var saved = null;
+          try {
+            saved = localStorage.getItem('hui.lang');
+          } catch (e) {}
+          var lang = ok[saved] ? saved : '';
+          var tags = navigator.languages && navigator.languages.length ? navigator.languages : [navigator.language || ''];
+          for (var i = 0; i < tags.length && !lang; i++) {
+            var p = String(tags[i]).slice(0, 2).toLowerCase();
+            if (ok[p]) lang = p;
+          }
+          document.documentElement.lang = lang || 'en';
+        } catch (e) {}
+      })();
+    </script>
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <!-- viewport-fit=cover: draw under notch / home indicator; the app pads with env(safe-area-inset-*) -->
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -26,6 +47,75 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+    <!-- Bundled fonts (SIL OFL 1.1, licence texts next to the files in /fonts/, built by scripts/subset-fonts.sh):
+         Atkinson Hyperlegible Next = UI + text, Gloock = greeting / onboarding / empty states, JetBrains Mono = code.
+         The two faces of the first screen are preloaded (≈ 56 KB, they arrive long before the app bundle), the mono
+         and italic faces load on first use. The "… Fallback" faces are local system fonts scaled to the bundled
+         faces' metrics, so a late swap does not reflow the chat. Same family names as the native builds (app.json). -->
+    <link rel="preload" href="/fonts/atkinson-hyperlegible-next-var.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/gloock-regular.woff2" as="font" type="font/woff2" crossorigin />
+    <style id="fonts-css">
+      @font-face {
+        font-family: 'Atkinson Hyperlegible Next';
+        src: url('/fonts/atkinson-hyperlegible-next-var.woff2') format('woff2');
+        font-weight: 400 700;
+        font-style: normal;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: 'Atkinson Hyperlegible Next';
+        src: url('/fonts/atkinson-hyperlegible-next-italic-var.woff2') format('woff2');
+        font-weight: 400 700;
+        font-style: italic;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: 'Gloock';
+        src: url('/fonts/gloock-regular.woff2') format('woff2');
+        font-weight: 400;
+        font-style: normal;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: 'JetBrains Mono';
+        src: url('/fonts/jetbrains-mono-var.woff2') format('woff2');
+        font-weight: 400 700;
+        font-style: normal;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: 'Atkinson Fallback';
+        src: local('Arial'), local('Helvetica'), local('Liberation Sans'), local('Roboto');
+        size-adjust: 99.4%;
+        ascent-override: 99%;
+        descent-override: 31.8%;
+        line-gap-override: 0%;
+      }
+      @font-face {
+        font-family: 'Gloock Fallback';
+        src: local('Georgia'), local('Times New Roman'), local('Liberation Serif');
+        size-adjust: 113.2%;
+        ascent-override: 86.1%;
+        descent-override: 19.9%;
+        line-gap-override: 0%;
+      }
+      @font-face {
+        font-family: 'JetBrains Mono Fallback';
+        src: local('Menlo'), local('Consolas'), local('Courier New'), local('Liberation Mono');
+        ascent-override: 102%;
+        descent-override: 30%;
+        line-gap-override: 0%;
+      }
+      /* Gloock has one weight: never fake a bold from it */
+      #root {
+        font-synthesis-weight: none;
+      }
+      /* keyboard focus: one ring in the accent (set by src/app/_layout.tsx); inputs that draw their own focus opt out */
+      #root :focus-visible {
+        outline: 2px solid var(--hui-focus, currentColor);
+        outline-offset: 2px;
+      }
+    </style>
     <style id="boot-css">
       /* Inline boot splash (shown until the React app has mounted, see #boot below and src/app/_layout.tsx) */
       #boot {
@@ -44,7 +134,7 @@
         text-align: center;
         background: #ffffff;
         color: #111111;
-        font: 500 17px/1.35 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        font: 500 17px/1.35 'Atkinson Hyperlegible Next', 'Atkinson Fallback', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         -webkit-font-smoothing: antialiased;
       }
       @media (prefers-color-scheme: dark) {

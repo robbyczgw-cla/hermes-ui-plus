@@ -1,4 +1,4 @@
-# Install the Hermes UI+ web app (PWA)
+# Install the HUI+ web app (PWA)
 
 The web app is the same Hermes Interactive UI+ app that runs on Android and iOS, built for the browser. You open it from your own bridge, and you can install it to the home screen so it behaves like an app (own icon, full screen, notifications).
 
@@ -116,7 +116,7 @@ Open the web app's HTTPS address in the browser, then:
 
 | Platform | Steps |
 |---|---|
-| **iPhone / iPad** | Use **Safari**. Tap **Share**, then **Add to Home Screen**, then **Add**. Open the new "Hermes UI+" icon. Needs iOS 16.4 or newer for notifications. |
+| **iPhone / iPad** | Use **Safari**. Tap **Share**, then **Add to Home Screen**, then **Add**. Open the new "HUI+" icon. Needs iOS 16.4 or newer for notifications. |
 | **Android** | Use **Chrome**. Tap the **⋮** menu, then **Install app** (or **Add to Home screen**). |
 | **Desktop Chrome / Edge** | Click the install icon at the right end of the address bar, then **Install**. |
 | **macOS Safari 17+** | **File**, **Add to Dock**. |
@@ -171,6 +171,7 @@ Update the bridge and the web app together when the release notes say so ([../CH
 |---|---|
 | White screen, or the old version after an update | Hard reload (Ctrl+Shift+R, or Cmd+Shift+R). On a phone, close the app completely and reopen. Still old: remove the home-screen icon, clear the site data for the address in the browser settings, and add it again. Check that you restarted the bridge after replacing the folder. |
 | "Not reachable", or the page does not open | Is Tailscale on, on that device? Does the HTTPS address open in the browser? Does `BRIDGE_PUBLIC_URL` match it exactly? Is the bridge running (`systemctl --user status hermes-ui-plus-bridge`)? A wrong `Host` is refused with status 421. |
+| The address shows "Hermes UI+ bridge is running … Web app not installed" | The bridge works, but `BRIDGE_WEB_DIR` is not set, so it shows its status page instead of the app. Set it (section 2) and restart the bridge. In Docker see [SELF-HOSTING.md](SELF-HOSTING.md#with-docker). |
 | The address opens but shows "not found" | `BRIDGE_WEB_DIR` is missing, wrong, or the folder is empty. It must contain `index.html`. Look for "web app disabled" in the bridge log. |
 | No "Install" option in the browser | The page must be on HTTPS (or `localhost` / `127.0.0.1`). Plain `http://` over the LAN cannot install a PWA. On iPhone, use Safari. |
 | "Pairing link expired or already used" after tapping **Connect** | Each link works once. A link already used in another browser or app (or older than 1 hour) needs a new link (`npx hermes-ui-plus-bridge devices add "Laptop"`). |

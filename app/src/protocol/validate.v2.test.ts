@@ -17,7 +17,7 @@ test('registry: every v2 node type is known; interactive set', () => {
   }
   assert.deepEqual(
     [...INTERACTIVE_NODE_TYPES].sort(),
-    ['agenda', 'calc', 'checklist', 'choice', 'confirm', 'decision', 'flashcards', 'form', 'guide', 'map', 'mindmap', 'paths', 'places', 'poll', 'products', 'quiz', 'rank', 'recipe', 'scale', 'slots', 'studyplan', 'timer', 'vocab', 'workout'],
+    ['agenda', 'calc', 'changes', 'checklist', 'choice', 'confirm', 'decision', 'flashcards', 'form', 'guide', 'map', 'mindmap', 'paths', 'places', 'poll', 'products', 'quiz', 'rank', 'recipe', 'scale', 'slots', 'studyplan', 'timer', 'vocab', 'workout'],
   );
   assert.ok(isInteractiveNodeType('choice'));
   // map keeps persisted state (animation played) → needs a stable, per-message-unique id (GPT review #7)

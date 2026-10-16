@@ -4,9 +4,11 @@ The UI-Bridge (`bridge/`) is part of this repository, released under the same li
 workflow as the app (`.github/workflows/ci.yml`). It is not a hosted service: **you run it yourself, next to your Hermes Agent**, and
 nothing in it phones home to us or to anyone else.
 
+See the [threat model and security regression tests](BRIDGE-THREAT-MODEL.md) for trust boundaries, mitigations and limits.
+
 ```
-Hermes UI+ app ──HTTPS (your tailnet / LAN)──► UI-Bridge ──localhost──► Hermes Agent API
-   (phone, web, Mac)                             (your machine)          (your machine)
+HUI+ app ──HTTPS (your tailnet / LAN)──► UI-Bridge ──localhost──► Hermes Agent API
+(phone, web, Mac)                          (your machine)          (your machine)
 ```
 
 ## Why a bridge at all?
@@ -36,7 +38,10 @@ Hermes API directly, with the limitations above.
 - **Authentication:**
   - Every request needs a device token, except: `GET /health` / `/v1/health`, `POST /bridge/pair/redeem` (one-time
     code, rate limited), the pairing page from the bridge machine itself (or with the one-time page code), the static
-    web app files (`BRIDGE_WEB_DIR`), and `POST /bridge/hermes-hook` (HMAC-signed by Hermes).
+    web app files (`BRIDGE_WEB_DIR`), and `POST /bridge/hermes-hook` (HMAC-signed by Hermes). Without
+    `BRIDGE_WEB_DIR`, `GET /` answers a fixed status page ("bridge is running", how to pair, where the web app docs
+    are): the same bytes for every request, with no name, version, device or pairing-code state, and a CSP without
+    any script (`default-src 'none'`). Every other path keeps its answer (401 without a token).
   - Tokens are stored only as hashes (`devices.json`, mode 0600) and compared in constant time. Every change to
     `devices.json` (bridge, CLI, setup wizard) runs under an exclusive lock file, so a `devices revoke` from the CLI
     is never overwritten by the running bridge.
@@ -143,8 +148,11 @@ streamed chat answer. The app sends every message with an `Idempotency-Key`; for
 - **Resume:** `X-Hermes-UI-Resume-Offset: <bytes>` with the same key continues a broken stream at that byte offset (the
   app keeps its parser state, so every event arrives exactly once), from the record and then live. A resume never starts
   a turn: an unknown or expired key, an offset beyond the record or a broken turn get `409 resume_unavailable`, a turn
-  over the buffer limit `409 turn_unrecorded`; the app then falls back to the live inbox / stored session. The resume header is consumed by
-  the bridge and never forwarded.
+  over the buffer limit `409 turn_unrecorded`; the app then falls back to the live inbox / stored session. Offline, the
+  app keeps re-attaching for up to 2 minutes; an answer the app persisted unfinished (killed, reopened) re-attaches at
+  offset 0 and replays the record. A re-attach request carries no message (`messages: []`), so a bridge without resume
+  support forwards something Hermes refuses instead of a second turn. The resume header is consumed by the bridge and
+  never forwarded.
 - **Limits:** `BRIDGE_RESUME_TURN_KB` per turn (default 2048; a longer turn stays live but is no longer resumable),
   `BRIDGE_RESUME_TOTAL_MB` for all records (default 32; finished records lose their bytes oldest first and then answer
   `turn_unrecorded`), finished records are
@@ -254,6 +262,10 @@ default in current Hermes versions). The bridge passes that through:
   the profile in its body: `{sessionId, profile}`; without one it stops the default profile's run only), resume records
   (an `Idempotency-Key` never re-attaches to another profile's turn), approvals and push watching are kept per profile; push payloads carry `hermesProfile` so a
   tap opens the right bot's chat. The push watcher polls at most 8 profiles besides the default.
+- **Hermes side (v0.22):** each profile's own `.env` needs `API_SERVER_KEY` with the same value as the bridge's
+  `HERMES_API_KEY`, or every `/p/<profile>/` request answers 401. Each profile also needs its own provider key.
+- **Hardened service:** a systemd unit with `ProtectHome`/`DynamicUser` cannot read the Hermes home, so `auto`
+  sees no profiles: set `BRIDGE_PROFILES` to the list (`hermes-ui-plus-bridge setup` does that for root installs).
 - **No profiles:** nothing changes. `GET /bridge/profiles` lists the default only and the app shows no "Bot" section.
 
 ## Quick answers (Schnellfrage, optional plugin)
@@ -265,7 +277,8 @@ and listens on loopback only; the bridge is the transport:
 - **Routes** (device token required): `GET /bridge/quick/config` (is it available, which model, the limits) and
   `POST /bridge/quick` (alias `POST /bridge/quick/v1/chat/completions`, OpenAI-compatible, streamed). The bridge
   forwards to `BRIDGE_HERMES_PLUGIN_URL` (default `http://127.0.0.1:8646`) with the shared secret from
-  `BRIDGE_HERMES_PLUGIN_SECRET_FILE`, applies per-device limits (`BRIDGE_QUICK_RATE` per minute, default 20;
+  `BRIDGE_HERMES_PLUGIN_SECRET_FILE` (no default: unset means ⚡ off; a hardened unit gets the file through
+  `LoadCredential=`, see [HERMES-PLUGIN.md](HERMES-PLUGIN.md)), applies per-device limits (`BRIDGE_QUICK_RATE` per minute, default 20;
   `BRIDGE_QUICK_DAILY`, default 300), checks a requested model against Hermes' `GET /api/model/options` and stops the
   plugin call when the app goes away. Message content is never logged.
 - **Without the plugin** (not installed, disabled, unreachable or answering garbage) the quick routes answer

@@ -1,5 +1,6 @@
 import { memo } from 'react';
-import { ScrollView, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import { ScrollView, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { Text } from '../ui/primitives/Text';
 import { useT, type TFn } from '../i18n';
 import { Icon, PressableScale, haptic, useTheme, type Theme } from '../ui';
 import { formatClock } from './dates.ts';
@@ -63,7 +64,7 @@ const Pill = memo(function Pill({ timer, now, t }: { timer: TimerRecord; now: nu
     ? tr('actionRunner.timers.doneA11y', { label: timer.label })
     : tr(timer.status === 'running' ? 'actionRunner.timers.runningA11y' : 'actionRunner.timers.pausedA11y', { label: timer.label, remaining: spoken(tr, rem) });
   return (
-    <View style={[styles.pill, { backgroundColor: bg, borderColor: isDone ? t.colors.success : t.colors.border }, t.shadows.sm]}>
+    <View style={[styles.pill, { borderRadius: t.radii.pill }, { backgroundColor: bg, borderColor: isDone ? t.colors.success : t.colors.border }, t.shadows.sm]}>
       <PressableScale
         onPress={toggle}
         onLongPress={() => {
@@ -78,9 +79,9 @@ const Pill = memo(function Pill({ timer, now, t }: { timer: TimerRecord; now: nu
         <View style={styles.glyph}>
           {isDone ? <Icon name="check" size={16} color={fg} strokeWidth={2.4} /> : timer.status === 'running' ? <PauseGlyph color={t.colors.accent} /> : <PlayGlyph color={t.colors.accent} />}
         </View>
-        <Text style={[styles.time, { color: fg }]}>{isDone ? tr('actionRunner.timers.done') : formatClock(rem)}</Text>
+        <Text style={[t.typography.bodyStrong, styles.time, { color: fg }]}>{isDone ? tr('actionRunner.timers.done') : formatClock(rem)}</Text>
         {label ? (
-          <Text style={[styles.label, { color: isDone ? fg : t.colors.muted }]} numberOfLines={1}>
+          <Text style={[t.typography.caption, styles.label, { color: isDone ? fg : t.colors.muted }]} numberOfLines={1}>
             {label}
           </Text>
         ) : null}
@@ -128,11 +129,11 @@ export function ActiveTimersBar({ style, onTimerDone }: ActiveTimersBarProps) {
 
 const styles = StyleSheet.create({
   row: { gap: 8, paddingHorizontal: 12, paddingVertical: 6 },
-  pill: { flexDirection: 'row', alignItems: 'center', height: 40, borderRadius: 20, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden', paddingLeft: 12 },
+  pill: { flexDirection: 'row', alignItems: 'center', height: 40, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden', paddingLeft: 12 },
   main: { flexDirection: 'row', alignItems: 'center', gap: 8, height: 40 },
   glyph: { width: 16, alignItems: 'center', justifyContent: 'center' },
-  time: { fontSize: 15, fontWeight: '600', fontVariant: ['tabular-nums'] },
-  label: { fontSize: 13, maxWidth: 110 },
+  time: { fontWeight: '600', fontVariant: ['tabular-nums'] },
+  label: { maxWidth: 110 },
   close: { width: 32, height: 40, alignItems: 'center', justifyContent: 'center' },
   track: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 3 },
 });

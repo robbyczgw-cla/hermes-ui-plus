@@ -3,7 +3,7 @@ only, SSE for streaming answers.
 
 Routes:
   GET  /health                          no auth, {"ok": true}
-  GET  /quick/config                    Bearer secret
+  GET  /quick/config                    Bearer secret; {enabled, available, reason, ...} (self-test result)
   POST /quick/v1/chat/completions       Bearer secret, OpenAI-compatible (stream or JSON)
 """
 
@@ -124,6 +124,7 @@ class QuickHttpServer:
         self.host, self.port = host, port
         self._server: Optional[asyncio.base_events.Server] = None
         self._conns: set[asyncio.Task] = set()
+        self._warmup: Optional[asyncio.Future] = None
 
     @property
     def bound_port(self) -> int:
@@ -134,8 +135,12 @@ class QuickHttpServer:
     async def start(self) -> None:
         self._server = await asyncio.start_server(self._on_conn, host=self.host, port=self.port,
                                                   limit=MAX_HEADER_BYTES, reuse_address=True)
+        # self-test once at start (logs the result); config and quick requests re-check from its cache
+        self._warmup = asyncio.ensure_future(self.service.availability(force=True))
 
     async def stop(self) -> None:
+        if self._warmup is not None and not self._warmup.done():
+            self._warmup.cancel()
         if self._server is not None:
             self._server.close()
             for t in list(self._conns):
@@ -201,6 +206,12 @@ class QuickHttpServer:
         t0 = time.monotonic()
         if not svc.settings.quick_enabled:
             await _send_json(writer, 404, QuickError(404, "feature_off", "quick answers are disabled").body())
+            return
+        reason = await svc.availability()
+        if reason:  # the self-test failed: answer like "off" (clients hide the button) instead of a 502 per call
+            self._log(404, t0, None, None, None, None, qreq_stream=None)
+            await _send_json(writer, 404, QuickError(404, "feature_off", "quick answers are unavailable on this "
+                                                     "Hermes", reason=reason).body())
             return
         try:
             body = json.loads(req.body.decode("utf-8")) if req.body else None

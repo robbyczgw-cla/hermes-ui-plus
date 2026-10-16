@@ -1,4 +1,5 @@
 /** Table header sizing helpers (pure, tested). */
+import { longestNowrapCode, MONO_CHAR_PX } from './inlineCode.ts';
 
 const HEAD_CHAR_PX = 8; // caption, weight 600 (slightly wider than body average)
 const CELL_PADDING_PX = 28; // horizontal cell padding (2 x spacing.m, rounded up)
@@ -114,13 +115,18 @@ export function keepTogether(text: string): string {
   return text.replace(/ /g, '\u00a0').replace(/([–—\-/])/g, '\u2060$1\u2060');
 }
 
-/** Markdown pipe-table column width: wide enough for its content up to a cap, never narrower than its unbreakable cells. */
+/**
+ * Markdown pipe-table column width: wide enough for its content up to a cap, never narrower than its unbreakable cells
+ * or a short inline-code span (kept on one line, chat/Markdown.tsx; monospace glyphs + chip padding).
+ */
 export function markdownColumnWidth(cells: readonly string[], fontScale = 1): number {
   const plain = cells.map((c) => c.replace(/[*_`]/g, ''));
   const scale = normScale(fontScale);
   const max = plain.reduce((m, c) => Math.max(m, [...c].length), 3);
   const want = Math.min(Math.round(260 * scale), Math.max(72, Math.round(max * 8 * scale) + 22));
-  return Math.max(want, cellMinWidth(plain, scale, 8, 22));
+  const code = cells.reduce((m, c) => Math.max(m, longestNowrapCode(c)), 0);
+  const codeMin = code > 0 ? Math.ceil(code * MONO_CHAR_PX * scale) + 22 + 8 : 0;
+  return Math.max(want, cellMinWidth(plain, scale, 8, 22), codeMin);
 }
 
 /** Tables up to this many rows are never collapsed ("Alle N zeigen" for two hidden rows is silly, UX7). */

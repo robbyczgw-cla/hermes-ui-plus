@@ -48,9 +48,11 @@ test('starters: six distinct card types, each with icon and translated texts', (
   }
 });
 
-test('starters: German prompts hit the matching demo scenarios', () => {
-  const byKey = Object.fromEntries(chatStarters(de).map((s) => [s.key, pickScenario(s.prompt).name]));
-  assert.deepEqual(byKey, { checklist: 'checklist', agenda: 'romTrip', compare: 'reiseChoice', chart: 'charts3', recipe: 'carbonara', explain: 'steps' });
+test('starters: the prompts of every language hit the matching demo scenarios', () => {
+  for (const t of [de, en, es]) {
+    const byKey = Object.fromEntries(chatStarters(t).map((s) => [s.key, pickScenario(s.prompt).name]));
+    assert.deepEqual(byKey, { checklist: 'checklist', agenda: 'trip', compare: 'reiseChoice', chart: 'charts3', recipe: 'recipe', explain: 'explain' });
+  }
 });
 
 test('avatar initial: first letter or digit, upper-cased', () => {

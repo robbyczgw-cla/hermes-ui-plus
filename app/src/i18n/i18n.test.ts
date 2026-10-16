@@ -14,9 +14,14 @@ test('plural en/de', () => {
   assert.equal(interpolate(tpl, { count: 1 }, 'en'), '1 item');
   assert.equal(interpolate(tpl, { count: 1500 }, 'en-US'), '1,500 items');
   assert.equal(interpolate(tpl, { count: 1500 }, 'de-DE'), '1.500 items');
-  assert.equal(makeT('de', 'de-DE')('time.minutes', { count: 1 }), '1 Minute');
-  assert.equal(makeT('de', 'de-DE')('time.minutes', { count: 5 }), '5 Minuten');
-  assert.equal(makeT('en', 'en-US')('time.days', { count: 2 }), '2 days');
+  // makeT resolves a real plural key through the same interpolation
+  const key = 'menus.archive.bulkRestoreA11y';
+  for (const [lang, locale] of [['de', 'de-DE'], ['en', 'en-US'], ['es', 'es-ES']] as const) {
+    for (const count of [1, 5]) {
+      assert.equal(makeT(lang, locale)(key, { count }), interpolate(dictionaries[lang].menus.archive.bulkRestoreA11y, { count }, locale));
+    }
+  }
+  assert.match(makeT('en', 'en-US')(key, { count: 1 }), /^Unarchive 1 chat$/);
 });
 
 test('nested vars inside plural branch', () => {

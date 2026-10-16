@@ -46,7 +46,12 @@ One gateway serves every profile (`gateway.multiplex_profiles`, default on in cu
 - Every API path is mirrored under `/p/<profile>/…`: `/p/<name>/v1/chat/completions`, `/p/<name>/v1/models`,
   `/p/<name>/v1/runs/{id}/approval`, `/p/<name>/api/sessions…`, `/p/<name>/api/model/options`, `/p/<name>/health`.
   Unprefixed = the default profile. A prefix naming an unknown profile → 404.
-- Auth is the same `API_SERVER_KEY`. Sessions are namespaced per profile; session ids/keys carry the profile.
+- Auth (v0.22): `/p/<name>/` is checked against the `API_SERVER_KEY` in **that profile's own `.env`**, not the
+  default profile's. A profile without one answers 401 `gateway_auth_failed` (fail closed). One client key for all
+  profiles therefore means: the same `API_SERVER_KEY` in every profile's `.env`. Provider keys are per profile too
+  (each profile's `.env`). Sessions are namespaced per profile; session ids/keys carry the profile.
+- In the official Docker image (s6), set `gateway.multiplex_profiles: true` explicitly: the implicit default may
+  leave a container gateway standalone (only the default profile).
 - Profile names: lowercase letter or digit first, then lowercase letters, digits, `-`, `_` (max 64). The app and
   the bridge refuse anything else before it reaches Hermes.
 - Out of scope: bot-to-bot messaging and the desktop app's leased "Bot Chats".

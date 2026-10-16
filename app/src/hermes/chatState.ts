@@ -243,7 +243,7 @@ export function finalize(
   const isError = status === 'error';
   // a new error without a key must not keep the key of an older one
   const key = isError ? (errorText ?? (error === undefined ? msg.errorText : undefined)) : undefined;
-  const { errorText: _old, ...rest } = m;
+  const { errorText: _old, reconnecting: _r, ...rest } = m;
   return {
     ...rest,
     ...(key ? { errorText: key } : {}),

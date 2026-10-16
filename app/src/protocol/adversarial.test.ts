@@ -126,18 +126,18 @@ test('lenient repair of stray/missing closers stays linear and never throws on h
   for (const [label, build] of Object.entries(shapes)) {
     assert.doesNotThrow(() => parseLenientJson(build(20_000)), label);
     if (label === 'missing closers') continue; // depth is capped by the shape, not by size
-    assertLinear('parseLenientJson ' + label, build, (x) => void parseLenientJson(x), 20_000, { maxRatio: 10 });
+    assertLinear('parseLenientJson ' + label, build, (x) => void parseLenientJson(x), 12_500);
   }
   // the result is still the plain value (not a mangled one)
   assert.deepEqual(parseLenientJson('{"a":[1]]}'), { a: [1] });
 });
 
-test('EOF repair of deep open nesting stays linear (4k → 16k levels) and depth is capped while parsing', () => {
+test('EOF repair of deep open nesting stays linear (2k → 32k levels) and depth is capped while parsing', () => {
   assert.equal(PARTIAL_MAX_DEPTH, 200);
   // the closing suffix is built once (no slice + re-concat per level); beyond the cap the scan stops early
-  assertLinear('parsePartialJson open arrays', (n) => '['.repeat(n), (x) => void parsePartialJson(x), 4_000, { maxRatio: 10 });
-  assertLinear('parsePartialJson open objects (markOpen)', (n) => '{"a":'.repeat(n) + '1', (x) => void parsePartialJson(x, { markOpen: true }), 4_000, { maxRatio: 10 });
-  assertLinear('parsePartialJson trailing commas', (n) => '[' + '[1,],'.repeat(n), (x) => void parsePartialJson(x), 4_000, { maxRatio: 10 });
+  assertLinear('parsePartialJson open arrays', (n) => '['.repeat(n), (x) => void parsePartialJson(x), 2_000);
+  assertLinear('parsePartialJson open objects (markOpen)', (n) => '{"a":'.repeat(n) + '1', (x) => void parsePartialJson(x, { markOpen: true }), 2_000);
+  assertLinear('parsePartialJson trailing commas', (n) => '[' + '[1,],'.repeat(n), (x) => void parsePartialJson(x), 2_000);
   // malicious depth: nothing usable instead of a stall
   assert.equal(parsePartialJson('['.repeat(16_000)), undefined);
   assert.equal(parsePartialJson('['.repeat(PARTIAL_MAX_DEPTH + 1)), undefined);
@@ -159,5 +159,5 @@ test('a mismatched closer that leaves a value unbalanced does not swallow the ne
   // a plain truncated tail is still repaired as before
   assert.deepEqual(parseLenientJson('{"a":[1,2'), { a: [1, 2] });
   // hostile: many unbalanced values stay linear
-  assertLinear('parseLenientJson unbalanced values', (n) => '[1}'.repeat(n) + '/', (x) => void parseLenientJson(x), 20_000, { maxRatio: 10 });
+  assertLinear('parseLenientJson unbalanced values', (n) => '[1}'.repeat(n) + '/', (x) => void parseLenientJson(x), 12_500);
 });

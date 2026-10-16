@@ -19,8 +19,8 @@ export function HistoryPlaceholder({ hint: withHint = true }: { hint?: boolean }
   // "Loading the chat from Hermes…" – not for other backends (their history is a local read)
   const hint = useSettledAfter(HISTORY_HINT_MS) && withHint;
   const block = { backgroundColor: t.colors.skeleton };
-  const line = [styles.line, block, { borderRadius: t.radii.xs }];
-  const bubble = [styles.bubble, block, { borderRadius: t.radii.xl }];
+  const line = [styles.line, block, { borderRadius: t.radii.inline }];
+  const bubble = [styles.bubble, block, { borderRadius: t.radii.card }];
   return (
     <View style={styles.flex} accessibilityLiveRegion="polite">
       <View style={[styles.column, { maxWidth: chatMaxWidth(prefs) }]}>

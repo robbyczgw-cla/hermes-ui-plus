@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // PWA post-processing of an `expo export -p web` output dir (called by scripts/build-web.sh):
 //  - manifest.webmanifest from EXPO_PUBLIC_APP_NAME / _APP_SHORT_NAME / _THEME_COLOR (+ WEB_DESCRIPTION, official: the tagline)
-//  - index.html: <title>, application-name, apple-mobile-web-app-title, theme-color metas (data-pwa="…")
+//  - index.html: <title>, application-name, apple-mobile-web-app-title, theme-color metas (data-pwa="…"), <html lang="en">
 //  - sw.js: SHELL_VERSION = content hash of the FINAL export (relative paths + bytes of every shipped file incl. the
 //    shell, manifest and icons, plus the worker template), PRECACHE = the export's hashed bundles / lazy chunks /
 //    assets; registration script.
@@ -56,17 +56,20 @@ export function finalize(dir, env = process.env) {
   const themeDark = color(env.EXPO_PUBLIC_THEME_COLOR_DARK, '#000000');
   const withSw = env.WEB_SW !== '0';
 
-  // offline shell: every hashed bundle / lazy chunk / asset of THIS export (root-relative URLs; the app is served at '/').
+  // offline shell: every hashed bundle / lazy chunk / asset of THIS export plus the bundled web fonts (public/fonts,
+  // referenced from index.html) (root-relative URLs; the app is served at '/').
   // Runs before web-precompress.mjs, the .br/.gz siblings are not there yet (and are skipped anyway).
   const precache = walk(dir)
     .map((f) => rel(dir, f))
-    .filter((f) => /^(_expo\/static|assets)\//.test(f) && !/\.(br|gz|map)$/.test(f))
+    .filter((f) => (/^(_expo\/static|assets)\//.test(f) || /^fonts\/[^/]+\.woff2$/.test(f)) && !/\.(br|gz|map)$/.test(f))
     .sort()
     .map((f) => '/' + f.split('/').map(encodeURIComponent).join('/'));
 
   const manifestPath = join(dir, 'manifest.webmanifest');
   const manifest = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, 'utf8')) : {};
   Object.assign(manifest, { name, short_name: shortName, theme_color: theme, background_color: theme });
+  // the Web Share Target POST is answered by sw.js only (docs/SHARE-TARGET.md "Web"): without a worker, no share target
+  if (!withSw) delete manifest.share_target;
   if (env.WEB_DESCRIPTION) manifest.description = text(env.WEB_DESCRIPTION, manifest.description ?? '', 200);
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
@@ -77,6 +80,10 @@ export function finalize(dir, env = process.env) {
     html = html.replace(re, `$1${value}$2`);
   };
   html = html.replace(/<title>[^<]*<\/title>/, `<title>${name}</title>`);
+  // static default language of the shell: en (app.json web.lang used to be "de"); the inline data-pwa="lang" script and
+  // the app (applyDocumentLang) switch it to the UI language at runtime
+  if (!/<html\b[^>]*\blang="/.test(html)) console.warn('web-finalize: <html lang> not found');
+  html = html.replace(/(<html\b[^>]*?\blang=")[^"]*"/, '$1en"');
   setMeta('name', name);
   setMeta('short-name', shortName);
   setMeta('theme-light', theme);

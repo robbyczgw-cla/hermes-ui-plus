@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Platform, TextInput, View, type GestureResponderEvent } from 'react-native';
+import { Platform, View, type GestureResponderEvent } from 'react-native';
+import { TextInput } from '../primitives/Text';
+import { noOutline } from '../lib/webStyle';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useTheme, type Theme } from '../theme';
 import { useHui, type HuiFieldValue } from '../primitives/context';
 import { BlockTitle, HText, PressableScale, Surface, textStyle } from '../primitives/basics';
+import { Button } from '../primitives/Button';
 import { Icon } from '../primitives/Icon';
 import { Skeleton } from '../primitives/Skeleton';
 import { haptic } from '../primitives/haptics';
@@ -118,36 +121,22 @@ export function Form({ node }: NodeProps<HuiForm>) {
         {streaming && rawCount >= fields.length ? (
           <View style={{ gap: 8 }}>
             <Skeleton width="30%" height={10} />
-            <Skeleton height={42} radius={t.radii.m} />
+            <Skeleton height={42} radius={t.radii.control} />
           </View>
         ) : null}
       </View>
       {sent ? (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s }}>
-          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 44, borderRadius: t.radii.pill, backgroundColor: t.colors.successSoft }}>
+          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 44 }}>
             <Icon name="check" size={16} color={t.colors.success} strokeWidth={2.25} />
             <HText variant="callout" weight="600" style={{ color: t.colors.success }}>
               {tr('ui.form.sent')}
             </HText>
           </View>
-          <PressableScale haptic="selection" onPress={() => setStored((s) => reopenedFormState(asFormState(s)))} style={{ height: 44, paddingHorizontal: t.spacing.l, justifyContent: 'center', borderRadius: t.radii.pill }}>
-            <HText variant="callout" color="muted" weight="500">
-              {tr('ui.form.change')}
-            </HText>
-          </PressableScale>
+          <Button label={tr('ui.form.change')} variant="tertiary" onPress={() => setStored((s) => reopenedFormState(asFormState(s)))} />
         </View>
       ) : (
-        <PressableScale
-          haptic={false}
-          disabled={streaming || !fields.length}
-          onPress={submit}
-          style={{ height: 44, borderRadius: t.radii.pill, backgroundColor: t.colors.accent, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 6 }}
-          pressedStyle={{ opacity: 0.88 }}
-        >
-          <HText variant="callout" weight="600" style={{ color: t.colors.onAccent }}>
-            {submitLabel || tr('ui.form.submit')}
-          </HText>
-        </PressableScale>
+        <Button label={submitLabel || tr('ui.form.submit')} variant="primary" disabled={streaming || !fields.length} onPress={submit} />
       )}
     </Surface>
   );
@@ -209,7 +198,7 @@ function Input({ t, value, onChangeText, placeholder, numeric, editable = true, 
         flexDirection: 'row',
         alignItems: 'center',
         minHeight: 44,
-        borderRadius: t.radii.m,
+        borderRadius: t.radii.control,
         borderWidth: 1,
         borderColor: focus ? t.colors.accent : t.colors.borderStrong,
         backgroundColor: t.colors.surface,
@@ -228,7 +217,7 @@ function Input({ t, value, onChangeText, placeholder, numeric, editable = true, 
         accessibilityState={{ disabled: !editable }}
         onFocus={() => setFocus(true)}
         onBlur={() => setFocus(false)}
-        style={[textStyle(t, 'body'), { flex: 1, color: t.colors.text, paddingVertical: 10, outlineStyle: 'none' } as object]}
+        style={[textStyle(t, 'body'), { flex: 1, color: t.colors.text, paddingVertical: 10, ...noOutline } as object]}
       />
       {suffix ? (
         <HText variant="callout" color="muted">
@@ -253,7 +242,7 @@ function NumberInput({ t, field, value, onChange, disabled = false }: { t: Theme
     onChange(Number(next.toFixed(6)));
   };
   const btn = (dir: 1 | -1) => (
-    <PressableScale haptic="selection" disabled={disabled} onPress={() => bump(dir)} accessibilityLabel={`${dir === 1 ? tr('ui.form.increase') : tr('ui.form.decrease')}: ${field.label}`} accessibilityState={{ disabled }} style={{ width: 44, height: 44, borderRadius: t.radii.m, backgroundColor: t.colors.surfaceAlt, alignItems: 'center', justifyContent: 'center' }} pressedStyle={{ backgroundColor: t.colors.surfacePressed }}>
+    <PressableScale haptic="selection" disabled={disabled} onPress={() => bump(dir)} accessibilityLabel={`${dir === 1 ? tr('ui.form.increase') : tr('ui.form.decrease')}: ${field.label}`} accessibilityState={{ disabled }} style={{ width: 44, height: 44, borderRadius: t.radii.control, backgroundColor: t.colors.surfaceAlt, alignItems: 'center', justifyContent: 'center' }} pressedStyle={{ backgroundColor: t.colors.surfacePressed }}>
       <Icon name={dir === 1 ? 'plus' : 'minus'} size={16} color={t.colors.text} />
     </PressableScale>
   );
@@ -358,7 +347,7 @@ function Switch({ t, on }: { t: Theme; on: boolean }) {
   }, [on, p]);
   const thumb = useAnimatedStyle(() => ({ transform: [{ translateX: p.value * 18 }] }));
   return (
-    <View style={{ width: 46, height: 28, borderRadius: 14, padding: 3, backgroundColor: on ? t.colors.accent : t.colors.borderStrong }}>
+    <View style={{ width: 46, height: 28, borderRadius: 14, padding: 3, backgroundColor: on ? t.colors.accent : t.colors.borderControl }}>
       <Animated.View style={[{ width: 22, height: 22, borderRadius: 11, backgroundColor: '#FFFFFF', ...t.shadows.sm }, thumb]} />
     </View>
   );
@@ -384,10 +373,10 @@ function Select({ t, field, value, onChange, disabled = false }: { t: Theme; fie
               haptic="selection"
               onPress={() => onChange(o)}
               accessibilityRole="radio"
-              accessibilityState={{ selected: active, disabled }}
+              accessibilityState={{ selected: active, checked: active, disabled }}
               style={{ minHeight: 36, paddingHorizontal: 14, justifyContent: 'center', borderRadius: t.radii.pill, borderWidth: 1, borderColor: active ? t.colors.accent : t.colors.borderStrong, backgroundColor: active ? t.colors.accentSoft : t.colors.surface }}
             >
-              <HText variant="callout" weight={active ? '600' : '400'} style={{ color: active ? t.colors.accent : t.colors.text }} numberOfLines={1}>
+              <HText variant="callout" weight={active ? '600' : '400'} style={{ color: active ? t.colors.accentText : t.colors.text }} numberOfLines={1}>
                 {o}
               </HText>
             </PressableScale>
@@ -398,7 +387,7 @@ function Select({ t, field, value, onChange, disabled = false }: { t: Theme; fie
   }
   if (segmented) {
     return (
-      <View style={{ flexDirection: 'row', backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.m, padding: 3, gap: 3 }}>
+      <View style={{ flexDirection: 'row', backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.control, padding: 3, gap: 3 }}>
         {opts.map((o) => {
           const active = o === value;
           return (
@@ -409,8 +398,8 @@ function Select({ t, field, value, onChange, disabled = false }: { t: Theme; fie
               scaleTo={0.98}
               onPress={() => onChange(o)}
               accessibilityRole="radio"
-              accessibilityState={{ selected: active, disabled }}
-              style={{ flex: 1, minHeight: 36, borderRadius: t.radii.s, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6, backgroundColor: active ? t.colors.surface : 'transparent', ...(active ? t.shadows.sm : {}) }}
+              accessibilityState={{ selected: active, checked: active, disabled }}
+              style={{ flex: 1, minHeight: 36, borderRadius: t.radii.control, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6, backgroundColor: active ? t.colors.surface : 'transparent', ...(active ? t.shadows.sm : {}) }}
             >
               <HText variant="callout" weight={active ? '600' : '400'} color={active ? 'text' : 'muted'} numberOfLines={1}>
                 {o}
@@ -422,7 +411,7 @@ function Select({ t, field, value, onChange, disabled = false }: { t: Theme; fie
     );
   }
   return (
-    <View style={{ borderRadius: t.radii.m, borderWidth: 1, borderColor: open ? t.colors.accent : t.colors.borderStrong, overflow: 'hidden', backgroundColor: t.colors.surface }}>
+    <View style={{ borderRadius: t.radii.control, borderWidth: 1, borderColor: open ? t.colors.accent : t.colors.borderStrong, overflow: 'hidden', backgroundColor: t.colors.surface }}>
       <PressableScale haptic="selection" scaleTo={1} disabled={disabled} accessibilityLabel={field.label} accessibilityState={{ disabled, expanded: open }} onPress={() => setOpen((x) => !x)} style={{ flexDirection: 'row', alignItems: 'center', minHeight: 44, paddingHorizontal: t.spacing.m }}>
         <HText variant="body" color={value ? 'text' : 'subtle'} style={{ flex: 1 }} numberOfLines={1}>
           {value ?? field.placeholder ?? tr('ui.form.choose')}
@@ -445,7 +434,7 @@ function Select({ t, field, value, onChange, disabled = false }: { t: Theme; fie
                   setOpen(false);
                 }}
                 accessibilityRole="radio"
-                accessibilityState={{ selected: active, disabled }}
+                accessibilityState={{ selected: active, checked: active, disabled }}
                 style={{ flexDirection: 'row', alignItems: 'center', minHeight: 42, paddingHorizontal: t.spacing.m, borderTopWidth: 1, borderColor: t.colors.border }}
                 pressedStyle={{ backgroundColor: t.colors.surfaceAlt }}
               >
@@ -504,7 +493,7 @@ function DateField({ t, value, onChange, placeholder, label: fieldLabel, disable
   const label = sel ? formatDate(new Date(sel.y, sel.m, sel.d), { dateStyle: 'medium' }) : placeholder ?? tr('ui.form.chooseDate');
   const { months: MONTHS, weekdays: WEEKDAYS } = useMemo(() => calendarNames(locale), [locale]);
   return (
-    <View style={{ borderRadius: t.radii.m, borderWidth: 1, borderColor: open ? t.colors.accent : t.colors.borderStrong, backgroundColor: t.colors.surface, overflow: 'hidden' }}>
+    <View style={{ borderRadius: t.radii.control, borderWidth: 1, borderColor: open ? t.colors.accent : t.colors.borderStrong, backgroundColor: t.colors.surface, overflow: 'hidden' }}>
       <PressableScale haptic="selection" scaleTo={1} disabled={disabled} accessibilityLabel={fieldLabel ? `${fieldLabel}: ${label}` : label} accessibilityState={{ disabled, expanded: open }} onPress={() => setOpen((x) => !x)} style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s, minHeight: 44, paddingHorizontal: t.spacing.m }}>
         <Icon name="calendar" size={17} color={t.colors.muted} />
         <HText variant="body" color={sel ? 'text' : 'subtle'} style={{ flex: 1 }}>
@@ -552,7 +541,7 @@ function DateField({ t, value, onChange, placeholder, label: fieldLabel, disable
                     style={{ flex: 1, height: 38, alignItems: 'center', justifyContent: 'center' }}
                   >
                     <View style={{ width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: active ? t.colors.accent : 'transparent', borderWidth: isToday && !active ? 1 : 0, borderColor: t.colors.accent }}>
-                      <HText variant="callout" tabular weight={active || isToday ? '600' : '400'} style={{ color: active ? t.colors.onAccent : isToday ? t.colors.accent : t.colors.text }}>
+                      <HText variant="callout" tabular weight={active || isToday ? '600' : '400'} style={{ color: active ? t.colors.onAccent : isToday ? t.colors.accentText : t.colors.text }}>
                         {d}
                       </HText>
                     </View>

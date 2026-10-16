@@ -4,6 +4,7 @@ import { Image } from 'expo-image';
 import { useTheme, type Theme } from '../../theme';
 import { useHui } from '../../primitives/context';
 import { FadeIn, HText, PressableScale } from '../../primitives/basics';
+import { Button } from '../../primitives/Button';
 import { Icon } from '../../primitives/Icon';
 import { Skeleton } from '../../primitives/Skeleton';
 import { asObjects, asOptString, asString } from '../../lib/format';
@@ -37,7 +38,7 @@ export function Sources({ node }: { node: Partial<HuiSources> }) {
     <View style={{ gap: t.spacing.s }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
         <Icon name="external" size={13} color={t.colors.muted} />
-        <HText variant="micro" color="muted" style={{ textTransform: 'uppercase', letterSpacing: 0.6 }} accessibilityRole="header">
+        <HText variant="caption" weight="600" color="muted" accessibilityRole="header">
           {S.sources.title(items.length)}
         </HText>
       </View>
@@ -47,14 +48,17 @@ export function Sources({ node }: { node: Partial<HuiSources> }) {
             <SourceRow t={t} index={i} item={it} onOpen={(url) => onAction({ type: 'open_url', url })} />
           </FadeIn>
         ))}
-        {streaming ? <Skeleton height={56} radius={t.radii.m} /> : null}
+        {streaming ? <Skeleton height={56} radius={t.radii.control} /> : null}
       </View>
       {hidden > 0 || (expanded && items.length > COLLAPSED) ? (
-        <PressableScale haptic="selection" onPress={() => setExpanded((e) => !e)} style={{ alignSelf: 'flex-start', minHeight: 36, justifyContent: 'center' }} accessibilityState={{ expanded }}>
-          <HText variant="caption" color="accent" weight="500">
-            {expanded ? S.sources.showLess : S.sources.showAll(items.length)}
-          </HText>
-        </PressableScale>
+        <Button
+          label={expanded ? S.sources.showLess : S.sources.showAll(items.length)}
+          variant="tertiary"
+          size="small"
+          onPress={() => setExpanded((e) => !e)}
+          accessibilityState={{ expanded }}
+          style={{ alignSelf: 'flex-start' }}
+        />
       ) : null}
     </View>
   );
@@ -80,7 +84,7 @@ function SourceRow({ t, index, item, onOpen }: { t: Theme; index: number; item: 
       accessibilityRole="link"
       accessibilityLabel={`${index + 1}. ${title}, ${meta}${unverified ? `, ${S.sources.notRetrieved}` : ''}`}
       accessibilityHint={valid ? S.sources.open(domain) : undefined}
-      style={{ flexDirection: 'row', gap: t.spacing.m, padding: t.spacing.m, borderRadius: t.radii.m, borderWidth: 1, borderColor: t.colors.border, backgroundColor: t.colors.surface }}
+      style={{ flexDirection: 'row', gap: t.spacing.m, padding: t.spacing.m, borderRadius: t.radii.control, borderWidth: 1, borderColor: t.colors.border, backgroundColor: t.colors.surface }}
       pressedStyle={{ backgroundColor: t.colors.surfacePressed }}
     >
       <Favicon t={t} url={valid ? url : ''} domain={domain || title} />
@@ -119,7 +123,7 @@ function SourceNumber({ n }: { n: number }) {
   }
   return (
     <View style={{ minWidth: 18, height: 18, paddingHorizontal: 4, borderRadius: 9, backgroundColor: t.colors.accentSoft, alignItems: 'center', justifyContent: 'center', marginTop: 1 }}>
-      <HText variant="micro" weight="700" tabular style={{ color: t.colors.accent, fontSize: 11, lineHeight: 14 }}>
+      <HText variant="micro" weight="700" tabular style={{ color: t.colors.accentText }}>
         {n}
       </HText>
     </View>
@@ -137,7 +141,7 @@ export function Favicon({ t, url, domain }: { t: Theme; url: string; domain: str
   const src = gate.allowed ? icon : undefined;
   const color = t.colors.chart[parseInt(hashString(domain), 36) % t.colors.chart.length];
   return (
-    <View style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: t.colors.surfaceAlt, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+    <View style={{ width: 28, height: 28, borderRadius: t.radii.inline, backgroundColor: t.colors.surfaceAlt, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
       {!loaded ? (
         <HText variant="caption" weight="700" style={{ color }}>
           {(domain[0] ?? '?').toUpperCase()}

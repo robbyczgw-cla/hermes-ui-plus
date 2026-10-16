@@ -190,8 +190,9 @@ export function PushHost({ children }: { children: ReactNode }) {
         if (ev.sessionId) {
           // an answer whose stream the app lost → completes that message in place (same conversation, no 2nd copy)
           const r = await recoverFromInbox({ controller: ctl, deliverToOpenChat }, p, ev).catch(() => null);
-          // a chat that is not open got its lost answer: "Antwort ist da" (the open chat reports via onTurnEnd)
-          if (r?.recovered) emitAnswerReady({ conversationId: r.conversationId, message: r.recovered, late: true });
+          // a chat that is not open got its lost answer: "Antwort ist da" (the open chat reports via onTurnEnd); the
+          // notification waits until it is written – now, the debounce timer does not run in the Android background
+          if (r?.recovered) emitAnswerReady({ conversationId: r.conversationId, message: r.recovered, late: true, written: ctl.flush().catch(() => {}) });
           await refreshHermesSession(p, ev.sessionId, ev.hermesProfile).catch(() => {});
         }
       } else {

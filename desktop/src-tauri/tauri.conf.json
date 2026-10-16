@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Hermes UI+",
-  "version": "0.1.0-alpha.1",
+  "productName": "HUI+",
+  "version": "0.1.1",
   "identifier": "xyz.hermesui.desktop",
   "build": {
     "frontendDist": "../dist-web"

@@ -6,10 +6,13 @@ connected messaging platform in every agent session prompt. A separate loop also
 never block the gateway's loop.
 
 The bind is the lock: Hermes loads plugins in every process (gateway, CLI, cron workers). Only the first
-process that binds ``server.port`` serves; the others log once at DEBUG and stay passive. The gateway starts
-first and lives longest, so in practice it owns the port. The thread runs in a copy of the registering
-context, so a profile-scoped ``HERMES_HOME`` override set during plugin load stays in effect for the model
-calls.
+process that binds ``server.port`` serves; the others log once at DEBUG and stay passive, retrying the bind
+every ``BIND_RETRY_S``. The retry matters with several profiles: a container that starts one gateway service
+per profile can have a short-lived process (``hermes -p <other> gateway run`` that exits because the main
+gateway multiplexes that profile) win the bind and exit, which used to leave quick answers dead until the next
+restart. The gateway lives longest, so it ends up owning the port. The thread runs in a copy of the
+registering context, so a profile-scoped ``HERMES_HOME`` override or secret scope set during plugin load stays
+in effect for the model calls.
 """
 
 from __future__ import annotations
@@ -26,6 +29,8 @@ from .quick import QuickService
 
 logger = logging.getLogger("hermes_ui_plus.runner")
 
+BIND_RETRY_S = 15.0  # passive processes try to take over the port this often (cheap: one failed bind)
+
 
 class ListenerThread:
     def __init__(self, make_service: Callable[[], QuickService], secret: str, *, host: str, port: int):
@@ -37,11 +42,13 @@ class ListenerThread:
         self._service: Optional[QuickService] = None
         self._thread: Optional[threading.Thread] = None
         self._ready = threading.Event()
+        self._stopping = threading.Event()
         self.bound = False
         self.error: Optional[str] = None
 
     def start(self, wait: float = 5.0) -> bool:
-        """Start the thread and wait until bound (or failed). True when this process serves."""
+        """Start the thread and wait until bound (or failed, or passive). True when this process serves now; a
+        passive listener keeps retrying the bind until ``stop()``."""
         ctx = contextvars.copy_context()
         self._thread = threading.Thread(target=ctx.run, args=(self._main,), name="hermes-ui-plus", daemon=True)
         self._thread.start()
@@ -55,15 +62,23 @@ class ListenerThread:
         try:
             self._service = self._make_service()
             self._server = QuickHttpServer(self._service, self._secret, host=self.host, port=self.port)
-            try:
-                loop.run_until_complete(self._server.start())
-            except OSError as exc:
-                self.error = "port in use" if exc.errno == errno.EADDRINUSE else type(exc).__name__
-                if exc.errno == errno.EADDRINUSE:
-                    logger.debug("hermes-ui-plus: %s:%s already served by another process", self.host, self.port)
-                else:
-                    logger.warning("hermes-ui-plus: could not bind %s:%s (%s)", self.host, self.port, self.error)
-                return
+            while True:
+                try:
+                    loop.run_until_complete(self._server.start())
+                    break
+                except OSError as exc:
+                    if exc.errno != errno.EADDRINUSE:
+                        self.error = type(exc).__name__
+                        logger.warning("hermes-ui-plus: could not bind %s:%s (%s)", self.host, self.port, self.error)
+                        return
+                    if self.error != "port in use":
+                        self.error = "port in use"
+                        logger.debug("hermes-ui-plus: %s:%s already served by another process; staying passive",
+                                     self.host, self.port)
+                        self._ready.set()  # start() returns now (passive); this thread keeps retrying
+                    if self._stopping.wait(BIND_RETRY_S):
+                        return
+            self.error = None
             self.bound = True
             self.port = self._server.bound_port
             logger.info("hermes-ui-plus: quick answers on http://%s:%s", self.host, self.port)
@@ -83,6 +98,7 @@ class ListenerThread:
                 loop.close()
 
     def stop(self, wait: float = 5.0) -> None:
+        self._stopping.set()
         loop = self._loop
         if loop is not None and not loop.is_closed():
             try:

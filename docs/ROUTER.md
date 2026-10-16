@@ -133,7 +133,7 @@ The bridge emits the same line **without** `- <reason>` by default and with conf
 | format | renderer | component hints | routed when |
 |---|---|---|---|
 | **places** | `hui` places | – | local businesses via tools: restaurants/cafés/shops/pharmacies "in der Nähe", `Öffnungszeiten`, `cerca de mí`, "find a coffee shop near …" (sights/itineraries stay `map`; one fact about one place stays `text`) |
-| **products** | `hui` products | – | buying advice: `kaufen`, `Kaufberatung`, `Preisvergleich`, "bestes … unter 200 €", "which robot vacuum should I buy", `mejores auriculares por menos de 100 €` (two named items without shopping intent stay `compare`) |
+| **products** | `hui` products | `compare` (r7) | buying advice: `kaufen`, `Kaufberatung`, `Preisvergleich`, "bestes … unter 200 €", "which robot vacuum should I buy", `mejores auriculares por menos de 100 €`. Named buyable products compared ("iPhone 17 vs Pixel 11", "Sony XM6 vs Bose QC", a list of handheld models) get `component=compare` = a `products` node with `compare:true` (photos, prices, specs table): the heuristic's `looksLikeProductComparison()` (product lines, maker + model token, or a category with a shopping cue) also upgrades a backend's `compare`. Concepts, plans, services and places ("Kubernetes vs Nomad", "Miete vs Kauf") stay `compare` |
 | **guide** | `hui` guide | – | hands-on procedures: `Schritt für Schritt`, `Anleitung`, `wie wechsle ich …`, `paso a paso` (software install / admin steps stay `steps`) |
 | **workout** | `hui` workout | – | `Trainingsplan`, `Workout`, `HIIT`, `rutina de ejercicios` (fitness theory stays `text`) |
 | **studyplan** | `hui` studyplan | – | `Lernplan`, `in 4 Wochen … lernen`, `study plan`, `plan de estudio` |
@@ -167,6 +167,21 @@ Two heuristic rules: the explicit block-diagram rule sits before the `diagram`/`
 im Aufbau" rule right before `compare` (and before `stats`' "auf einen Blick"). The `diagram` definition now points at
 `blocks` for parts at a glance; `blocks` is display-only, so there is no widget reply. A follow-up after a blocks answer
 keeps the format. The `r6` prompt is ~21.0k chars (router.test.mjs budget 21.5k); eval cases bl01-bl08.
+
+**Prompt `r7` (still taxonomy v5).** Three coding views (display-only `hui` nodes, no component hints; skill reference `coding.md`):
+
+| format | renderer | routed when |
+|---|---|---|
+| **diff** | `hui` diff / ```` ```diff ```` fence | show a code change: "Zeig mir den Diff", "show me the patch", `git diff`, "what would change in this file", before/after of code or config, `muestra el diff` |
+| **terminal** | `hui` terminal / ```` ```terminal ```` fence | run a command / the tests / a build and show the output: "Führ die Tests aus", "Zeig mir die Ausgabe von npm test", "run the tests", `ejecuta git status` |
+| **changes** | `hui` changes | files changed after an agent task: "Welche Dateien hast du geändert?", "which files did you touch", `git status`, "¿qué archivos cambiaste?" |
+
+The heuristic checks these three before the generic coding guard (which otherwise sends every `git`/code message to `text`), with
+"how do I run …", "was macht …", "wie funktioniert …" and "schreib/write …" questions staying `text`. `text` is now "code and
+programming help without running commands or showing changes". No new hint syntax: the skill's `UI-ROUTER-HINT` only knows
+`data=live` ("search first"), which does not fit "content must come from a tool run", so these formats get the plain
+`format=<f> confidence=<c>` line; the skill reference already says real output only. The `r7` prompt is ~22.7k chars
+(router.test.mjs budget 23k); eval cases cd01-cd16.
 
 **Taxonomy v3 (prompt version `r3`, skill-router-v3).** Seven new formats and seven chart components on top of v2:
 
@@ -273,7 +288,7 @@ Logging (JSON lines on stdout → journald): `route` events with reqId, format, 
 model, ms, cached, fallback; `http` access lines; `route_backend_failed` with status/error class.
 No message content at info level (the model's `reason` is only logged at debug).
 
-### App-side `RouteFormat` (v5: 35 values = the 26 below + `places products guide workout studyplan vocab mindmap` + `paths blocks`)
+### App-side `RouteFormat` (v5: 38 values = the 26 below + `places products guide workout studyplan vocab mindmap` + `paths blocks` + `diff terminal changes`)
 See `app/src/protocol/types.ts` (`ROUTE_FORMATS`); the bridge `taxonomy.mjs` list must stay identical.
 
 ### App-side `RouteFormat` (v3)

@@ -41,3 +41,68 @@ test('devices add without --env-file uses the env file the setup wizard wrote (p
   assert.match(r.stdout, /Web app:\nhttps:\/\/box\.example\.ts\.net:8790\/#pair\?/);
   rmSync(root, { recursive: true });
 });
+
+// ---- fresh-user test of 0.1.0-alpha.1: help links, missing env file, --strict reason, pair hint ----
+test('--help points to GitHub docs URLs (npx has no checkout), and says the --env-file must exist', async () => {
+  const { HELP } = await import('../src/cli.mjs');
+  assert.doesNotMatch(HELP, /Docs: bridge\/README\.md/);
+  for (const f of ['bridge/README.md', 'docs/SELF-HOSTING.md', 'docs/WEB-APP.md']) assert.ok(HELP.includes(`https://github.com/robbyczgw-cla/hermes-ui-plus/blob/main/${f}`), f);
+  assert.match(HELP, /must exist/);
+});
+
+test('docUrl: blob for files, tree for directories, anchors kept', async () => {
+  const { docUrl, REPO_URL } = await import('../src/links.mjs');
+  assert.equal(docUrl('docs/WEB-APP.md#troubleshooting'), `${REPO_URL}/blob/main/docs/WEB-APP.md#troubleshooting`);
+  assert.equal(docUrl('bridge/'), `${REPO_URL}/tree/main/bridge/`);
+});
+
+test('a missing --env-file is a friendly error that says how to create it', async () => {
+  const { loadEnvFiles } = await import('../src/cli.mjs');
+  assert.throws(() => loadEnvFiles(['/nonexistent-test-dir/bridge.env'], {}), (e) => /env file not found: \/nonexistent-test-dir\/bridge\.env/.test(e.message)
+    && /install -m 600 \/dev\/null/.test(e.message) && /setup/.test(e.message));
+});
+
+test('fetchErrorReason / preflight: the real cause instead of "(TypeError)"', async () => {
+  const { fetchErrorReason, preflight } = await import('../src/cli.mjs');
+  const wrap = (cause) => Object.assign(new TypeError('fetch failed'), { cause });
+  assert.equal(fetchErrorReason(wrap(Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }))), 'ECONNREFUSED');
+  assert.equal(fetchErrorReason(wrap(new AggregateError([Object.assign(new Error('x'), { code: 'EHOSTUNREACH' })]))), 'EHOSTUNREACH');
+  assert.match(fetchErrorReason(wrap(new Error('bad port'))), /bad port.*another port/);
+  assert.equal(fetchErrorReason(wrap(new Error('something odd'))), 'something odd');
+  assert.equal(fetchErrorReason(Object.assign(new Error('t'), { name: 'TimeoutError' })), 'timed out');
+  assert.equal(fetchErrorReason(new TypeError('fetch failed')), 'fetch failed');
+  // a real request to a port fetch refuses (the report's example: port 1)
+  const config = { upstream: { baseUrl: 'http://127.0.0.1:1', apiKey: '' } };
+  const [r] = await preflight(config);
+  assert.equal(r.fatalWhenStrict, true);
+  assert.doesNotMatch(r.message, /\(TypeError\)/);
+  assert.match(r.message, /bad port/);
+});
+
+test('bin --strict with an unreachable Hermes: exit 1 with a reason', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const dir = mkdtempSync(join(tmpdir(), 'hui-strict-'));
+  try {
+    const r = spawnSync(process.execPath, [new URL('../bin/hermes-ui-bridge.mjs', import.meta.url).pathname, '--strict', '--port', '0', '--state-dir', dir],
+      { env: { PATH: process.env.PATH, HERMES_BASE_URL: 'http://127.0.0.1:1' }, encoding: 'utf8', timeout: 20_000 });
+    assert.equal(r.status, 1, r.stderr);
+    assert.match(r.stdout, /Hermes not reachable at http:\/\/127\.0\.0\.1:1 \(port blocked/);
+    assert.match(r.stderr, /stopping \(--strict: Hermes must be reachable at start/);
+    assert.doesNotMatch(r.stdout + r.stderr, /\(TypeError\)/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('pairHint: BRIDGE_PAIRING=1 points to /bridge/pair?code=..., Docker to devices add via compose exec', async () => {
+  const { pairHint } = await import('../src/cli.mjs');
+  const plain = pairHint({ port: 8790 });
+  assert.match(plain, /restart with --pair/); assert.match(plain, /http:\/\/127\.0\.0\.1:8790\/bridge\/pair on this machine/);
+  const pairing = pairHint({ port: 8790, pairingEnabled: true, inContainer: true });
+  assert.match(pairing, /\/bridge\/pair\?code=/);
+  assert.match(pairing, /docker compose exec bridge node bin\/hermes-ui-bridge\.mjs devices add "Phone"/);
+  assert.doesNotMatch(pairing, /127\.0\.0\.1/);
+  const docker = pairHint({ port: 8790, inContainer: true });
+  assert.match(docker, /docker compose exec/); assert.doesNotMatch(docker, /on this machine/);
+});

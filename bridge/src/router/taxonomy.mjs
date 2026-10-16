@@ -1,7 +1,7 @@
 // Presentation taxonomy shared by every router backend, the prompt, the hint and the eval.
 // RouteFormat / RouteDecision mirror app/src/protocol/types.ts (SPEC "UI Router").
 
-/** @typedef {'text'|'table'|'chart'|'stats'|'compare'|'steps'|'timeline'|'form'|'diagram'|'calculator'|'map'|'interactive'|'image'|'choice'|'checklist'|'recipe'|'quiz'|'calc'|'timer'|'translation'|'poll'|'agenda'|'weather'|'decision'|'rank'|'scale'|'places'|'products'|'guide'|'workout'|'studyplan'|'vocab'|'mindmap'|'paths'|'blocks'} RouteFormat */
+/** @typedef {'text'|'table'|'chart'|'stats'|'compare'|'steps'|'timeline'|'form'|'diagram'|'calculator'|'map'|'interactive'|'image'|'choice'|'checklist'|'recipe'|'quiz'|'calc'|'timer'|'translation'|'poll'|'agenda'|'weather'|'decision'|'rank'|'scale'|'places'|'products'|'guide'|'workout'|'studyplan'|'vocab'|'mindmap'|'paths'|'blocks'|'diff'|'terminal'|'changes'} RouteFormat */
 /**
  * @typedef {object} RouteDecision
  * @property {RouteFormat} format
@@ -24,6 +24,8 @@ export const ROUTE_FORMATS = Object.freeze([
   'places', 'products', 'guide', 'workout', 'studyplan', 'vocab', 'mindmap',
   // v5 (native answer modules)
   'paths', 'blocks',
+  // v5 coding (display-only answer nodes, hermes-skill/hermes-ui/references/coding.md)
+  'diff', 'terminal', 'changes',
 ]);
 
 /** Renderer per format (SPEC mapping). */
@@ -35,7 +37,7 @@ export const RENDERER = Object.freeze({
   map: 'hui', choice: 'hui', checklist: 'hui', recipe: 'hui', quiz: 'hui', calc: 'hui', timer: 'hui',
   translation: 'hui', poll: 'hui', agenda: 'hui', weather: 'hui', decision: 'hui', rank: 'hui', scale: 'hui',
   places: 'hui', products: 'hui', guide: 'hui', workout: 'hui', studyplan: 'hui', vocab: 'hui', mindmap: 'hui',
-  paths: 'hui', blocks: 'hui',
+  paths: 'hui', blocks: 'hui', diff: 'hui', terminal: 'hui', changes: 'hui',
   diagram: 'hui-html', calculator: 'hui-html', interactive: 'hui-html',
 });
 
@@ -44,11 +46,11 @@ export const RENDERER = Object.freeze({
  * Keep them short, mutually exclusive, and phrased as "choose when".
  */
 export const DEFINITIONS = Object.freeze({
-  text: 'Plain Markdown prose. Direct facts, short answers, explanations without structured data, opinions, advice, writing/editing, long translations (letters, documents), code and programming help, chit-chat, personal or emotional topics, agent actions (reminders, messages, files), and clarifying questions when needed data is missing.',
+  text: 'Plain Markdown prose. Direct facts, short answers, explanations without structured data, opinions, advice, writing/editing, long translations (letters, documents), code and programming help without running commands or showing changes (writing, explaining, reviewing or debugging code, snippets, regex, SQL, how a command works), chit-chat, personal or emotional topics, agent actions (reminders, messages, files), and clarifying questions when needed data is missing.',
   table: 'Exact values or records in rows x columns: lists of items with several attributes, specs, schedules with many fields, rankings that need exact numbers. Use when the user wants to look things up, not see a shape.',
   chart: 'Numeric data where the shape matters: trend over time (line/area), magnitude comparison across categories (bar), ranking (hbar), parts of one total (pie/donut), composition per category (stacked), correlation of two numbers (scatter), multi-criteria profile of 1-3 entities (radar), one KPI against a target (gauge), activity per day (heatmap), money/budget flow with increases and decreases (waterfall).',
   stats: 'A few (2-6) headline numbers / KPIs with optional change, e.g. a status overview, dashboard summary, current figures of one subject.',
-  compare: '2-4 options side by side with qualitative features, pros/cons, trade-offs and possibly a recommendation (products, plans, technologies, choices).',
+  compare: '2-4 options side by side with qualitative features, pros/cons, trade-offs and possibly a recommendation: concepts, plans, technologies, services, places, life choices. Named buyable products (devices, appliances, cars) are products (component "compare").',
   steps: 'A short ordered reference list of a procedure: software installation, setup, configuration, administrative how-to (apply for an ID card), troubleshooting sequence. Hands-on procedures the user performs while reading (repair, assembly, replacing a part) are guide; NOT cooking recipes (recipe).',
   timeline: 'Events anchored in dates/times in chronological order: history, biography, project milestones, a history or project timeline. A day or week plan with clock times is agenda.',
   form: 'The assistant needs several (3+) structured inputs from the user before it can act (booking details, preferences for a plan, a questionnaire). Not for one decision or one simple clarifying question (choice).',
@@ -71,7 +73,7 @@ export const DEFINITIONS = Object.freeze({
   scale: 'ONE rating or intensity question answered on a scale ("wie gut war ...", "bewerte auf einer Skala von 1 bis 5", "rate from 1 to 10 how much"). Several ratings are a form.',
   timer: 'A timer, stopwatch or countdown: "stell einen Timer auf 7 Minuten", "set a 25 minute timer", "Countdown bis zum Anpfiff", "Erinnere mich in 10 Minuten" (a reminder after a DURATION is a timer), several timers at once. Reminders at a clock time or date and alarms ("um 8 Uhr", "morgen") are text (the app proposes an action button).',
   places: 'Real local places the assistant must look up with tools: restaurants, cafés, shops, pharmacies, hotels, gyms near a location or "in der Nähe", with ratings, opening hours, phone, route ("Restaurants in der Nähe", "Café in Ulm mit WLAN", "Öffnungszeiten von ...", "cafetería cerca de mí"). Sights, itineraries and trip plans on a map are map; one short fact about one place is text.',
-  products: 'Shopping help for concrete products: "welche Kopfhörer soll ich kaufen", "bestes Handy unter 500 €", "Vergleich von 4 Staubsaugern mit Preisen", "best laptop under 800". Prices, ratings and shops come from web search; show cards with price, rating, specs, pros/cons. A qualitative comparison of two named items without shopping intent is compare; specs in numbers for many items is table.',
+  products: 'Shopping help for concrete products: "welche Kopfhörer soll ich kaufen", "bestes Handy unter 500 €", "Vergleich von 4 Staubsaugern mit Preisen", "best laptop under 800". Prices, ratings and shops come from web search; show cards with price, rating, specs, pros/cons. Named buyable products compared ("iPhone 17 vs Pixel 11", "Sony XM6 vs Bose QC") are products with component "compare".',
   guide: 'A hands-on procedure the user performs while reading and may get stuck on: repair, replacement, assembly, device setup, "Schritt für Schritt", "Anleitung", "wie wechsle ich einen Reifen", "paso a paso". One step at a time with tips, warnings and optional timers. Software installation lists and administrative steps are steps; cooking is recipe.',
   workout: 'A training session or workout plan with exercises, sets, reps and rest: "Trainingsplan für Brust und Schultern", "Workout für zuhause", "HIIT in 20 Minuten", "rutina de piernas". Questions about fitness theory or nutrition are text.',
   studyplan: 'A multi-week or multi-day learning plan with daily tasks: "Lernplan für die Matheklausur", "Spanisch in 4 Wochen lernen", "study plan for the exam", "plan de estudio". Not a one-off quiz (quiz) and not a single-day schedule (agenda).',
@@ -79,6 +81,9 @@ export const DEFINITIONS = Object.freeze({
   mindmap: 'A mind map / concept map as a pan-and-zoom tree: "Mindmap zur Photosynthese", "Übersicht der Zusammenhänge", "mapa mental", organise a topic into branches. A process or architecture with arrows is diagram.',
   paths: 'Ways / variants / architectures (2-6) that differ in how something flows or where it lives, each a chain "A → B → C" with a verdict: where files live (Mac vs VM disk vs shared folder), how a request travels, Docker vs VM vs bare metal, backup / sync / deploy routes. Pros/cons per option: compare.',
   blocks: 'An architecture / setup at a glance without arrows: 1-3 variants or tiers side by side, each a few boxes (parts) and an optional shared base layer: "wie unterscheiden sich OrbStack und Parallels im Aufbau" (one shared kernel vs one kernel per VM), "aus welchen Bausteinen besteht mein Setup", "setup at a glance", frontend / backend / database. A flow with arrows or a sequence is diagram; ways with a verdict are paths.',
+  diff: 'The user wants to SEE a code change: a patch, a git diff, "what would change in this file", a before/after of code or config, reviewing or proposing an edit as lines added / removed (also a ```diff fence). Writing a new snippet without a change, or explaining code, is text; the files of a whole agent turn are changes.',
+  terminal: 'The user asks to RUN a shell command, the tests or a build and to see its output, or asks for the output / log of a command ("run the tests", "zeig mir die Ausgabe von npm test", "ejecuta git status"). The output must come from really running it. How a command works, or a command for the user to run themselves, is text.',
+  changes: 'An overview of the SEVERAL files changed after an agent coding task: "what did you change", "welche Dateien hast du geändert", "git status", "qué archivos cambiaste" (files with +/- counts, tap opens the diff). One file\'s code change is diff; running a command is terminal.',
 });
 
 /** Allowed component hints per format. `null` = no component for this format. */
@@ -110,7 +115,7 @@ export const COMPONENTS = Object.freeze({
   rank: null,
   scale: null,
   places: null,
-  products: null,
+  products: ['compare'],
   guide: null,
   workout: null,
   studyplan: null,
@@ -118,6 +123,9 @@ export const COMPONENTS = Object.freeze({
   mindmap: null,
   paths: null,
   blocks: null,
+  diff: null,
+  terminal: null,
+  changes: null,
 });
 
 const SLUG = /^[a-z0-9][a-z0-9-]{0,31}$/;
@@ -147,6 +155,7 @@ export function normalizeComponent(format, component) {
     checklist: { shopping_list: 'shopping', einkauf: 'shopping', packing_list: 'packing', pack: 'packing', 'to-do': 'todo', todos: 'todo', tasks: 'todo' },
     quiz: { flashcard: 'flashcards', cards: 'flashcards', vocab: 'flashcards', multiple_choice: 'quiz', mc: 'quiz' },
     interactive: { scatter: undefined, simulate: 'simulation', physics: 'simulation', '3d-model': '3d' },
+    products: { comparison: 'compare', vs: 'compare', versus: 'compare', table: 'compare' },
     choice: { slot: 'slots', time: 'slots', appointment: 'slots', yesno: 'confirm', 'yes-no': 'confirm', multi: 'multiple', multiselect: 'multiple' },
   };
   const s = /** @type {Record<string, Record<string,string>>} */ (syn)[format]?.[c];

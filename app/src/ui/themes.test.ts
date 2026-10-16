@@ -10,6 +10,7 @@ import {
   THEME_FAMILY_IDS,
   buildColors,
   checkCustomAccent,
+  controlBorder,
   familySchemes,
   resolveVariant,
   scaleFont,
@@ -26,8 +27,9 @@ const COLOR = /^(#[0-9a-f]{6}|rgba\(\d+,\d+,\d+,(0|1|0?\.\d+)\))$/i;
 
 // every key of ThemeColors (kept in sync with theme.ts; a missing one fails here and in tsc)
 const KEYS = [
-  'bg', 'surface', 'surfaceAlt', 'surfacePressed', 'text', 'muted', 'subtle', 'accent', 'onAccent', 'accentSoft',
-  'border', 'borderStrong', 'success', 'successSoft', 'warning', 'warningSoft', 'danger', 'dangerSoft', 'info', 'infoSoft',
+  'bg', 'surface', 'surfaceAlt', 'surfacePressed', 'text', 'muted', 'subtle', 'accent', 'accentText', 'onAccent', 'accentSoft',
+  'border', 'borderStrong', 'borderControl', 'success', 'successSoft', 'warning', 'warningSoft', 'danger', 'dangerSoft',
+  'ink', 'onInk', 'seal', 'onSeal', 'sealSoft', 'info', 'infoSoft',
   'codeBg', 'codeText', 'codeComment', 'codeKeyword', 'codeString', 'codeNumber', 'codeFunction',
   'skeleton', 'skeletonHighlight', 'overlay', 'chart',
 ];
@@ -95,6 +97,11 @@ for (const [id, s] of variants) {
     // text on accent (primary buttons): ≥ 4.5; accent text on its soft tint (selected chips): ≥ 4.5
     assert.ok(ratio(c.onAccent, c.accent) >= 4.5, `onAccent ${ratio(c.onAccent, c.accent)}`);
     for (const soft of hexOnly(c.accentSoft)) assert.ok(ratio(c.accent, soft) >= 4.5, `accent on accentSoft ${ratio(c.accent, soft)}`);
+    // the button system: ink-filled primary and seal-filled approval / danger buttons carry ≥ 4.5 labels; the seal is
+    // also a small mark and text (risk seal, "Delete" outline) on bg, surface and its tint
+    assert.ok(ratio(c.onInk, c.ink) >= 4.5, `onInk ${ratio(c.onInk, c.ink)}`);
+    assert.ok(ratio(c.onSeal, c.seal) >= 4.5, `onSeal ${ratio(c.onSeal, c.seal)}`);
+    assert.ok(minOn(c.seal, c.bg, c.surface, ...hexOnly(c.sealSoft)) >= 4.5, `seal ${minOn(c.seal, c.bg, c.surface, ...hexOnly(c.sealSoft))}`);
     // status + info colors are short labels (chips, deltas, errors): AA 4.5 on bg, surface and their own soft tint
     for (const [k, soft] of [['success', c.successSoft], ['warning', c.warningSoft], ['danger', c.dangerSoft], ['info', c.infoSoft]] as const) {
       const m = minOn(c[k], c.bg, c.surface, ...hexOnly(soft));
@@ -129,6 +136,39 @@ for (const [id, s] of variants) {
   });
 }
 
+/**
+ * Text/icon color × background pairs the UI actually renders (found by scanning app/src for `color` tokens inside
+ * elements with a `backgroundColor` token). Small text needs 4.5:1; the transient pressed surface is exempt.
+ */
+const USED_TEXT_PAIRS: readonly (readonly [fg: string, bgs: readonly string[]])[] = [
+  ['text', ['bg', 'surface', 'surfaceAlt', 'surfacePressed', 'accentSoft', 'successSoft', 'warningSoft', 'dangerSoft', 'infoSoft', 'codeBg']],
+  ['muted', ['bg', 'surface', 'surfaceAlt', 'surfacePressed', 'accentSoft', 'successSoft', 'warningSoft', 'dangerSoft', 'infoSoft', 'codeBg']],
+  ['subtle', ['bg', 'surface', 'surfaceAlt', 'accentSoft', 'successSoft', 'warningSoft', 'dangerSoft', 'infoSoft', 'codeBg']],
+  ['accent', ['bg', 'surface', 'surfaceAlt', 'accentSoft', 'codeBg']],
+  ['accentText', ['bg', 'surface', 'surfaceAlt', 'accentSoft', 'codeBg']],
+  ['info', ['bg', 'surface', 'surfaceAlt', 'infoSoft']],
+  ['success', ['bg', 'surface', 'surfaceAlt', 'successSoft']],
+  ['warning', ['bg', 'surface', 'surfaceAlt', 'warningSoft']],
+  ['danger', ['bg', 'surface', 'surfaceAlt', 'dangerSoft']],
+  ['onAccent', ['accent']],
+];
+
+for (const [id, s] of variants) {
+  test(`WCAG contrast of every used text/background pair ${id}/${s}`, () => {
+    const c = buildColors(id, s) as unknown as Record<string, string>;
+    for (const [fg, bgs] of USED_TEXT_PAIRS) {
+      for (const bg of bgs) {
+        if (!HEX.test(c[bg])) continue;
+        assert.ok(contrast(c[fg], c[bg]) >= 4.5, `${fg} on ${bg} ${ratio(c[fg], c[bg])}`);
+      }
+    }
+    // text on a filled status badge (Guide / Workout / attachment error): onAccent is the light-or-dark pick for accent only
+    for (const fill of ['success', 'danger'] as const) {
+      assert.ok(Math.max(contrast('#ffffff', c[fill]), contrast('#0b0b0f', c[fill])) >= 4.5, `best text on ${fill}`);
+    }
+  });
+}
+
 test('accent swatches: every swatch × family × scheme keeps accent ≥ 3 and onAccent ≥ 4.5', () => {
   for (const id of THEME_FAMILY_IDS) {
     for (const s of SCHEMES) {
@@ -136,7 +176,7 @@ test('accent swatches: every swatch × family × scheme keeps accent ≥ 3 and o
         const c = buildColors(id, s, sw.id);
         assert.ok(minOn(c.accent, c.bg, c.surface) >= 3, `${id}/${s}/${sw.id} accent ${minOn(c.accent, c.bg, c.surface)}`);
         assert.ok(ratio(c.onAccent, c.accent) >= 4.5, `${id}/${s}/${sw.id} onAccent ${ratio(c.onAccent, c.accent)}`);
-        assert.equal(c.info, c.accent);
+        assert.equal(c.info, c.accentText);
       }
     }
   }
@@ -217,4 +257,58 @@ test('theme picker: 5 featured families up front, all 9 when expanded, selected 
   assert.equal(open.shown.length, THEME_FAMILY_IDS.length);
   assert.deepEqual(new Set(open.shown), new Set(THEME_FAMILY_IDS));
   assert.deepEqual(pickerFamilies('forest', false), { shown: ['standard', 'oled', 'paper', 'nord', 'rose', 'forest'], hiddenCount: 3 });
+});
+
+// accent as TEXT (links, text buttons, selected labels): a custom accent is only held to 3:1 as a fill / icon / border,
+// `accentText` is its readable copy
+const ODD_ACCENTS = ['#FFE600', '#808080', '#00FF00', '#FF69B4', '#FFFFFF', '#000000', '#7A7AFF', '#C0C0C0', '#1E90FF'];
+
+test('accentText: AA (4.5:1) on bg, surface, surfaceAlt and accentSoft for every swatch and odd custom colour, in every theme', () => {
+  const accents: string[] = [...ACCENT_SWATCHES.map((s) => s.id), ...ODD_ACCENTS];
+  for (const id of THEME_FAMILY_IDS) {
+    for (const s of SCHEMES) {
+      for (const a of [undefined, ...accents]) {
+        const c = buildColors(id, s, a);
+        for (const bg of ['bg', 'surface', 'surfaceAlt', 'accentSoft'] as const) {
+          if (!HEX.test(c[bg])) continue;
+          assert.ok(contrast(c.accentText, c[bg]) >= 4.5, `${id}/${s}/${a ?? 'theme'} accentText on ${bg} ${ratio(c.accentText, c[bg])}`);
+        }
+        // the fill / icon accent keeps its own (3:1) contract
+        assert.ok(minOn(c.accent, c.bg, c.surface) >= 3, `${id}/${s}/${a ?? 'theme'} accent`);
+      }
+    }
+  }
+});
+
+test('accentText: equals accent where the accent already reads as text; differs only for custom colours that need it', () => {
+  for (const [id, s] of variants) {
+    const c = buildColors(id, s);
+    assert.equal(c.accentText, c.accent, `${id}/${s}`);
+  }
+  const yellow = buildColors('standard', 'light', '#FFE600');
+  assert.notEqual(yellow.accentText, yellow.accent);
+  // already dark enough on a light theme: unchanged
+  const dark = buildColors('standard', 'light', '#1A237E');
+  assert.equal(dark.accentText, dark.accent);
+  // same hue family: the nudge only moves lightness (stays closer to the pick than to the text colour)
+  assert.ok(contrast(yellow.accentText, yellow.accent) < contrast(yellow.accentText, '#ffffff'));
+});
+
+for (const [id, s] of variants) {
+  test(`borderControl: 3:1 on bg / surface / surfaceAlt (WCAG 1.4.11) ${id}/${s}`, () => {
+    const c = buildColors(id, s);
+    assert.ok(HEX.test(c.borderControl), c.borderControl);
+    for (const bg of ['bg', 'surface', 'surfaceAlt'] as const) assert.ok(contrast(c.borderControl, c[bg]) >= 3, `borderControl on ${bg} ${ratio(c.borderControl, c[bg])}`);
+    // it is a control outline, not a text colour: weaker than the text itself
+    assert.ok(contrast(c.borderControl, c.surface) < contrast(c.text, c.surface));
+  });
+}
+
+test('borderControl: the smallest step that reaches 3:1 (not just black / white); decorative borders keep their tuned values', () => {
+  const light = controlBorder({ bg: '#ffffff', surface: '#ffffff', surfaceAlt: '#f4f4f5', text: '#111111' });
+  assert.ok(contrast(light, '#f4f4f5') >= 3 && contrast(light, '#f4f4f5') < 3.3, String(ratio(light, '#f4f4f5')));
+  const dark = controlBorder({ bg: '#000000', surface: '#111111', surfaceAlt: '#1c1c1e', text: '#f5f5f5' });
+  assert.ok(Math.min(contrast(dark, '#000000'), contrast(dark, '#111111'), contrast(dark, '#1c1c1e')) >= 3);
+  const c = buildColors('standard', 'light');
+  assert.match(c.border, /^rgba\(/);
 });

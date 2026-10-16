@@ -4,11 +4,13 @@
  * capability badges, star to pin. Web: ↑/↓ move the highlight, Enter picks, Esc closes.
  */
 import { memo, useCallback, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Platform, Pressable, StyleSheet, Text, TextInput, View, type NativeSyntheticEvent, type TextInputKeyPressEventData } from 'react-native';
+import { ActivityIndicator, FlatList, Platform, Pressable, StyleSheet, View, type NativeSyntheticEvent, type TextInputKeyPressEventData } from 'react-native';
+import { Text, TextInput } from '../ui/primitives/Text';
 import { useT, type TKey } from '../i18n';
-import { useTheme } from '../ui';
+import { Button, useTheme } from '../ui';
 import { Icon, type IconName } from './icons';
 import { buildRows, nextModelRow, type ModelBadge, type ModelEntry, type ModelPrefs, type ModelRow } from './modelSearch';
+import { a11yState } from '../ui/lib/a11yState';
 
 const HEADER_H = 32;
 const ROW_H = 58;
@@ -105,10 +107,10 @@ export function ModelSearchList({ entries, selected, onPick, prefs, onToggleFavo
     ({ item, index }: { item: ModelRow; index: number }) =>
       item.type === 'header' ? (
         <View style={[styles.header, { height: HEADER_H }]} accessibilityRole="header">
-          <Text style={[styles.headerText, { color: th.colors.subtle }]} numberOfLines={1}>
-            {item.title.toUpperCase()}
+          <Text style={[th.typography.caption, styles.headerText, { color: th.colors.subtle }]} numberOfLines={1}>
+            {item.title}
           </Text>
-          {item.count !== undefined ? <Text style={[styles.headerCount, { color: th.colors.subtle }]}>{item.count}</Text> : null}
+          {item.count !== undefined ? <Text style={[th.typography.micro, { color: th.colors.subtle }]}>{item.count}</Text> : null}
         </View>
       ) : (
         <ModelRowView
@@ -125,14 +127,14 @@ export function ModelSearchList({ entries, selected, onPick, prefs, onToggleFavo
 
   return (
     <View>
-      <View style={[styles.search, { backgroundColor: th.colors.surfaceAlt, borderRadius: th.radii.m }]}>
+      <View style={[styles.search, { backgroundColor: th.colors.surfaceAlt, borderRadius: th.radii.control }]}>
         <Icon name="search" size={17} color={th.colors.muted} />
         <TextInput
           value={query}
           onChangeText={setQuery}
           placeholder={realCount > 0 ? tr('chat.modelPicker.searchCount', { count: realCount }) : tr('chat.modelPicker.search')}
           placeholderTextColor={th.colors.subtle}
-          style={[styles.input, { color: th.colors.text }, Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : null]}
+          style={[th.typography.body, styles.input, { color: th.colors.text }, Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : null]}
           autoCapitalize="none"
           autoCorrect={false}
           autoFocus={autoFocus}
@@ -152,13 +154,11 @@ export function ModelSearchList({ entries, selected, onPick, prefs, onToggleFavo
       </View>
       {error ? (
         <View style={styles.state}>
-          <Text style={[styles.stateText, { color: th.colors.danger }]} numberOfLines={3}>
+          <Text style={[th.typography.callout, { color: th.colors.danger }]} numberOfLines={3}>
             {tr('chat.modelPicker.loadFailedDetail', { error })}
           </Text>
           {onRetry ? (
-            <Pressable onPress={onRetry} accessibilityRole="button" hitSlop={8}>
-              <Text style={{ color: th.colors.accent, fontSize: 14, fontWeight: '600' }}>{tr('chat.modelPicker.retry')}</Text>
-            </Pressable>
+            <Button label={tr('chat.modelPicker.retry')} variant="tertiary" size="small" onPress={onRetry} />
           ) : null}
         </View>
       ) : null}
@@ -178,11 +178,9 @@ export function ModelSearchList({ entries, selected, onPick, prefs, onToggleFavo
         ListEmptyComponent={
           empty ? (
             <View style={styles.state}>
-              <Text style={[styles.stateText, { color: th.colors.muted }]}>{tr('chat.modelPicker.noMatch', { query: q })}</Text>
+              <Text style={[th.typography.callout, { color: th.colors.muted }]}>{tr('chat.modelPicker.noMatch', { query: q })}</Text>
               {allowCustom ? (
-                <Pressable onPress={() => onPick(q)} accessibilityRole="button" hitSlop={8}>
-                  <Text style={{ color: th.colors.accent, fontSize: 14, fontWeight: '600' }}>{tr('chat.modelPicker.useCustom', { model: q })}</Text>
-                </Pressable>
+                <Button label={tr('chat.modelPicker.useCustom', { model: q })} size="small" numberOfLines={2} onPress={() => onPick(q)} />
               ) : null}
             </View>
           ) : null
@@ -191,9 +189,9 @@ export function ModelSearchList({ entries, selected, onPick, prefs, onToggleFavo
           !q && !error && realCount === 0 ? (
             <View style={styles.state}>
               {loading ? (
-                <Text style={[styles.stateText, { color: th.colors.muted }]}>{tr('chat.modelPicker.loading')}</Text>
+                <Text style={[th.typography.callout, { color: th.colors.muted }]}>{tr('chat.modelPicker.loading')}</Text>
               ) : (
-                <Text style={[styles.stateText, { color: th.colors.muted }]}>{tr('chat.modelPicker.noMore')}</Text>
+                <Text style={[th.typography.callout, { color: th.colors.muted }]}>{tr('chat.modelPicker.noMore')}</Text>
               )}
             </View>
           ) : null
@@ -228,18 +226,18 @@ const ModelRowView = memo(function ModelRowView({
         onPress={() => onPick(entry.id)}
         disabled={entry.disabled}
         accessibilityRole="button"
-        accessibilityState={{ selected: active, disabled: !!entry.disabled }}
+        {...a11yState({ selected: active, disabled: !!entry.disabled }, 'button')}
         accessibilityLabel={[tr('chat.modelPicker.option.a11y', { label: entry.label }), entry.detail, badgeText].filter(Boolean).join(', ')}
         style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [
           styles.row,
-          { borderRadius: th.radii.m, opacity: entry.disabled ? 0.45 : 1 },
+          { borderRadius: th.radii.control, opacity: entry.disabled ? 0.45 : 1 },
           (pressed || active || highlighted || hovered) && { backgroundColor: active ? th.colors.surfaceAlt : th.colors.surfacePressed },
-          highlighted && { borderWidth: 1, borderColor: th.colors.borderStrong },
+          highlighted && { borderWidth: 1, borderColor: th.colors.borderControl },
         ]}
       >
         <View style={{ flex: 1, minWidth: 0 }}>
           <View style={styles.titleLine}>
-            <Text style={[styles.rowTitle, { color: th.colors.text }]} numberOfLines={1}>
+            <Text style={[th.typography.body, styles.rowTitle, { color: th.colors.text }]} numberOfLines={1}>
               {entry.label}
             </Text>
             {badges.map((b) => (
@@ -249,7 +247,7 @@ const ModelRowView = memo(function ModelRowView({
             ))}
           </View>
           {entry.detail ? (
-            <Text style={[styles.rowDetail, { color: th.colors.muted }]} numberOfLines={1}>
+            <Text style={[th.typography.caption, styles.rowDetail, { color: th.colors.muted }]} numberOfLines={1}>
               {entry.detail}
             </Text>
           ) : null}
@@ -261,7 +259,7 @@ const ModelRowView = memo(function ModelRowView({
           onPress={() => onToggleFavorite(entry.id as string)}
           hitSlop={6}
           accessibilityRole="button"
-          accessibilityState={{ checked: favorite }}
+          {...a11yState({ checked: favorite }, 'button')}
           accessibilityLabel={favorite ? tr('chat.modelPicker.unfavorite', { label: entry.label }) : tr('chat.modelPicker.favorite', { label: entry.label })}
           style={styles.star}
         >
@@ -276,17 +274,15 @@ const ModelRowView = memo(function ModelRowView({
 
 const styles = StyleSheet.create({
   search: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, height: 42, marginHorizontal: 4, marginBottom: 6 },
-  input: { flex: 1, fontSize: 15.5, paddingVertical: 0, height: 42 },
+  input: { flex: 1, paddingVertical: 0, height: 42 },
   header: { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 12, paddingBottom: 6, gap: 6 },
-  headerText: { fontSize: 11.5, fontWeight: '600', letterSpacing: 0.6, flexShrink: 1 },
-  headerCount: { fontSize: 11.5 },
+  headerText: { fontWeight: '600', flexShrink: 1 },
   rowWrap: { flexDirection: 'row', alignItems: 'center' },
   row: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, height: ROW_H - 4 },
   titleLine: { flexDirection: 'row', alignItems: 'center', gap: 5, minWidth: 0 },
-  rowTitle: { fontSize: 15.5, fontWeight: '500', flexShrink: 1 },
-  rowDetail: { fontSize: 12.5, marginTop: 1 },
+  rowTitle: { fontWeight: '500', flexShrink: 1 },
+  rowDetail: { marginTop: 1 },
   badge: { opacity: 0.9 },
   star: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   state: { paddingHorizontal: 12, paddingVertical: 14, gap: 8, alignItems: 'flex-start' },
-  stateText: { fontSize: 13.5 },
 });

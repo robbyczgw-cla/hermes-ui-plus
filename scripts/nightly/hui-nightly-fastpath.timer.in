@@ -1,0 +1,10 @@
+[Unit]
+Description=HUI+ nightly fast-path cross-check, 03:30 local time
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=false
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

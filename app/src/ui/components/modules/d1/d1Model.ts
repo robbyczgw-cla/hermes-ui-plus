@@ -530,7 +530,7 @@ export function scoresLine(scores: Score[], lang: NumLang = 'de'): string {
 export type ProductKind = 'headphones' | 'gamepad' | 'phone' | 'laptop' | 'watch' | 'camera' | 'screen' | 'box';
 
 const PRODUCT_KINDS: [ProductKind, RegExp][] = [
-  ['gamepad', /handheld|konsole|console|consola|game\s?boy|nintendo|switch\b|steam deck|playstation|xbox|retroid|anbernic|miyoo|\bayn\b|odin|powkiddy|ayaneo|controller|gamepad|mando/i],
+  ['gamepad', /handheld|konsole|console|consola|game\s?boy|nintendo|switch\b|steam deck|playstation|xbox|retroid|anbernic|miyoo|trimui|konkr|\brg ?(\d{2}|rotate|cube)|\bayn\b|odin|powkiddy|ayaneo|controller|gamepad|mando/i],
   ['headphones', /kopfhörer|headphone|headset|earbud|ear\s?buds|in-ear|over-ear|auricular|airpods|buds\b|wh-1000|qc\s?ultra|quietcomfort/i],
   ['watch', /watch|uhr\b|smartwatch|reloj|fitness.?tracker|band\b/i],
   ['phone', /smartphone|iphone|galaxy s|pixel \d|handy|móvil|movil|phone\b|teléfono/i],

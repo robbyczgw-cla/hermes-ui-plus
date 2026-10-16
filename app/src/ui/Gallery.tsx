@@ -29,6 +29,8 @@ import { GallerySectionD2 } from './components/modules/d2/GallerySectionD2';
 import { GallerySectionD1 } from './components/modules/d1/GallerySectionD1';
 // ── modules-e1 (paths, blocks) ──
 import { GallerySectionE1 } from './components/modules/e1/GallerySectionE1';
+// ── modules-e2 (diff, terminal, changes, Pi steps) ──
+import { GallerySectionE2 } from './components/modules/e2/GallerySectionE2';
 import { LoaderGallery } from './loaders/LoaderGallery';
 
 type Mode = 'static' | 'streaming' | 'skeletons' | 'loaders';
@@ -50,7 +52,7 @@ export function Gallery() {
 function Segmented<T extends string | null>({ value, options, onChange }: { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void }) {
   const t = useTheme();
   return (
-    <View style={{ flexDirection: 'row', backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.m, padding: 3, gap: 3 }}>
+    <View style={{ flexDirection: 'row', backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.control, padding: 3, gap: 3 }}>
       {options.map((o) => {
         const active = o.value === value;
         return (
@@ -59,7 +61,7 @@ function Segmented<T extends string | null>({ value, options, onChange }: { valu
             haptic="selection"
             scaleTo={0.98}
             onPress={() => onChange(o.value)}
-            style={{ flex: 1, height: 32, borderRadius: t.radii.s, alignItems: 'center', justifyContent: 'center', backgroundColor: active ? t.colors.surface : 'transparent', ...(active ? t.shadows.sm : {}) }}
+            style={{ flex: 1, height: 32, borderRadius: t.radii.control, alignItems: 'center', justifyContent: 'center', backgroundColor: active ? t.colors.surface : 'transparent', ...(active ? t.shadows.sm : {}) }}
           >
             <HText variant="caption" weight={active ? '600' : '400'} color={active ? 'text' : 'muted'}>
               {o.label}
@@ -124,7 +126,7 @@ function GalleryBody({ scheme, setScheme }: { scheme: ColorScheme | null; setSch
           {mode === 'streaming' ? (
             <PressableScale
               onPress={() => setRun((r) => r + 1)}
-              style={{ flexDirection: 'row', alignSelf: 'flex-start', alignItems: 'center', gap: 6, height: 36, paddingHorizontal: 14, borderRadius: t.radii.pill, borderWidth: 1, borderColor: t.colors.borderStrong }}
+              style={{ flexDirection: 'row', alignSelf: 'flex-start', alignItems: 'center', gap: 6, height: 36, paddingHorizontal: 14, borderRadius: t.radii.pill, borderWidth: 1, borderColor: t.colors.borderControl }}
             >
               <Icon name="sparkle" size={14} color={t.colors.text} />
               <HText variant="callout" weight="500">
@@ -133,11 +135,11 @@ function GalleryBody({ scheme, setScheme }: { scheme: ColorScheme | null; setSch
             </PressableScale>
           ) : null}
           {last ? (
-            <View style={{ backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.s, padding: t.spacing.s }}>
+            <View style={{ backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.control, padding: t.spacing.s }}>
               <HText variant="micro" color="muted">
                 {tr('ui.gallery.lastAction')}
               </HText>
-              <HText variant="mono" style={{ fontSize: 12 }} numberOfLines={3}>
+              <HText variant="mono" numberOfLines={3}>
                 {last}
               </HText>
             </View>
@@ -214,6 +216,9 @@ function GalleryBody({ scheme, setScheme }: { scheme: ColorScheme | null; setSch
         {/* ── modules-e1: Wege & Varianten (paths), Architektur & Bausteine (blocks) ── */}
         {mode === 'static' ? <GallerySectionE1 onAction={onAction} /> : null}
         {/* ── /modules-e1 ── */}
+        {/* ── modules-e2: Coding (diff, terminal, changes, Pi steps) ── */}
+        {mode === 'static' ? <GallerySectionE2 onAction={onAction} /> : null}
+        {/* ── /modules-e2 ── */}
 
         {/* ── charts-v3: neue Diagrammarten + Sparklines (owner: charts-v3) ── */}
         {mode === 'static' ? <GallerySectionCharts onAction={onAction} /> : null}
@@ -227,7 +232,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   const t = useTheme();
   return (
     <View style={{ gap: t.spacing.s }}>
-      <HText variant="micro" color="subtle" style={{ textTransform: 'uppercase', letterSpacing: 0.6 }}>
+      <HText variant="caption" weight="600" color="subtle">
         {title}
       </HText>
       {children}

@@ -79,9 +79,10 @@ def _register(ctx: Any) -> None:
         logger.warning("%s: unusable secret file (%s); listener off", PLUGIN_NAME, exc)
         return
 
-    backend = hermes_adapter.HermesAuxBackend(AUX_TASK_KEY)
+    backend = hermes_adapter.HermesAuxBackend(AUX_TASK_KEY, home=str(_hermes_home()))
     listener = ListenerThread(
         lambda: QuickService(settings, backend, task=AUX_TASK_KEY, inherit_from=AUX_INHERIT_FROM),
         secret, host=settings.host, port=settings.port)
-    if listener.start() and hasattr(ctx, "on_unload"):
+    listener.start()  # False = another process serves; this one stays passive and takes over if that one exits
+    if hasattr(ctx, "on_unload"):
         ctx.on_unload(listener.stop)

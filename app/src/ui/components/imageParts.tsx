@@ -3,14 +3,15 @@
  * tiny attribution line (tap → source page), thumbnails and a fullscreen lightbox.
  * Never shows a broken image: failures render a subtle placeholder glyph or nothing.
  */
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions, type StyleProp, type ViewStyle } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Modal, Pressable, ScrollView, StyleSheet, View, useWindowDimensions, type StyleProp, type ViewStyle } from 'react-native';
+import { Text } from '../primitives/Text';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 import { useTheme } from '../theme';
 import { useHui } from '../primitives/context';
-import { HText, PressableScale } from '../primitives/basics';
+import { HText, PressableScale, textStyle } from '../primitives/basics';
 import { Icon } from '../primitives/Icon';
 import { Skeleton } from '../primitives/Skeleton';
 import { attributionText, attributionUrl, useImageGate, useResolvedImage, type ResolvedImage } from '../../images';
@@ -18,6 +19,8 @@ import { useT } from '../../i18n';
 import { shareImageUrl } from '../../images/share';
 import { useImageEdit } from '../../imageedit/context';
 import { useEscapeToClose } from '../lib/useEscapeToClose';
+import { useCaptureBusy, useCaptureMode } from '../lib/capture';
+import { useCaptureImageSource } from '../lib/captureImage';
 import { knownAspect, rememberAspect } from '../lib/aspectCache';
 import { fallbackHeight, slotStatus } from '../../images/slot';
 import { FallbackTile, useImageSlot, useSlotCap } from './imageSlot';
@@ -84,10 +87,18 @@ export function Photo({
   const [load, setLoad] = useState<{ uri: string | null; s: 'ok' | 'error' } | null>(null);
   const state = load && load.uri === uri ? load.s : 'loading';
   const setState = (s: 'ok' | 'error') => setLoad({ uri, s });
-  const r = radius ?? t.radii.l;
+  const r = radius ?? t.radii.card;
   // security review H1: unknown hosts (model-written URLs) load only after a tap (images/trust.ts)
   const gate = useImageGate(uri);
-  if (uri && !gate.allowed) {
+  // share-as-image: wait for the photo (web: its local copy, captureImage.ts); past the capture deadline, or when it
+  // cannot be read, it is drawn as the glyph box (no shimmer, no empty box)
+  const capture = useCaptureMode();
+  const plain = useMemo(() => (uri ? { uri } : null), [uri]);
+  const cap = useCaptureImageSource(gate.allowed ? plain : null);
+  const capFailed = cap.state === 'failed';
+  const captureExpired = useCaptureBusy(!!uri && gate.allowed && !capFailed && state === 'loading');
+  const shown = capFailed || (captureExpired && state === 'loading') ? 'error' : state;
+  if (uri && !gate.allowed && !capture) {
     return <ImageConsent host={gate.host} onLoad={gate.unlock} radius={r} aspect={aspect} height={height} style={style} />;
   }
   const box = (
@@ -98,9 +109,9 @@ export function Photo({
         style,
       ]}
     >
-      {uri && state !== 'error' ? (
+      {uri && gate.allowed && shown !== 'error' && cap.source ? (
         <Image
-          source={{ uri }}
+          source={cap.source}
           recyclingKey={uri}
           style={StyleSheet.absoluteFill}
           contentFit={fit}
@@ -116,8 +127,9 @@ export function Photo({
           }}
         />
       ) : null}
-      {uri && state === 'loading' ? <Skeleton width="100%" height={null} radius={0} style={StyleSheet.absoluteFill} /> : null}
-      {!uri || state === 'error' ? (
+      {uri && gate.allowed && shown === 'loading' ? <Skeleton width="100%" height={null} radius={0} style={StyleSheet.absoluteFill} /> : null}
+      {/* capture mode: a host that waits for a tap stays the glyph box (the image never shows a load button) */}
+      {!uri || !gate.allowed || shown === 'error' ? (
         <View style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center' }]}>
           <ImageGlyph color={t.colors.subtle} size={22} />
         </View>
@@ -149,7 +161,7 @@ export function ImageConsent({ host, onLoad, radius, aspect, height, style, dark
   const tr = useT();
   const t = useTheme();
   const label = tr('ui.image.loadFrom', { host: host || '?' });
-  const fg = dark ? '#fff' : t.colors.accent;
+  const fg = dark ? '#fff' : t.colors.accentText;
   return (
     <Pressable
       onPress={onLoad}
@@ -157,14 +169,14 @@ export function ImageConsent({ host, onLoad, radius, aspect, height, style, dark
       accessibilityLabel={label}
       accessibilityHint={tr('ui.image.loadFromHint')}
       style={({ pressed }) => [
-        { width: '100%', borderRadius: radius ?? t.radii.l, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', gap: 6, padding: 12 },
+        { width: '100%', borderRadius: radius ?? t.radii.card, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', gap: 6, padding: 12 },
         dark ? { backgroundColor: pressed ? 'rgba(255,255,255,0.12)' : 'transparent' } : { backgroundColor: pressed ? t.colors.surfacePressed : t.colors.surfaceAlt, borderWidth: StyleSheet.hairlineWidth, borderColor: t.colors.border },
         height !== undefined ? { height } : { aspectRatio: aspect ?? 4 / 3, minHeight: 72 },
         style,
       ]}
     >
       <ImageGlyph color={dark ? '#fff' : t.colors.subtle} size={22} />
-      <Text style={{ color: fg, fontSize: 14, fontWeight: '600', textAlign: 'center' }} numberOfLines={2}>
+      <Text style={[textStyle(t, 'callout'), { color: fg, fontWeight: '600', textAlign: 'center' }]} numberOfLines={2}>
         {label}
       </Text>
     </Pressable>
@@ -183,7 +195,8 @@ function LightboxImage({ item, width, height, onClose }: { item: LightboxItem; w
     );
   }
   return (
-    <Pressable onPress={onClose} style={{ width, height }} accessibilityLabel={tr('ui.image.close')}>
+    // the page is the picture (named by its caption); a tap closes, like the explicit close button in the top bar
+    <Pressable onPress={onClose} style={{ width, height }} accessibilityRole="image" accessibilityLabel={item.caption || item.image.title || tr('ui.image.fullscreenNoLabel')} accessibilityHint={tr('ui.image.close')}>
       <Image source={{ uri: item.image.url }} placeholder={{ uri: item.image.thumbUrl }} style={{ width, height }} contentFit="contain" transition={200} accessibilityLabel={item.caption ?? item.image.title} />
     </Pressable>
   );
@@ -233,6 +246,7 @@ export function ImageLightbox({ items, index, onClose }: { items: LightboxItem[]
 function LightboxBody({ items, start, onClose }: { items: LightboxItem[]; start: number; onClose: () => void }) {
   useEscapeToClose(true, onClose);
   const tr = useT();
+  const t = useTheme();
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const { onAction } = useHui();
@@ -268,7 +282,7 @@ function LightboxBody({ items, start, onClose }: { items: LightboxItem[]; start:
         <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel={tr('ui.image.close')} style={lb.btn}>
           <Icon name="x" size={22} color="#fff" strokeWidth={2.2} />
         </Pressable>
-        {items.length > 1 ? <Text style={lb.counter}>{`${page + 1} / ${items.length}`}</Text> : null}
+        {items.length > 1 ? <Text style={[textStyle(t, 'callout'), lb.counter]}>{`${page + 1} / ${items.length}`}</Text> : null}
         {curGate.allowed ? (
         <View style={lb.actions}>
         {editor ? (
@@ -282,7 +296,7 @@ function LightboxBody({ items, start, onClose }: { items: LightboxItem[]; start:
             accessibilityLabel={tr('imageEdit.actionA11y')}
             style={lb.pill}
           >
-            <Text style={lb.pillText}>{tr('imageEdit.action')}</Text>
+            <Text style={[textStyle(t, 'callout'), lb.pillText]}>{tr('imageEdit.action')}</Text>
           </Pressable>
         ) : null}
         <Pressable onPress={() => void shareImageUrl(cur.image.url, tr)} hitSlop={10} accessibilityRole="button" accessibilityLabel={tr('ui.image.share')} style={lb.btn}>
@@ -295,18 +309,18 @@ function LightboxBody({ items, start, onClose }: { items: LightboxItem[]; start:
       </View>
       <View style={[lb.bottom, { paddingBottom: insets.bottom + 16 }]} pointerEvents="box-none">
         {cur.caption || cur.image.title ? (
-          <Text style={lb.caption} numberOfLines={3}>
+          <Text style={[textStyle(t, 'body'), lb.caption]} numberOfLines={3}>
             {cur.caption || cur.image.title}
           </Text>
         ) : null}
         {credit && creditUrl ? (
           <Pressable onPress={() => onAction({ type: 'open_url', url: creditUrl })} hitSlop={8} accessibilityRole="link">
-            <Text style={lb.credit} numberOfLines={1}>
+            <Text style={[textStyle(t, 'caption'), lb.credit]} numberOfLines={1}>
               {credit + '  ›'}
             </Text>
           </Pressable>
         ) : credit ? (
-          <Text style={lb.credit} numberOfLines={1}>
+          <Text style={[textStyle(t, 'caption'), lb.credit]} numberOfLines={1}>
             {credit}
           </Text>
         ) : null}
@@ -320,11 +334,11 @@ const lb = StyleSheet.create({
   btn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.14)' },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   pill: { height: 40, borderRadius: 20, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.18)' },
-  pillText: { color: '#fff', fontSize: 14.5, fontWeight: '600' },
-  counter: { color: 'rgba(255,255,255,0.85)', fontSize: 14, fontWeight: '500', paddingHorizontal: 12, fontVariant: ['tabular-nums'] },
+  pillText: { color: '#fff', fontWeight: '600' },
+  counter: { color: 'rgba(255,255,255,0.85)', fontWeight: '500', paddingHorizontal: 12, fontVariant: ['tabular-nums'] },
   bottom: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 20, gap: 6, backgroundColor: 'rgba(0,0,0,0.35)', paddingTop: 12 },
-  caption: { color: '#fff', fontSize: 15, lineHeight: 21, fontWeight: '500' },
-  credit: { color: 'rgba(255,255,255,0.7)', fontSize: 12 },
+  caption: { color: '#fff', fontWeight: '500' },
+  credit: { color: 'rgba(255,255,255,0.7)' },
 });
 
 /**
@@ -343,10 +357,13 @@ export function Thumb({ query, lang, enabled = true, size = 60, height, fit = 'c
   const loading = st.status === 'loading';
   const expired = useSlotCap(loading, `${lang ?? ''}|${query}`);
   const mode = useImageSlot(slotStatus({ hasImage: !!img && broken !== img.url, pending: st.status === 'idle' || loading, expired }));
+  // share-as-image: the lookup holds the capture; past its deadline the slot shows the calm tile instead of a shimmer
+  const captureExpired = useCaptureBusy(mode === 'skeleton');
   const w = size;
   const h = height ?? (typeof size === 'number' ? size : 120);
-  const r = typeof size === 'number' && size < 80 ? t.radii.m : t.radii.l;
+  const r = typeof size === 'number' && size < 80 ? t.radii.control : t.radii.card;
   if (mode === 'collapse') return <>{whenCollapsed ?? null}</>;
+  if (mode === 'skeleton' && captureExpired) return <FallbackTile width={w} height={fallbackHeight(h)} radius={r} label={label ?? query} />;
   if (mode === 'skeleton') return <Skeleton width={w} height={h} radius={r} />;
   if (mode === 'fallback' || !img) return <FallbackTile width={w} height={fallbackHeight(h)} radius={r} label={label ?? query} />;
   return (

@@ -33,6 +33,12 @@ class FakeCache {
     const e = this.m.get(this.key(k));
     return e ? new Response(e.body, { headers: e.headers }) : undefined;
   }
+  async keys() {
+    return [...this.m.keys()].map((url) => ({ url }));
+  }
+  async delete(k) {
+    return this.m.delete(this.key(k));
+  }
 }
 class FakeCaches {
   constructor() {
@@ -54,8 +60,10 @@ class FakeCaches {
 }
 
 /** load sw.js as web-finalize would write it; routes: path -> () => Response | throws (offline) */
-function load({ version = 'v2', precache = [ENTRY, LAZY, FONT], routes = {}, caches = new FakeCaches(), windows = 1 } = {}) {
-  const src = SW.replace(/const SHELL_VERSION = '[^']*';/, `const SHELL_VERSION = '${version}';`).replace(/const PRECACHE = \[[^\]]*\];/, `const PRECACHE = ${JSON.stringify(precache)};`);
+function load({ version = 'v2', precache = [ENTRY, LAZY, FONT], routes = {}, caches = new FakeCaches(), windows = 1, shareMaxBody = 201_048_576, shareMaxFile = 20_000_000 } = {}) {
+  const src = SW.replace(/const SHELL_VERSION = '[^']*';/, `const SHELL_VERSION = '${version}';`).replace(/const PRECACHE = \[[^\]]*\];/, `const PRECACHE = ${JSON.stringify(precache)};`)
+    .replace(/const SHARE_MAX_BODY_BYTES = [\d_]+;/, `const SHARE_MAX_BODY_BYTES = ${shareMaxBody};`)
+    .replace(/const SHARE_MAX_FILE_BYTES = [\d_]+;/, `const SHARE_MAX_FILE_BYTES = ${shareMaxFile};`);
   const listeners = {};
   const fetched = [];
   const self = {
@@ -72,7 +80,7 @@ function load({ version = 'v2', precache = [ENTRY, LAZY, FONT], routes = {}, cac
     if (!r) return res('not found', { status: 404, ct: 'text/plain' });
     return r();
   };
-  vm.runInNewContext(src, { self, caches, fetch, Response, Headers, URL, Promise, console });
+  vm.runInNewContext(src, { self, caches, fetch, Response, Headers, URL, Promise, TransformStream, console });
   const fire = async (type, extra = {}) => {
     const waits = [];
     let responded;
@@ -264,4 +272,138 @@ test('push while the app is focused: WebKit still shows (and closes) a notificat
   const chrome = await pushWithFocusedWindow('Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Mobile Safari/537.36');
   assert.equal(chrome.posted.length, 1);
   assert.equal(chrome.shown.length, 0);
+});
+
+function shareRequest(form, headers = new Headers()) {
+  const request = new Request(`${ORIGIN}/share-target`, { method: 'POST', body: form, headers });
+  return { method: request.method, url: request.url, headers: request.headers, body: request.body, mode: 'navigate', formData: () => request.formData() };
+}
+
+test('share target: a POST to /share-target is stored in its own cache and redirects to /#huiShare=<id>', async () => {
+  const caches = new FakeCaches();
+  const stale = await caches.open('hui-share-inbox');
+  const oldId = (Date.now() - 2 * 24 * 3600 * 1000).toString(36) + '-old';
+  await stale.put(`/__hui-share/${oldId}/meta`, new Response('{}'));
+  const w = load({ caches });
+  const form = new FormData();
+  form.set('title', 'Page');
+  form.set('text', 'look');
+  form.set('url', 'https://example.com/a');
+  form.append('files', new File(['%PDF-1.4'], 'doc.pdf', { type: 'application/pdf' }));
+  const request = shareRequest(form);
+  const { response } = await w.fire('fetch', { request });
+  assert.equal(response.status, 303);
+  const loc = new URL(response.headers.get('location'));
+  assert.equal(loc.origin, ORIGIN);
+  const id = /^#huiShare=(.+)$/.exec(loc.hash)?.[1];
+  assert.match(id, /^[a-z0-9]+-[a-z0-9]+$/);
+  const c = await caches.open('hui-share-inbox');
+  const meta = await (await c.match(`/__hui-share/${id}/meta`)).json();
+  assert.deepEqual(meta, { title: 'Page', text: 'look', url: 'https://example.com/a', files: [{ name: 'doc.pdf', type: 'application/pdf' }] });
+  assert.equal(await (await c.match(`/__hui-share/${id}/0`)).text(), '%PDF-1.4');
+  assert.equal(await c.match(`/__hui-share/${oldId}/meta`), undefined, 'shares older than a day are dropped');
+  assert.deepEqual(await caches.keys(), ['hui-share-inbox'], 'never written into a shell cache');
+  assert.deepEqual(w.fetched, [], 'nothing goes to the network');
+});
+
+test('share target: an unreadable POST redirects to #huiShare=failed; other POSTs and foreign origins pass through', async () => {
+  const w = load();
+  const bad = await w.fire('fetch', { request: { method: 'POST', url: `${ORIGIN}/share-target`, mode: 'navigate', formData: async () => Promise.reject(new Error('bad')) } });
+  assert.equal(new URL(bad.response.headers.get('location')).hash, '#huiShare=failed');
+  assert.equal((await w.fire('fetch', { request: { method: 'POST', url: `${ORIGIN}/v1/chat/completions` } })).response, undefined);
+  assert.equal((await w.fire('fetch', { request: { method: 'POST', url: 'https://other.test/share-target' } })).response, undefined);
+});
+
+test('share target: foreign forms and script POSTs cannot populate the inbox', async () => {
+  for (const extra of [
+    { mode: 'navigate', headers: new Headers({ origin: 'https://other.test' }) },
+    { mode: 'navigate', headers: new Headers({ 'sec-fetch-site': 'cross-site' }) },
+    { mode: 'navigate', headers: new Headers({ 'sec-fetch-site': 'same-site' }) },
+    { mode: 'cors', headers: new Headers({ origin: ORIGIN }) },
+  ]) {
+    const w = load();
+    let parsed = false;
+    const { response } = await w.fire('fetch', { request: {
+      method: 'POST', url: `${ORIGIN}/share-target`, ...extra,
+      formData: async () => { parsed = true; return new FormData(); },
+    } });
+    assert.equal(response.status, 403);
+    assert.equal(parsed, false, 'reject before parsing or storing attacker content');
+    assert.deepEqual(await w.caches.keys(), []);
+  }
+});
+
+test('share target: native launches with no origin or an opaque origin still work', async () => {
+  for (const origin of [undefined, 'null', ORIGIN]) {
+    const w = load();
+    const form = new FormData();
+    form.set('text', 'shared deliberately');
+    const headers = new Headers({ 'sec-fetch-site': 'none' });
+    if (origin) headers.set('origin', origin);
+    const { response } = await w.fire('fetch', { request: shareRequest(form, headers) });
+    assert.equal(response.status, 303);
+    assert.match(response.headers.get('location'), /#huiShare=[a-z0-9]+-[a-z0-9]+$/);
+  }
+});
+
+test('share target: rejects oversized bodies with and without Content-Length before storage', async () => {
+  for (const declared of [false, true]) {
+    const w = load({ shareMaxBody: 1024 });
+    const form = new FormData();
+    form.set('text', 'x'.repeat(2048));
+    const request = shareRequest(form);
+    if (declared) request.headers.set('content-length', '201048577');
+    const { response } = await w.fire('fetch', { request });
+    assert.equal(new URL(response.headers.get('location')).hash, '#huiShare=failed');
+    assert.deepEqual(await w.caches.keys(), [], 'oversized content never reaches CacheStorage');
+  }
+});
+
+test('share target: bounds each file and refuses excessive file counts without silently dropping files', async () => {
+  for (const files of [1, 21]) {
+    const w = load({ shareMaxFile: 4 });
+    const form = new FormData();
+    for (let i = 0; i < files; i++) form.append('files', new File([files === 1 ? '12345' : 'x'], `test-${i}.pdf`, { type: 'application/pdf' }));
+    const { response } = await w.fire('fetch', { request: shareRequest(form) });
+    assert.equal(new URL(response.headers.get('location')).hash, '#huiShare=failed');
+    assert.deepEqual(await w.caches.keys(), []);
+  }
+});
+
+test('share target: a failed cache write rolls back every file of that share', async () => {
+  const caches = new FakeCaches();
+  const cache = await caches.open('hui-share-inbox');
+  const existing = `/__hui-share/${Date.now().toString(36)}-existing/meta`;
+  await cache.put(existing, Response.json({ text: 'keep existing share' }));
+  const put = cache.put.bind(cache);
+  cache.put = async (k, r) => {
+    if (k.endsWith('/1')) throw new Error('quota exceeded');
+    return put(k, r);
+  };
+  const w = load({ caches });
+  const form = new FormData();
+  for (let i = 0; i < 3; i++) form.append('files', new File(['private test content'], `test-${i}.pdf`, { type: 'application/pdf' }));
+  const { response } = await w.fire('fetch', { request: shareRequest(form) });
+  assert.equal(new URL(response.headers.get('location')).hash, '#huiShare=failed');
+  assert.deepEqual((await cache.keys()).map((r) => new URL(r.url).pathname), [existing]);
+});
+
+test('share target: stale unconsumed files are pruned on normal app visits without another share', async () => {
+  for (const action of ['activate', 'navigate']) {
+    const caches = new FakeCaches();
+    const cache = await caches.open('hui-share-inbox');
+    const old = `/__hui-share/${(Date.now() - 2 * 24 * 3600 * 1000).toString(36)}-old/`;
+    const fresh = `/__hui-share/${Date.now().toString(36)}-fresh/`;
+    for (const base of [old, fresh]) {
+      await cache.put(base + 'meta', Response.json({ text: 'test share' }));
+      await cache.put(base + '0', new Response('test file'));
+    }
+    const w = load({ caches, routes: okRoutes() });
+    if (action === 'activate') await w.fire('activate');
+    else await w.nav('/');
+    assert.equal(await cache.match(old + 'meta'), undefined);
+    assert.equal(await cache.match(old + '0'), undefined);
+    assert.ok(await cache.match(fresh + 'meta'));
+    assert.ok(await cache.match(fresh + '0'));
+  }
 });

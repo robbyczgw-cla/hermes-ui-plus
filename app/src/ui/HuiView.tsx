@@ -24,12 +24,13 @@ import { registryD1 } from './components/modules/registryD1';
 import { registryD2 } from './components/modules/registryD2';
 import { registryD3 } from './components/modules/registryD3';
 import { registryE1 } from './components/modules/registryE1';
+import { registryE2 } from './components/modules/registryE2';
 import { registryPolish } from './components/registryPolish';
 import { ChildRendererContext, type ChildRenderer } from './components/modules/a/shared';
 
 /** Module renderers (registries have disjoint keys; merge order: polish, d3, d2, d1, c3 … a). Built-in types above take precedence. */
 /** Module renderers (registries have disjoint keys; a duplicate key is won by the LAST spread, i.e. a < b < c < d < polish is NOT the case – the order below is polish, d3..d1, c3..a). Built-in types above take precedence. */
-const MODULES: Record<string, ComponentType<{ node: never }>> = { ...registryPolish, ...registryE1, ...registryD3, ...registryD2, ...registryD1, ...registryC3, ...registryC2, ...registryC1, ...registryB, ...registryA };
+const MODULES: Record<string, ComponentType<{ node: never }>> = { ...registryPolish, ...registryE2, ...registryE1, ...registryD3, ...registryD2, ...registryD1, ...registryC3, ...registryC2, ...registryC1, ...registryB, ...registryA };
 const hasModule = (type: string) => Object.prototype.hasOwnProperty.call(MODULES, type);
 const renderChild: ChildRenderer = (node, { key, last }) => <Child key={key} node={node} last={last} />;
 

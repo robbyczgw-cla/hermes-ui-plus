@@ -66,7 +66,7 @@ export function C3Skeleton({ rows = 3, rowHeight = 44 }: { rows?: number; rowHei
       <Skeleton width="55%" height={16} />
       <View style={{ gap: t.spacing.s }}>
         {Array.from({ length: rows }, (_, i) => (
-          <Skeleton key={i} height={rowHeight} radius={t.radii.m} />
+          <Skeleton key={i} height={rowHeight} radius={t.radii.control} />
         ))}
       </View>
     </Surface>

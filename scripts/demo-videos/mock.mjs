@@ -31,6 +31,22 @@ const extra = {
       { text: '\nTip: Tap ✨ Edit to transform the image.' },
     ],
   },
+  // compare-shots.mjs: a model that wrote generic compare columns for products (no imageQuery) – the app's safety net
+  // still shows a product thumbnail per column (fictional headphones; "Lumo" has no photo → neutral glyph)
+  compareNoImages: {
+    format: 'compare',
+    steps: () => [
+      { wait: 300 },
+      { text: 'Short version: the **Aurel QX7** has the best noise canceling, the **Nordwell ANC 5** is the most comfortable, and the **Lumo L5** is the budget pick. Sample data.\n\n' },
+      { text: hui({ type: 'compare', basis: 'illustrative', columns: [
+        { title: 'Aurel QX7', badge: 'Best ANC', highlight: true, items: ['ANC: adaptive, 8 mics', 'Battery: 32 h', 'Weight: 252 g', 'about €329'], pros: ['Excellent ANC'], cons: ['Highest price'] },
+        { title: 'Nordwell ANC 5', badge: 'Comfort', items: ['ANC: hybrid', 'Battery: 30 h', 'Weight: 238 g', 'about €279'], pros: ['Very light'], cons: ['No LDAC'] },
+        { title: 'Kiro K3', items: ['ANC: hybrid', 'Battery: 45 h', 'Bluetooth 5.3', 'about €199'], pros: ['Long battery'], cons: ['Bulky case'] },
+        { title: 'Halden H2', items: ['ANC: basic', 'Battery: 60 h', 'USB-C audio', 'about €149'], pros: ['Battery king'], cons: ['Average ANC'] },
+        { title: 'Lumo L5', items: ['ANC: basic', 'Battery: 40 h', 'Weight: 210 g', 'about €89'], pros: ['Cheap'], cons: ['Plastic build'] },
+      ] }) },
+    ],
+  },
   editResult: {
     format: 'image',
     steps: () => [
@@ -57,6 +73,7 @@ function pick(text, hasImage, bot) {
   const t = text.toLowerCase();
   if (hasImage || /^please edit this image/.test(t)) return { name: 'editResult', scenario: extra.editResult };
   if (/harbor photo/.test(t)) return { name: 'editSource', scenario: extra.editSource };
+  if (/aurel qx7 vs/.test(t)) return { name: 'compareNoImages', scenario: extra.compareNoImages };
   const botScenario = bot && BOTS.find((b) => b.name === bot)?.scenario;
   if (botScenario) return { name: botScenario, scenario: SCENARIOS[botScenario] };
   return { name: 'hello', scenario: SCENARIOS.hello };

@@ -49,6 +49,10 @@ export type { HTextProps, PressableScaleProps } from './primitives/basics';
 export { Skeleton, SkeletonLines } from './primitives/Skeleton';
 export type { SkeletonProps } from './primitives/Skeleton';
 export { Icon } from './primitives/Icon';
+export { Toggle } from './primitives/Toggle';
+export { Button } from './primitives/Button';
+export type { ButtonProps, ButtonTone, ButtonVariant } from './primitives/Button';
+export { Text, TextInput } from './primitives/Text';
 export { SheetModal, SheetLayer, SheetGrabber, useSheetDialog } from './primitives/Sheet';
 export type { SheetModalProps, SheetLayerProps } from './primitives/Sheet';
 export { useIsWide, useLayoutClass, useKeyboardShortcuts } from './lib/useLayout';
@@ -61,6 +65,10 @@ export type { InlineSpan } from './lib/inlineMarkdown';
 export { formatNumber, formatCompact } from './lib/format';
 export { useCopiedFlash } from './lib/useCopiedFlash';
 export { COPIED_MS } from './lib/copiedFlash';
+// share-as-image: capture mode (static final state, busy tokens for images still loading)
+export { CaptureProvider, useCaptureBusy, useCaptureMode } from './lib/capture';
+export { createCaptureTracker } from './lib/captureTracker';
+export type { CaptureOutcome, CaptureTracker } from './lib/captureTracker';
 
 // waiting delight: loader library, WaitingIndicator, pure waiting logic (ui/loaders)
 export * from './loaders';

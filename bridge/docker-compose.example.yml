@@ -1,5 +1,6 @@
-# Copy to docker-compose.yml and an .env next to it (see README.md). Build locally: `npm run bundle-skill` (copies the
-# hermes-ui skill + bootstrap message into ./skill, the image needs them), then `docker compose build`.
+# Copy to docker-compose.yml and an .env next to it (see README.md). There is no prebuilt image in 0.1: build it from a
+# checkout. `npm run bundle-skill` (copies the hermes-ui skill + bootstrap message into ./skill, the image needs them),
+# then `docker compose up -d --build`.
 services:
   bridge:
     build: .
@@ -15,8 +16,14 @@ services:
       # The URL your phone uses to reach the bridge (https://... via your reverse proxy / tunnel).
       BRIDGE_PUBLIC_URL: ${BRIDGE_PUBLIC_URL:-}
       BRIDGE_NAME: ${BRIDGE_NAME:-Hermes}
-      # Set to 1 to pair from another machine: the one-time code appears in `docker compose logs bridge`.
+      # Set to 1 to pair from another machine: `docker compose logs bridge` shows a path /bridge/pair?code=XXXX-XXXX;
+      # open it on the bridge URL within 10 minutes. Or create a pair link any time:
+      #   docker compose exec bridge node bin/hermes-ui-bridge.mjs devices add "Phone"
       BRIDGE_PAIRING: ${BRIDGE_PAIRING:-}
+      # Optional web app (PWA): unpack hermes-ui-plus-web-<version>.tar.gz into ./web next to this file
+      #   mkdir -p web && tar -xzf hermes-ui-plus-web-<version>.tar.gz -C web --strip-components=1
+      # then uncomment this line and the ./web volume below (docs/WEB-APP.md).
+      # BRIDGE_WEB_DIR: /web
       # Optional features (leave empty to keep them off)
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
@@ -31,6 +38,7 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - bridge-data:/var/lib/hermes-ui-bridge
+      # - ./web:/web:ro   # web app bundle for BRIDGE_WEB_DIR above (read-only)
     read_only: true
     tmpfs:
       - /tmp

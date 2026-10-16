@@ -7,12 +7,13 @@
  * Pure mapping lives in toolTimeline.ts.
  */
 import { memo, useEffect, useMemo, useState } from 'react';
-import { Animated, LayoutAnimation, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Animated, LayoutAnimation, Linking, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '../ui/primitives/Text';
 import type { ChatMessage } from '../hermes';
 import type { ProgressNote } from '../hermes/progressNotes';
 import { useI18n } from '../i18n';
 import { formatNumber } from '../i18n/core';
-import { SheetGrabber, SheetModal, useCopiedFlash, useTheme } from '../ui';
+import { Button, SheetGrabber, SheetModal, useCopiedFlash, useTheme } from '../ui';
 import { useCopy } from './actions';
 import { Icon } from './icons';
 import { safeHref } from './markdown';
@@ -30,6 +31,7 @@ import {
   type DetailSection,
   type TimelineRow,
 } from './toolTimeline';
+import { a11yState } from '../ui/lib/a11yState';
 
 const NATIVE = Platform.OS !== 'web';
 
@@ -91,21 +93,21 @@ export const ToolTimelinePanel = memo(function ToolTimelinePanel({
   };
 
   return (
-    <View style={[styles.panel, { borderColor: t.colors.border, borderRadius: t.radii.m, backgroundColor: t.dark ? 'rgba(255,255,255,0.025)' : 'rgba(0,0,0,0.015)' }]}>
+    <View style={[styles.panel, { borderColor: t.colors.border, borderRadius: t.radii.control, backgroundColor: t.dark ? 'rgba(255,255,255,0.025)' : 'rgba(0,0,0,0.015)' }]}>
       <Pressable
         onPress={toggle}
         accessibilityRole="button"
-        accessibilityState={{ expanded: open }}
+        {...a11yState({ expanded: open })}
         accessibilityLabel={tr('chat.toolTimeline.panel.a11y', { header })}
         style={({ pressed }) => [styles.head, pressed && { opacity: 0.6 }]}
         hitSlop={4}
       >
         <Icon name="tool" size={15} color={t.colors.muted} />
         <View style={styles.headText}>
-          <Text style={[styles.headTitle, { color: t.colors.text }]} numberOfLines={1}>
+          <Text style={[t.typography.callout, styles.headTitle, { color: t.colors.text }]} numberOfLines={1}>
             {tr('chat.toolTimeline.panel.title')}
           </Text>
-          <Text style={[styles.headMeta, { color: errors ? t.colors.danger : t.colors.muted }]} numberOfLines={1}>
+          <Text style={[t.typography.caption, styles.headMeta, { color: errors ? t.colors.danger : t.colors.muted }]} numberOfLines={1}>
             {header}
             {timelineDone(message, rows) ? ' ✓' : ''}
           </Text>
@@ -145,33 +147,33 @@ const Row = memo(
       >
         <View style={styles.rail}>
           <View style={[styles.iconDot, { backgroundColor: row.state === 'error' ? t.colors.dangerSoft : row.state === 'waiting' ? t.colors.warningSoft : t.colors.surfaceAlt }]}>
-            {row.iconName ? <Icon name={row.iconName} size={14} color={row.state === 'error' ? t.colors.danger : t.colors.muted} /> : <Text style={styles.icon}>{row.icon}</Text>}
+            {row.iconName ? <Icon name={row.iconName} size={14} color={row.state === 'error' ? t.colors.danger : t.colors.muted} /> : <Text style={t.typography.caption}>{row.icon}</Text>}
           </View>
           {!last ? <View style={[styles.line, { backgroundColor: t.colors.border }]} /> : null}
         </View>
         <View style={styles.body}>
           <View style={styles.titleLine}>
-            <Text style={[styles.title, { color }]} numberOfLines={1}>
+            <Text style={[t.typography.callout, styles.title, { color }]} numberOfLines={1}>
               {row.title}
             </Text>
             {running ? <Pulse color={row.state === 'waiting' ? t.colors.warning : t.colors.accent} /> : null}
             {row.state === 'error' ? <Icon name="alert" size={13} color={t.colors.danger} /> : null}
             <View style={{ flex: 1 }} />
             {row.durationMs !== undefined ? (
-              <Text style={[styles.dur, { color: running ? t.colors.text : t.colors.muted }]}>{formatElapsed(row.durationMs, locale)}</Text>
+              <Text style={[t.typography.caption, styles.dur, { color: running ? t.colors.text : t.colors.muted }]}>{formatElapsed(row.durationMs, locale)}</Text>
             ) : null}
           </View>
           {row.summary ? (
-            <Text style={[styles.summary, { color: t.colors.muted }]} numberOfLines={2}>
+            <Text style={[t.typography.caption, styles.summary, { color: t.colors.muted }]} numberOfLines={2}>
               {row.summary}
             </Text>
           ) : null}
           {row.sub ? (
-            <Text style={[styles.sub, { color: t.colors.subtle }]} numberOfLines={1}>
+            <Text style={[t.typography.caption, styles.sub, { color: t.colors.subtle }]} numberOfLines={1}>
               {row.sub}
             </Text>
           ) : null}
-          <Text style={[styles.offset, { color: t.colors.subtle }]}>+{formatElapsed(row.offsetMs, locale)}</Text>
+          <Text style={[t.typography.micro, styles.offset, { color: t.colors.subtle }]}>+{formatElapsed(row.offsetMs, locale)}</Text>
         </View>
       </Pressable>
     );
@@ -227,12 +229,12 @@ export const ProgressNotesDisclosure = memo(function ProgressNotesDisclosure({ n
       <Pressable
         onPress={toggle}
         accessibilityRole="button"
-        accessibilityState={{ expanded: open }}
+        {...a11yState({ expanded: open })}
         accessibilityHint={tr('chat.toolTimeline.notesA11y', { count: notes.length })}
         hitSlop={6}
         style={({ pressed }) => [styles.notesHead, pressed && { opacity: 0.6 }]}
       >
-        <Text style={[styles.notesTitle, { color: t.colors.muted }]}>
+        <Text style={[t.typography.caption, styles.notesTitle, { color: t.colors.muted }]}>
           {open ? tr('chat.toolTimeline.notesHide') : tr('chat.toolTimeline.notesAll', { count: notes.length })}
         </Text>
         <Icon name={open ? 'chevronDown' : 'chevronRight'} size={13} color={t.colors.muted} />
@@ -240,7 +242,7 @@ export const ProgressNotesDisclosure = memo(function ProgressNotesDisclosure({ n
       {open ? (
         <View style={[styles.notesBody, { borderLeftColor: t.colors.borderStrong }]}>
           {notes.map((n) => (
-            <Text key={n.toolId} style={[styles.noteText, { color: t.colors.muted }]} selectable>
+            <Text key={n.toolId} style={[t.typography.callout, { color: t.colors.muted }]} selectable>
               {n.text}
             </Text>
           ))}
@@ -260,7 +262,7 @@ export function TurnFooter({ message, onOpen, tokens = true }: { message: ChatMe
   const line = parts.join(' · ');
   if (!onOpen) {
     return (
-      <Text style={[styles.footer, styles.footerText, { color: t.colors.subtle }]} numberOfLines={2}>
+      <Text style={[t.typography.caption, styles.footer, styles.footerText, { color: t.colors.subtle }]} numberOfLines={2}>
         {line}
       </Text>
     );
@@ -273,7 +275,7 @@ export function TurnFooter({ message, onOpen, tokens = true }: { message: ChatMe
       hitSlop={6}
       style={({ pressed }) => [styles.footer, pressed && { opacity: 0.6 }]}
     >
-      <Text style={[styles.footerText, { color: t.colors.subtle }]} numberOfLines={2}>
+      <Text style={[t.typography.caption, styles.footerText, { color: t.colors.subtle }]} numberOfLines={2}>
         {line}
       </Text>
     </Pressable>
@@ -305,8 +307,8 @@ export function ToolDetailSheet({ message, rowKey, onClose }: { message: ChatMes
         <>
           <SheetGrabber style={styles.grabber} />
           <View style={styles.sheetHead}>
-            {detail.iconName ? <Icon name={detail.iconName} size={20} color={t.colors.muted} /> : <Text style={styles.sheetIcon}>{detail.icon}</Text>}
-            <Text style={[styles.sheetTitle, { color: t.colors.text }]} numberOfLines={2}>
+            {detail.iconName ? <Icon name={detail.iconName} size={20} color={t.colors.muted} /> : <Text style={t.typography.headline}>{detail.icon}</Text>}
+            <Text style={[t.typography.headline, styles.sheetTitle, { color: t.colors.text }]} numberOfLines={2}>
               {detail.title}
             </Text>
             <Pressable
@@ -321,18 +323,18 @@ export function ToolDetailSheet({ message, rowKey, onClose }: { message: ChatMes
           </View>
           <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetContent}>
             {detail.meta.length ? (
-              <View style={[styles.metaBox, { backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.m }]}>
+              <View style={[styles.metaBox, { backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.control }]}>
                 {detail.meta.map((m, i) => (
                   <View key={`${m.label}-${i}`} style={styles.metaRow}>
-                    <Text style={[styles.metaLabel, { color: t.colors.muted }]}>{m.label}</Text>
-                    <Text style={[styles.metaValue, { color: t.colors.text, fontFamily: t.fonts.mono }]} selectable numberOfLines={3}>
+                    <Text style={[t.typography.caption, styles.metaLabel, { color: t.colors.muted }]}>{m.label}</Text>
+                    <Text style={[t.typography.caption, styles.metaValue, { color: t.colors.text, fontFamily: t.fonts.mono }]} selectable numberOfLines={3}>
                       {m.value}
                     </Text>
                   </View>
                 ))}
               </View>
             ) : null}
-            {detail.note ? <Text style={[styles.note, { color: t.colors.muted }]}>{detail.note}</Text> : null}
+            {detail.note ? <Text style={[t.typography.caption, styles.note, { color: t.colors.muted }]}>{detail.note}</Text> : null}
             {detail.links?.length ? <Links links={detail.links} /> : null}
             {detail.sections.map((s, i) => (
               <Section key={`${s.title}-${i}`} section={s} />
@@ -350,8 +352,8 @@ function Links({ links }: { links: NonNullable<ReturnType<typeof rowDetail>>['li
   if (!links) return null;
   return (
     <View style={styles.section}>
-      <Text style={[styles.sectionTitle, { color: t.colors.muted }]}>{tr('chat.detail.sources', { count: links.length })}</Text>
-      <View style={[styles.linkList, { borderColor: t.colors.border, borderRadius: t.radii.m }]}>
+      <Text style={[t.typography.caption, styles.sectionTitle, { color: t.colors.muted }]}>{tr('chat.detail.sources', { count: links.length })}</Text>
+      <View style={[styles.linkList, { borderColor: t.colors.border, borderRadius: t.radii.control }]}>
         {links.map((l, i) => {
           const href = safeHref(l.url);
           return (
@@ -368,10 +370,10 @@ function Links({ links }: { links: NonNullable<ReturnType<typeof rowDetail>>['li
               ]}
             >
               <View style={{ flex: 1 }}>
-                <Text style={[styles.linkTitle, { color: t.colors.accent }]} numberOfLines={2}>
+                <Text style={[t.typography.callout, styles.linkTitle, { color: t.colors.accentText }]} numberOfLines={2}>
                   {l.title}
                 </Text>
-                <Text style={[styles.linkDomain, { color: t.colors.muted }]} numberOfLines={1}>
+                <Text style={[t.typography.caption, styles.linkDomain, { color: t.colors.muted }]} numberOfLines={1}>
                   {linkDomain(l.url)}
                   {l.age ? ` · ${l.age}` : ''}
                 </Text>
@@ -393,27 +395,25 @@ function Section({ section }: { section: DetailSection }) {
   const [copied, flashCopied] = useCopiedFlash();
   const shown = truncateText(section.body, full ? MAX_CHARS : PREVIEW_CHARS);
   const textStyle = section.mono
-    ? [styles.code, { color: t.colors.text, fontFamily: t.fonts.mono }]
-    : [styles.prose, { color: t.colors.text }];
+    ? [t.typography.mono, { color: t.colors.text, fontFamily: t.fonts.mono }]
+    : [t.typography.callout, { color: t.colors.text }];
   return (
     <View style={styles.section}>
       <View style={styles.sectionHead}>
-        <Text style={[styles.sectionTitle, { color: t.colors.muted, flex: 1 }]}>{section.title}</Text>
-        <Pressable
+        <Text style={[t.typography.caption, styles.sectionTitle, { color: t.colors.muted, flex: 1 }]}>{section.title}</Text>
+        <Button
+          label={copied ? tr('actions.copied') : tr('actions.copy')}
+          icon={copied ? 'check' : 'copy'}
+          variant="tertiary"
+          size="small"
+          accessibilityLabel={tr('chat.detail.sectionCopy', { title: section.title })}
           onPress={() => {
             copy(section.body, tr('chat.detail.sectionCopied', { title: section.title }));
             flashCopied();
           }}
-          hitSlop={6}
-          accessibilityRole="button"
-          accessibilityLabel={tr('chat.detail.sectionCopy', { title: section.title })}
-          style={({ pressed }) => [styles.copyBtn, { borderColor: t.colors.border }, pressed && { backgroundColor: t.colors.surfacePressed }]}
-        >
-          <Icon name={copied ? 'check' : 'copy'} size={13} color={copied ? t.colors.success : t.colors.muted} />
-          <Text style={[styles.copyText, { color: copied ? t.colors.success : t.colors.muted }]}>{copied ? tr('actions.copied') : tr('actions.copy')}</Text>
-        </Pressable>
+        />
       </View>
-      <View style={[styles.codeBox, { backgroundColor: t.colors.codeBg, borderColor: t.colors.border, borderRadius: t.radii.s }]}>
+      <View style={[styles.codeBox, { backgroundColor: t.colors.codeBg, borderColor: t.colors.border, borderRadius: t.radii.control }]}>
         {section.mono ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={Platform.OS === 'web'} contentContainerStyle={styles.codeScroll}>
             <Text style={textStyle} selectable>
@@ -427,13 +427,16 @@ function Section({ section }: { section: DetailSection }) {
         )}
       </View>
       {shown.truncated ? (
-        <Pressable onPress={() => setFull(true)} hitSlop={6} accessibilityRole="button" style={({ pressed }) => [styles.more, pressed && { opacity: 0.6 }]}>
-          <Text style={[styles.moreText, { color: t.colors.accent }]}>
-            {full
-              ? tr('chat.detail.truncatedTo', { max: formatNumber(locale, MAX_CHARS) })
-              : tr('chat.detail.showMore', { total: formatNumber(locale, shown.total) })}
-          </Text>
-        </Pressable>
+        <Button
+          label={full
+            ? tr('chat.detail.truncatedTo', { max: formatNumber(locale, MAX_CHARS) })
+            : tr('chat.detail.showMore', { total: formatNumber(locale, shown.total) })}
+          variant="tertiary"
+          size="small"
+          numberOfLines={2}
+          onPress={() => setFull(true)}
+          style={styles.more}
+        />
       ) : null}
     </View>
   );
@@ -443,56 +446,48 @@ const styles = StyleSheet.create({
   panel: { borderWidth: StyleSheet.hairlineWidth, marginBottom: 10, overflow: 'hidden' },
   head: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 10, paddingVertical: 8, minHeight: 38 },
   headText: { flex: 1, minWidth: 0 },
-  headTitle: { fontSize: 13.5, fontWeight: '600' },
-  headMeta: { fontSize: 12, marginTop: 1 },
+  headTitle: { fontWeight: '600' },
+  headMeta: { marginTop: 1 },
   rows: { paddingBottom: 4 },
   row: { flexDirection: 'row', paddingHorizontal: 8, paddingTop: 4, gap: 8 },
   rail: { width: 26, alignItems: 'center' },
   iconDot: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
-  icon: { fontSize: 13 },
   line: { width: StyleSheet.hairlineWidth * 2, flex: 1, marginTop: 2, minHeight: 6 },
   body: { flex: 1, minWidth: 0, paddingBottom: 8, paddingTop: 3 },
   titleLine: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  title: { fontSize: 13.5, fontWeight: '600', flexShrink: 1 },
-  dur: { fontSize: 12, fontVariant: ['tabular-nums'] },
-  summary: { fontSize: 13, lineHeight: 18, marginTop: 1 },
-  sub: { fontSize: 12, lineHeight: 16, marginTop: 1 },
-  offset: { fontSize: 10.5, marginTop: 2, fontVariant: ['tabular-nums'] },
+  title: { fontWeight: '600', flexShrink: 1 },
+  dur: { fontVariant: ['tabular-nums'] },
+  summary: { marginTop: 1 },
+  sub: { marginTop: 1 },
+  offset: { marginTop: 2, fontVariant: ['tabular-nums'] },
   pulse: { width: 7, height: 7, borderRadius: 4 },
   notesInPanel: { paddingHorizontal: 12, paddingBottom: 6 },
   notes: { marginBottom: 8 },
   notesHead: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', minHeight: 28 },
-  notesTitle: { fontSize: 13, fontWeight: '500' },
+  notesTitle: { fontWeight: '500' },
   notesBody: { borderLeftWidth: 2, paddingLeft: 10, marginTop: 4, gap: 6 },
-  noteText: { fontSize: 13.5, lineHeight: 19 },
   footer: { alignSelf: 'flex-start', marginTop: 8, paddingVertical: 2 },
-  footerText: { fontSize: 12, lineHeight: 16, fontVariant: ['tabular-nums'] },
+  footerText: { fontVariant: ['tabular-nums'] },
   sheet: { paddingHorizontal: 0 },
   grabber: { marginBottom: 8 },
   sheetHead: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingBottom: 8 },
-  sheetIcon: { fontSize: 18 },
-  sheetTitle: { flex: 1, fontSize: 16.5, fontWeight: '600' },
+  sheetTitle: { flex: 1, fontWeight: '600' },
   closeBtn: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   sheetScroll: { flexGrow: 0 },
   sheetContent: { paddingHorizontal: 16, paddingBottom: 12, gap: 12 },
   metaBox: { paddingHorizontal: 12, paddingVertical: 8, gap: 5 },
   metaRow: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
-  metaLabel: { width: 112, fontSize: 12.5, lineHeight: 18 },
-  metaValue: { flex: 1, fontSize: 12.5, lineHeight: 18 },
-  note: { fontSize: 12.5, lineHeight: 18, fontStyle: 'italic' },
+  metaLabel: { width: 112 },
+  metaValue: { flex: 1 },
+  note: { fontStyle: 'italic' },
   section: { gap: 6 },
   sectionHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  sectionTitle: { fontSize: 12, fontWeight: '600', letterSpacing: 0.3, textTransform: 'uppercase' },
-  copyBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: StyleSheet.hairlineWidth, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4 },
-  copyText: { fontSize: 12, fontWeight: '500' },
+  sectionTitle: { fontWeight: '600' },
   codeBox: { borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
   codeScroll: { padding: 10 },
-  code: { fontSize: 12, lineHeight: 17 },
-  prose: { fontSize: 13.5, lineHeight: 20 },
   more: { alignSelf: 'flex-start', paddingVertical: 2 },
-  moreText: { fontSize: 13, fontWeight: '500' },
   linkList: { borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
   link: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 9 },
-  linkTitle: { fontSize: 13.5, lineHeight: 18, fontWeight: '500' },
-  linkDomain: { fontSize: 12, marginTop: 1 },
+  linkTitle: { fontWeight: '500' },
+  linkDomain: { marginTop: 1 },
 });

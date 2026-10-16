@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '../ui/primitives/Text';
 import type { ChatMessage } from '../hermes';
 import type { Segment } from '../protocol/types';
 import { useI18n, useT } from '../i18n';
 import { PressableScale, useTheme } from '../ui';
 import { usePreferences } from '../settings/PreferencesProvider';
-import { scaledText } from '../settings/preferences';
 import { Icon } from './icons';
 import type { ActionHandler } from './MessageItem';
 import { answerShape, reformatLabel, reformatMessage, transformChips, translateTargets, type ReformatKind } from './reformat';
@@ -45,7 +45,6 @@ export function TransformBar({
     shape,
   });
   if (!chips.base.length && !chips.translate) return null;
-  const size = scaledText(13, 18, t.fontScale);
   const send = (kind: ReformatKind) => {
     if (onAction({ type: 'send', text: reformatMessage(kind, tr) }, undefined, { composed: true }) !== false) setLangsOpen(false);
   };
@@ -60,7 +59,7 @@ export function TransformBar({
       style={[styles.chip, { borderRadius: t.radii.pill, backgroundColor: t.colors.surfaceAlt }]}
       pressedStyle={{ backgroundColor: t.colors.surfacePressed }}
     >
-      <Text style={[styles.label, size, { color: t.colors.muted }]} numberOfLines={1}>
+      <Text style={[t.typography.caption, styles.label, { color: t.colors.muted }]} numberOfLines={1}>
         {label}
       </Text>
       {extra?.icon ? <Icon name={extra.icon} size={13} color={t.colors.subtle} /> : null}
@@ -80,7 +79,7 @@ export function TransformBar({
       </ScrollView>
       {langsOpen ? (
         <View style={styles.langs} accessibilityLabel={tr('chat.transform.menuTitle')}>
-          <Text style={[styles.menuTitle, size, { color: t.colors.subtle }]}>{tr('chat.transform.menuTitle')}</Text>
+          <Text style={[t.typography.caption, styles.menuTitle, { color: t.colors.subtle }]}>{tr('chat.transform.menuTitle')}</Text>
           {translateTargets(lang).map((l) => chip(`lang-${l}`, tr(`chat.transform.lang.${l}`), () => send(`translate:${l}`)))}
         </View>
       ) : null}
@@ -94,7 +93,7 @@ export function ReformattedMarker() {
   const tr = useT();
   return (
     <View style={styles.marker} accessible accessibilityLabel={tr('chat.transform.markerA11y')}>
-      <Text style={[styles.markerText, scaledText(12, 16, t.fontScale), { color: t.colors.subtle }]}>{tr('chat.transform.marker')}</Text>
+      <Text style={[t.typography.caption, { color: t.colors.subtle }]}>{tr('chat.transform.marker')}</Text>
       <Icon name="arrowDown" size={12} color={t.colors.subtle} />
     </View>
   );
@@ -104,9 +103,8 @@ const styles = StyleSheet.create({
   wrap: { marginTop: 8, gap: 6 },
   row: { gap: 6, paddingRight: 8 },
   chip: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 32, paddingHorizontal: 12, paddingVertical: 6 },
-  label: { fontSize: 13, fontWeight: '500' },
+  label: { fontWeight: '500' },
   langs: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6 },
-  menuTitle: { fontSize: 13, marginRight: 2 },
+  menuTitle: { marginRight: 2 },
   marker: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 4, alignSelf: 'flex-start' },
-  markerText: { fontSize: 12 },
 });

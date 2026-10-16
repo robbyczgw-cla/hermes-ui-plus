@@ -12,7 +12,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Animated, AppRegistry, AppState, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, AppRegistry, AppState, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Text } from '../ui/primitives/Text';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useConversations } from '../conversations';
 import { useT } from '../i18n';
@@ -20,8 +21,8 @@ import { notificationsModule } from '../push/device';
 import { allPushSettings } from '../push/settingsStore';
 import { useConnection } from '../settings/ConnectionProvider';
 import { usePreferences } from '../settings/PreferencesProvider';
-import { useTheme } from '../ui';
-import { createKeepAliveController } from './keepAlive';
+import { Button, useTheme } from '../ui';
+import { createKeepAliveController, createTaskSlot } from './keepAlive';
 import { KEEPALIVE_TASK, keepAliveModule } from './keepAliveNative';
 import { desktopNotify, desktopWindowFocused, isDesktopApp } from '../desktop/bridge';
 import { notificationBody, type NoticeEvent } from './notice';
@@ -33,10 +34,10 @@ const ASKED_KEY = 'hermes.answerNotify.asked.v1';
 const ANSWER_CHANNEL = 'hui-answers';
 const BANNER_MS = 7000;
 
-// The service's headless task: keeps JS timers running while the app is in the background. Its body is set once
-// the controller exists; until then (or without a running turn) it ends at once.
-let taskBody: () => Promise<void> = () => Promise.resolve();
-if (Platform.OS === 'android') AppRegistry.registerHeadlessTask(KEEPALIVE_TASK, () => () => taskBody());
+// The service's headless task: keeps JS timers running while the app is in the background. Its body is claimed by
+// the mounted host's controller; until then (or without a running turn) it ends at once.
+const taskSlot = createTaskSlot();
+if (Platform.OS === 'android') AppRegistry.registerHeadlessTask(KEEPALIVE_TASK, () => () => taskSlot.run());
 
 type Banner = { ev: NoticeEvent; name: string; n: number };
 
@@ -73,9 +74,10 @@ export function BackgroundTurnHost() {
       },
       log: (m) => console.warn('[keepalive]', m),
     });
-    taskBody = () => ctl.task();
+    // a theme change relaunches the activity: the new host mounts before this one unmounts (see createTaskSlot)
+    const release = taskSlot.claim(() => ctl.task());
     return () => {
-      taskBody = () => Promise.resolve();
+      release();
       ctl.dispose();
     };
   }, []);
@@ -214,20 +216,18 @@ function AnswerBanner({ name, onOpen, onClose }: { name: string; onOpen(): void;
       pointerEvents="box-none"
     >
       <View
-        style={[styles.banner, { backgroundColor: t.dark ? t.colors.surfaceAlt : t.colors.bg, borderColor: t.colors.borderStrong, borderRadius: t.radii.l }, t.shadows.md]}
+        style={[styles.banner, { backgroundColor: t.dark ? t.colors.surfaceAlt : t.colors.bg, borderColor: t.colors.borderStrong, borderRadius: t.radii.card }, t.shadows.md]}
         accessibilityLiveRegion="polite"
         accessibilityRole="alert"
       >
         <Pressable onPress={onOpen} style={styles.textWrap} accessibilityRole="button" accessibilityLabel={`${tr('chat.background.ready.banner', { name })}. ${tr('chat.background.ready.open')}`}>
-          <Text style={[styles.text, { color: t.colors.text }]} numberOfLines={2}>
+          <Text style={[t.typography.callout, styles.text, { color: t.colors.text }]} numberOfLines={2}>
             {tr('chat.background.ready.banner', { name })}
           </Text>
         </Pressable>
-        <Pressable onPress={onOpen} hitSlop={8} accessibilityRole="button" style={({ pressed }) => pressed && { opacity: 0.6 }}>
-          <Text style={[styles.action, { color: t.colors.accent }]}>{tr('chat.background.ready.open')}</Text>
-        </Pressable>
+        <Button label={tr('chat.background.ready.open')} size="small" onPress={onOpen} />
         <Pressable onPress={onClose} hitSlop={8} accessibilityRole="button" accessibilityLabel={tr('chat.background.ready.dismiss')} style={({ pressed }) => pressed && { opacity: 0.6 }}>
-          <Text style={[styles.close, { color: t.colors.muted }]}>✕</Text>
+          <Text style={[t.typography.body, styles.close, { color: t.colors.muted }]}>✕</Text>
         </Pressable>
       </View>
     </Animated.View>
@@ -282,7 +282,6 @@ const styles = StyleSheet.create({
   wrap: { position: 'absolute', left: 12, right: 12, alignItems: 'center', zIndex: 1000, elevation: 12 },
   banner: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 11, paddingHorizontal: 14, borderWidth: StyleSheet.hairlineWidth, maxWidth: 560, width: '100%' },
   textWrap: { flex: 1 },
-  text: { fontSize: 14.5, fontWeight: '500' },
-  action: { fontSize: 14.5, fontWeight: '700' },
-  close: { fontSize: 15, paddingHorizontal: 2 },
+  text: { fontWeight: '500' },
+  close: { paddingHorizontal: 2 },
 });

@@ -4,11 +4,13 @@ import { recordChatCrash } from '../chat/ChatBoundary';
 import { ChatErrorScreen } from '../chat/ChatErrorScreen';
 import { ChatScreen } from '../chat/ChatScreen';
 import { logRuntimeOnce } from '../compat/runtimeProbe';
+import { perfBoot } from '../perf/probe';
 import { useConversations } from '../conversations';
 import { useConnection } from '../settings/ConnectionProvider';
 
 // one-line engine capability report in logcat (ReactNativeJS) – device bug reports / emulator runs
 logRuntimeOnce();
+perfBoot(); // no-op unless EXPO_PUBLIC_HUI_PERF is set
 
 /**
  * Last-resort route boundary (crashes outside the per-chat ChatBoundary, e.g. in the drawer).

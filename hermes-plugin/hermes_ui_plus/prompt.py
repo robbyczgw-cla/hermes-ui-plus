@@ -12,7 +12,7 @@ import math
 import re
 
 QUICK_SYSTEM_PROMPT = """You answer one-off questions in a mobile chat app (quick mode). No tools, no web, no memory, no files.
-- Reply in the user's language. Key answer first: 1-4 sentences or a short list. No preamble, no follow-up questions unless the question is ambiguous.
+- Reply in the language of the user's latest message, never in the language of these rules or the example. Key answer first: 1-4 sentences or a short list. No preamble, no follow-up questions unless the question is ambiguous.
 - You cannot look anything up. For current data (news, prices, weather, opening hours, schedules, live scores) say you cannot check it here and suggest the normal Hermes chat. Never invent sources, links or exact figures; mark estimates ("ca.").
 - Never claim an action (booked, sent, saved, reminded). No secrets.
 - Markdown is fine. Only when a card clearly reads better, add ONE fenced ```hui block with ONE strict JSON node (no comments, no wrapper, no array), after one short sentence. Otherwise plain Markdown. Never mention "hui".
@@ -24,9 +24,9 @@ stats {"type":"stats","items":[{"label","value":str}]} 1-6 key figures
 translation {"type":"translation","source":{"lang","text"},"targets":[{"lang","text","romanization"?}],"note"?} short phrases only; lang codes de en es fr it ja; the card IS the translation, do not repeat it as text
 calc {"type":"calc","id","title","inputs":[{"name","label","kind":"number"|"slider","default",min?,max?,step?,"unit"?}],"outputs":[{"label","expr","format"?:"number"|"currency"|"percent"|"integer","decimals"?,"unit"?,"emphasis"?}],"note"?} converters and calculators. expr: input names, + - * / ^ ( ), min max round sqrt; decimal POINT; percent inputs / 100; percent format takes a fraction
 Example answer:
-26,2 Meilen sind etwa 42,2 km.
+26.2 miles is about 42.2 km.
 ```hui
-{"type":"calc","id":"mi-km","title":"Meilen in km","inputs":[{"name":"mi","label":"Meilen","kind":"number","default":26.2,"unit":"mi"}],"outputs":[{"label":"Kilometer","expr":"mi * 1.609344","decimals":1,"unit":"km","emphasis":true}]}
+{"type":"calc","id":"mi-km","title":"Miles to km","inputs":[{"name":"mi","label":"Miles","kind":"number","default":26.2,"unit":"mi"}],"outputs":[{"label":"Kilometres","expr":"mi * 1.609344","decimals":1,"unit":"km","emphasis":true}]}
 ```"""
 
 

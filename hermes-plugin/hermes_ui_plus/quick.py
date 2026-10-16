@@ -13,6 +13,7 @@ status, timings, provider/model and token counts only.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import datetime as _dt
 import logging
 import threading
@@ -30,22 +31,31 @@ logger = logging.getLogger("hermes_ui_plus.quick")
 # Model names OpenAI-compatible clients send by habit; they mean "the configured default".
 DEFAULT_MODEL_ALIASES = frozenset({"", "auto", "default", "quick", "hui-quick", "hermes-agent", "hermes"})
 _MAX_ID_LEN = 200
+# Self-test cache (see QuickService.availability): a pass is re-checked rarely, a failure soon (a fixed .env or a
+# restarted gateway should bring the button back without a plugin restart).
+SELFTEST_OK_TTL = 600.0
+SELFTEST_FAIL_TTL = 60.0
 
 
 class QuickError(Exception):
     """Client-facing error. ``message`` must never contain request content or provider error text."""
 
-    def __init__(self, status: int, code: str, message: str, *, retry_after: Optional[int] = None):
+    def __init__(self, status: int, code: str, message: str, *, retry_after: Optional[int] = None,
+                 reason: Optional[str] = None):
         super().__init__(message)
         self.status = status
         self.code = code
         self.message = message
         self.retry_after = retry_after
+        self.reason = reason  # machine-readable cause of feature_off (e.g. profile_scope_unavailable)
 
     def body(self) -> dict:
         kind = "invalid_request_error" if self.status in (400, 401, 404, 413) else (
             "rate_limit_error" if self.status == 429 else "server_error")
-        return {"error": {"message": self.message, "type": kind, "code": self.code}}
+        err = {"message": self.message, "type": kind, "code": self.code}
+        if self.reason:
+            err["reason"] = self.reason
+        return {"error": err}
 
 
 @dataclass
@@ -65,7 +75,10 @@ class Backend(Protocol):
                timeout: float, cancel: threading.Event) -> Iterator[tuple[str, Any]]:
         """Blocking iterator of events: ("delta", str), ("finish", reason), ("usage", {prompt_tokens,
         completion_tokens}), ("route", {provider, model}), ("mode", "stream"|"single"). Runs in a worker
-        thread; must stop soon after *cancel* is set."""
+        thread; must stop soon after *cancel* is set.
+
+        Optional: ``self_test() -> reason|None`` (blocking), ``scope_key() -> str`` (cheap cache key) and
+        ``failure_reason(exc) -> reason|None`` (a failure that switches the feature off)."""
 
 
 # --- request parsing ---------------------------------------------------------------------------------------
@@ -164,6 +177,60 @@ class QuickService:
         self._inflight = 0
         self._executor = ThreadPoolExecutor(max_workers=settings.max_concurrency,
                                             thread_name_prefix="hui-quick")
+        self._selftest: Optional[tuple[Optional[str], Any, float]] = None  # (reason, scope key, checked at)
+        self._selftest_running: Optional[asyncio.Future] = None
+
+    def _in_executor(self, fn: Callable[[], Any]) -> "asyncio.Future":
+        """Run *fn* in the worker pool inside a copy of the caller's context. ``run_in_executor`` does not carry
+        contextvars, and Hermes keeps the profile's secret scope and home override in contextvars: a scope the
+        host bound to the plugin's registration context (NousResearch/hermes-agent#139123) reaches the worker
+        only this way (registration -> listener thread -> request task -> worker)."""
+        loop = asyncio.get_running_loop()
+        return loop.run_in_executor(self._executor, contextvars.copy_context().run, fn)
+
+    # -- self-test --
+
+    def _scope_key(self) -> Any:
+        fn = getattr(self.backend, "scope_key", None)
+        if not callable(fn):
+            return None
+        try:
+            return fn()
+        except Exception:
+            return None
+
+    async def availability(self, force: bool = False) -> Optional[str]:
+        """None when quick calls can work here, else a machine-readable reason. Cached; re-checked after the TTL
+        or when the scope situation changes (the gateway turns multiplexing on after loading plugins)."""
+        if not self.settings.quick_enabled:
+            return "disabled"
+        probe = getattr(self.backend, "self_test", None)
+        if not callable(probe):
+            return None
+        key = self._scope_key()
+        cached = self._selftest
+        if not force and cached is not None and cached[1] == key and (
+                self._clock() - cached[2] < (SELFTEST_OK_TTL if cached[0] is None else SELFTEST_FAIL_TTL)):
+            return cached[0]
+        if self._selftest_running is None or self._selftest_running.done():
+            self._selftest_running = self._in_executor(probe)
+        try:
+            reason = await asyncio.shield(self._selftest_running)
+        except Exception as exc:  # a broken self-test must not cost the feature
+            logger.warning("quick self-test failed to run (%s)", type(exc).__name__)
+            reason = None
+        reason = reason if isinstance(reason, str) and reason else None
+        self._set_selftest(reason, key)
+        return reason
+
+    def _set_selftest(self, reason: Optional[str], key: Any) -> None:
+        prev = self._selftest
+        self._selftest = (reason, key, self._clock())
+        if prev is None or prev[0] != reason:
+            if reason:
+                logger.warning("quick answers unavailable: %s", reason)
+            elif prev is not None:
+                logger.info("quick answers available again")
 
     def close(self) -> None:
         self._executor.shutdown(wait=False, cancel_futures=True)
@@ -172,8 +239,15 @@ class QuickService:
 
     async def config_payload(self) -> dict:
         s = self.settings
+        reason = await self.availability()
         return {
-            "enabled": s.quick_enabled,
+            # enabled = usable now (older bridges only read this), available/reason = why not (newer bridges)
+            "enabled": reason is None,
+            "available": reason is None,
+            "reason": reason,
+            # diagnostics: Hermes' profile-scope situation of quick calls (off / host = Hermes bound one /
+            # needed = the plugin enters its own profile's scope / unknown); never secret values
+            "scope": self._scope_key(),
             "aux_task": self.task,
             "inherits_from": self.inherit_from,
             # Hermes resolves the default route per call (auxiliary.<task>, else the inherited slot, else the
@@ -243,18 +317,27 @@ class QuickService:
                 cancel.set()
 
         def worker() -> None:
+            events = self.backend.stream(messages=messages, provider=provider, model=model,
+                                         max_tokens=req.max_tokens, timeout=s.total_timeout, cancel=cancel)
             try:
-                for ev in self.backend.stream(messages=messages, provider=provider, model=model,
-                                              max_tokens=req.max_tokens, timeout=s.total_timeout, cancel=cancel):
+                for ev in events:
                     if cancel.is_set():
                         break
                     put(ev)
                 put(("_end", None))
             except BaseException as exc:  # noqa: BLE001 - reported as a generic upstream error
                 put(("_error", exc))
+            finally:
+                # close in this thread: the backend's profile scope is a contextvar of this thread's context
+                close = getattr(events, "close", None)
+                if callable(close):
+                    try:
+                        close()
+                    except Exception:
+                        pass
 
         started = self._clock()
-        future = loop.run_in_executor(self._executor, worker)
+        future = self._in_executor(worker)
         got_content = False
         try:
             while True:
@@ -270,6 +353,10 @@ class QuickService:
                 if kind == "_end":
                     return
                 if kind == "_error":
+                    off = getattr(self.backend, "failure_reason", None)
+                    reason = off(value) if callable(off) else None
+                    if reason:  # e.g. UnscopedSecretError: every further call would fail the same way
+                        self._set_selftest(reason, self._scope_key())
                     status = getattr(value, "status_code", None) or getattr(value, "status", None)
                     logger.warning("quick upstream error: %s%s", type(value).__name__,
                                    f" status={status}" if isinstance(status, int) else "")

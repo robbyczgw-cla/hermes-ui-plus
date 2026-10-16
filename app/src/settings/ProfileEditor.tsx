@@ -1,8 +1,9 @@
 // Connection editor for all profile kinds (hermes · demo).
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Platform, Pressable, ScrollView, Text, View } from 'react-native';
+import { Alert, Platform, Pressable, ScrollView, View } from 'react-native';
+import { Text } from '../ui/primitives/Text';
 import { Icon } from '../chat/icons';
-import { Loader, PERSONA_LOADER_KINDS, personaLoader, useMotionReduced, useTheme } from '../ui';
+import { Loader, PERSONA_LOADER_KINDS, personaLoader, textStyle, useMotionReduced, useTheme } from '../ui';
 import { cleanBaseUrl, validateProfile, type ConnectionProfile } from './profiles';
 import { useT, type TKey } from '../i18n';
 import { personaHintKey } from './flavorTexts';
@@ -128,8 +129,13 @@ export function ProfileEditor({ initial, isNew, bottomInset, onSave, onCancel, o
   };
 
   const keyToggle = (
-    <Pressable onPress={() => setShowKey((v) => !v)} hitSlop={8} accessibilityRole="button">
-      <Text style={{ color: th.colors.accent, fontSize: 14 }}>{showKey ? t('settings.editor.hide') : t('settings.editor.show')}</Text>
+    <Pressable
+      onPress={() => setShowKey((v) => !v)}
+      hitSlop={8}
+      accessibilityRole="button"
+      accessibilityLabel={`${showKey ? t('settings.editor.hide') : t('settings.editor.show')}: ${p.bridge ? t('settings.editor.bridgeToken') : t('settings.editor.apiKey')}`}
+    >
+      <Text style={[textStyle(th, 'callout'), { color: th.colors.accentText }]}>{showKey ? t('settings.editor.hide') : t('settings.editor.show')}</Text>
     </Pressable>
   );
   const nameField = (last = false) => (
@@ -235,16 +241,16 @@ export function ProfileEditor({ initial, isNew, bottomInset, onSave, onCancel, o
         <SwitchRow title={t('settings.editor.makeActive')} value={makeActive} onChange={setMakeActive} last />
       </Group>
 
-      {error ? <Text style={{ color: th.colors.danger, fontSize: 14, marginHorizontal: 14 }}>{error}</Text> : null}
+      {error ? <Text style={[textStyle(th, 'callout'), { color: th.colors.danger, marginHorizontal: 14 }]}>{error}</Text> : null}
 
       <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
-        {p.kind !== 'demo' ? <Button label={t('settings.editor.test')} onPress={() => void runTest()} loading={testing} kind="secondary" /> : null}
-        <Button label={t('settings.editor.save')} onPress={() => void save()} loading={saving} kind="primary" />
+        {p.kind !== 'demo' ? <Button label={t('settings.editor.test')} onPress={() => void runTest()} loading={testing} kind="secondary" grow /> : null}
+        <Button label={t('settings.editor.save')} onPress={() => void save()} loading={saving} kind="primary" grow />
       </View>
 
       {confirmSave ? (
         <View style={{ gap: 8, marginHorizontal: 14 }} accessibilityLiveRegion="polite">
-          <Text style={{ color: th.colors.danger, fontSize: 14 }}>{t('settings.editor.authFailedWarning')}</Text>
+          <Text style={[textStyle(th, 'callout'), { color: th.colors.danger }]}>{t('settings.editor.authFailedWarning')}</Text>
           <View style={{ flexDirection: 'row' }}>
             <Button label={t('settings.editor.saveAnyway')} onPress={() => void save(true)} loading={saving} kind="secondary" />
           </View>
@@ -263,14 +269,9 @@ export function ProfileEditor({ initial, isNew, bottomInset, onSave, onCancel, o
       ) : null}
 
       {onDelete ? (
-        <Pressable onPress={confirmDelete} accessibilityRole="button" style={({ pressed }) => [{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 14, marginTop: 8 }, pressed && { opacity: 0.6 }]}>
-          <Icon name="trash" size={17} color={th.colors.danger} />
-          <Text style={{ color: th.colors.danger, fontSize: 15, fontWeight: '500' }}>{t('settings.editor.delete')}</Text>
-        </Pressable>
+        <Button label={t('settings.editor.delete')} onPress={confirmDelete} kind="secondary" tone="seal" icon={(c, s) => <Icon name="trash" size={s} color={c} />} style={{ marginTop: 8 }} />
       ) : (
-        <Pressable onPress={onCancel} accessibilityRole="button" style={({ pressed }) => [{ alignItems: 'center', paddingVertical: 14, marginTop: 8 }, pressed && { opacity: 0.6 }]}>
-          <Text style={{ color: th.colors.muted, fontSize: 15 }}>{t('actions.cancel')}</Text>
-        </Pressable>
+        <Button label={t('actions.cancel')} onPress={onCancel} kind="tertiary" style={{ marginTop: 8 }} />
       )}
     </ScrollView>
   );

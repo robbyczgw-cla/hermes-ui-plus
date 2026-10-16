@@ -16,11 +16,11 @@ The same prompts are built into the app (onboarding and diagnostics, "Copy promp
 
 ## The prompt
 
-One prompt for any agent with a shell on the Hermes machine: Hermes itself (in a direct chat over Telegram or the Hermes CLI), Claude Code, Codex or similar. Paste it as it is. The README and [hermesui.xyz](https://hermesui.xyz/#agent-setup) show the same text, generated from this block.
+One prompt for any agent with a shell on the Hermes machine: Hermes itself (in a direct chat over Telegram or the Hermes CLI), Claude Code, Codex or similar. Paste it as it is. The README, [hermesui.xyz](https://hermesui.xyz/#agent-setup) and the app's connect screen ("Let your agent set it up", also under Settings → Connections → Add connection) show the same text, generated from this block (the app via `scripts/gen-agent-setup-prompt.mjs`).
 
 <!-- agent-setup-prompt:begin -->
 ```text
-Set up the Hermes UI+ bridge on this machine (the one that runs my Hermes Agent) so I can pair the Hermes UI+ app. Docs: https://github.com/robbyczgw-cla/hermes-ui-plus/blob/main/docs/SETUP-WITH-AGENT.md
+Set up the Hermes UI+ bridge on this machine (the one that runs my Hermes Agent) so I can pair the HUI+ app. Docs: https://github.com/robbyczgw-cla/hermes-ui-plus/blob/main/docs/SETUP-WITH-AGENT.md
 
 1. Check first, change nothing: `node --version` (22 or newer), Hermes home (`$HERMES_HOME` or `~/.hermes`), `tailscale status`. If something is missing, stop and tell me what and how to get it. Do not guess.
 2. Preview: `npx -y hermes-ui-plus-bridge@latest setup --dry-run --json`. Summarize the plan: Hermes API server, skill, env file, service, Tailscale URL, warnings.
@@ -47,7 +47,7 @@ The app's onboarding and diagnostics offer these variants, tuned per agent, plus
 Paste this into a direct chat with your Hermes agent (Telegram, the Hermes CLI, or any other private channel). Hermes runs the wizard on its own machine and sends you the pair link back in the same chat.
 
 ```text
-Please set up Hermes UI+ (the Hermes Interactive UI+ app) on this machine, the one you run on. Work step by step and report back briefly after each step.
+Please set up HUI+ (Hermes UI+, the Hermes Interactive UI+ app) on this machine, the one you run on. Work step by step and report back briefly after each step.
 
 1. Check that Node.js 22 or newer is installed (`node --version`). If not, stop and tell me how to install it.
 2. Preview: run `npx -y hermes-ui-plus-bridge@latest setup --dry-run --json` and summarize the plan: Hermes API server status, skill install, env file, service, Tailscale URL, warnings. Never show keys or tokens.
@@ -68,7 +68,7 @@ Rules:
 For a coding agent with a terminal on the Hermes host. It runs the wizard without creating a pair link, so no device token ends up in the agent transcript; you create the QR code yourself at the end.
 
 ```text
-You are on the server that runs my Hermes Agent. Set up the Hermes UI+ Bridge (npm package hermes-ui-plus-bridge, docs: https://github.com/robbyczgw-cla/hermes-ui-plus) so my phone can use the Hermes UI+ app.
+You are on the server that runs my Hermes Agent. Set up the Hermes UI+ Bridge (npm package hermes-ui-plus-bridge, docs: https://github.com/robbyczgw-cla/hermes-ui-plus) so my phone can use the HUI+ app.
 
 1. Check `node --version` (22 or newer), `tailscale status`, and that Hermes lives here (`~/.hermes` or $HERMES_HOME).
 2. Run `npx -y hermes-ui-plus-bridge@latest setup --dry-run --json` and show me a short summary of the plan. The report masks keys and tokens; never print them yourself.
@@ -85,7 +85,7 @@ Rules: ask before restarting Hermes, editing its config or installing system pac
 Read-only diagnosis first. The app's guided diagnostics can copy this prompt with what it saw appended (error kind, HTTP status, host); no keys are included.
 
 ```text
-The Hermes UI+ app cannot connect to my Hermes. Diagnose it on this server. Read-only first: change nothing until I agree to a fix. Never print tokens or API keys (mask them).
+The HUI+ app cannot connect to my Hermes. Diagnose it on this server. Read-only first: change nothing until I agree to a fix. Never print tokens or API keys (mask them).
 
 Check each item and report OK or the problem:
 1. Bridge service: `systemctl --user status hermes-ui-plus-bridge` (or `sudo systemctl status hermes-ui-plus-bridge`, or `docker compose ps`) and the last 50 log lines (`journalctl --user -u hermes-ui-plus-bridge -n 50`).
@@ -124,7 +124,7 @@ Dieselben Prompts auf Deutsch. In der App gibt es sie zusätzlich auf Spanisch (
 ### (a) Prompt für deinen Hermes-Agenten
 
 ```text
-Bitte richte Hermes UI+ (die App Hermes Interactive UI+) auf diesem Rechner ein, also dort, wo du läufst. Arbeite Schritt für Schritt und melde dich nach jedem Schritt kurz.
+Bitte richte HUI+ (Hermes UI+, die App Hermes Interactive UI+) auf diesem Rechner ein, also dort, wo du läufst. Arbeite Schritt für Schritt und melde dich nach jedem Schritt kurz.
 
 1. Prüfe, ob Node.js 22 oder neuer installiert ist (`node --version`). Wenn nicht: abbrechen und mir sagen, wie ich es installiere.
 2. Vorschau: führe `npx -y hermes-ui-plus-bridge@latest setup --dry-run --json` aus und fasse den Plan zusammen: Hermes-API-Server, Skill, Env-Datei, Dienst, Tailscale-URL, Warnungen. Zeig nie Schlüssel oder Tokens.
@@ -143,7 +143,7 @@ Regeln:
 ### (b) Prompt für Claude Code / Codex
 
 ```text
-Du bist auf dem Server, auf dem mein Hermes Agent läuft. Richte die Hermes UI+ Bridge ein (npm-Paket hermes-ui-plus-bridge, Doku: https://github.com/robbyczgw-cla/hermes-ui-plus), damit mein Handy die App Hermes UI+ nutzen kann.
+Du bist auf dem Server, auf dem mein Hermes Agent läuft. Richte die Hermes UI+ Bridge ein (npm-Paket hermes-ui-plus-bridge, Doku: https://github.com/robbyczgw-cla/hermes-ui-plus), damit mein Handy die App HUI+ nutzen kann.
 
 1. Prüfe `node --version` (22 oder neuer), `tailscale status` und ob Hermes hier liegt (`~/.hermes` oder $HERMES_HOME).
 2. Führe `npx -y hermes-ui-plus-bridge@latest setup --dry-run --json` aus und zeig mir eine kurze Zusammenfassung. Der Bericht maskiert Schlüssel und Tokens; gib sie nie selbst aus.
@@ -158,7 +158,7 @@ Regeln: frag vor einem Hermes-Neustart, Config-Änderungen oder Systempaketen. N
 ### (c) Verbindungsproblem untersuchen
 
 ```text
-Die App Hermes UI+ verbindet sich nicht mit meinem Hermes. Untersuche das auf diesem Server. Zuerst nur lesen: ändere nichts, bis ich einem Fix zustimme. Tokens und API-Schlüssel nie ausgeben (maskieren).
+Die App HUI+ verbindet sich nicht mit meinem Hermes. Untersuche das auf diesem Server. Zuerst nur lesen: ändere nichts, bis ich einem Fix zustimme. Tokens und API-Schlüssel nie ausgeben (maskieren).
 
 Prüfe jeden Punkt und melde OK oder das Problem:
 1. Bridge-Dienst: `systemctl --user status hermes-ui-plus-bridge` (oder `sudo systemctl status hermes-ui-plus-bridge` oder `docker compose ps`) und die letzten 50 Logzeilen (`journalctl --user -u hermes-ui-plus-bridge -n 50`).

@@ -43,10 +43,13 @@ class StreamKeepAliveModule : Module() {
         .putExtra(StreamKeepAliveService.EXTRA_STOP_LABEL, stopLabel)
         .putExtra(StreamKeepAliveService.EXTRA_CHANNEL_NAME, channelName)
       try {
+        StreamKeepAliveService.stopAfterStart = false
+        StreamKeepAliveService.startPending = true
         ContextCompat.startForegroundService(ctx, intent)
         true
       } catch (e: Exception) {
         // ForegroundServiceStartNotAllowedException (API 31+, app in background / dataSync budget used up), SecurityException
+        StreamKeepAliveService.startPending = false
         Log.w(TAG, "start refused: ${e.javaClass.simpleName}: ${e.message}")
         false
       }
@@ -71,6 +74,11 @@ class StreamKeepAliveModule : Module() {
 
     AsyncFunction("stop") {
       val ctx = appContext.reactContext ?: return@AsyncFunction false
+      // a start still on its way must reach startForeground first (else Android kills the app): stop right after it
+      if (StreamKeepAliveService.startPending) {
+        StreamKeepAliveService.stopAfterStart = true
+        return@AsyncFunction true
+      }
       ctx.stopService(Intent(ctx, StreamKeepAliveService::class.java))
     }
 

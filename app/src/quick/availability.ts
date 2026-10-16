@@ -7,13 +7,17 @@
  */
 import { bridgeOrigin, parseQuickConfig, quickConfigUrl, QUICK_LIMITS, type QuickConfig, type QuickConn } from './core.ts';
 
-export type QuickAvailability = { on: boolean; config: QuickConfig | null; at: number };
+/** `reason`: why it is off, when the bridge said so (diagnostics only; the UI just hides ⚡) */
+export type QuickAvailability = { on: boolean; config: QuickConfig | null; at: number; reason?: string };
 
 export type ConfigFetch = (url: string, init: { headers: Record<string, string>; signal?: AbortSignal }) => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>;
 
 export const DEMO_KEY = 'demo://local';
 /** what the offline demo reports (quick/demo.ts answers locally) */
 export const DEMO_CONFIG: QuickConfig = { available: true, model: 'flash-mini', provider: 'demo', perMinute: 20, perDay: 300, allowModelOverride: true };
+
+/** ⚡ is offered only on an explicit "available" from the bridge (unknown, off with any reason, offline-unknown: hidden) */
+export const quickOffered = (entry: QuickAvailability | undefined): boolean => entry?.on === true && entry.config !== null;
 
 export const availabilityKey = (conn: QuickConn) => `${bridgeOrigin(conn.baseUrl)}#${conn.apiKey.slice(-6)}`;
 
@@ -65,7 +69,7 @@ export function createAvailability(o: { fetch: ConfigFetch; now?: () => number; 
       if (running) return running;
       const p = fetchConfig(conn)
         .then((config) => {
-          const e = { on: config.available, config: config.available ? config : null, at: now() };
+          const e: QuickAvailability = { on: config.available, config: config.available ? config : null, at: now(), ...(config.reason ? { reason: config.reason } : {}) };
           set(key, e);
           return e;
         })

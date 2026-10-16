@@ -11,6 +11,7 @@ import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming, type Sh
 import { useTheme, useMotionReduced, type Theme } from '../../../theme';
 import { useHui } from '../../../primitives/context';
 import { BlockTitle, HText, InlineText, PressableScale, Surface } from '../../../primitives/basics';
+import { Button } from '../../../primitives/Button';
 import { Skeleton } from '../../../primitives/Skeleton';
 import { haptic } from '../../../primitives/haptics';
 import { useNodeState } from '../../../../nodestate';
@@ -80,15 +81,11 @@ export function Rank({ node }: { node: Partial<HuiRank> }) {
         {tr('ui.rank.hint')}
       </HText>
       <RankList t={t} order={order} byKey={byKey} disabled={streaming} onOrder={setOrder} />
-      {streaming ? <Skeleton height={EST_H} radius={t.radii.m} /> : null}
+      {streaming ? <Skeleton height={EST_H} radius={t.radii.control} /> : null}
       <View style={{ gap: t.spacing.xs }}>
         <PrimaryButton label={(typeof node.submitLabel === 'string' && node.submitLabel.trim()) || tr('ui.rank.submit')} icon="send" onPress={submit} disabled={!canSend} />
         {changed && !streaming ? (
-          <PressableScale haptic="selection" onPress={() => setOrder(keys)} accessibilityRole="button" style={{ alignSelf: 'center', minHeight: 36, paddingHorizontal: t.spacing.m, justifyContent: 'center' }}>
-            <HText variant="caption" color="accent" weight="500">
-              {tr('ui.rank.reset')}
-            </HText>
-          </PressableScale>
+          <Button label={tr('ui.rank.reset')} variant="tertiary" size="small" onPress={() => setOrder(keys)} style={{ alignSelf: 'center' }} />
         ) : null}
       </View>
     </Surface>
@@ -362,7 +359,7 @@ function RankRow({
             paddingLeft: t.spacing.s + 2,
             paddingRight: 4,
             paddingVertical: 6,
-            borderRadius: t.radii.m,
+            borderRadius: t.radii.control,
             borderWidth: dragging ? 1.5 : 1,
             borderColor: dragging ? t.colors.accent : t.colors.border,
             backgroundColor: dragging ? t.colors.surface : t.colors.surface,
@@ -371,7 +368,7 @@ function RankRow({
           }}
         >
           <View style={{ width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: position === 0 ? t.colors.accent : t.colors.accentSoft }}>
-            <HText variant="caption" weight="700" tabular style={{ color: position === 0 ? t.colors.onAccent : t.colors.accent }}>
+            <HText variant="caption" weight="700" tabular style={{ color: position === 0 ? t.colors.onAccent : t.colors.accentText }}>
               {String(position + 1)}
             </HText>
           </View>
@@ -398,7 +395,7 @@ function StepBtn({ t, dir, label, disabled, onPress }: { t: Theme; dir: 'up' | '
       accessibilityLabel={label}
       accessibilityState={{ disabled }}
       hitSlop={{ top: 6, bottom: 6, left: 2, right: 2 }}
-      style={{ width: 36, height: 40, borderRadius: t.radii.s, alignItems: 'center', justifyContent: 'center', opacity: disabled ? 0.3 : 1 }}
+      style={{ width: 36, height: 40, borderRadius: t.radii.control, alignItems: 'center', justifyContent: 'center', opacity: disabled ? 0.3 : 1 }}
       pressedStyle={{ backgroundColor: t.colors.surfacePressed }}
     >
       <C3Icon name={dir} size={20} color={t.colors.text} strokeWidth={2.1} />

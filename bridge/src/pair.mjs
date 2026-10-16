@@ -237,18 +237,21 @@ export function createPairing(bridgeConfig, o = {}) {
       req.resume();
       return failed(413, 'Request body too large', 'payload_too_large', { connection: 'close' });
     }
-    let raw = '';
+    const chunks = [];
+    let size = 0;
     try {
       for await (const c of req) {
-        raw += c;
-        if (raw.length > REDEEM_BODY_MAX) return failed(413, 'Request body too large', 'payload_too_large', { connection: 'close' });
+        const chunk = Buffer.from(c);
+        size += chunk.length;
+        if (size > REDEEM_BODY_MAX) return failed(413, 'Request body too large', 'payload_too_large', { connection: 'close' });
+        chunks.push(chunk);
       }
     } catch {
       return res.destroy();
     }
     let code;
     try {
-      code = JSON.parse(raw)?.code;
+      code = JSON.parse(Buffer.concat(chunks).toString('utf8'))?.code;
     } catch {
       return failed(400, 'Body must be JSON {"code": "…"}', 'invalid_json');
     }
@@ -343,7 +346,7 @@ export function createPairing(bridgeConfig, o = {}) {
     const secret = pair.code
       ? 'This QR code contains a one-time pairing code: it works once and expires in 1 hour. Reload the page for another device.'
       : pair.uri.includes('&t=') ? '<strong>This QR code contains BRIDGE_TOKEN (BRIDGE_PAIR_ADMIN_TOKEN=1)</strong>, a permanent admin credential; do not share a screenshot.' : '';
-    const html = page('Pair Hermes UI+', `<h1>Pair Hermes UI+</h1><p>Open the app, choose "Scan QR code" and scan:</p>${await qrSvg(uri)}<p>Bridge: <code>${esc(effectiveUrl())}</code><br>Name: ${esc(cfg.name)}</p>${warn}<p><a href="${esc(uri)}">Open in the app on this device</a></p>${web}<p>${verdict === 'code' ? 'The page code is now used up. Restart the bridge to open this page remotely again.' : 'Shown because you are on the bridge machine itself.'} ${secret}</p>`);
+    const html = page('Pair HUI+', `<h1>Pair HUI+</h1><p>Open the app, choose "Scan QR code" and scan:</p>${await qrSvg(uri)}<p>Bridge: <code>${esc(effectiveUrl())}</code><br>Name: ${esc(cfg.name)}</p>${warn}<p><a href="${esc(uri)}">Open in the app on this device</a></p>${web}<p>${verdict === 'code' ? 'The page code is now used up. Restart the bridge to open this page remotely again.' : 'Shown because you are on the bridge machine itself.'} ${secret}</p>`);
     return send(res, 200, 'text/html; charset=utf-8', html);
   }
 

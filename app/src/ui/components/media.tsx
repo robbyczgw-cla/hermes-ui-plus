@@ -4,6 +4,7 @@ import * as Clipboard from 'expo-clipboard';
 import { useTheme } from '../theme';
 import { useHui } from '../primitives/context';
 import { HText, InlineText, PressableScale } from '../primitives/basics';
+import { Button } from '../primitives/Button';
 import { Icon, type IconName } from '../primitives/Icon';
 import { Skeleton } from '../primitives/Skeleton';
 import { haptic } from '../primitives/haptics';
@@ -11,6 +12,7 @@ import { CodeSkeleton, ImageSkeleton } from '../skeletons';
 import { useResolvedImage } from '../../images';
 import { AttributionLine, ImageLightbox, Photo } from './imageParts';
 import { useCopiedFlash } from '../lib/useCopiedFlash';
+import { useCaptureBusy } from '../lib/capture';
 import { asArray, asNumber, asObjects, asOptString, asString, clamp, isObject } from '../lib/format';
 import type { HuiAction, HuiButtons, HuiCode, HuiImage, HuiSuggestions } from '../types';
 import { CONFIRMED_ACTION_TYPES } from '../../protocol/types';
@@ -40,7 +42,10 @@ export function ImageBlock({ node }: NodeProps<HuiImage>) {
   const img = st.status === 'ok' ? st.image : null;
   const natural = img && img.width > 0 && img.height > 0 ? img.width / img.height : undefined;
   const aspect = clamp(fixedAspect ?? natural ?? 3 / 2, 0.75, 2.4);
+  // share-as-image: the lookup holds the capture; past its deadline the block is left out like a miss
+  const captureExpired = useCaptureBusy(!streaming && !!(url || query) && (st.status === 'idle' || st.status === 'loading'));
   if (!url && !query) return streaming ? <ImageSkeleton aspect={aspect} /> : null;
+  if ((st.status === 'idle' || st.status === 'loading') && captureExpired) return caption ? <InlineText variant="caption" color="muted" text={caption} /> : null;
   if (st.status === 'idle' || st.status === 'loading') return <ImageSkeleton aspect={aspect} />;
   if (!img) {
     // not found / failed: omit; keep a subtle trace only if the model gave a caption
@@ -78,12 +83,12 @@ export function CodeBlock({ node }: NodeProps<HuiCode>) {
     flashCopied();
   };
   return (
-    <View style={{ backgroundColor: t.colors.codeBg, borderRadius: t.radii.m, borderWidth: 1, borderColor: t.colors.border, overflow: 'hidden' }}>
+    <View style={{ backgroundColor: t.colors.codeBg, borderRadius: t.radii.control, borderWidth: 1, borderColor: t.colors.border, overflow: 'hidden' }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', paddingLeft: t.spacing.m, paddingRight: 4, height: 36, borderBottomWidth: 1, borderColor: t.colors.border }}>
         <HText variant="caption" color="muted" style={{ flex: 1 }}>
           {lang ?? 'Code'}
         </HText>
-        <PressableScale haptic={false} onPress={copy} disabled={streaming} accessibilityLabel={tr('ui.code.copy')} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 8, height: 28, borderRadius: t.radii.s }}>
+        <PressableScale haptic={false} onPress={copy} disabled={streaming} accessibilityLabel={tr('ui.code.copy')} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 8, height: 28, borderRadius: t.radii.control }}>
           <Icon name={copied ? 'check' : 'copy'} size={14} color={copied ? t.colors.success : t.colors.muted} />
           <HText variant="caption" style={{ color: copied ? t.colors.success : t.colors.muted }}>
             {copied ? tr('actions.copied') : tr('actions.copy')}
@@ -153,12 +158,15 @@ export function Buttons({ node }: NodeProps<HuiButtons>) {
         // never auto-promote: only an explicit `style:'primary'` is filled, and only the first one (≤ 1 primary)
         const primary = b.style === 'primary' && items.findIndex((x) => x.style === 'primary') === i;
         const icon = done === i && action?.type === 'copy' ? 'check' : actionIcon(action);
-        const fg = primary ? t.colors.onAccent : t.colors.text;
         return (
-          <PressableScale
+          <Button
             key={i}
+            label={done === i && action?.type === 'copy' ? tr('actions.copied') : asString(b.label)}
+            variant={primary ? 'primary' : 'secondary'}
+            icon={icon ?? undefined}
+            numberOfLines={2}
             disabled={!action || streaming}
-            haptic={action?.type === 'copy' ? 'success' : 'light'}
+            haptic={action?.type === 'copy' ? 'success' : undefined}
             onPress={() => {
               if (!action) return;
               // M2: a hidden `send` text (label "Weiter", text "<instructions for the agent>") is never sent blind: the
@@ -175,24 +183,7 @@ export function Buttons({ node }: NodeProps<HuiButtons>) {
                 flashCopied();
               }
             }}
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 6,
-              minHeight: 40,
-              paddingHorizontal: t.spacing.l,
-              borderRadius: t.radii.pill,
-              backgroundColor: primary ? t.colors.accent : t.colors.surface,
-              borderWidth: primary ? 0 : 1,
-              borderColor: t.colors.borderStrong,
-            }}
-            pressedStyle={{ opacity: 0.85 }}
-          >
-            <HText variant="callout" weight="600" style={{ color: fg }} numberOfLines={1}>
-              {done === i && action?.type === 'copy' ? tr('actions.copied') : asString(b.label)}
-            </HText>
-            {icon ? <Icon name={icon} size={14} color={primary ? t.colors.onAccent : t.colors.muted} /> : null}
-          </PressableScale>
+          />
         );
       })}
     </View>
@@ -231,7 +222,7 @@ export function Suggestions({ node }: NodeProps<HuiSuggestions>) {
               minHeight: 36,
               paddingHorizontal: 14,
               paddingVertical: 7,
-              borderRadius: row ? 18 : t.radii.pill,
+              borderRadius: row ? t.radii.control : t.radii.pill,
               borderWidth: 1,
               borderColor: t.colors.border,
               backgroundColor: t.colors.surface,

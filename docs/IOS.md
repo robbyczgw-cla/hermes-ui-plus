@@ -17,7 +17,7 @@ The web app is the same app as the native one, served by the user's own bridge. 
 | Install: Safari → Share → **Add to Home Screen** (HTTPS origin, e.g. Tailscale `https://<host>.<tailnet>.ts.net`) | works; `manifest.webmanifest` has `display: standalone`, `id`/`scope` `/` |
 | Home-screen icon | `apple-touch-icon` 180×180, opaque (iOS rounds the corners itself), from `app/brand/icon/petasos.svg` |
 | Full screen without Safari UI | `display: standalone` + `apple-mobile-web-app-capable` (older iOS) |
-| Name under the icon | `apple-mobile-web-app-title` = short name ("Hermes UI+", set by `scripts/web-finalize.mjs`) |
+| Name under the icon | `apple-mobile-web-app-title` = display name ("HUI+", `displayName`, set by `scripts/web-finalize.mjs`) |
 | Status bar | `apple-mobile-web-app-status-bar-style: default`: opaque bar, content starts below it, readable in light and dark |
 | Notch / home indicator | `viewport-fit=cover`; the app pads with `env(safe-area-inset-*)` through `react-native-safe-area-context` |
 | Colours | `theme-color` light/dark = `colors.paper` / `colors.ink` (official build) |
@@ -42,7 +42,7 @@ All in `app/app.json` (+ `app/app.config.ts` for identity) and config plugins; `
 | Item | Value / where | Why |
 |---|---|---|
 | Bundle id | `xyz.hermesui.app` (`app/brand/identity.json`) | App ID to register in the developer account |
-| Display name | "Hermes UI+" (`shortName`); store title "Hermes Interactive UI+" | home-screen label vs. listing title |
+| Display name | "HUI+" (`displayName` → `CFBundleDisplayName`); App Store name "HUI+ for Hermes Agent" (`storeName`) | home-screen label vs. listing title; the label matches the start of the store name (guideline 2.3.8). Bundle id unchanged since 0.1, so 0.1.1 installs as an update |
 | Deployment target | **iOS 26.0** (`ios.deploymentTarget`) | on-device dictation with SpeechAnalyzer (`modules/speech-analyzer`). The module itself is `#available`-guarded and would load on older iOS; 26.0 is a product decision (one dictation path, less testing). Lowering it later is a config change |
 | Version | `CFBundleShortVersionString` **0.1.0**, `CFBundleVersion` = build number | see section 3 |
 | Export compliance | `ios.config.usesNonExemptEncryption: false` → `ITSAppUsesNonExemptEncryption = NO` | section 7 |
@@ -114,8 +114,8 @@ Store Connect app record (section 5, step 4).
    create the Apple Distribution certificate and the App Store profile. Alternative: an API key (step 5), used by
    the script for cloud signing; an **App Manager** key was enough (section 4). Only if cloud signing is ever refused:
    Xcode → Settings → Accounts → team → Manage Certificates → "+" → Apple Distribution (on the build Mac), or an Admin key.
-4. **App Store Connect → My Apps → "+" New App:** platform iOS, name "Hermes Interactive UI+" (check availability;
-   STORE.md section 7 on the name), primary language German or English, bundle id `xyz.hermesui.app`, SKU e.g.
+4. **App Store Connect → My Apps → "+" New App:** platform iOS, name "HUI+ for Hermes Agent" (App Store Connect checks
+   availability on entry and reserves the name; fallback and trademark note in STORE.md sections 4 and 7), primary language German or English, bundle id `xyz.hermesui.app`, SKU e.g.
    `hermes-ui-plus`, user access full.
 5. **API key** (optional, for scripted upload): App Store Connect → Users and Access → Integrations → App Store
    Connect API → Team Keys → "+" (role **App Manager** for upload; **Admin** if the script should also do cloud
@@ -138,7 +138,7 @@ Store Connect app record (section 5, step 4).
 
 ## 6. App Review notes (draft, English)
 
-> Hermes Interactive UI+ ("Hermes UI+") is an unofficial, open-source client for Hermes Agent, a self-hosted AI
+> HUI+ for Hermes Agent ("HUI+", project name "Hermes Interactive UI+") is an unofficial, open-source client for Hermes Agent, a self-hosted AI
 > agent. It is not affiliated with Nous Research. There are no accounts and no developer-operated backend: the app
 > connects to a Hermes server that the user runs.
 >
@@ -197,7 +197,7 @@ Consistent with [PRIVACY.md](../PRIVACY.md), STORE.md 3.2 and the privacy manife
 - **State 2026-10-14:** Developer Program, API key (App Manager), App ID `xyz.hermesui.app` + Push: done. First App
   Store build (0.1.0, build 1) archived, signed and gated, **not uploaded**. Missing, owner only (Apple allows it in
   the web UI only): the **App Store Connect app record** (section 5, step 4: App Store Connect → Apps → "+" → New
-  App → iOS, name "Hermes Interactive UI+", bundle id `xyz.hermesui.app` from the list, SKU, full access). Then
+  App → iOS, name "HUI+ for Hermes Agent", bundle id `xyz.hermesui.app` from the list, SKU, full access). Then
   `MODE=appstore scripts/build-ios.sh` with `ASC_*` set builds the next number and uploads; afterwards TestFlight →
   Internal Testing → add the internal group/testers. APNs auth key for production push still open (section 5, step 10).
 - Reviewer Hermes instance + pairing link (section 6).

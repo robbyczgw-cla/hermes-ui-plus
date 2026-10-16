@@ -1,0 +1,107 @@
+# Weekly, grouped update pull requests. Expo/React Native packages are pinned per Expo SDK: bump them with
+# `npx expo install --fix` (CONTRIBUTING.md), so dependabot only proposes their patch releases.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci"
+  # composite actions under .github/actions/ (dependabot reads them from their own directories)
+  - package-ecosystem: github-actions
+    directories:
+      - /.github/actions/setup-gitleaks
+      - /.github/actions/setup-actionlint
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci"
+
+  - package-ecosystem: npm
+    directory: /app
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      app-dependencies:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: "expo"
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: "expo-*"
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: "react"
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: "react-dom"
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: "react-native"
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: "react-native-*"
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: "@react-native/*"
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: "@types/react"
+        update-types: [version-update:semver-major, version-update:semver-minor]
+    commit-message:
+      prefix: "chore(app)"
+
+  - package-ecosystem: npm
+    directory: /bridge
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      bridge-dependencies:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    commit-message:
+      prefix: "chore(bridge)"
+
+  - package-ecosystem: npm
+    directory: /desktop
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    groups:
+      desktop-dependencies:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    commit-message:
+      prefix: "chore(desktop)"
+
+  - package-ecosystem: cargo
+    directory: /desktop/src-tauri
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    groups:
+      desktop-crates:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    commit-message:
+      prefix: "chore(desktop)"
+
+  - package-ecosystem: docker
+    directory: /bridge
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      bridge-image:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(bridge)"

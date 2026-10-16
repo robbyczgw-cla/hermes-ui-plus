@@ -141,7 +141,7 @@ test('form: fields normalized, defaults applied', () => {
       { name: 'b', label: 'b', kind: 'text', options: ['x', '1'] },
       { name: 'c', label: 'C', kind: 'toggle', default: true },
     ],
-    submit: { label: 'Senden' },
+    submit: { label: '' }, // no model label: the Form falls back to the localized default
   });
 });
 

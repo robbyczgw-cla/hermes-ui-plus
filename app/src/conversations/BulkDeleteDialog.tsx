@@ -10,16 +10,18 @@
  * (other backends, demo) are only ever removed on this device. The actual deletion runs
  * through the deleter (bulkDelete.ts): undo toast first, Hermes deletes only after the undo window.
  */
+import { webNoTab } from '../ui/lib/webStyle';
 import { useMemo, useState, useSyncExternalStore } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { turnRegistry } from '../background/turnRegistry';
 import { useT } from '../i18n';
-import { bestOn, haptic, HText, Icon, PressableScale, useTheme } from '../ui';
+import { Button, haptic, HText, Icon, useTheme } from '../ui';
 import { planDelete } from './bulkDelete';
 import { useBulkDelete } from './ConversationsProvider';
 import type { RemoteActions } from './hermesSync';
 import type { ConversationMeta } from './types';
 import { useEscapeToClose } from '../ui/lib/useEscapeToClose';
+import { a11yState } from '../ui/lib/a11yState';
 
 /** ids of conversations with a running turn (re-renders when a turn starts/ends) */
 export function useRunningIds(): ReadonlySet<string> {
@@ -82,8 +84,11 @@ export function BulkDeleteDialog({ mode, candidates, remote, profiles, onCancel,
 
   return (
     <Modal transparent animationType="fade" visible onRequestClose={onCancel} statusBarTranslucent>
-      <Pressable style={[styles.scrim, { backgroundColor: t.colors.overlay }]} onPress={onCancel} accessibilityLabel={tr('actions.close')}>
-        <Pressable onPress={() => {}} style={[styles.dialog, { backgroundColor: t.colors.surface, borderColor: t.colors.border, borderRadius: t.radii.l }, t.shadows.lg]}>
+      {/* backdrop button BEHIND the dialog (a sibling, as in ui/primitives/Sheet.tsx): a scrim that wraps the dialog made
+          VoiceOver merge the whole dialog into ONE "Close" element, hiding every control inside */}
+      <View style={[styles.scrim, { backgroundColor: t.colors.overlay }]}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onCancel} accessibilityRole="button" accessibilityLabel={tr('actions.close')} {...webNoTab} />
+        <View onAccessibilityEscape={onCancel} style={[styles.dialog, { backgroundColor: t.colors.surface, borderColor: t.colors.border, borderRadius: t.radii.card }, t.shadows.lg]}>
           <ScrollView bounces={false} contentContainerStyle={styles.content}>
             <HText variant="headline" style={styles.pad} accessibilityRole="header">
               {tr('conversations.bulk.title', { count })}
@@ -94,8 +99,8 @@ export function BulkDeleteDialog({ mode, candidates, remote, profiles, onCancel,
 
             {scopeOptions.length > 1 ? (
               <View style={styles.section}>
-                <HText variant="micro" color="subtle" style={styles.pad}>
-                  {tr('conversations.bulk.scope').toUpperCase()}
+                <HText variant="caption" weight="600" color="subtle" style={styles.pad}>
+                  {tr('conversations.bulk.scope')}
                 </HText>
                 <Choice label={tr('conversations.bulk.scopeAll')} checked={!scope} onPress={() => setScope(undefined)} />
                 {scopeOptions.map((p) => (
@@ -126,11 +131,11 @@ export function BulkDeleteDialog({ mode, candidates, remote, profiles, onCancel,
           </ScrollView>
 
           <View style={styles.btnRow}>
-            <Btn label={tr('actions.cancel')} onPress={onCancel} />
-            <Btn label={tr('conversations.bulk.confirm', { count })} danger disabled={!count} onPress={confirm} />
+            <Button label={tr('actions.cancel')} variant="tertiary" onPress={onCancel} />
+            <Button label={tr('conversations.bulk.confirm', { count })} variant="primary" tone="seal" numberOfLines={2} disabled={!count} onPress={confirm} />
           </View>
-        </Pressable>
-      </Pressable>
+        </View>
+      </View>
     </Modal>
   );
 }
@@ -158,7 +163,7 @@ function Choice({ label, sub, checked, onPress, kind = 'radio', danger }: { labe
         onPress();
       }}
       accessibilityRole={kind}
-      accessibilityState={{ checked }}
+      {...a11yState({ checked })}
       accessibilityLabel={sub ? `${label}. ${sub}` : label}
       style={({ pressed }) => [styles.choice, pressed && { backgroundColor: t.colors.surfacePressed }]}
     >
@@ -187,29 +192,12 @@ export function SelectionBox({ checked, disabled }: { checked: boolean; disabled
   return (
     <View
       style={[
-        styles.box,
+        styles.box, { borderRadius: t.radii.inline },
         { borderColor: checked ? t.colors.accent : t.colors.borderStrong, backgroundColor: checked ? t.colors.accent : 'transparent', opacity: disabled ? 0.4 : 1 },
       ]}
     >
       {checked ? <Icon name="check" size={14} color={t.colors.onAccent} strokeWidth={2.6} /> : null}
     </View>
-  );
-}
-
-function Btn({ label, onPress, danger, disabled }: { label: string; onPress: () => void; danger?: boolean; disabled?: boolean }) {
-  const t = useTheme();
-  return (
-    <PressableScale
-      onPress={onPress}
-      disabled={disabled}
-      accessibilityRole="button"
-      accessibilityState={{ disabled: !!disabled }}
-      style={[styles.btn, { backgroundColor: danger ? t.colors.danger : t.colors.surfaceAlt, borderRadius: t.radii.pill, opacity: disabled ? 0.45 : 1 }]}
-    >
-      <HText variant="callout" weight="600" style={{ color: danger ? bestOn(t.colors.danger, ['#FFFFFF', t.colors.bg]) : t.colors.text }}>
-        {label}
-      </HText>
-    </PressableScale>
   );
 }
 
@@ -224,7 +212,6 @@ const styles = StyleSheet.create({
   choice: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 18, minHeight: 48, paddingVertical: 6 },
   radio: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
   radioDot: { width: 10, height: 10, borderRadius: 5 },
-  box: { width: 22, height: 22, borderRadius: 6, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  box: { width: 22, height: 22, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
   btnRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 14, paddingTop: 8, paddingBottom: 10, justifyContent: 'flex-end' },
-  btn: { minHeight: 44, paddingHorizontal: 18, justifyContent: 'center', alignItems: 'center' },
 });

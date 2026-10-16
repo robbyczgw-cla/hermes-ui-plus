@@ -13,7 +13,7 @@ import type { ConfigContext, ExpoConfig } from 'expo/config';
 /** Official identity: app/brand/identity.json is the single source (also read by the build scripts and guards). */
 type BrandFile = {
   name: string;
-  shortName: string;
+  displayName: string;
   tagline: string;
   slug: string;
   iosBundleId: string;
@@ -24,11 +24,11 @@ type BrandFile = {
 const BRAND: BrandFile = JSON.parse(readFileSync(join(__dirname, 'brand', 'identity.json'), 'utf8'));
 
 /**
- * The Expo `name` is the home-screen label (iOS CFBundleDisplayName / Android app_name), so it is the short name;
- * the full name ("Hermes Interactive UI+") is the store listing title and is shown inside the app (src/brand.ts).
+ * The Expo `name` is the home-screen label (iOS CFBundleDisplayName / Android app_name), so it is the display name
+ * ("HUI+"); the product name ("Hermes Interactive UI+") is shown inside the app (src/brand.ts) and in the docs.
  */
 export const OFFICIAL_IDENTITY = {
-  name: BRAND.shortName,
+  name: BRAND.displayName,
   slug: BRAND.slug,
   iosBundleId: BRAND.iosBundleId,
   androidPackage: BRAND.androidPackage,

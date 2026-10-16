@@ -16,6 +16,7 @@ import type { ModelLockState } from '../hermes/modelLock.ts';
 import type { RemoteSession } from '../hermes/sessions.ts';
 import { hiddenKey, mergeRemoteSessions, type MergeResult, type SyncFilter } from './remoteSync.ts';
 import { botOf } from '../hermes/bots.ts';
+import { PERF, perfNow, perfSpan } from '../perf/probe.ts';
 
 export function createController(store: IndexStore, repo: ConversationRepo, now: () => number = Date.now) {
   /** signature of the last persisted list per conversation: identical saves are no-ops */
@@ -57,6 +58,11 @@ export function createController(store: IndexStore, repo: ConversationRepo, now:
    */
   const save = (id: string, messages: ChatMessage[], opts: { keepOrder?: boolean } = {}) => {
     if (!get(id)) return; // deleted meanwhile
+    const t0 = PERF ? perfNow() : 0;
+    persistMessages(id, messages, opts);
+    if (PERF) perfSpan('save', t0);
+  };
+  const persistMessages = (id: string, messages: ChatMessage[], opts: { keepOrder?: boolean }) => {
     const sig = messagesSignature(messages);
     if (sigs.get(id) === sig) return;
     const stored = repo.saveMessages(id, messages);
@@ -255,6 +261,14 @@ export function createController(store: IndexStore, repo: ConversationRepo, now:
      */
     saveNow(id: string, messages: ChatMessage[]): Promise<void> {
       save(id, messages);
+      return repo.flush();
+    },
+
+    /**
+     * Write everything pending now instead of on the repo's debounce timer; resolves once written. A finished answer
+     * goes through this before it is announced: in the Android background JS timers stop with the keep-alive service.
+     */
+    flush(): Promise<void> {
       return repo.flush();
     },
 

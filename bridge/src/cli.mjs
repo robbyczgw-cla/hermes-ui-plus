@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path';
 import { parseEnv } from 'node:util';
 import { metaEnabled } from './meta.mjs';
 import { upstreamUrl } from './paths.mjs';
+import { docUrl } from './links.mjs';
 
 export const HELP = `hermes-ui-plus-bridge - optional UI bridge for the Hermes Interactive UI+ app
 
@@ -14,7 +15,9 @@ Usage: hermes-ui-plus-bridge [options]   (the old command name hermes-ui-bridge 
        hermes-ui-plus-bridge setup | devices ...
 
 Options:
-  --env-file <file>   load KEY=VALUE pairs from a file (repeatable; real environment variables win)
+  --env-file <file>   load KEY=VALUE pairs from a file (repeatable; real environment variables win). The file
+                      must exist: Node.js itself checks --env-file and stops with "node: <file>: not found"
+                      before the bridge starts. Create it first (install -m 600 /dev/null <file>) or run setup.
   --pair              print a pairing QR code in the terminal on startup
   --port <n>          listen port (BRIDGE_PORT, default 8790)
   --host <addr>       listen address (BRIDGE_HOST, default 127.0.0.1)
@@ -33,7 +36,10 @@ Device tokens (each paired app gets its own, revocable token; BRIDGE_TOKEN stays
 
 Required: HERMES_BASE_URL (e.g. http://127.0.0.1:8642). Usually also HERMES_API_KEY.
 BRIDGE_TOKEN is generated on first run and stored in <state-dir>/state.json (mode 0600) if not set.
-Docs: bridge/README.md`;
+Docs:
+  Bridge reference   ${docUrl('bridge/README.md')}
+  Self-hosting       ${docUrl('docs/SELF-HOSTING.md')}
+  Web app            ${docUrl('docs/WEB-APP.md')}`;
 
 /** @param {string[]} argv */
 export function parseArgs(argv) {
@@ -73,7 +79,7 @@ export function loadEnvFiles(files, baseEnv = process.env, cwd = process.cwd()) 
   const fromFiles = {};
   for (const f of files) {
     const p = resolve(cwd, f);
-    if (!existsSync(p)) throw new Error(`env file not found: ${p}`);
+    if (!existsSync(p)) throw new Error(`env file not found: ${p}. Create it first (install -m 600 /dev/null ${p}), or let \`hermes-ui-plus-bridge setup\` write one.`);
     Object.assign(fromFiles, parseEnv(readFileSync(p, 'utf8')));
   }
   return { ...fromFiles, ...Object.fromEntries(Object.entries(baseEnv).filter(([, v]) => v !== undefined)) };
@@ -129,7 +135,7 @@ export async function preflight(config, { fetch: doFetch = fetch, timeoutMs = 50
     try {
       return await doFetch(upstreamUrl(base, path).href, { headers, signal: AbortSignal.timeout(timeoutMs) });
     } catch (e) {
-      return { error: e?.cause?.code || e?.cause?.errors?.[0]?.code || e?.name || 'error' };
+      return { error: fetchErrorReason(e) };
     }
   };
   const h = await get('/health');
@@ -145,6 +151,39 @@ export async function preflight(config, { fetch: doFetch = fetch, timeoutMs = 50
   else if (!m.ok) out.push({ level: 'warn', message: `/v1/models answered HTTP ${m.status}` });
   else out.push({ level: 'ok', message: config.upstream.apiKey ? 'API key accepted (/v1/models)' : 'Hermes accepts requests without a key' });
   return out;
+}
+
+/**
+ * Short, meaningful reason for a failed fetch: undici throws a bare `TypeError: fetch failed` and hides the real cause
+ * (ECONNREFUSED, ENOTFOUND, "bad port", an invalid URL) in `cause`, so `e.name` alone printed "(TypeError)".
+ */
+export function fetchErrorReason(e) {
+  const c = e?.cause;
+  const code = c?.code || c?.errors?.[0]?.code || e?.code;
+  if (code && code !== 'UND_ERR') return String(code);
+  if (e?.name === 'TimeoutError' || e?.name === 'AbortError') return 'timed out';
+  const msg = [c?.message, e?.message].find((m) => m && m !== 'fetch failed');
+  // fetch refuses some ports outright (1, 9, 25, 6000, ... "bad port"): Hermes is fine, the port is not usable
+  if (msg === 'bad port') return 'port blocked by the fetch API ("bad port"), pick another port for the Hermes API server';
+  if (msg) return String(msg).slice(0, 160);
+  return e?.message || e?.name || 'error';
+}
+
+/**
+ * Startup hint how to pair, when no --pair QR was printed. Behind Docker's port mapping the request to /bridge/pair
+ * does not arrive from loopback, so "open it on this machine" does not work there; with BRIDGE_PAIRING=1 the page
+ * needs the one-time page code from the log line above (`/bridge/pair?code=…`).
+ */
+export function pairHint({ port, pairingEnabled = false, inContainer = false }) {
+  const add = inContainer
+    ? 'docker compose exec bridge node bin/hermes-ui-bridge.mjs devices add "Phone"'
+    : 'hermes-ui-plus-bridge devices add "Phone" (or npx hermes-ui-plus-bridge ...)';
+  if (pairingEnabled) {
+    return `Pair the app: open the /bridge/pair?code=... path from the "pairing enabled" log line above on the bridge URL `
+      + `(valid 10 minutes, one-time), or run: ${add}`;
+  }
+  if (inContainer) return `Pair the app: ${add}`;
+  return `Pair the app: restart with --pair, run ${add}, or open http://127.0.0.1:${port}/bridge/pair on this machine.`;
 }
 
 const writable = (dir) => { try { accessSync(dir, constants.W_OK); return true; } catch { return false; } };

@@ -3,6 +3,7 @@ import { View } from 'react-native';
 import { useTheme, type Theme } from '../../theme';
 import { useHui } from '../../primitives/context';
 import { FadeIn, HText, InlineText, PressableScale, Surface } from '../../primitives/basics';
+import { Button } from '../../primitives/Button';
 import { Icon } from '../../primitives/Icon';
 import { haptic } from '../../primitives/haptics';
 import { asOptString } from '../../lib/format';
@@ -115,11 +116,7 @@ export function Quiz({ node }: { node: Partial<HuiQuiz> }) {
       <View style={{ flexDirection: 'row', gap: t.spacing.s, alignItems: 'center' }}>
         {!revealed ? (
           <>
-            <PressableScale haptic="selection" disabled={streaming} onPress={() => submit([])} style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: t.spacing.s }}>
-              <HText variant="callout" color="muted" weight="500">
-                {S.quiz.skip}
-              </HText>
-            </PressableScale>
+            <Button label={S.quiz.skip} variant="tertiary" disabled={streaming} onPress={() => submit([])} />
             {q.multi ? <PrimaryButton label={S.quiz.check} disabled={!draft.length || streaming} onPress={() => submit(draft)} style={{ flex: 1 }} /> : null}
           </>
         ) : (
@@ -173,7 +170,7 @@ function OptionRow({ t, label, state, multi, onPress, disabled, locked }: { t: T
         minHeight: 48,
         paddingHorizontal: t.spacing.m,
         paddingVertical: t.spacing.s + 2,
-        borderRadius: t.radii.m,
+        borderRadius: t.radii.control,
         borderWidth: state === 'idle' || state === 'dim' ? 1 : 1.5,
         borderColor: border,
         backgroundColor: bg,
@@ -193,7 +190,7 @@ function Feedback({ t, q, answered }: { t: Theme; q: QuizQuestion; answered: num
   const ok = isCorrect(answered, q.answer);
   const fg = ok ? t.colors.success : skipped ? t.colors.muted : t.colors.danger;
   return (
-    <View style={{ gap: 4, backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.m, padding: t.spacing.m }} accessibilityLiveRegion="polite">
+    <View style={{ gap: 4, backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.control, padding: t.spacing.m }} accessibilityLiveRegion="polite">
       <HText variant="bodyStrong" style={{ color: fg }}>
         {ok ? S.quiz.correct : skipped ? S.quiz.skipped : S.quiz.wrong}
       </HText>
@@ -213,7 +210,7 @@ function Result({ t, title, questions, answers, correct, total, sent, onSend, on
   return (
     <Surface style={{ gap: t.spacing.l }}>
       <FadeIn style={{ alignItems: 'center', gap: 4, paddingTop: t.spacing.s }}>
-        <HText variant="micro" color="muted" style={{ textTransform: 'uppercase', letterSpacing: 0.6 }}>
+        <HText variant="caption" weight="600" color="muted">
           {title ?? S.quiz.resultTitle}
         </HText>
         <HText variant="display" tabular accessibilityLabel={S.quiz.score(correct, total)}>

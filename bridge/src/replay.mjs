@@ -73,6 +73,7 @@ export function createReplayStore(o = {}) {
       this.state = 'pending';
       /** @type {{status: number, headers: Record<string, any>}|null} */
       this.head = null;
+      this.startedAt = 0; // bridge clock when the recorded upstream Date arrived
       /** @type {Buffer[]} */
       this.chunks = [];
       this.size = 0; // bytes recorded (while resumable)
@@ -92,6 +93,7 @@ export function createReplayStore(o = {}) {
       if (this.state !== 'pending') return;
       this.state = 'live';
       this.head = head;
+      this.startedAt = now();
       this.resumable = true;
     }
 
@@ -189,7 +191,13 @@ export function createReplayStore(o = {}) {
       if (offset > this.size) return { status: 409, code: 'resume_unavailable', message: 'Resume offset is beyond the recorded stream' };
       if (this.subs.size >= MAX_SUBSCRIBERS) return { ...TOO_MANY, message: 'Too many resumed streams for this turn' };
       if (subscribers >= maxSubscribersTotal) return { ...TOO_MANY, message: 'Too many resumed streams on this bridge' };
-      res.writeHead(this.head.status, { ...this.head.headers, 'x-hermes-ui-resumed': String(offset) });
+      const headers = { ...this.head.headers, 'x-hermes-ui-resumed': String(offset) };
+      // Advance the original upstream clock here: a reverse proxy may replace the replay response's Date.
+      // This also works when the bridge/device clocks disagree with Hermes.
+      delete headers['x-hermes-ui-server-time'];
+      const serverDate = Date.parse(String(this.head.headers.date ?? ''));
+      if (Number.isFinite(serverDate)) headers['x-hermes-ui-server-time'] = String(serverDate + Math.max(0, now() - this.startedAt));
+      res.writeHead(this.head.status, headers);
       res.flushHeaders?.();
       if (res.destroyed) return null;
       const sub = { live: false, i: 0, skip: offset };

@@ -81,7 +81,7 @@ function render(): void {
   root.style.color = c.text;
   for (const part of Array.from(root.children) as HTMLElement[]) part.style.visibility = showUi ? '' : 'hidden';
   const title = root.querySelector<HTMLElement>('[data-part="title"]');
-  if (title) title.textContent = texts.title || brand().name;
+  if (title) title.textContent = texts.title || brand().displayName;
   const btn = root.querySelector<HTMLButtonElement>('[data-part="btn"]');
   if (btn) {
     btn.textContent = texts.unlock;
@@ -205,7 +205,7 @@ export function useDesktopLock(): void {
   const th = useTheme();
   useLayoutEffect(() => {
     texts = {
-      title: tr('desktop.lock.title', { name: brand().name }),
+      title: tr('desktop.lock.title', { name: brand().displayName }),
       unlock: tr('desktop.lock.unlock'),
       reason: tr('desktop.lock.reason'),
       failed: tr('desktop.lock.failed'),

@@ -33,13 +33,52 @@ const HUI_OPEN_RE = /^ {0,3}(`{3,})(hui|hui-html)[ \t]*$/;
 const MD_FENCE_OPEN_RE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 /**
  * Models sometimes label a component fence with the node type instead of `hui` (```suggestions,
- * ```places …). Only names that are never programming-language/markup tags are accepted; the fence
- * name becomes the node `type` when the JSON has none. Invalid JSON falls back to a readable view.
+ * ```places …). Only names that are never programming-language/markup tags are accepted (except the
+ * TEXT_FENCE_TYPES below); the fence name becomes the node `type` when the JSON has none. Invalid JSON
+ * falls back to a readable view.
  */
 export const TYPED_FENCE_TYPES: ReadonlySet<string> = new Set([
   'suggestions', 'places', 'products', 'weather', 'recipe', 'compare', 'checklist', 'timeline', 'agenda',
   'stats', 'mindmap', 'vocab', 'quiz', 'flashcards', 'workout', 'studyplan', 'gallery', 'decision', 'poll', 'guide', 'paths', 'blocks',
+  'changes', 'diff', 'patch', 'terminal',
 ]);
+/**
+ * Typed fences whose plain-text content is the node itself: ```diff / ```patch hold a unified diff (→ `diff` node with
+ * `patch`), ```terminal a `$ command` line and its output (→ `terminal`). A JSON object inside still works like any
+ * typed fence. The text is handed over verbatim (no JSON parse), so a growing block costs O(1) per update here and
+ * the renderer parses only the appended lines.
+ */
+export const TEXT_FENCE_TYPES: ReadonlySet<string> = new Set(['diff', 'patch', 'terminal']);
+
+/** `$ npm test` / `% make` / `> cargo run` as the first line of a ```terminal fence */
+const PROMPT_LINE_RE = /^[ \t]*[$%>❯][ \t]+(.*)$/;
+/** optional last line of a ```terminal fence: `[exit 1]` / `[exit 0, 4.2s]` / `[exit 2 · 350ms]` → exitCode (+ duration) */
+const EXIT_LINE_RE = /\n?[ \t]*\[exit(?: code)?:? (-?\d{1,9})(?:[ \t]*[,·;][ \t]*([\d.,]+[ \t]*(?:ms|s|min|m|h)(?:[ \t]+[\d.,]+[ \t]*(?:ms|s|min|m|h))?))?\][ \t]*\n?$/;
+
+/** node of a text fence (TEXT_FENCE_TYPES) from its raw content */
+export function textFenceNode(fenceType: string, raw: string): Record<string, unknown> {
+  if (fenceType !== 'terminal') return { type: 'diff', patch: raw };
+  const node: Record<string, unknown> = { type: 'terminal' };
+  // the exit line is only looked for in the last 80 chars (a growing output stays O(1) here)
+  const tailAt = Math.max(0, raw.length - 80);
+  const x = EXIT_LINE_RE.exec(raw.slice(tailAt));
+  let body = raw;
+  if (x && (tailAt + x.index === 0 || raw[tailAt + x.index] === '\n')) {
+    body = raw.slice(0, tailAt + x.index);
+    node.exitCode = Number(x[1]);
+    if (x[2]) node.duration = x[2];
+  }
+  const nl = body.indexOf('\n');
+  const first = nl === -1 ? body : body.slice(0, nl);
+  const m = PROMPT_LINE_RE.exec(first);
+  if (!m) {
+    if (body) node.output = body;
+    return node;
+  }
+  node.command = m[1];
+  if (nl !== -1) node.output = body.slice(nl + 1);
+  return node;
+}
 const TYPED_OPEN_RE = /^ {0,3}(`{3,})([a-z][a-z0-9_-]*)[ \t]*$/;
 /** possible start of a closing fence inside a block (held back from content) */
 const PARTIAL_HEAD_RE = /^ {0,3}`*[ \t]*$/;
@@ -53,7 +92,7 @@ const OPENER_PARTS_RE = /^ {0,3}(`*)([a-z0-9_-]*)([ \t]*)$/;
 
 /**
  * `md`: markdown · `hui` / `html`: component / sandboxed HTML block ·
- * `typed`: a typed fence (```quiz) whose content has no non-whitespace char yet – held back until the first one
+ * `typed`: a typed fence (```quiz) whose content has no non-whitespace char yet – held back until the first one (a text fence, ```diff, is a component with any content)
  * decides: `{` (or `[` for ARRAY_FENCE_TYPES) → component (`hui`), anything else → plain code block (markdown)
  */
 type Mode = 'md' | 'hui' | 'html' | 'typed';
@@ -131,6 +170,10 @@ type PartialParse = (raw: string) => unknown;
 
 function buildHuiUnsafe(key: string, raw: string, complete: boolean, reserved: readonly string[], fenceType?: string, partial?: PartialParse): Segment {
   const opts = { path: key, reservedIds: reserved };
+  if (fenceType && TEXT_FENCE_TYPES.has(fenceType) && firstNonWs(raw) !== '{') {
+    const node = normalizeNode(textFenceNode(fenceType, raw), opts);
+    return { key, kind: 'hui', complete, raw, node };
+  }
   if (complete) {
     if (raw.trim() === '') {
       return { key, kind: 'hui', complete: true, raw, node: null, error: 'Leerer hui-Block' };
@@ -145,9 +188,14 @@ function buildHuiUnsafe(key: string, raw: string, complete: boolean, reserved: r
       error = 'Ungültiges JSON: ' + errMsg(e);
     }
     if (value === undefined) return { key, kind: 'hui', complete: true, raw, node: null, error };
+    const inferredTerminal = fenceType === 'terminal' && value && typeof value === 'object' && !Array.isArray(value) && !('type' in value);
     value = withFenceType(value, fenceType);
     // normalizeNode also maps harmless variants (top-level arrays, envelopes, wrappers, type aliases)
     let node = normalizeNode(value, opts);
+    // A terminal text fence may hold a JSON log line rather than a terminal-node descriptor.
+    if (inferredTerminal && node?.type === 'terminal' && !node.command && !node.output && node.status !== 'running') {
+      node = normalizeNode(textFenceNode(fenceType!, raw), opts);
+    }
     // a list-like node whose entries all failed to normalise (shape written from memory) would
     // render as an empty card: show the block's content readably instead
     const lost = !!node && isEmptyCollection(node) && hasListContent(value);
@@ -289,7 +337,7 @@ export function createStreamParser(opts: StreamParserOptions = {}): StreamParser
     if (mode !== 'typed') return;
     let c = firstNonWs(blockBuf);
     if (!c && withPending && !PARTIAL_HEAD_RE.test(pending.replace(/\r$/, ''))) c = firstNonWs(pending);
-    if (c) decideTyped(c === '{' || (c === '[' && fenceType !== undefined && ARRAY_FENCE_TYPES.has(fenceType)));
+    if (c) decideTyped(c === '{' || (fenceType !== undefined && (TEXT_FENCE_TYPES.has(fenceType) || (c === '[' && ARRAY_FENCE_TYPES.has(fenceType)))));
   }
 
   function processLine(rawLine: string) {
@@ -392,7 +440,9 @@ export function createStreamParser(opts: StreamParserOptions = {}): StreamParser
       const content = raw.endsWith('\n') ? raw.slice(0, -1) : raw;
       const key = nextKey();
       if (mode === 'hui') {
-        if (lastHuiSeg && lastHuiSeg.key === key && (lastHuiRaw === content || skipRebuild(content))) out.push(lastHuiSeg);
+        // text fences (```diff) are not parsed here: no rebuild rate limit
+        const textFence = fenceType !== undefined && TEXT_FENCE_TYPES.has(fenceType);
+        if (lastHuiSeg && lastHuiSeg.key === key && (lastHuiRaw === content || (!textFence && skipRebuild(content)))) out.push(lastHuiSeg);
         else {
           const seg = buildHui(key, content, false, usedIds, fenceType, (huiPartial ??= createPartialJsonParser({ markOpen: true })));
           // keep the identity of unchanged subtrees (rows, points, children) → memo'd renderers skip them

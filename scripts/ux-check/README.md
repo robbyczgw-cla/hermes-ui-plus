@@ -21,6 +21,19 @@ Requirements: a Chromium via playwright-core (resolved like the demo-video recor
 `PLAYWRIGHT_CORE`, a local install, or the npx cache) and enough free RAM for the web build when
 `dist/web` has to be produced.
 
+## Share-as-image sample shots
+
+```bash
+node scripts/ux-check/share-shots.mjs [--out=DIR] [--scenario=checklist,quiz] [--theme=light|dark] [--fake-images=PNG]
+```
+
+Same bundle, profile and offline rules as above. Per scenario and theme it sends the prompt, sets some state (ticks
+checklist items, answers a quiz question), opens "Share as image" from the action row and saves the PNG the app hands
+to the browser download (the exact file a user gets) plus a screenshot of the open sheet and `report.json` (time until
+the image is ready). Output: `dist/share-shots/` by default. `--fake-images` answers
+`https://upload.wikimedia.org/share-check/photo-{ok,slow,404}.png` (photo / past the capture deadline / 404) for a
+bundle whose demo answer was pointed at them.
+
 ## How it drives the app
 
 The built web bundle is served locally and opened at 390×844 with a seeded localStorage: onboarding

@@ -4,12 +4,14 @@
  * Native: tap a row.
  */
 import { forwardRef, memo, useImperativeHandle, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '../../ui/primitives/Text';
 import { useT, type TKey } from '../../i18n';
 import { useTheme } from '../../ui';
 import type { SlashBinding } from './binding';
 import type { PaletteRow, PaletteState } from './palette';
 import { useKeyboardHints } from '../../ui/lib/useKeyboardHints';
+import { a11yState } from '../../ui/lib/a11yState';
 
 export type SlashPaletteHandle = {
   /** web key from the composer input; true = handled (caller prevents the default) */
@@ -70,7 +72,7 @@ export const SlashPalette = memo(forwardRef<SlashPaletteHandle, Props>(function 
 
   return (
     <View
-      style={[styles.box, { backgroundColor: t.dark ? t.colors.surface : t.colors.bg, borderColor: t.colors.border }, !t.dark && t.shadows.sm]}
+      style={[styles.box, { borderRadius: t.radii.card }, { backgroundColor: t.dark ? t.colors.surface : t.colors.bg, borderColor: t.colors.border }, !t.dark && t.shadows.sm]}
       accessibilityLabel={tr('slash.palette.a11y')}
       accessibilityRole="menu"
     >
@@ -79,7 +81,7 @@ export const SlashPalette = memo(forwardRef<SlashPaletteHandle, Props>(function 
           <Row key={rowKey(row)} row={row} active={i === index} binding={binding} onPress={() => onPick(row)} onHover={() => setHl({ sig, i })} />
         ))}
       </ScrollView>
-      {keyboardHints ? <Text style={[styles.keys, { color: t.colors.subtle, borderTopColor: t.colors.border }]}>{tr('slash.palette.keys')}</Text> : null}
+      {keyboardHints ? <Text style={[t.typography.micro, styles.keys, { color: t.colors.subtle, borderTopColor: t.colors.border }]}>{tr('slash.palette.keys')}</Text> : null}
     </View>
   );
 }));
@@ -99,8 +101,8 @@ function Row({ row, active, binding, onPress, onHover }: { row: PaletteRow; acti
         accessibilityLabel={tr('slash.palette.sendRaw')}
         style={({ pressed }) => [styles.row, (active || pressed) && { backgroundColor: t.colors.surfacePressed }]}
       >
-        <Text style={[styles.name, { color: t.colors.accent }]}>{tr('slash.palette.sendRaw')}</Text>
-        <Text style={[styles.desc, { color: t.colors.muted }]} numberOfLines={1}>
+        <Text style={[t.typography.callout, styles.name, { color: t.colors.accentText }]}>{tr('slash.palette.sendRaw')}</Text>
+        <Text style={[t.typography.caption, styles.desc, { color: t.colors.muted }]} numberOfLines={1}>
           {tr('slash.palette.sendRawHint', { name: binding.backendName })}
         </Text>
       </Pressable>
@@ -116,16 +118,16 @@ function Row({ row, active, binding, onPress, onHover }: { row: PaletteRow; acti
       onPress={onPress}
       onHoverIn={onHover}
       accessibilityRole="menuitem"
-      accessibilityState={{ disabled: !enabled, selected: active }}
+      {...a11yState({ disabled: !enabled, selected: active })}
       accessibilityLabel={`/${def.name} ${desc}`}
       style={({ pressed }) => [styles.row, (active || pressed) && { backgroundColor: t.colors.surfacePressed }, !enabled && styles.disabled]}
     >
       <View style={styles.head}>
-        <Text style={[styles.name, mono, { color: t.colors.text }]}>/{def.name}</Text>
-        {arg ? <Text style={[styles.arg, mono, { color: t.colors.subtle }]} numberOfLines={1}>{arg}</Text> : null}
-        {via ? <Text style={[styles.via, { color: t.colors.subtle }]}>{tr('slash.palette.via', { alias: via })}</Text> : null}
+        <Text style={[t.typography.callout, styles.name, mono, { color: t.colors.text }]}>/{def.name}</Text>
+        {arg ? <Text style={[t.typography.caption, styles.arg, mono, { color: t.colors.subtle }]} numberOfLines={1}>{arg}</Text> : null}
+        {via ? <Text style={[t.typography.caption, styles.via, { color: t.colors.subtle }]}>{tr('slash.palette.via', { alias: via })}</Text> : null}
       </View>
-      <Text style={[styles.desc, { color: t.colors.muted }]} numberOfLines={1}>
+      <Text style={[t.typography.caption, styles.desc, { color: t.colors.muted }]} numberOfLines={1}>
         {desc}
         {enabled && def.sendsText ? ` · ${tr('slash.palette.sendsText')}` : ''}
       </Text>
@@ -134,14 +136,14 @@ function Row({ row, active, binding, onPress, onHover }: { row: PaletteRow; acti
 }
 
 const styles = StyleSheet.create({
-  box: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 16, marginBottom: 6, overflow: 'hidden', maxWidth: 720, width: '100%', alignSelf: 'center' },
+  box: { borderWidth: StyleSheet.hairlineWidth, marginBottom: 6, overflow: 'hidden', maxWidth: 720, width: '100%', alignSelf: 'center' },
   scroll: { maxHeight: ROW_H * 6.5 },
   row: { minHeight: ROW_H, paddingHorizontal: 14, paddingVertical: 6, justifyContent: 'center' },
   disabled: { opacity: 0.5 },
   head: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
-  name: { fontSize: 14.5, fontWeight: '600' },
-  arg: { fontSize: 12.5, flexShrink: 1 },
-  via: { fontSize: 12, marginLeft: 'auto' },
-  desc: { fontSize: 12.5, marginTop: 1 },
-  keys: { fontSize: 11, paddingHorizontal: 14, paddingVertical: 5, borderTopWidth: StyleSheet.hairlineWidth },
+  name: { fontWeight: '600' },
+  arg: { flexShrink: 1 },
+  via: { marginLeft: 'auto' },
+  desc: { marginTop: 1 },
+  keys: { paddingHorizontal: 14, paddingVertical: 5, borderTopWidth: StyleSheet.hairlineWidth },
 });

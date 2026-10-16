@@ -37,11 +37,15 @@ export function createDeviceAdmin({ auth, devices, issue }) {
       }
       if (p === DEVICES_PATH && req.method === 'GET') return json(res, 200, { devices: devices.list() });
       if (p === DEVICES_PATH && req.method === 'POST') {
-        let raw = '';
+        const chunks = [];
+        let size = 0;
         for await (const c of req) {
-          raw += c;
-          if (raw.length > 4096) return err(res, 413, 'Request body too large', 'payload_too_large');
+          const chunk = Buffer.from(c);
+          size += chunk.length;
+          if (size > 4096) return err(res, 413, 'Request body too large', 'payload_too_large');
+          chunks.push(chunk);
         }
+        const raw = Buffer.concat(chunks).toString('utf8');
         let label = 'device';
         try {
           if (raw.trim()) label = String(JSON.parse(raw)?.label ?? label);

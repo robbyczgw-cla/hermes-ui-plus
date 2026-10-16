@@ -39,7 +39,7 @@ export function BulkDeleteToast() {
         accessibilityLiveRegion="polite"
         role="status"
         aria-live="polite"
-        style={[styles.toast, { marginBottom: insets.bottom + 24, backgroundColor: t.colors.text }, t.shadows.md]}
+        style={[styles.toast, { marginBottom: insets.bottom + 24, backgroundColor: t.colors.text, borderRadius: t.radii.card }, t.shadows.md]}
       >
         <HText variant="callout" weight="500" style={[styles.text, { color: t.colors.bg }]}>
           {text}
@@ -72,7 +72,7 @@ export function BulkDeleteToast() {
 
 const styles = StyleSheet.create({
   wrap: { justifyContent: 'flex-end', alignItems: 'center' },
-  toast: { flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: 520, marginHorizontal: 16, paddingLeft: 16, paddingRight: 4, borderRadius: 22, minHeight: 48 },
+  toast: { flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: 520, marginHorizontal: 16, paddingLeft: 16, paddingRight: 4, minHeight: 48 },
   text: { flexShrink: 1, paddingVertical: 10 },
   action: { minHeight: 44, minWidth: 44, paddingHorizontal: 14, justifyContent: 'center', alignItems: 'center' },
 });

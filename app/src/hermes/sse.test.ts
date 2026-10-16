@@ -146,3 +146,92 @@ test('default cap is 1 MiB: a 900 KB frame passes', () => {
   assert.equal(out.length, 1);
   assert.equal(out[0].data.length, big.length);
 });
+
+// ── fast paths (native line search, ASCII decode): same results as before on random inputs ──────────────────────────
+/** small seeded PRNG (mulberry32) */
+function prng(seed: number) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+test('utf8 decoder: random text split at random byte offsets equals TextDecoder (ASCII fast path + exact path)', () => {
+  const pieces = ['a', 'Z', ' ', '{"x":1}', '\n', 'é', '€', '—', '😀', '中', 'ß'];
+  for (let seed = 1; seed <= 200; seed++) {
+    const rnd = prng(seed);
+    let text = '';
+    const len = 1 + Math.floor(rnd() * 300);
+    // half the inputs are pure ASCII (the fast path), the rest mixed
+    const ascii = seed % 2 === 0;
+    for (let i = 0; i < len; i++) text += ascii ? pieces[Math.floor(rnd() * 5)] : pieces[Math.floor(rnd() * pieces.length)];
+    const bytes = new TextEncoder().encode(text);
+    const dec = createUtf8Decoder();
+    let out = '';
+    for (let i = 0; i < bytes.length; ) {
+      const n = 1 + Math.floor(rnd() * 40);
+      out += dec.decode(bytes.subarray(i, i + n));
+      i += n;
+    }
+    out += dec.flush();
+    assert.equal(out, text, `seed ${seed}`);
+  }
+});
+
+test('utf8 decoder: a chunk larger than one conversion block (4 KB) and invalid bytes after an ASCII chunk', () => {
+  const big = 'x'.repeat(10_000) + '\n';
+  const dec = createUtf8Decoder();
+  assert.equal(dec.decode(new TextEncoder().encode(big)), big);
+  assert.equal(dec.decode(new Uint8Array([0x61, 0xff, 0x62])), 'a�b');
+  assert.equal(dec.decode(new Uint8Array([0xe2, 0x82])), '', 'incomplete sequence carried over');
+  assert.equal(dec.decode(new Uint8Array([0xac, 0x41])), '€A');
+});
+
+/** independent reference: whole input, lines split on CRLF | CR | LF, frames on empty lines (data/event only) */
+function referenceFrames(input: string): { event: string; data: string }[] {
+  const out: { event: string; data: string }[] = [];
+  let event = '';
+  let data: string[] = [];
+  let has = false;
+  for (const line of input.split(/\r\n|\r|\n/)) {
+    if (line === '') {
+      if (has) out.push({ event: event || 'message', data: data.join('\n') });
+      event = '';
+      data = [];
+      has = false;
+    } else if (line.startsWith('data:')) {
+      data.push(line.slice(5).replace(/^ /, ''));
+      has = true;
+    } else if (line.startsWith('event:')) event = line.slice(6).replace(/^ /, '');
+  }
+  return out;
+}
+
+test('parser: random frames with mixed line endings, split at random points, equal the reference', () => {
+  for (let seed = 1; seed <= 200; seed++) {
+    const rnd = prng(seed * 7919);
+    const eol = () => ['\n', '\r\n', '\r'][Math.floor(rnd() * 3)];
+    let input = '';
+    const frames = 1 + Math.floor(rnd() * 12);
+    for (let f = 0; f < frames; f++) {
+      if (rnd() < 0.3) input += `event: e${f}${eol()}`;
+      const lines = 1 + Math.floor(rnd() * 3);
+      for (let l = 0; l < lines; l++) input += `data: {"n":${f},"l":${l},"t":"${'w'.repeat(Math.floor(rnd() * 30))}"}${eol()}`;
+      if (rnd() < 0.2) input += `: keepalive${eol()}`;
+      input += eol();
+    }
+    const p = createSseParser();
+    const got: { event: string; data: string }[] = [];
+    for (let i = 0; i < input.length; ) {
+      const n = 1 + Math.floor(rnd() * 50);
+      for (const fr of p.push(input.slice(i, i + n))) got.push({ event: fr.event, data: fr.data });
+      i += n;
+    }
+    for (const fr of p.flush()) got.push({ event: fr.event, data: fr.data });
+    assert.deepEqual(got, referenceFrames(input), `seed ${seed}`);
+  }
+});

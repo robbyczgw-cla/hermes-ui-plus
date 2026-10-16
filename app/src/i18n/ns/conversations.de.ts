@@ -54,7 +54,7 @@ export const conversations = {
   menu: {
     rename: 'Umbenennen',
     pin: 'Anheften',
-    unpin: 'Lösen',
+    unpin: 'Nicht mehr anheften',
     delete: 'Löschen',
     select: 'Auswählen',
   },
@@ -97,12 +97,12 @@ export const conversations = {
   },
   sync: {
     loading: 'Chat wird von Hermes geladen …',
-    notSynced: 'Diese Unterhaltung ist nicht mit Hermes synchronisiert.',
+    notSynced: 'Dieser Chat ist nicht mit Hermes synchronisiert.',
     sessionGone: 'Diese Sitzung gibt es in Hermes nicht mehr.',
     foreignNoDelete: 'Chats aus Telegram, CLI oder Cron werden nur hier entfernt, nie in Hermes gelöscht.',
   },
   bulk: {
-    title: '{count, plural, =0 {Keine Chats löschen} one {# Chat löschen?} other {# Chats löschen?}}',
+    title: '{count, plural, =0 {Keine Chats zum Löschen} one {# Chat löschen?} other {# Chats löschen?}}',
     irreversible: 'Das kann nicht rückgängig gemacht werden.',
     nothing: 'Es gibt nichts zu löschen.',
     scope: 'Welche Chats',

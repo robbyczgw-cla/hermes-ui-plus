@@ -39,10 +39,11 @@ const PUBLIC_OK = new Set([
   'EXPO_PUBLIC_THEME_COLOR',
   'EXPO_PUBLIC_THEME_COLOR_DARK',
   'EXPO_PUBLIC_HUI_CRASH_TEST',
+  'EXPO_PUBLIC_HUI_PERF', // perf-probe builds (app/src/perf/probe.ts, docs/PERF.md)
   'EXPO_PUBLIC_BG_SERVICE', // store-build switch (app/plugins/withBgService.js, docs/STORE.md)
 ]);
 /** value rules for allowed EXPO_PUBLIC_* switches (anything else would be a channel for arbitrary values) */
-const PUBLIC_VALUES = { EXPO_PUBLIC_BG_SERVICE: /^[01]$/ };
+const PUBLIC_VALUES = { EXPO_PUBLIC_BG_SERVICE: /^[01]$/, EXPO_PUBLIC_HUI_PERF: /^[012]$/ };
 const BRAND = JSON.parse(readFileSync(join(ROOT, 'app', 'brand', 'identity.json'), 'utf8'));
 /** official identity (app/brand/identity.json, the single source) */
 export const OFFICIAL = { ios: BRAND.iosBundleId, android: BRAND.androidPackage, scheme: BRAND.scheme };

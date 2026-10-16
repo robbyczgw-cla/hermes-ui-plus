@@ -1,0 +1,211 @@
+name: release
+
+# Builds the release ARTIFACTS of a version and attaches them to the workflow run. It never publishes anything:
+# no GitHub release, no tag push, no npm publish, no store upload, no deployment; the workflow has no write permission.
+# Publishing stays a deliberate manual step (docs/RELEASING.md): download the artifacts, compare the checksums, then
+# create the release by hand.
+#
+# Triggers
+#   workflow_dispatch   manual run on the selected branch or tag (Actions tab -> release -> Run workflow)
+#   push of a tag v*    same build; the tag must equal v<bridge/package.json version> (checked in the "verify" job)
+#
+# Artifacts (names and formats mirror the maintainers' release script and docs/RELEASING.md)
+#   hermes-ui-plus-web-<version>.tar.gz + .sha256           web app (PWA) bundle, FLAVOR=hermes, scripts/package-web.sh
+#   hermes-ui-plus-bridge-<version>.tgz + .sha256           `npm pack` of bridge/ (what `npm publish` would upload)
+#   The .sha256 files are in `sha256sum -c` format. Both are scanned (generic leak-guard patterns + gitleaks, the
+#   public gate of scripts/scan-artifact.sh) and refused when the hermes flavor mark is missing.
+#
+# Optional signing jobs (android-signed, ios-signed) are DISABLED BY DEFAULT: they need repository secrets, a protected
+# environment and a repository variable, and they are unfinished templates. Details at the jobs. No secret is needed
+# for the default jobs.
+
+on:
+  workflow_dispatch:
+    inputs:
+      android_signed:
+        description: "Also run the optional android-signed job (needs the release-signing environment; unfinished template)"
+        type: boolean
+        default: false
+      ios_signed:
+        description: "Also run the optional ios-signed job (needs the release-signing environment; unfinished template)"
+        type: boolean
+        default: false
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Check version, tag and changelog
+        id: v
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # prints version=<x> on stdout (-> step output) and the findings on stderr
+          node scripts/release-version-check.mjs "$REF_TYPE" "$REF_NAME" >> "$GITHUB_OUTPUT"
+
+  web:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - uses: ./.github/actions/setup-gitleaks
+      - name: npm ci (app)
+        working-directory: app
+        run: npm ci --no-audit --no-fund
+      - name: Build the web bundle (FLAVOR=hermes, release gate included)
+        env:
+          FLAVOR: hermes
+          HUI_BUILD_PLAIN: "1"
+          BUILD_DIR: ${{ runner.temp }}/hui-web-build
+        run: scripts/build-web.sh
+      - name: Package (scan, flavor mark, tarball + sha256)
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+          OUT_DIR: ${{ runner.temp }}/release
+        run: scripts/package-web.sh
+      - name: Verify the checksum file
+        working-directory: ${{ runner.temp }}/release
+        run: sha256sum -c ./*.sha256
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: web-${{ needs.verify.outputs.version }}
+          path: |
+            ${{ runner.temp }}/release/hermes-ui-plus-web-*.tar.gz
+            ${{ runner.temp }}/release/hermes-ui-plus-web-*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+  bridge:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: bridge/package-lock.json
+      - uses: ./.github/actions/setup-gitleaks
+      - name: Tests
+        working-directory: bridge
+        run: |
+          npm ci --no-audit --no-fund
+          npm test
+      - name: npm pack (prepack bundles hermes-skill/ and the licence)
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+          OUT_DIR: ${{ runner.temp }}/release
+        run: |
+          set -euo pipefail
+          mkdir -p "$OUT_DIR"
+          (cd bridge && npm pack --pack-destination "$OUT_DIR" --silent)
+          name="hermes-ui-plus-bridge-$VERSION.tgz"
+          test -f "$OUT_DIR/$name"
+          (cd "$OUT_DIR" && sha256sum "$name" > "$name.sha256" && sha256sum -c "$name.sha256")
+      - name: Scan the package (public gate, unpacked)
+        env:
+          OUT_DIR: ${{ runner.temp }}/release
+        run: |
+          set -euo pipefail
+          unpacked="$(mktemp -d)"
+          tar -xzf "$OUT_DIR"/hermes-ui-plus-bridge-*.tgz -C "$unpacked"
+          scripts/scan-artifact.sh --public "$unpacked"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bridge-${{ needs.verify.outputs.version }}
+          path: |
+            ${{ runner.temp }}/release/hermes-ui-plus-bridge-*.tgz
+            ${{ runner.temp }}/release/hermes-ui-plus-bridge-*.tgz.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+  # ── optional, disabled by default ─────────────────────────────────────────────────────────────────────────────
+  # Runs only when ALL hold: it was started by hand with the input ticked, the repository variable
+  # HUI_RELEASE_SIGNING is "true", and a reviewer approves the "release-signing" environment (Settings -> Environments:
+  # required reviewers; the signing secrets belong to that environment, not to the repository).
+  # Secrets (environment): HUI_ANDROID_KEYSTORE_B64 (base64 of the release keystore), HUI_ANDROID_KEYSTORE_PASS.
+  # Variables: HUI_ANDROID_KEY_ALIAS [hermes], HUI_ANDROID_CERT_SHA256 (the public signer fingerprint README.md names).
+  # UNFINISHED TEMPLATE: scripts/build-apk.sh still assumes a systemd user session and an Android SDK at a fixed
+  # path (docs/BUILD.md). It must get a runner mode like HUI_BUILD_PLAIN in scripts/build-web.sh before this job
+  # can succeed; until then it stops with an explanation after the keystore handling.
+  android-signed:
+    needs: [verify, web, bridge]
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.android_signed && vars.HUI_RELEASE_SIGNING == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: release-signing
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prepare the release keystore (never printed, removed afterwards)
+        env:
+          KEYSTORE_B64: ${{ secrets.HUI_ANDROID_KEYSTORE_B64 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          echo "HERMES_KEYSTORE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+      - name: Build and sign
+        env:
+          HERMES_KEYSTORE_PASS: ${{ secrets.HUI_ANDROID_KEYSTORE_PASS }}
+          HERMES_KEY_ALIAS: ${{ vars.HUI_ANDROID_KEY_ALIAS }}
+          HERMES_CERT_SHA256: ${{ vars.HUI_ANDROID_CERT_SHA256 }}
+          FLAVOR: hermes
+        run: |
+          echo "android-signed is an unfinished template: port scripts/build-apk.sh to a runner first (see the comment above this job)." >&2
+          exit 1
+          # then: scripts/build-apk.sh release && VERSION=... scripts/package-apk.sh   (checks signer == HERMES_CERT_SHA256)
+      - name: Remove the keystore
+        if: ${{ always() }}
+        run: rm -f "$RUNNER_TEMP/release.keystore"
+
+  # Same gating as android-signed. Secrets (environment): HUI_APPLE_CERT_P12_B64, HUI_APPLE_CERT_PASSWORD,
+  # HUI_APPLE_PROFILE_B64, HUI_APPLE_TEAM_ID, and the App Store Connect key for an upload (HUI_ASC_KEY_ID,
+  # HUI_ASC_ISSUER_ID, HUI_ASC_KEY_P8_B64). UNFINISHED TEMPLATE: scripts/build-ios.sh builds on a Mac over ssh
+  # (docs/IOS.md); a runner-native Xcode build is a separate script that does not exist yet.
+  ios-signed:
+    needs: [verify, web, bridge]
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.ios_signed && vars.HUI_RELEASE_SIGNING == 'true' }}
+    runs-on: macos-latest
+    timeout-minutes: 90
+    environment: release-signing
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Not implemented
+        run: |
+          echo "ios-signed is an unfinished template: scripts/build-ios.sh needs a remote Mac (docs/IOS.md); add a runner build script first." >&2
+          exit 1

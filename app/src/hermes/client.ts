@@ -8,10 +8,12 @@ import {
   fetchRunStatusCore,
   respondApprovalCore,
   streamChatCore,
+  probeServerCore,
   joinUrl,
   errorFromResponse,
   HermesError,
   type FetchLike,
+  type ReachProbe,
   type StreamChatParams,
   type StreamChatResult,
 } from './stream';
@@ -46,7 +48,16 @@ const nativeFetch: FetchLike = async (url, init) => {
  * bridge keeps the run going and needs `stopBridgeTurn` for a deliberate stop).
  */
 export function streamChat(params: StreamChatParams): Promise<StreamChatResult> {
-  return streamChatCore(nativeFetch, params);
+  return streamChatCore(nativeFetch, { probeReachable: (signal) => probeServer(params.conn, signal), ...params });
+}
+
+/**
+ * Reachability check of the chat's server (stream.ts HEADER_PROBE_AFTER_MS). Uses the global fetch on purpose: on
+ * Android that is React Native's own OkHttp client with its own connection pool, so the check opens a fresh
+ * connection instead of reusing expo/fetch's keep-alive socket that the stuck request may be sitting on.
+ */
+function probeServer(conn: HermesConn, signal: AbortSignal): Promise<ReachProbe> {
+  return probeServerCore(fetch, conn.baseUrl, conn.apiKey, signal);
 }
 
 /** Answer an `approval.request` while its stream is still open. */

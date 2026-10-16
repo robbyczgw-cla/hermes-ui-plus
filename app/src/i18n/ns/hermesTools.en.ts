@@ -15,7 +15,6 @@ export const hermesTools = {
   delegate: {
     title: 'Subagent',
     many: '{count} subagents',
-    withGoal: 'Subagent: {goal}',
   },
   cron: {
     create: 'Set reminder',
@@ -91,6 +90,5 @@ export const hermesTools = {
     deleteMessage: 'Please delete the reminder {name}.',
     today: 'today {time}',
     tomorrow: 'tomorrow {time}',
-    a11y: '{title}, {when}, {text}',
   },
 } satisfies typeof de;

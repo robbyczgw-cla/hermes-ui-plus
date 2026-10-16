@@ -8,7 +8,8 @@
  * sends `[agenda:<id>] 09:00–10:00 Fokus · …`. The edited plan is persisted per node.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, TextInput, View, type LayoutChangeEvent } from 'react-native';
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, View, type LayoutChangeEvent } from 'react-native';
+import { TextInput } from '../../../primitives/Text';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -16,6 +17,7 @@ import { useTheme, type Theme } from '../../../theme';
 import { mix, normalizeHex, withAlpha } from '../../../color';
 import { useHui } from '../../../primitives/context';
 import { HText, InlineText, PressableScale, Surface, textStyle } from '../../../primitives/basics';
+import { Button } from '../../../primitives/Button';
 import { Icon } from '../../../primitives/Icon';
 import { Skeleton, SkeletonLines } from '../../../primitives/Skeleton';
 import { haptic } from '../../../primitives/haptics';
@@ -49,6 +51,7 @@ import {
   visibleRange,
   type AgendaBlock,
 } from './agendaModel.ts';
+import { a11yState } from '../../../lib/a11yState';
 
 const HOUR_PX = 60;
 const SNAP_PX = (HOUR_PX * SNAP_MIN) / 60;
@@ -305,7 +308,7 @@ export function Agenda({ node }: { node: Partial<HuiAgenda> }) {
         ) : null}
 
         {deleted ? (
-          <View accessibilityLiveRegion="polite" style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s, paddingLeft: t.spacing.m, minHeight: 44, borderRadius: t.radii.m, backgroundColor: t.colors.surfaceAlt }}>
+          <View accessibilityLiveRegion="polite" style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s, paddingLeft: t.spacing.m, minHeight: 44, borderRadius: t.radii.control, backgroundColor: t.colors.surfaceAlt }}>
             <HText variant="callout" style={{ flex: 1 }} numberOfLines={1}>
               {tr('ui.agenda.deleted', { title: deleted.title })}
             </HText>
@@ -325,17 +328,13 @@ export function Agenda({ node }: { node: Partial<HuiAgenda> }) {
               {tr('ui.agenda.sent')}
             </HText>
             {editable ? (
-              <PressableScale haptic="selection" onPress={() => { setSt((s) => ({ ...s, sent: false })); setEditing(true); }} style={{ minHeight: 36, justifyContent: 'center' }}>
-                <HText variant="caption" color="accent" weight="500">
-                  {tr('ui.agenda.editAgain')}
-                </HText>
-              </PressableScale>
+              <Button label={tr('ui.agenda.editAgain')} variant="tertiary" size="small" onPress={() => { setSt((s) => ({ ...s, sent: false })); setEditing(true); }} />
             ) : null}
           </View>
         ) : null}
         {!streaming ? (
           <View style={{ gap: t.spacing.s }}>
-            {isEditing ? <Btn label={tr('ui.agenda.add')} kind="ghost" icon="plus" onPress={() => setAdding(true)} style={{ backgroundColor: t.colors.accentSoft }} /> : null}
+            {isEditing ? <Btn label={tr('ui.agenda.add')} kind="ghost" icon="plus" onPress={() => setAdding(true)} style={{ alignSelf: 'flex-start' }} /> : null}
             {changed && !st.sent && blocks.length && editable ? (
               <Btn label={tr('ui.agenda.apply')} kind="primary" icon="send" onPress={apply} accessibilityHint={tr('ui.agenda.applyHint')} />
             ) : null}
@@ -496,7 +495,7 @@ function BlockView(p: BlockViewProps) {
           accessibilityRole={editing && selected ? 'adjustable' : 'button'}
           accessibilityLabel={p.a11yLabel}
           accessibilityHint={p.a11yHint}
-          accessibilityState={{ selected }}
+          {...a11yState({ selected }, editing && selected ? 'adjustable' : 'button')}
           accessibilityActions={editing && selected ? [{ name: 'increment', label: p.laterLabel }, { name: 'decrement', label: p.earlierLabel }, { name: 'activate' }] : [{ name: 'activate' }]}
           onAccessibilityAction={(e) => {
             if (e.nativeEvent.actionName === 'increment') onMove(SNAP_MIN);
@@ -505,7 +504,7 @@ function BlockView(p: BlockViewProps) {
           }}
           style={{
             flex: 1,
-            borderRadius: 8,
+            borderRadius: t.radii.control,
             backgroundColor: bg,
             borderLeftWidth: 3,
             borderLeftColor: color,
@@ -596,7 +595,7 @@ function BlockPanel({
 }) {
   const tr = useT();
   return (
-    <View style={{ gap: t.spacing.m, padding: t.spacing.m, borderRadius: t.radii.m, backgroundColor: t.colors.surfaceAlt }}>
+    <View style={{ gap: t.spacing.m, padding: t.spacing.m, borderRadius: t.radii.control, backgroundColor: t.colors.surfaceAlt }}>
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: t.spacing.s }}>
         <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: color, marginTop: 6 }} />
         <View style={{ flex: 1, gap: 2 }}>
@@ -634,17 +633,7 @@ function BlockPanel({
       <View style={{ flexDirection: 'row', gap: t.spacing.s, flexWrap: 'wrap' }}>
         <Btn label={tr('ui.agenda.toCalendar')} icon="calendar" compact onPress={onCalendar} style={{ flexGrow: 1 }} />
         {editing ? (
-          <PressableScale
-            haptic={false}
-            onPress={onDelete}
-            accessibilityLabel={tr('ui.agenda.delete')}
-            style={{ minHeight: 36, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: t.spacing.m, borderRadius: t.radii.pill, backgroundColor: t.colors.dangerSoft }}
-          >
-            <ExtraIcon name="trash" size={15} color={t.colors.danger} />
-            <HText variant="callout" weight="500" style={{ color: t.colors.danger }}>
-              {tr('ui.agenda.delete')}
-            </HText>
-          </PressableScale>
+          <Button label={tr('ui.agenda.delete')} variant="secondary" tone="seal" size="small" onPress={onDelete} />
         ) : null}
       </View>
     </View>
@@ -682,7 +671,7 @@ function AddSheet({
   const seq = useRef(0);
   const end = Math.min(DAY_MIN, start + dur);
   const ok = title.trim().length > 0 && end > start;
-  const input = { ...textStyle(t, 'body'), color: t.colors.text, backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.m, paddingHorizontal: t.spacing.m, minHeight: 44 };
+  const input = { ...textStyle(t, 'body'), color: t.colors.text, backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.control, paddingHorizontal: t.spacing.m, minHeight: 44 };
   const save = () => {
     if (!ok) return;
     seq.current += 1;
@@ -692,7 +681,7 @@ function AddSheet({
     <Modal visible transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
         <Pressable style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: t.colors.overlay }} onPress={onClose} accessibilityRole="button" accessibilityLabel={tr('ui.agenda.cancel')} />
-        <View style={{ backgroundColor: t.colors.surface, borderTopLeftRadius: t.radii.xl, borderTopRightRadius: t.radii.xl, maxHeight: '88%', paddingBottom: insets.bottom + t.spacing.m, width: '100%', maxWidth: 640, alignSelf: 'center' }}>
+        <View style={{ backgroundColor: t.colors.surface, borderTopLeftRadius: t.radii.card, borderTopRightRadius: t.radii.card, maxHeight: '88%', paddingBottom: insets.bottom + t.spacing.m, width: '100%', maxWidth: 640, alignSelf: 'center' }}>
           <View style={{ alignItems: 'center', paddingTop: t.spacing.s }}>
             <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: t.colors.borderStrong }} />
           </View>
@@ -763,9 +752,9 @@ export function AgendaSkeleton() {
             <Skeleton width={24} height={10} />
           </View>
           <View style={{ flex: 1, gap: t.spacing.s }}>
-            <Skeleton height={52} radius={8} />
-            <Skeleton height={30} radius={8} width="70%" />
-            <Skeleton height={64} radius={8} />
+            <Skeleton height={52} radius={t.radii.control} />
+            <Skeleton height={30} radius={t.radii.control} width="70%" />
+            <Skeleton height={64} radius={t.radii.control} />
           </View>
         </View>
       </View>

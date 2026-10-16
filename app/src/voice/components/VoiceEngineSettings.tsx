@@ -4,11 +4,12 @@
  */
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
-import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Text } from '../../ui/primitives/Text';
 import { useLocale, useT } from '../../i18n';
 import type { TKey } from '../../i18n/core.ts';
 import { Chips, Field } from '../../settings/ui';
-import { useTheme } from '../../ui';
+import { Button, useTheme } from '../../ui';
 import { DEEPGRAM_VOICES, effectiveSttApi, effectiveTtsApi, OPENAI_TTS_VOICES, STT_API_PRESETS, TTS_API_PRESETS } from '../apiCore';
 import type { AppLang } from '../apiCore';
 import { setVoiceApiKey, useVoiceApiKeys } from '../apiKeys';
@@ -17,6 +18,7 @@ import { listDeviceVoices } from '../deviceTts';
 import type { DeviceVoice } from '../deviceTts';
 import { useVoiceSettings } from '../settingsStore';
 import type { SttApiPreset, SttEngine, TtsApiPreset, TtsEngine, VoiceEngineChoice } from '../types';
+import { a11yState } from '../../ui/lib/a11yState';
 
 export const ENGINE_LABEL: Record<VoiceEngineChoice, TKey> = {
   auto: 'voice.settings.engines.auto',
@@ -51,10 +53,10 @@ export function EnginePicker({
     .map((c) => ({ id: c, label: t(ENGINE_LABEL[c]) }));
   return (
     <View style={[styles.block, rowBorder(theme)]}>
-      <Text style={[styles.rowTitle, { color: theme.colors.text }]}>{t('voice.settings.engine')}</Text>
+      <Text style={[theme.typography.body, { color: theme.colors.text }]}>{t('voice.settings.engine')}</Text>
       <Chips items={items} selected={value} onPick={(id) => onChange(id as VoiceEngineChoice)} />
       {value === 'auto' && active ? (
-        <Text style={[styles.rowSub, { color: theme.colors.muted }]}>{t('voice.settings.activeEngine', { engine: t(ENGINE_NAME[active]) })}</Text>
+        <Text style={[theme.typography.caption, styles.rowSub, { color: theme.colors.muted }]}>{t('voice.settings.activeEngine', { engine: t(ENGINE_NAME[active]) })}</Text>
       ) : null}
     </View>
   );
@@ -88,16 +90,16 @@ export function DeviceVoicePicker({ note, renderPreview }: { note?: string; rend
   }
   const row = (id: string | null, title: string, sub: string) => (
     <View key={id ?? 'auto'} style={[styles.row, rowBorder(theme)]}>
-      <Pressable onPress={() => update({ deviceVoice: id })} accessibilityRole="radio" accessibilityState={{ selected: selected === id }} accessibilityLabel={sub ? `${title}, ${sub}` : title} style={styles.rowMain}>
+      <Pressable onPress={() => update({ deviceVoice: id })} accessibilityRole="radio" {...a11yState({ selected: selected === id, checked: selected === id })} accessibilityLabel={sub ? `${title}, ${sub}` : title} style={styles.rowMain}>
         <View style={[styles.radio, { borderColor: selected === id ? theme.colors.accent : theme.colors.borderStrong }]}>
           {selected === id ? <View style={[styles.radioDot, { backgroundColor: theme.colors.accent }]} /> : null}
         </View>
         <View style={styles.flex}>
-          <Text style={[styles.rowTitle, { color: theme.colors.text }]} numberOfLines={2}>
+          <Text style={[theme.typography.body, { color: theme.colors.text }]} numberOfLines={2}>
             {title}
           </Text>
           {sub ? (
-            <Text style={[styles.rowSub, { color: theme.colors.muted }]} numberOfLines={2}>
+            <Text style={[theme.typography.caption, styles.rowSub, { color: theme.colors.muted }]} numberOfLines={2}>
               {sub}
             </Text>
           ) : null}
@@ -115,7 +117,7 @@ export function DeviceVoicePicker({ note, renderPreview }: { note?: string; rend
         </View>
       ) : voices.length === 0 ? (
         <View style={[styles.row, rowBorder(theme)]}>
-          <Text style={[styles.rowSub, { color: theme.colors.muted }]}>{t('voice.settings.noDeviceVoices')}</Text>
+          <Text style={[theme.typography.caption, styles.rowSub, { color: theme.colors.muted }]}>{t('voice.settings.noDeviceVoices')}</Text>
         </View>
       ) : (
         visible.map((v) =>
@@ -123,13 +125,19 @@ export function DeviceVoicePicker({ note, renderPreview }: { note?: string; rend
         )
       )}
       {voices && voices.length > COLLAPSED ? (
-        <Pressable onPress={() => setExpanded((e) => !e)} accessibilityRole="button" style={({ pressed }) => [styles.row, rowBorder(theme), pressed && { backgroundColor: theme.colors.surfacePressed }]}>
-          <Text style={[styles.link, { color: theme.colors.accent }]}>{expanded ? t('voice.settings.showLess') : t('voice.settings.showAll', { count: voices.length })}</Text>
-        </Pressable>
+        <View style={[styles.row, rowBorder(theme)]}>
+          <Button
+            label={expanded ? t('voice.settings.showLess') : t('voice.settings.showAll', { count: voices.length })}
+            variant="tertiary"
+            size="small"
+            accessibilityState={{ expanded }}
+            onPress={() => setExpanded((e) => !e)}
+          />
+        </View>
       ) : null}
       {Platform.OS === 'web' ? null : (
         <View style={[styles.row, rowBorder(theme)]}>
-          <Text style={[styles.rowSub, styles.flex, { color: theme.colors.muted }]}>
+          <Text style={[theme.typography.caption, styles.rowSub, styles.flex, { color: theme.colors.muted }]}>
             {t(Platform.OS === 'ios' ? 'voice.settings.betterVoicesIos' : 'voice.settings.betterVoicesAndroid')}
           </Text>
         </View>
@@ -179,15 +187,11 @@ function ApiKeyField({ slot }: { slot: VoiceKeySlot }) {
     return (
       <View style={[styles.row, rowBorder(theme)]}>
         <View style={styles.flex}>
-          <Text style={[styles.rowTitle, { color: theme.colors.text }]}>{t('voice.settings.api.key')}</Text>
-          <Text style={[styles.rowSub, { color: theme.colors.muted }]}>{t('voice.settings.api.keySaved')}</Text>
+          <Text style={[theme.typography.body, { color: theme.colors.text }]}>{t('voice.settings.api.key')}</Text>
+          <Text style={[theme.typography.caption, styles.rowSub, { color: theme.colors.muted }]}>{t('voice.settings.api.keySaved')}</Text>
         </View>
-        <Pressable onPress={() => setEditing(true)} accessibilityRole="button" hitSlop={8}>
-          <Text style={[styles.link, { color: theme.colors.accent }]}>{t('voice.settings.api.change')}</Text>
-        </Pressable>
-        <Pressable onPress={() => void save('')} accessibilityRole="button" hitSlop={8} disabled={busy}>
-          <Text style={[styles.link, { color: theme.colors.danger }]}>{t('voice.settings.api.remove')}</Text>
-        </Pressable>
+        <Button label={t('voice.settings.api.change')} variant="tertiary" size="small" onPress={() => setEditing(true)} />
+        <Button label={t('voice.settings.api.remove')} variant="tertiary" tone="seal" size="small" disabled={busy} onPress={() => void save('')} />
       </View>
     );
   }
@@ -206,9 +210,7 @@ function ApiKeyField({ slot }: { slot: VoiceKeySlot }) {
           busy ? (
             <ActivityIndicator size="small" color={theme.colors.muted} />
           ) : (
-            <Pressable onPress={() => draft.trim() && void save(draft)} accessibilityRole="button" hitSlop={8} disabled={!draft.trim()}>
-              <Text style={[styles.link, { color: draft.trim() ? theme.colors.accent : theme.colors.subtle }]}>{t('voice.settings.api.save')}</Text>
-            </Pressable>
+            <Button label={t('voice.settings.api.save')} variant="secondary" size="small" disabled={!draft.trim()} onPress={() => draft.trim() && void save(draft)} />
           )
         }
       />
@@ -221,7 +223,7 @@ function PresetChips<P extends string>({ presets, value, onPick, labels }: { pre
   const t = useT();
   return (
     <View style={[styles.block, rowBorder(theme)]}>
-      <Text style={[styles.rowTitle, { color: theme.colors.text }]}>{t('voice.settings.api.provider')}</Text>
+      <Text style={[theme.typography.body, { color: theme.colors.text }]}>{t('voice.settings.api.provider')}</Text>
       <Chips items={presets.map((p) => ({ id: p, label: labels[p] }))} selected={value} onPick={(id) => onPick(id as P)} />
     </View>
   );
@@ -268,7 +270,7 @@ export function ApiTtsForm({ preview }: { preview: ReactNode }) {
       ) : null}
       {voiceList.length ? (
         <View style={[styles.block, rowBorder(theme)]}>
-          <Text style={[styles.rowTitle, { color: theme.colors.text }]}>{t('voice.settings.api.voice')}</Text>
+          <Text style={[theme.typography.body, { color: theme.colors.text }]}>{t('voice.settings.api.voice')}</Text>
           <Chips items={voiceList.map((v) => ({ id: v, label: v.replace(/^aura-2-/, '').replace(/-(de|en|es)$/, '') }))} selected={eff.voice} onPick={(id) => update({ ttsApi: { ...api, voice: id } })} />
         </View>
       ) : (
@@ -276,7 +278,7 @@ export function ApiTtsForm({ preview }: { preview: ReactNode }) {
       )}
       <ApiKeyField slot="tts" />
       <View style={[styles.row, rowBorder(theme)]}>
-        <Text style={[styles.rowSub, styles.flex, { color: theme.colors.muted }]}>{t('voice.settings.api.ttsNote')}</Text>
+        <Text style={[theme.typography.caption, styles.rowSub, styles.flex, { color: theme.colors.muted }]}>{t('voice.settings.api.ttsNote')}</Text>
         {preview}
       </View>
       {!eff.baseUrl || !eff.voice ? <Incomplete /> : null}
@@ -289,7 +291,7 @@ function Incomplete() {
   const t = useT();
   return (
     <View style={[styles.row, rowBorder(theme)]}>
-      <Text style={[styles.rowSub, { color: theme.colors.warning }]}>{t('voice.settings.api.incomplete')}</Text>
+      <Text style={[theme.typography.caption, styles.rowSub, { color: theme.colors.warning }]}>{t('voice.settings.api.incomplete')}</Text>
     </View>
   );
 }
@@ -301,9 +303,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, minHeight: 52, paddingVertical: 8 },
   rowMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12 },
   block: { paddingHorizontal: 14, paddingVertical: 12, gap: 10 },
-  rowTitle: { fontSize: 16 },
-  rowSub: { fontSize: 13, marginTop: 2 },
-  link: { fontSize: 15, fontWeight: '500' },
+  rowSub: { marginTop: 2 },
   radio: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
   radioDot: { width: 10, height: 10, borderRadius: 5 },
 });

@@ -72,11 +72,14 @@ npm run bundle-skill                # copies the skill + bootstrap message into 
 cp docker-compose.example.yml docker-compose.yml
 printf 'HERMES_BASE_URL=http://host.docker.internal:8642\nHERMES_API_KEY=<key>\nBRIDGE_PUBLIC_URL=https://bridge.example.net\nBRIDGE_PAIRING=1\n' > .env
 docker compose up -d --build
-docker compose logs bridge          # shows the one-time pairing code
+docker compose logs bridge          # shows the pairing page path /bridge/pair?code=XXXX-XXXX (10 minutes)
+docker compose exec bridge node bin/hermes-ui-bridge.mjs devices add "Phone"   # pair link + QR code
 ```
 
-The image is `node:22-alpine`, runs as the unprivileged `node` user, keeps token and uploads in the volume
-`/var/lib/hermes-ui-bridge`, and has a healthcheck. Nothing is pushed anywhere; build it yourself.
+There is no prebuilt image in 0.1: build it from a checkout as above. The image is `node:22-alpine`, runs as the
+unprivileged `node` user, keeps token and uploads in the volume `/var/lib/hermes-ui-bridge`, and has a healthcheck.
+For the web app, uncomment `BRIDGE_WEB_DIR: /web` and the `./web:/web:ro` volume in the compose file and unpack the
+web bundle into `./web` (`tar -xzf hermes-ui-plus-web-<version>.tar.gz -C web --strip-components=1`).
 The build fails with a clear message if `skill/` is missing. Without Node on the host, copy it by hand:
 `mkdir -p skill && cp -r ../hermes-skill/hermes-ui ../hermes-skill/bootstrap-system-message.txt skill/`.
 Plain `docker run` (from the repository root):

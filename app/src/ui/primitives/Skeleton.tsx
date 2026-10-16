@@ -41,7 +41,7 @@ export function Skeleton({ width = '100%', height = 12, radius, style }: Skeleto
     <View
       onLayout={(e) => setW(e.nativeEvent.layout.width)}
       style={[
-        { width: width ?? undefined, height: height ?? undefined, borderRadius: radius ?? Math.min(t.radii.xs, (height ?? 24) / 2), backgroundColor: t.colors.skeleton, overflow: 'hidden' },
+        { width: width ?? undefined, height: height ?? undefined, borderRadius: radius ?? Math.min(t.radii.inline, (height ?? 24) / 2), backgroundColor: t.colors.skeleton, overflow: 'hidden' },
         style,
       ]}
     >

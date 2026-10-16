@@ -17,6 +17,7 @@ import { diagnosticsSummary, fillTroubleshootPrompt } from '../troubleshoot';
 import type { NormalizedUrl } from '../url';
 import { ActionPill } from '../ui';
 import { copyText, openTailscale, promptsFor } from './actions';
+import { a11yState } from '../../ui/lib/a11yState';
 
 export type CheckState =
   | { phase: 'idle' }
@@ -151,7 +152,7 @@ export function CheckResult({ state, onFix }: { state: CheckState; onFix: (a: Fi
           </View>
           {hints && (hints.hints.length || hints.detail) ? (
             <>
-              <Pressable onPress={() => setMoreHints((v) => !v)} accessibilityRole="button" accessibilityState={{ expanded: moreHints }} hitSlop={6} style={styles.more}>
+              <Pressable onPress={() => setMoreHints((v) => !v)} accessibilityRole="button" {...a11yState({ expanded: moreHints })} hitSlop={6} style={styles.more}>
                 <HText variant="caption" color="muted" weight="600">
                   {moreHints ? tr('onboarding.guided.check.fewerHints') : tr('onboarding.guided.check.moreHints')}
                 </HText>

@@ -142,7 +142,7 @@ export function ScanPair({
           <View style={styles.reticle} />
         </View>
         <View pointerEvents="none" style={styles.caption}>
-          <View style={styles.captionPill}>
+          <View style={[styles.captionPill, { borderRadius: t.radii.pill }]}>
             <HText variant="caption" style={{ color: '#FFFFFF' }} accessibilityLiveRegion="polite">
               {scanError ? tr(scanError) : tr('onboarding.scan.hint')}
             </HText>
@@ -189,5 +189,5 @@ const styles = StyleSheet.create({
   reticleWrap: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
   reticle: { width: '62%', aspectRatio: 1, borderRadius: 24, borderWidth: 2, borderColor: 'rgba(255,255,255,0.9)' },
   caption: { position: 'absolute', left: 0, right: 0, bottom: 14, alignItems: 'center' },
-  captionPill: { backgroundColor: 'rgba(0,0,0,0.55)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, maxWidth: '90%' },
+  captionPill: { backgroundColor: 'rgba(0,0,0,0.55)', paddingHorizontal: 12, paddingVertical: 6, maxWidth: '90%' },
 });

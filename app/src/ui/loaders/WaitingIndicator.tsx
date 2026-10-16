@@ -90,7 +90,7 @@ export function WaitingIndicator({ state, mode, seed = 0, persona = null, starte
   const kind = indicatorFor(state, { mode, persona, seed });
   const badge = variant === 'badge';
   const size = badge ? 20 : 26;
-  const text = scaleFont(badge ? 13 : 14, badge ? 18 : 20, t.fontScale);
+  const text = { ...scaleFont(badge ? 13 : 14, badge ? 18 : 20, t.fontScale), fontFamily: t.fonts.sans };
 
   const body = (
     <>

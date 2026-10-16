@@ -1,16 +1,14 @@
 /// <reference types="node" />
 /**
- * Behaviour of the REAL useHermesChat hook under node:test: the source is transpiled, React is replaced by a
- * single-render stub (refs and callbacks persist, setters only record), and the modules that need a device
+ * Behaviour of the REAL useHermesChat hook under node:test: the source is transpiled (testkit/hookHost.ts), React is
+ * replaced by a single-render stub (refs and callbacks persist, setters only record), and the modules that need a device
  * (react-native, attachment files, uploads, the HTTP client) are replaced by deferred fakes. Everything else
  * (pendingSend, chatState, recovery, idempotency, …) is the real code.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import ts from 'typescript';
+import { fileURLToPath } from 'node:url';
+import { loadTsModule } from '../testkit/hookHost.ts';
 import { isHermesError } from './stream.ts';
 import type { ChatMessage } from './types';
 import type { UseHermesChat, UseHermesChatOptions } from './useHermesChat';
@@ -99,31 +97,7 @@ async function mountHook(options: UseHermesChatOptions): Promise<Harness> {
     answerApproval: async () => {},
   };
 
-  const js = ts.transpileModule(fs.readFileSync(HOOK, 'utf8'), {
-    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
-  }).outputText;
-  const ast = ts.createSourceFile(HOOK, js, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
-  const names: string[] = [];
-  const values: unknown[] = [];
-  const cuts: [number, number][] = [];
-  for (const s of ast.statements) {
-    if (!ts.isImportDeclaration(s)) continue;
-    const spec = (s.moduleSpecifier as ts.StringLiteral).text;
-    const mod: Record<string, unknown> =
-      stubs[spec] ?? (await import(pathToFileURL(path.resolve(path.dirname(HOOK), spec.endsWith('.ts') ? spec : spec + '.ts')).href));
-    const bindings = s.importClause?.namedBindings;
-    if (bindings && ts.isNamedImports(bindings)) {
-      for (const el of bindings.elements) {
-        names.push(el.name.text);
-        values.push(mod[(el.propertyName ?? el.name).text]);
-      }
-    }
-    cuts.push([s.pos, s.end]);
-  }
-  let body = js;
-  for (const [a, b] of cuts.reverse()) body = body.slice(0, a) + body.slice(b);
-  body = body.replace(/^export /gm, '');
-  const useHermesChat = new Function(...names, body + '\nreturn useHermesChat;')(...values) as (c: unknown, o: UseHermesChatOptions) => UseHermesChat;
+  const { useHermesChat } = (await loadTsModule(HOOK, stubs)) as { useHermesChat: (c: unknown, o: UseHermesChatOptions) => UseHermesChat };
 
   const chat = useHermesChat({ baseUrl: 'https://example.com/v1', apiKey: 'dummy_test_token', bridge: true }, options);
   assert.equal(cells[0], chat.messages, 'the first state cell is the transcript');

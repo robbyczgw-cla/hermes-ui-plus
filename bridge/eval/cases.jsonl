@@ -41,7 +41,7 @@
 {"id":"ta07","messages":[{"role":"user","content":"Übersicht der technischen Daten vom Raspberry Pi 4 und 5"}],"expected":"table","accept":["compare"],"tags":["de"]}
 {"id":"ta08","messages":[{"role":"user","content":"Gib mir eine Übersicht aller Feiertage in Bayern 2027 mit Datum und Wochentag."}],"expected":"table","accept":["timeline"],"tags":["de"]}
 {"id":"ta09","messages":[{"role":"user","content":"Was sind die Öffnungszeiten der Hallenbäder in Ulm?"}],"expected":"places","accept":["table","text"],"tags":["de","ambiguous","v4"]}
-{"id":"ta10","messages":[{"role":"user","content":"Vergleiche die Specs von 6 Laptops unter 1000 € in Zahlen."}],"expected":"table","accept":["compare"],"tags":["de","counterexample"]}
+{"id":"ta10","messages":[{"role":"user","content":"Vergleiche die Specs von 6 Laptops unter 1000 € in Zahlen."}],"expected":"table","accept":["compare","products"],"tags":["de","counterexample"]}
 {"id":"ta11","messages":[{"role":"user","content":"Erstelle mir einen Trainingsplan für einen Halbmarathon in 10 Wochen."}],"expected":"workout","accept":["studyplan","table","text","timeline","form"],"tags":["de","ambiguous","v4"]}
 {"id":"ta12","messages":[{"role":"user","content":"Compare AWS, GCP and Azure pricing for a small VM"},{"role":"assistant","content":"For a 2 vCPU / 4 GB VM: AWS t3.medium ≈ $30/month, GCP e2-medium ≈ $24/month, Azure B2s ≈ $30/month (on-demand, US regions)."},{"role":"user","content":"put that in a table"}],"expected":"table","tags":["en","followup","explicit"]}
 {"id":"c01","messages":[{"role":"user","content":"Wie hat sich der Bitcoin-Kurs seit 2020 entwickelt?"}],"expected":"chart","component":"line","tags":["de"]}
@@ -68,11 +68,11 @@
 {"id":"s05","messages":[{"role":"user","content":"Wie viele Schritte bin ich diese Woche gelaufen und wie viele Kalorien habe ich verbrannt?"}],"expected":"stats","accept":["chart","text"],"tags":["de"]}
 {"id":"s06","messages":[{"role":"user","content":"Steckbrief Mars"}],"expected":"stats","accept":["table","text"],"tags":["de","ambiguous"]}
 {"id":"s07","messages":[{"role":"user","content":"Give me the key stats of the last Champions League final."}],"expected":"stats","accept":["text","table"],"tags":["en"]}
-{"id":"cmp01","messages":[{"role":"user","content":"Vergleiche iPhone 17 und Pixel 11."}],"expected":"compare","accept":["table"],"tags":["de","explicit"]}
+{"id":"cmp01","messages":[{"role":"user","content":"Vergleiche iPhone 17 und Pixel 11."}],"expected":"products","component":"compare","accept":["compare","table"],"tags":["de","explicit"]}
 {"id":"cmp02","messages":[{"role":"user","content":"Was sind die Vor- und Nachteile von Wärmepumpe vs. Gasheizung?"}],"expected":"compare","tags":["de","explicit"]}
 {"id":"cmp03","messages":[{"role":"user","content":"Soll ich eher einen Bausparvertrag oder einen ETF-Sparplan machen?"}],"expected":"compare","accept":["text"],"tags":["de"]}
 {"id":"cmp04","messages":[{"role":"user","content":"Python oder Go für ein neues Backend-Projekt?"}],"expected":"compare","accept":["text"],"tags":["de","ambiguous"]}
-{"id":"cmp05","messages":[{"role":"user","content":"Which is better for a beginner: Canon R50 or Sony ZV-E10?"}],"expected":"compare","tags":["en"]}
+{"id":"cmp05","messages":[{"role":"user","content":"Which is better for a beginner: Canon R50 or Sony ZV-E10?"}],"expected":"products","component":"compare","accept":["compare"],"tags":["en"]}
 {"id":"cmp06","messages":[{"role":"user","content":"Explain the difference between TCP and UDP briefly."}],"expected":"compare","accept":["text"],"tags":["en","ambiguous"]}
 {"id":"cmp07","messages":[{"role":"user","content":"Was ist der Unterschied zwischen Wetter und Klima?"}],"expected":"compare","accept":["text"],"tags":["de","ambiguous"]}
 {"id":"cmp08","messages":[{"role":"user","content":"Ich überlege zwischen Hyundai Ioniq 5, Skoda Enyaq und Tesla Model Y. Was passt zu einer Familie mit 2 Kindern?"}],"expected":"compare","accept":["table"],"tags":["de","implicit"]}
@@ -248,7 +248,11 @@
 {"id":"pr04","messages":[{"role":"user","content":"Quiero comprar una aspiradora robot, ¿cuál me recomiendas?"}],"expected":"products","tags":["es","v4","products"]}
 {"id":"pr05","messages":[{"role":"user","content":"Preisvergleich Saugroboter bis 300 €"}],"expected":"products","tags":["de","v4","products"]}
 {"id":"pr06","messages":[{"role":"user","content":"Wie funktioniert Noise-Cancelling bei Kopfhörern?"}],"expected":"text","tags":["de","v4","products","counterexample"]}
-{"id":"pr07","messages":[{"role":"user","content":"Vergleiche iPhone 17 und Pixel 11."}],"expected":"compare","tags":["de","v4","products","counterexample"]}
+{"id":"pr07","messages":[{"role":"user","content":"Vergleiche iPhone 17 und Pixel 11."}],"expected":"products","component":"compare","tags":["de","v4","products","compare"]}
+{"id":"pr10","messages":[{"role":"user","content":"Gba trimui hammer vs pocket mini v2 vs Odin 2 mini vs 35xx SP vs 28xx vs konkr advance vs rg rotate tiefer Vergleich extrem"}],"expected":"products","component":"compare","tags":["de","v4","products","compare"]}
+{"id":"pr11","messages":[{"role":"user","content":"Sony XM6 vs Bose QC"}],"expected":"products","component":"compare","tags":["en","v4","products","compare"]}
+{"id":"pr12","messages":[{"role":"user","content":"Kubernetes vs Nomad"}],"expected":"compare","tags":["en","v4","products","counterexample"]}
+{"id":"pr13","messages":[{"role":"user","content":"Miete vs Kauf"}],"expected":"compare","tags":["de","v4","products","counterexample"]}
 {"id":"pr08","messages":[{"role":"user","content":"Ich will ein Haus kaufen. Wie finanziere ich das am besten?"}],"expected":"text","accept":["calc"],"tags":["de","v4","products","counterexample"]}
 {"id":"pr09","messages":[{"role":"user","content":"Schreib mir eine Produktbeschreibung für meine selbstgemachten Kerzen."}],"expected":"text","tags":["de","v4","products","counterexample"]}
 {"id":"gu01","messages":[{"role":"user","content":"Wie wechsle ich einen Reifen?"}],"expected":"guide","accept":["steps"],"tags":["de","v4","guide"]}
@@ -316,3 +320,19 @@
 {"id":"bl06","messages":[{"role":"user","content":"Mach ein Blockdiagramm von meinem Smart-Home"}],"expected":"blocks","accept":["diagram"],"tags":["de","v5","blocks"]}
 {"id":"bl07","messages":[{"role":"user","content":"Zeichne den Ablauf eines Logins mit OAuth als Diagramm"}],"expected":"diagram","tags":["de","v5","blocks","counterexample"]}
 {"id":"bl08","messages":[{"role":"user","content":"Vergleiche OrbStack und Parallels"}],"expected":"compare","tags":["de","v5","blocks","counterexample"]}
+{"id":"cd01","messages":[{"role":"user","content":"Zeig mir den Diff für die Änderung an user.ts"}],"expected":"diff","tags":["de","v5","coding"]}
+{"id":"cd02","messages":[{"role":"user","content":"Show me what would change in this file if we add a null check"}],"expected":"diff","tags":["en","v5","coding"]}
+{"id":"cd03","messages":[{"role":"user","content":"Muestra el diff de los cambios en config.yaml"}],"expected":"diff","tags":["es","v5","coding"]}
+{"id":"cd04","messages":[{"role":"user","content":"Führ die Tests aus"}],"expected":"terminal","tags":["de","v5","coding"]}
+{"id":"cd05","messages":[{"role":"user","content":"Zeig mir die Ausgabe von npm test"}],"expected":"terminal","tags":["de","v5","coding"]}
+{"id":"cd06","messages":[{"role":"user","content":"Run the tests and tell me what fails"}],"expected":"terminal","tags":["en","v5","coding"]}
+{"id":"cd07","messages":[{"role":"user","content":"ejecuta git status"}],"expected":"terminal","accept":["changes"],"tags":["es","v5","coding"]}
+{"id":"cd08","messages":[{"role":"user","content":"Welche Dateien hast du geändert?"}],"expected":"changes","tags":["de","v5","coding"]}
+{"id":"cd09","messages":[{"role":"user","content":"Which files did you touch in that refactor?"}],"expected":"changes","tags":["en","v5","coding"]}
+{"id":"cd10","messages":[{"role":"user","content":"¿Qué archivos cambiaste?"}],"expected":"changes","tags":["es","v5","coding"]}
+{"id":"cd11","messages":[{"role":"user","content":"Schreib eine Funktion, die zwei Listen zusammenführt"}],"expected":"text","tags":["de","v5","coding","counterexample"]}
+{"id":"cd12","messages":[{"role":"user","content":"Was macht git rebase eigentlich?"}],"expected":"text","tags":["de","v5","coding","counterexample"]}
+{"id":"cd13","messages":[{"role":"user","content":"How do I run the tests in this repo?"}],"expected":"text","tags":["en","v5","coding","counterexample"]}
+{"id":"cd14","messages":[{"role":"user","content":"Wie funktioniert git diff?"}],"expected":"text","tags":["de","v5","coding","counterexample"]}
+{"id":"cd15","messages":[{"role":"user","content":"Schreib ein Skript, das die Tests ausführt"}],"expected":"text","tags":["de","v5","coding","counterexample"]}
+{"id":"cd16","messages":[{"role":"user","content":"Zeig mir die Änderung an user.ts"},{"role":"assistant","content":"Hier:\n```hui\n{\"type\":\"diff\",\"files\":[{\"path\":\"user.ts\",\"status\":\"modified\",\"patch\":\"@@ -1 +1 @@\\n-a\\n+b\"}]}\n```"},{"role":"user","content":"und für index.ts?"}],"expected":"diff","tags":["de","v5","coding","followup"]}

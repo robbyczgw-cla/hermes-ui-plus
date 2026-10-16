@@ -23,3 +23,4 @@ This repository is (or will become) **public**. Everything tracked must be safe 
 
 `scripts/check.sh all` (tsc + tests, memory-capped; never wrap it in `flock` yourself). Leak-guard tests:
 `node --test scripts/leak-guard.test.mjs`.
+While iterating use `scripts/check.sh quick` (related tests + incremental tsc + leak-guard; not a merge gate); `scripts/check.sh all` is required before every merge.

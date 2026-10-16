@@ -10,6 +10,8 @@ test('official brand mirrors app/brand/identity.json', () => {
   const b = brand('hermes');
   assert.equal(b.name, ID.name);
   assert.equal(b.shortName, ID.shortName);
+  assert.equal(b.displayName, ID.displayName);
+  assert.equal(brandVars('hermes').appShort, ID.displayName);
   assert.equal(b.bridgeName, ID.bridgeName);
   assert.equal(b.scheme, ID.scheme);
   assert.equal(b.homepage, ID.homepage);
@@ -20,8 +22,9 @@ test('official brand mirrors app/brand/identity.json', () => {
   for (const u of [b.homepage, b.repoUrl, b.privacyUrl]) assert.ok(u === null || /^https:\/\//.test(u), String(u));
   assert.equal(pairScheme('hermes'), ID.scheme);
   assert.deepEqual([...PAIR_SCHEMES], [ID.scheme, ...ID.legacySchemes]);
-  assert.ok(ID.shortName.length <= 12, 'home-screen label must fit under an icon');
-  assert.equal(shareWordmark('hermes'), ID.shortName);
+  assert.ok(ID.displayName.length <= 12, 'home-screen label must fit under an icon');
+  assert.ok(ID.storeName.startsWith(ID.displayName), 'store name starts with the on-device name (App Store 2.3.8)');
+  assert.equal(shareWordmark('hermes'), ID.displayName);
 });
 
 test('personal flavor keeps its wording', () => {

@@ -36,6 +36,12 @@ export type ThemeColors = {
   /** Even quieter text (axis labels, placeholders) */
   subtle: string;
   accent: string;
+  /**
+   * The accent as TEXT / link color: ≥ 4.5:1 on bg, surface, surfaceAlt and accentSoft. Equals `accent` where that
+   * already passes; a custom accent (only held to 3:1 as a fill / icon / border) gets a nudged copy. Use it for every
+   * `color:` of a label; keep `accent` for fills, borders and icons.
+   */
+  accentText: string;
   /** Text/icon color on top of `accent` */
   onAccent: string;
   /** Low-emphasis accent background (selected chip, highlight column) */
@@ -43,12 +49,25 @@ export type ThemeColors = {
   border: string;
   /** Stronger border for inputs / focus */
   borderStrong: string;
+  /**
+   * Outline of a control that is recognisable by its border alone (text field, unchecked radio / checkbox, outlined chip,
+   * switch track when off): ≥ 3:1 on bg, surface and surfaceAlt (WCAG 1.4.11). Dividers and decoration stay on `border` /
+   * `borderStrong`.
+   */
+  borderControl: string;
   success: string;
   successSoft: string;
   warning: string;
   warningSoft: string;
   danger: string;
   dangerSoft: string;
+  /** Ink: fill of the primary button (the text colour), `onInk` its label */
+  ink: string;
+  onInk: string;
+  /** Seal red: approval and destructive moments only (the approval seal mark, "Delete"), never a general accent */
+  seal: string;
+  onSeal: string;
+  sealSoft: string;
   info: string;
   infoSoft: string;
   /** Code block background */
@@ -70,7 +89,12 @@ export type ThemeColors = {
 };
 
 export type Spacing = { xxs: number; xs: number; s: number; m: number; l: number; xl: number; xxl: number };
-export type Radii = { xs: number; s: number; m: number; l: number; xl: number; pill: number };
+/**
+ * Four radii, by what the shape is: `inline` 6 (chips, inline code, small tags), `control` 10 (buttons, inputs,
+ * thumbnails and other elements inside a card), `card` 16 (cards, sheets, dialogs), `pill` (counters, segmented
+ * selections, the composer). xs/s/m/l/xl are the older names, kept as aliases of the same four values.
+ */
+export type Radii = { inline: number; control: number; card: number; pill: number; xs: number; s: number; m: number; l: number; xl: number };
 
 export type TextStyleToken = {
   fontSize: number;
@@ -81,6 +105,11 @@ export type TextStyleToken = {
 };
 
 export type Typography = {
+  /** Gloock: the empty-chat greeting and onboarding titles. The display face never goes below 22 px or into controls. */
+  hero: TextStyleToken;
+  /** Gloock: titles of empty states (no chats yet, nothing found, onboarding done) */
+  heroCompact: TextStyleToken;
+  /** big numbers (score, result, countdown) */
   display: TextStyleToken;
   title: TextStyleToken;
   headline: TextStyleToken;
@@ -91,6 +120,15 @@ export type Typography = {
   micro: TextStyleToken;
   mono: TextStyleToken;
   stat: TextStyleToken;
+  /** answer prose (Markdown): one size up from UI body, with more leading for long reading */
+  reading: TextStyleToken;
+  readingH1: TextStyleToken;
+  readingH2: TextStyleToken;
+  readingH3: TextStyleToken;
+  /** answer tables and other dense prose */
+  readingSmall: TextStyleToken;
+  /** code blocks, commands */
+  code: TextStyleToken;
 };
 
 export type ShadowToken = {
@@ -115,31 +153,50 @@ export type Theme = {
   radii: Radii;
   typography: Typography;
   shadows: { none: ShadowToken; sm: ShadowToken; md: ShadowToken; lg: ShadowToken };
-  fonts: { sans: string | undefined; mono: string };
+  /** Atkinson Hyperlegible Next (UI + text), Gloock (display moments only), JetBrains Mono (code, commands) */
+  fonts: { sans: string; display: string; mono: string };
   /** Content max width for components inside a chat bubble */
   maxContentWidth: number;
 };
 
-const monoFont = Platform.select({ ios: 'Menlo', android: 'monospace', default: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' })!;
-const sansFont = Platform.select<string | undefined>({
-  web: 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-  default: undefined,
+// Bundled (SIL OFL, app/assets/fonts + app/public/fonts, scripts/subset-fonts.sh): native registers the static faces under
+// these family names (expo-font config plugin in app.json, weights resolve per face); web/desktop load the variable
+// woff2 via @font-face in public/index.html (preloaded, metric-matched fallback faces against a layout shift).
+export const FONT_FAMILY = { sans: 'Atkinson Hyperlegible Next', display: 'Gloock', mono: 'JetBrains Mono' } as const;
+const sansFont = Platform.select({
+  web: '"Atkinson Hyperlegible Next", "Atkinson Fallback", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+  default: FONT_FAMILY.sans,
 });
+const displayFont = Platform.select({ web: 'Gloock, "Gloock Fallback", Georgia, "Times New Roman", serif', default: FONT_FAMILY.display });
+const monoFont = Platform.select({ web: '"JetBrains Mono", "JetBrains Mono Fallback", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', default: FONT_FAMILY.mono });
+/** The platform's `fontFamily` values (web: stacks with metric-matched fallbacks). Same for every theme. */
+export const FONTS = { sans: sansFont, display: displayFont, mono: monoFont } as const;
 
 const spacing: Spacing = { xxs: 2, xs: 4, s: 8, m: 12, l: 16, xl: 24, xxl: 32 };
-const radii: Radii = { xs: 6, s: 8, m: 12, l: 16, xl: 20, pill: 999 };
+const radii: Radii = { inline: 6, control: 10, card: 16, pill: 999, xs: 6, s: 10, m: 10, l: 16, xl: 16 };
 
+// Type scale. UI steps 11 · 13 · 14 · 15 · 17 · 20 · 24 · 28 (one role each), answer prose 16 → H3 17 · H2 20 · H1 24,
+// and Gloock only at 24 / 32. Weights 400 / 500 / 600 / 700 exist as real faces on every platform (no faux bold);
+// Gloock has only 400. Atkinson runs wide with a large x-height, so body text gets generous leading (≈ 1.5).
 const typography: Typography = {
-  display: { fontSize: 28, lineHeight: 34, fontWeight: '600', letterSpacing: -0.6 },
-  title: { fontSize: 20, lineHeight: 26, fontWeight: '600', letterSpacing: -0.3 },
-  headline: { fontSize: 16, lineHeight: 22, fontWeight: '600', letterSpacing: -0.2 },
+  hero: { fontSize: 32, lineHeight: 38, fontWeight: '400', letterSpacing: -0.4, fontFamily: displayFont },
+  heroCompact: { fontSize: 24, lineHeight: 30, fontWeight: '400', letterSpacing: -0.2, fontFamily: displayFont },
+  display: { fontSize: 28, lineHeight: 34, fontWeight: '700', letterSpacing: -0.5 },
+  title: { fontSize: 20, lineHeight: 26, fontWeight: '700', letterSpacing: -0.2 },
+  headline: { fontSize: 17, lineHeight: 23, fontWeight: '600', letterSpacing: -0.1 },
   body: { fontSize: 15, lineHeight: 22, fontWeight: '400' },
   bodyStrong: { fontSize: 15, lineHeight: 22, fontWeight: '600' },
   callout: { fontSize: 14, lineHeight: 20, fontWeight: '400' },
   caption: { fontSize: 13, lineHeight: 18, fontWeight: '400' },
-  micro: { fontSize: 11, lineHeight: 14, fontWeight: '500', letterSpacing: 0.2 },
+  micro: { fontSize: 11, lineHeight: 14, fontWeight: '500', letterSpacing: 0.1 },
   mono: { fontSize: 13, lineHeight: 20, fontWeight: '400', fontFamily: monoFont },
-  stat: { fontSize: 24, lineHeight: 30, fontWeight: '600', letterSpacing: -0.5 },
+  stat: { fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.4 },
+  reading: { fontSize: 16, lineHeight: 25, fontWeight: '400' },
+  readingH1: { fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.4 },
+  readingH2: { fontSize: 20, lineHeight: 27, fontWeight: '700', letterSpacing: -0.2 },
+  readingH3: { fontSize: 17, lineHeight: 24, fontWeight: '600' },
+  readingSmall: { fontSize: 14, lineHeight: 21, fontWeight: '400' },
+  code: { fontSize: 13, lineHeight: 20, fontWeight: '400', fontFamily: monoFont },
 };
 
 function shadow(color: string, opacity: number, radius: number, y: number, elevation: number): ShadowToken {
@@ -193,7 +250,7 @@ export function resolveTheme(cfg: ThemeConfig, system: ColorScheme | null | unde
     radii,
     typography: scaleTypography(typography, fontScale),
     shadows: shadowsFor(dark),
-    fonts: { sans: sansFont, mono: monoFont },
+    fonts: { sans: sansFont, display: displayFont, mono: monoFont },
     maxContentWidth: 720,
   };
   cache.set(key, th);
@@ -273,6 +330,7 @@ export function cssVariables(t: Theme): string {
     ['--h-muted', c.muted],
     ['--h-subtle', c.subtle],
     ['--h-accent', c.accent],
+    ['--h-accent-text', c.accentText],
     ['--h-on-accent', c.onAccent],
     ['--h-accent-soft', c.accentSoft],
     ['--h-border', c.border],
@@ -291,8 +349,9 @@ export function cssVariables(t: Theme): string {
     ['--h-radius', `${t.radii.m}px`],
     ['--h-radius-sm', `${t.radii.s}px`],
     ['--h-radius-lg', `${t.radii.l}px`],
-    ['--h-font', 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'],
-    ['--h-font-mono', 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'],
+    // the sandboxed iframe cannot reach the app's @font-face files: the app faces are used where installed, else the system's
+    ['--h-font', '"Atkinson Hyperlegible Next", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'],
+    ['--h-font-mono', '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'],
     ['--h-font-size', `${t.typography.body.fontSize}px`],
     ...c.chart.map((col, i) => [`--h-chart-${i + 1}`, col] as [string, string]),
   ];

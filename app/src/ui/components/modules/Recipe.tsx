@@ -10,6 +10,7 @@ import { Modal, ScrollView, View } from 'react-native';
 import { useKeepAwake } from 'expo-keep-awake';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme, type Theme } from '../../theme';
+import { scaleFont } from '../../themes';
 import { useHui } from '../../primitives/context';
 import { HText, InlineText, PressableScale, Surface } from '../../primitives/basics';
 import { Icon } from '../../primitives/Icon';
@@ -136,9 +137,10 @@ export function Recipe({ node }: NodeProps<HuiRecipe>) {
         </View>
 
         {/* servings */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.m }}>
+        {/* wrap + content-sized label: at large text the stepper moves under the label instead of overflowing the card */}
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: t.spacing.m }}>
           <BIcon name="users" size={18} color={t.colors.muted} />
-          <HText variant="callout" color="muted" style={{ flex: 1 }}>
+          <HText variant="callout" color="muted" style={{ flexGrow: 1, flexShrink: 1 }}>
             {RECIPE.servingsLabel}
           </HText>
           <Stepper
@@ -159,7 +161,7 @@ export function Recipe({ node }: NodeProps<HuiRecipe>) {
           {groups.map((g, gi) => (
             <View key={gi} style={{ gap: 2 }}>
               {g.name ? (
-                <HText variant="micro" color="subtle" style={{ textTransform: 'uppercase', marginTop: gi ? t.spacing.s : 0, marginBottom: 2 }}>
+                <HText variant="caption" weight="600" color="subtle" style={{ marginTop: gi ? t.spacing.s : 0, marginBottom: 2 }}>
                   {g.name}
                 </HText>
               ) : null}
@@ -197,7 +199,7 @@ export function Recipe({ node }: NodeProps<HuiRecipe>) {
 
         {/* tips */}
         {tips.length ? (
-          <View style={{ gap: 6, backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.m, padding: t.spacing.m }}>
+          <View style={{ gap: 6, backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.control, padding: t.spacing.m }}>
             <HText variant="caption" weight="600">
               {RECIPE.tips}
             </HText>
@@ -262,7 +264,7 @@ function SectionHead({ t, title, right }: { t: Theme; title: string; right?: str
 
 function Check({ t, on, round }: { t: Theme; on: boolean; round?: boolean }) {
   return (
-    <View style={{ width: 22, height: 22, borderRadius: round ? 11 : 6, borderWidth: on ? 0 : 1.5, borderColor: t.colors.borderStrong, backgroundColor: on ? t.colors.accent : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+    <View style={{ width: 22, height: 22, borderRadius: round ? 11 : 6, borderWidth: on ? 0 : 1.5, borderColor: t.colors.borderControl, backgroundColor: on ? t.colors.accent : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
       {on ? <Icon name="check" size={14} color={t.colors.onAccent} strokeWidth={2.5} /> : null}
     </View>
   );
@@ -326,11 +328,11 @@ function StepTimer({ seconds, record, now, label, source, big }: StepTimerProps 
   };
   if (!record) {
     return (
-      <Btn label={RECIPE.startTimer(formatTimerLabel(seconds, S.time))} bicon="timer" kind="ghost" compact={!big} onPress={start} style={{ alignSelf: 'flex-start', paddingHorizontal: big ? undefined : 10, backgroundColor: t.colors.accentSoft }} />
+      <Btn label={RECIPE.startTimer(formatTimerLabel(seconds, S.time))} bicon="timer" compact={!big} onPress={start} style={{ alignSelf: 'flex-start' }} />
     );
   }
   const doneNow = status === 'done';
-  const color = doneNow ? t.colors.success : t.colors.accent;
+  const color = doneNow ? t.colors.success : t.colors.accentText;
   return (
     <View
       style={{ alignSelf: big ? 'stretch' : 'flex-start', flexDirection: 'row', alignItems: 'center', gap: t.spacing.s, paddingLeft: 12, paddingRight: 4, minHeight: big ? 64 : 40, borderRadius: t.radii.pill, backgroundColor: doneNow ? t.colors.successSoft : t.colors.accentSoft, overflow: 'hidden' }}
@@ -399,7 +401,7 @@ function CookingMode({
               {RECIPE.step(i + 1, steps.length)}
             </HText>
           </View>
-          <RoundBtn bicon="cart" label={RECIPE.ingredients} onPress={() => setShowIngredients((x) => !x)} size={44} filled={showIngredients} />
+          <RoundBtn bicon="cart" label={RECIPE.ingredients} onPress={() => setShowIngredients((x) => !x)} size={44} filled={showIngredients} expanded={showIngredients} />
           <RoundBtn icon="x" label={RECIPE.close} onPress={onClose} size={44} />
         </View>
         {/* progress */}
@@ -410,7 +412,7 @@ function CookingMode({
         </View>
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: t.spacing.xl, gap: t.spacing.xl, flexGrow: 1, justifyContent: 'center' }}>
           {showIngredients ? (
-            <View style={{ gap: 6, backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.l, padding: t.spacing.l }}>
+            <View style={{ gap: 6, backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.card, padding: t.spacing.l }}>
               {ingredients.map((ing, k) => (
                 <HText key={k} variant="body">
                   <HText variant="body" weight="600">
@@ -421,7 +423,7 @@ function CookingMode({
               ))}
             </View>
           ) : null}
-          {s ? <InlineText variant="display" text={s.text} style={{ fontSize: 26, lineHeight: 36, fontWeight: '500' }} /> : null}
+          {s ? <InlineText variant="display" text={s.text} style={{ ...scaleFont(26, 36, t.fontScale), fontWeight: '500' }} /> : null}
           {tp ? <StepTimer {...tp} big /> : null}
         </ScrollView>
         <View style={{ flexDirection: 'row', gap: t.spacing.m, paddingHorizontal: t.spacing.l }}>

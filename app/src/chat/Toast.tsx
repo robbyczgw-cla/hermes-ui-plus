@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AccessibilityInfo, Animated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { AccessibilityInfo, Animated, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Text } from '../ui/primitives/Text';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../ui';
 import { toastDuration } from './toastTiming';
@@ -98,11 +99,11 @@ function ToastView({ text, onDone }: { text: string; onDone: () => void }) {
             backgroundColor: t.colors.text,
             paddingHorizontal: 16,
             paddingVertical: 10,
-            borderRadius: 20,
+            borderRadius: t.radii.card,
             ...t.shadows.md,
           }}
         >
-          <Text style={{ color: t.colors.bg, fontSize: 14, lineHeight: 19, fontWeight: '500', textAlign: 'center' }}>{text}</Text>
+          <Text style={[t.typography.callout, { color: t.colors.bg, fontWeight: '500', textAlign: 'center' }]}>{text}</Text>
         </Pressable>
       </Animated.View>
     </View>

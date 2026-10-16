@@ -8,12 +8,14 @@ import Animated, { Easing, cancelAnimation, useAnimatedStyle, useReducedMotion, 
 import { useTheme } from '../../../theme';
 import { useHui } from '../../../primitives/context';
 import { HText, InlineText, PressableScale } from '../../../primitives/basics';
+import { Button } from '../../../primitives/Button';
 import { Icon, type IconName } from '../../../primitives/Icon';
 import { haptic } from '../../../primitives/haptics';
 import { useNodeScope, useNodeStateStore } from '../../../../nodestate';
 import { commitOnUnmount } from '../../../../actions/activeConversation.ts';
 import { moduleNodeId } from './misc.ts';
 import { useS } from '../useS';
+import { useCaptureMode } from '../../../lib/capture';
 
 /* ───────────── child rendering (tabs / accordion) ───────────── */
 
@@ -140,10 +142,10 @@ export function UndoBar({ label, ms, onUndo }: { label: string; ms: number; onUn
   return (
     <View
       accessibilityLiveRegion="polite"
-      style={{ borderRadius: t.radii.m, backgroundColor: t.colors.accentSoft, overflow: 'hidden' }}
+      style={{ borderRadius: t.radii.control, backgroundColor: t.colors.accentSoft, overflow: 'hidden' }}
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s, paddingLeft: t.spacing.m, minHeight: 44 }}>
-        <HText variant="callout" style={{ flex: 1, color: t.colors.accent }} numberOfLines={1}>
+        <HText variant="callout" style={{ flex: 1, color: t.colors.accentText }} numberOfLines={1}>
           {label}
         </HText>
         <PressableScale
@@ -191,7 +193,7 @@ export function AnsweredSummary({
           <Icon name={icon} size={18} color={fg} strokeWidth={2} />
         </View>
         <View style={{ flex: 1, gap: 2 }}>
-          <HText variant="micro" color="muted" style={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>
+          <HText variant="caption" weight="600" color="muted">
             {S.common.yourAnswer}
           </HText>
           <HText variant="bodyStrong">{answer}</HText>
@@ -199,11 +201,7 @@ export function AnsweredSummary({
       </View>
       {children}
       {onReopen ? (
-        <PressableScale haptic="selection" onPress={onReopen} accessibilityRole="button" style={{ alignSelf: 'flex-start', minHeight: 36, justifyContent: 'center' }}>
-          <HText variant="caption" color="accent" weight="500">
-            {S.common.reopen}
-          </HText>
-        </PressableScale>
+        <Button label={S.common.reopen} variant="tertiary" size="small" onPress={onReopen} style={{ alignSelf: 'flex-start' }} />
       ) : null}
     </View>
   );
@@ -211,6 +209,10 @@ export function AnsweredSummary({
 
 /* ───────────── buttons ───────────── */
 
+/**
+ * Card buttons on top of the one `Button`: the single main action of a card is primary (ink), the alternatives secondary.
+ * `tone`: 'danger' → seal red (destructive moments only);
+ */
 export function PrimaryButton({
   label,
   onPress,
@@ -223,32 +225,12 @@ export function PrimaryButton({
   label: string;
   onPress: () => void;
   disabled?: boolean;
-  tone?: 'accent' | 'danger' | 'success';
+  tone?: 'accent' | 'danger';
   icon?: IconName;
   style?: StyleProp<ViewStyle>;
   accessibilityHint?: string;
 }) {
-  const t = useTheme();
-  // disabled: neutral surfaceAlt + subtle text (a washed-out accent read as "loading")
-  const bg = disabled ? t.colors.surfaceAlt : tone === 'danger' ? t.colors.danger : tone === 'success' ? t.colors.success : t.colors.accent;
-  const fg = disabled ? t.colors.subtle : tone === 'accent' ? t.colors.onAccent : t.dark ? '#111' : '#FFF';
-  return (
-    <PressableScale
-      haptic={false}
-      disabled={disabled}
-      dimDisabled={false}
-      onPress={onPress}
-      accessibilityLabel={label}
-      accessibilityHint={accessibilityHint}
-      style={[{ minHeight: 44, borderRadius: t.radii.pill, backgroundColor: bg, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 6, paddingHorizontal: t.spacing.l }, style]}
-      pressedStyle={{ opacity: 0.88 }}
-    >
-      {icon ? <Icon name={icon} size={16} color={fg} strokeWidth={2.2} /> : null}
-      <HText variant="callout" weight="600" style={{ color: fg }} numberOfLines={1}>
-        {label}
-      </HText>
-    </PressableScale>
-  );
+  return <Button label={label} variant="primary" tone={tone === 'danger' ? 'seal' : 'default'} icon={icon} disabled={disabled} onPress={onPress} accessibilityHint={accessibilityHint} style={style} />;
 }
 
 export function SecondaryButton({
@@ -257,36 +239,18 @@ export function SecondaryButton({
   disabled,
   icon,
   style,
-  color,
 }: {
   label: string;
   onPress: () => void;
   disabled?: boolean;
   icon?: IconName;
   style?: StyleProp<ViewStyle>;
-  color?: string;
 }) {
-  const t = useTheme();
-  const fg = color ?? t.colors.text;
-  return (
-    <PressableScale
-      haptic="selection"
-      disabled={disabled}
-      onPress={onPress}
-      accessibilityLabel={label}
-      style={[{ minHeight: 44, borderRadius: t.radii.pill, borderWidth: 1, borderColor: t.colors.borderStrong, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 6, paddingHorizontal: t.spacing.l }, style]}
-      pressedStyle={{ backgroundColor: t.colors.surfacePressed }}
-    >
-      {icon ? <Icon name={icon} size={16} color={fg} /> : null}
-      <HText variant="callout" weight="500" style={{ color: fg }} numberOfLines={1}>
-        {label}
-      </HText>
-    </PressableScale>
-  );
+  return <Button label={label} variant="secondary" icon={icon} disabled={disabled} onPress={onPress} style={style} />;
 }
 
 /** Round icon-only button (≥ 44 px hit area). */
-export function IconButton({ icon, label, onPress, color, size = 18, disabled, active }: { icon: IconName; label: string; onPress: () => void; color?: string; size?: number; disabled?: boolean; active?: boolean }) {
+function IconButtonInner({ icon, label, onPress, color, size = 18, disabled, active }: { icon: IconName; label: string; onPress: () => void; color?: string; size?: number; disabled?: boolean; active?: boolean }) {
   const t = useTheme();
   return (
     <PressableScale
@@ -301,4 +265,9 @@ export function IconButton({ icon, label, onPress, color, size = 18, disabled, a
       <Icon name={icon} size={size} color={color ?? (active ? t.colors.accent : t.colors.muted)} />
     </PressableScale>
   );
+}
+
+/** share-as-image (capture mode): an app-only control, not part of the picture */
+export function IconButton(props: Parameters<typeof IconButtonInner>[0]) {
+  return useCaptureMode() ? null : <IconButtonInner {...props} />;
 }

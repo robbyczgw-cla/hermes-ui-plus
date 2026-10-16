@@ -1,8 +1,9 @@
 // Connection marks: neutral letter monograms (services) or stroke icons (own server, demo) on one tile
 // style. No emoji and no logos (trademarks): the letters only abbreviate the product name.
-import { Text, View } from 'react-native';
+import { View } from 'react-native';
+import { Text } from '../ui/primitives/Text';
 import { Icon, type IconName } from '../chat/icons';
-import { useTheme } from '../ui';
+import { textStyle, useTheme } from '../ui';
 import type { ProfileKind } from './profiles';
 
 export type MarkSpec = { text: string } | { icon: IconName };
@@ -36,7 +37,7 @@ export function ProfileMark({ mark, small }: { mark: MarkSpec; small?: boolean }
       importantForAccessibility="no-hide-descendants"
     >
       {'text' in mark ? (
-        <Text style={{ color: th.colors.text, fontSize: small ? 12 : 14, fontWeight: '600', letterSpacing: 0.2 }} allowFontScaling={false}>
+        <Text style={[textStyle(th, small ? 'micro' : 'callout'), { color: th.colors.text, fontWeight: '600' }]} allowFontScaling={false}>
           {mark.text}
         </Text>
       ) : (

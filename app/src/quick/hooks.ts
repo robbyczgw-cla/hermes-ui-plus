@@ -5,7 +5,7 @@
 import { fetch as expoFetch } from 'expo/fetch';
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import { AppState } from 'react-native';
-import { availabilityKey, createAvailability, DEMO_KEY, type ConfigFetch } from './availability';
+import { availabilityKey, createAvailability, DEMO_KEY, quickOffered, type ConfigFetch } from './availability';
 import { quickBackendFor, type ProfileLike, type QuickBackend, type QuickConfig } from './core';
 
 // arrow wrapper: on web expo/fetch IS the browser fetch, which throws "Illegal invocation" unless called with a window `this`
@@ -53,7 +53,7 @@ export function useQuickAvailability(profile: ProfileLike | null | undefined): U
   useEffect(() => {
     if (backend?.kind === 'bridge') void availability.refresh(backend.conn);
   }, [backend]);
-  return useMemo(() => (backend && entry?.on ? { available: true, config: entry.config, backend, key } : { ...NONE, backend, key }), [backend, entry, key]);
+  return useMemo(() => (backend && entry && quickOffered(entry) ? { available: true, config: entry.config, backend, key } : { ...NONE, backend, key }), [backend, entry, key]);
 }
 
 /** reconnect (health back online), settings opened: check again now */

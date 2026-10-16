@@ -5,9 +5,11 @@
 # Usage: [FLAVOR=hermes|personal] [HUI_PRIVATE_DIR=…] scripts/build-desktop-linux.sh   (docs/BUILD.md "Flavors")
 # Output: dist/share/desktop-linux[-plus]/{<artifact>_<ver>_x86_64.AppImage,<artifact>_<ver>_amd64.deb,index.html,
 #         icon-256.png,build.txt}
-#         hermes: name/id from app/brand/identity.json ("Hermes UI+", xyz.hermesui.desktop), files/binary hermes-ui-plus;
+#         hermes: name/id from app/brand/identity.json ("HUI+" = displayName, xyz.hermesui.desktop), files/binary
+#         hermes-ui-plus, .deb package debPackage ("hermes-ui": Tauri would derive "hui" from the name, so the deb is
+#         repacked with the pinned name and apt upgrades an installed 0.1 package instead of colliding with it);
 #         personal: desktopName/desktopId of $HUI_PRIVATE_DIR/app/identity.json, else "Hermes" / io.hermesiui.desktop,
-#         files/binary hermes
+#         files/binary hermes, package name as Tauri derives it
 #         dist/build-desktop-linux-<timestamp>.log
 #
 # Flow (runs on the build machine, mirrors scripts/build-desktop-mac.sh):
@@ -64,9 +66,9 @@ flavor_load_build_env
 if [ "$FLAVOR" = personal ]; then
   _pid() { node -p "try{require(process.argv[1])[process.argv[2]]||''}catch{''}" "$HUI_PRIVATE_DIR/app/identity.json" "$1"; }
   DESKTOP_NAME="$(_pid desktopName)"; DESKTOP_NAME="${DESKTOP_NAME:-Hermes}"
-  DESKTOP_ID="$(_pid desktopId)"; DESKTOP_ID="${DESKTOP_ID:-io.hermesiui.desktop}"; ART="hermes"
+  DESKTOP_ID="$(_pid desktopId)"; DESKTOP_ID="${DESKTOP_ID:-io.hermesiui.desktop}"; ART="hermes"; DEB_PACKAGE=""
 else
-  DESKTOP_NAME="$BRAND_SHORT_NAME"; DESKTOP_ID="$BRAND_DESKTOP_ID"; ART="$BRAND_ARTIFACT"
+  DESKTOP_NAME="$BRAND_DISPLAY_NAME"; DESKTOP_ID="$BRAND_DESKTOP_ID"; ART="$BRAND_ARTIFACT"; DEB_PACKAGE="$BRAND_DEB_PACKAGE"
 fi
 LINUX_HOST="${LINUX_HOST:-}"
 [ -n "$LINUX_HOST" ] || { echo "LINUX_HOST is not set (env or \$HUI_PRIVATE_DIR/build.env)"; exit 2; }
@@ -78,6 +80,7 @@ fi
 # names end up in the Tauri config (JSON via node), the remote env (printf %q), file names and the download page
 [[ "$DESKTOP_ID" =~ ^[A-Za-z0-9.-]+$ ]] || { echo "invalid desktop id '$DESKTOP_ID'" >&2; exit 2; }
 [[ "$ART" =~ ^[a-z0-9][a-z0-9-]*$ ]] || { echo "invalid artifact/binary name '$ART'" >&2; exit 2; }
+[[ -z "$DEB_PACKAGE" || "$DEB_PACKAGE" =~ ^[a-z0-9][a-z0-9+.-]+$ ]] || { echo "invalid deb package name '$DEB_PACKAGE'" >&2; exit 2; }
 case "$DESKTOP_NAME" in ''|*/*|*$'\n'*) echo "invalid desktop name" >&2; exit 2 ;; esac
 html_esc() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/"/\&quot;/g' -e "s/'/\&#39;/g" <<<"$1"; }
 SKIP_WEB="${SKIP_WEB:-0}"; KEEP_CACHE="${KEEP_CACHE:-0}"; MIN_FREE_GB="${MIN_FREE_GB:-8}"; EMU_WAIT_MIN="${EMU_WAIT_MIN:-90}"
@@ -168,7 +171,7 @@ t "remote build on $LINUX_HOST"
 # every value shell-quoted for the remote shell (a name with an apostrophe or spaces must not break / inject)
 printf -v REMOTE_ENV '%q=%q ' REMOTE_DIR "$REMOTE_DIR" KEEP_CACHE "$KEEP_CACHE" MIN_FREE_GB "$MIN_FREE_GB" \
   EMU_WAIT_MIN "$EMU_WAIT_MIN" MEM_MAX "$MEM_MAX" JOBS "$JOBS" SHA "$SHA" DESKTOP_NAME "$DESKTOP_NAME" \
-  DESKTOP_ID "$DESKTOP_ID" ART "$ART" LINUX_BUILD_IMAGE "$LINUX_BUILD_IMAGE" LINUX_IMAGE_REFRESH "$LINUX_IMAGE_REFRESH" \
+  DESKTOP_ID "$DESKTOP_ID" ART "$ART" DEB_PACKAGE "$DEB_PACKAGE" LINUX_BUILD_IMAGE "$LINUX_BUILD_IMAGE" LINUX_IMAGE_REFRESH "$LINUX_IMAGE_REFRESH" \
   LINUX_RUST_VERSION "$LINUX_RUST_VERSION"
 # the script is read from stdin (`bash -s`), so no remote process command line contains "qemu-system"
 "${SSH[@]}" "${REMOTE_ENV}/bin/bash -s" <<'REMOTE'
@@ -271,6 +274,16 @@ cd "$D"
 BUNDLE="src-tauri/target/release/bundle"
 AI="$(ls "$BUNDLE"/appimage/*.AppImage | head -1)"; DEB="$(ls "$BUNDLE"/deb/*.deb | head -1)"
 [ -f "$AI" ] && [ -f "$DEB" ] || { echo "bundle output missing"; exit 1; }
+# Tauri names the package after the product name (kebab case); a pinned name keeps the apt upgrade path across renames
+if [ -n "$DEB_PACKAGE" ] && [ "$(dpkg-deb -f "$DEB" Package)" != "$DEB_PACKAGE" ]; then
+  t "deb package name $(dpkg-deb -f "$DEB" Package) -> $DEB_PACKAGE"
+  RX="$TMPDIR/deb-repack"; rm -rf "$RX"
+  dpkg-deb -R "$DEB" "$RX"
+  sed -i "s/^Package: .*/Package: $DEB_PACKAGE/" "$RX/DEBIAN/control"
+  dpkg-deb --root-owner-group -b "$RX" "$DEB" >/dev/null
+  rm -rf "$RX"
+fi
+[ -z "$DEB_PACKAGE" ] || [ "$(dpkg-deb -f "$DEB" Package)" = "$DEB_PACKAGE" ] || { echo "deb package name is not $DEB_PACKAGE"; exit 1; }
 BIN="src-tauri/target/release/$ART"; [ -f "$BIN" ] || BIN="src-tauri/target/release/hermes-ui-desktop"
 VER="$(dpkg-deb -f "$DEB" Version)"
 GLIBC_REQ="$(objdump -T "$BIN" | grep -o 'GLIBC_[0-9][0-9.]*' | sed 's/^GLIBC_//' | sort -V | tail -1)"

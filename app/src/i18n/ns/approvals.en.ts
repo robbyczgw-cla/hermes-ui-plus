@@ -10,8 +10,12 @@ export const approvals = {
     flagged: 'Flagged as dangerous by Hermes',
     high: 'High risk (estimate)',
     elevated: 'Elevated risk (estimate)',
-    estimateNote: 'Risk estimated by the app, not by Hermes',
     normal: 'Confirmation needed',
+    short: {
+      high: 'High risk',
+      elevated: 'Elevated risk',
+    },
+    byApp: 'estimated by the app, not by Hermes',
   },
   choice: {
     once: {
@@ -34,6 +38,8 @@ export const approvals = {
       a11y: 'Deny this command',
     },
     retry: '{label} – try again',
+    more: 'More options',
+    less: 'Fewer options',
   },
   confirm: {
     title: 'Really always allow?',
@@ -89,7 +95,7 @@ export const approvals = {
   command: {
     unusual: 'Command contains unusual characters',
     unusualHint: 'Invisible control characters are shown as \\u… codes; non-ASCII characters can look like normal ones. Check the command carefully.',
-    label: '{count, plural, =1 {COMMAND} other {COMMAND · # lines}}',
+    label: '{count, plural, =1 {Command} other {Command · # lines}}',
     a11y: 'Command: {command}',
     copy: 'Copy',
     copied: 'Copied',

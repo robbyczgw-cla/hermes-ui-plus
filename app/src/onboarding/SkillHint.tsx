@@ -18,7 +18,7 @@ export function SkillHint({ bridge, onDone, onBack, step, total }: { bridge: boo
       footer={
         <>
           <Button label={tr('onboarding.skill.done')} onPress={onDone} />
-          <Button variant="ghost" label={tr('onboarding.skill.later')} onPress={onDone} />
+          <Button variant="tertiary" label={tr('onboarding.skill.later')} onPress={onDone} />
         </>
       }
     >

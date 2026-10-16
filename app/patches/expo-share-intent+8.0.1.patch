@@ -1,0 +1,126 @@
+diff --git a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
+index ff5b100..62a7d51 100644
+--- a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
++++ b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
+@@ -66,13 +66,22 @@ class ExpoShareIntentModule : Module() {
+                     "filePath" to instance?.getAbsolutePath(uri),
+                 )
+             }
+-            val queryResult: Cursor = resolver.query(uri, null, null, null, null)!!
+-            queryResult.moveToFirst()
+-            val fileName = queryResult.getString(queryResult.getColumnIndex(OpenableColumns.DISPLAY_NAME))
+-            val fileSize = queryResult.getString(queryResult.getColumnIndex(OpenableColumns.SIZE))
+-            queryResult.close()
+-
+-            val mimeType = resolver.getType(uri)!!
++            // HUI patch: a provider may return no cursor, no name/size column or no type: never crash on a share
++            var fileName: String? = null
++            var fileSize: String? = null
++            try {
++                resolver.query(uri, null, null, null, null)?.use { c ->
++                    if (c.moveToFirst()) {
++                        val n = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
++                        val s = c.getColumnIndex(OpenableColumns.SIZE)
++                        if (n >= 0) fileName = c.getString(n)
++                        if (s >= 0 && !c.isNull(s)) fileSize = c.getString(s)
++                    }
++                }
++            } catch (e: Exception) {
++                Log.w("ExpoShareIntent", "file info query failed")
++            }
++            val mimeType = resolver.getType(uri) ?: "application/octet-stream"
+ 
+             var mediaWidth: String? = null;
+             var mediaHeight: String? = null;
+@@ -138,11 +147,16 @@ class ExpoShareIntentModule : Module() {
+                     notifyError("Invalid action for text sharing: " + intent.action)
+                 }
+             } else {
+-                // files / medias
++                // files / medias (HUI patch: an unreadable file reports an error instead of crashing the app;
++                // text/html & co. without a stream but with EXTRA_TEXT are shared text)
++                try {
+                 if (intent.action == Intent.ACTION_SEND) {
+                     val uri = intent.parcelable<Uri>(Intent.EXTRA_STREAM);
++                    val text = intent.getStringExtra(Intent.EXTRA_TEXT)
+                     if (uri != null) {
+-                        notifyShareIntent(mapOf( "files" to arrayOf(getFileInfo(uri), "type" to "file")))
++                        notifyShareIntent(mapOf( "files" to arrayOf(getFileInfo(uri)), "type" to "file"))
++                    } else if (!text.isNullOrEmpty()) {
++                        notifyShareIntent(mapOf("text" to text, "type" to "text", "meta" to mapOf("title" to intent.getCharSequenceExtra(Intent.EXTRA_TITLE))))
+                     } else {
+                         notifyError("empty uri for file sharing: " + intent.action)
+                     }
+@@ -156,6 +170,10 @@ class ExpoShareIntentModule : Module() {
+                 } else {
+                     notifyError("Invalid action for file sharing: " + intent.action)
+                 }
++                } catch (e: Exception) {
++                    Log.w("ExpoShareIntent", "shared file unreadable")
++                    notifyError("shared file unreadable: " + e.javaClass.simpleName)
++                }
+             }
+         }
+ 
+@@ -183,7 +201,11 @@ class ExpoShareIntentModule : Module() {
+             // get the Intent from onCreate activity (app not running in background)
+             ExpoShareIntentSingleton.isPending = false
+             if (ExpoShareIntentSingleton.intent?.type != null) {
+-                handleShareIntent(ExpoShareIntentSingleton.intent!!);
++                val launch = ExpoShareIntentSingleton.intent!!
++                handleShareIntent(launch);
++                // HUI patch: the activity keeps this very Intent object across a recreation (font size change), and
++                // the lifecycle listener would hand the same share over again: mark it as delivered
++                launch.putExtra(ExpoShareIntentSingleton.DELIVERED_EXTRA, true)
+                 ExpoShareIntentSingleton.intent = null
+             }
+         }
+@@ -269,4 +291,4 @@ class ExpoShareIntentModule : Module() {
+         } catch (e: Exception) {
+-            e.printStackTrace()
+-            notifyError("cannot retreive absoluteFilePath for $uri: ${e.message}")
++            Log.w("ExpoShareIntent", "shared file path unavailable")
++            notifyError("shared file path unavailable")
+             return null
+@@ -302,6 +324,6 @@ class ExpoShareIntentModule : Module() {
+                     val fileName = cursor.getString(columnIndex)
+-                    Log.i("FileDirectory", "File name: $fileName")
++                    // HUI patch: shared file names are private; never write them to logcat.
+                     val safeName = fileName?.let { File(it).name }.orEmpty()
+                     if (safeName.isNotEmpty()) {
+-                        val candidate = File(context.cacheDir, safeName)
++                        val candidate = File.createTempFile("hui-share-", ".tmp", context.cacheDir)
+                         val cacheRoot = context.cacheDir.canonicalPath + File.separator
+@@ -325,3 +347,3 @@ class ExpoShareIntentModule : Module() {
+                 val type = MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType)
+-                targetFile = File(context.cacheDir, "${prefix}_${Date().time}.$type")
++                targetFile = File.createTempFile("${prefix}_", ".$type", context.cacheDir)
+             }
+diff --git a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentReactActivityLifecycleListener.kt b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentReactActivityLifecycleListener.kt
+index db573ec..a448a2a 100644
+--- a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentReactActivityLifecycleListener.kt
++++ b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentReactActivityLifecycleListener.kt
+@@ -13,8 +13,8 @@ import expo.modules.core.interfaces.ReactActivityLifecycleListener
+ class ExpoShareIntentReactActivityLifecycleListener(activityContext: Context) : ReactActivityLifecycleListener {
+ 
+     override fun onCreate(activity: Activity?, savedInstanceState: Bundle?) {
+-        // only store when the new intent is not empty
+-        if (activity?.intent?.type != null) {
++        // only store when the new intent is not empty (HUI patch: and was not handed over before this recreation)
++        if (activity?.intent?.type != null && activity?.intent?.getBooleanExtra(ExpoShareIntentSingleton.DELIVERED_EXTRA, false) != true) {
+             ExpoShareIntentSingleton.intent = activity?.intent
+             ExpoShareIntentSingleton.isPending = true
+         }
+diff --git a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentSingleton.kt b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentSingleton.kt
+index 7f93abe..be44086 100644
+--- a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentSingleton.kt
++++ b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentSingleton.kt
+@@ -12,4 +12,7 @@ object ExpoShareIntentSingleton : SingletonModule {
+   // members to store the initial launch intent
+   var intent: Intent? = null
+   var isPending: Boolean = false
++
++  /** HUI patch: set on a launch intent whose share was handed to JS (never deliver it twice) */
++  const val DELIVERED_EXTRA = "expo.modules.shareintent.DELIVERED"
+ }
+\ No newline at end of file

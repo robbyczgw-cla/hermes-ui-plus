@@ -4,7 +4,8 @@ import Constants from 'expo-constants';
 import { versionLabel } from './versionLabel.ts';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { BackHandler, KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { BackHandler, KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '../ui/primitives/Text';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../chat/icons';
 import { BulkDeleteDialog, useConversations } from '../conversations';
@@ -16,7 +17,7 @@ import { ConnectionCheckPage } from '../onboarding/guided/ConnectionCheckPage';
 import { queueStarterPrompt } from '../onboarding/starterPrompt';
 import { useTitlebarInset } from '../desktop/chrome';
 import { useDesktopSettingsSection } from '../desktop/DesktopSettings';
-import { useTheme } from '../ui';
+import { textStyle, useTheme } from '../ui';
 import { useEscapeToClose } from '../ui/lib/useEscapeToClose';
 import { VoiceSettingsSection, voiceConnFromProfile, voiceSearchTexts } from '../voice';
 import { PushSettingsSection, pushSearchTexts } from '../push';
@@ -34,6 +35,8 @@ import type { ProfilesStorageState } from './storage';
 import { confirmAsync } from '../chat/commands/confirm';
 import { useQuickAvailability } from '../quick/hooks';
 import { QuickSettingsSection } from '../quick/QuickSettings';
+import { SupportRows, supportSearchTexts } from '../support/SupportRows';
+import { a11yState } from '../ui/lib/a11yState';
 
 type Page = { name: 'list' } | { name: 'pickKind' } | { name: 'edit'; profile: ConnectionProfile; isNew: boolean } | { name: 'pair' } | { name: 'check' };
 
@@ -139,18 +142,18 @@ export function SettingsScreen() {
       <View style={[styles.header, { paddingTop: Platform.OS === 'ios' ? 12 : insets.top + 8, borderBottomColor: th.colors.border }, titlebarInset > 0 && { paddingLeft: titlebarInset }]}>
         {page.name !== 'list' ? (
           <Pressable onPress={back} hitSlop={10} accessibilityRole="button" style={styles.headerSide}>
-            <Text style={[styles.headerBtn, { color: th.colors.accent }]} numberOfLines={1}>
+            <Text style={[textStyle(th, 'headline'), { color: th.colors.accentText, fontWeight: '400' }]} numberOfLines={1}>
               {t('settings.screen.back')}
             </Text>
           </Pressable>
         ) : (
           <View style={styles.headerSide} />
         )}
-        <Text style={[styles.headerTitle, { color: th.colors.text }]} numberOfLines={1} accessibilityRole="header">
+        <Text style={[styles.headerTitle, textStyle(th, 'headline'), { color: th.colors.text }]} numberOfLines={1} accessibilityRole="header">
           {title}
         </Text>
         <Pressable onPress={close} hitSlop={10} accessibilityRole="button" style={[styles.headerSide, { alignItems: 'flex-end' }]}>
-          <Text style={[styles.headerBtn, { color: th.colors.accent, fontWeight: '600' }]} numberOfLines={1}>
+          <Text style={[textStyle(th, 'headline'), { color: th.colors.accentText }]} numberOfLines={1}>
             {t('settings.screen.done')}
           </Text>
         </Pressable>
@@ -367,16 +370,18 @@ function MainList({
       {
         key: 'about',
         texts: [
-          ...(FLAVOR === 'hermes' ? [brand().name, t('settings.about.tagline')] : []),
+          ...(FLAVOR === 'hermes' ? [brand().displayName, brand().name, t('settings.about.tagline')] : []),
           t('settings.about.version'),
           ...aboutLinks.map((l) => l.title),
           t('settings.about.gallery'),
           t('settings.about.unofficial'),
+          ...supportSearchTexts(t),
         ],
         render: () => (
           <Group>
-            {FLAVOR === 'hermes' ? <NavRow title={brand().name} subtitle={t('settings.about.tagline')} chevron={false} /> : null}
+            {FLAVOR === 'hermes' ? <NavRow title={brand().displayName} subtitle={`${brand().name} · ${t('settings.about.tagline')}`} chevron={false} /> : null}
             <NavRow title={t('settings.about.version')} subtitle={version} chevron={false} />
+            <SupportRows />
             <NavRow title={t('settings.about.unofficial')} subtitle={t('settings.about.unofficialText')} />
             {aboutLinks.map((l) => (
               <NavRow key={l.key} title={l.title} onPress={() => void Linking.openURL(l.url)} />
@@ -429,16 +434,16 @@ function ProfileRow({
   const keyInfo = needsBaseUrl(profile.kind) ? (profile.apiKey ? maskKey(profile.apiKey) : t('settings.connections.noKey')) : '';
   return (
     <View style={[styles.row, !last && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: th.colors.border }]}>
-      <Pressable onPress={onSelect} style={styles.rowMain} accessibilityRole="radio" accessibilityState={{ selected }} accessibilityLabel={profile.name}>
+      <Pressable onPress={onSelect} style={styles.rowMain} accessibilityRole="radio" {...a11yState({ selected, checked: selected })} accessibilityLabel={profile.name}>
         <View style={[styles.radio, { borderColor: selected ? th.colors.accent : th.colors.borderStrong }]}>
           {selected ? <View style={[styles.radioDot, { backgroundColor: th.colors.accent }]} /> : null}
         </View>
         <ProfileMark mark={markFor(profile.kind, profile)} small />
         <View style={styles.flexShrink}>
-          <Text style={[styles.rowTitle, { color: th.colors.text }]} numberOfLines={1}>
+          <Text style={[textStyle(th, 'body'), { color: th.colors.text }]} numberOfLines={1}>
             {profile.name}
           </Text>
-          <Text style={[styles.rowSub, { color: th.colors.muted }]} numberOfLines={1}>
+          <Text style={[styles.rowSub, textStyle(th, 'caption'), { color: th.colors.muted }]} numberOfLines={1}>
             {profileTarget(profile, t)}
             {keyInfo ? `  ·  ${keyInfo}` : ''}
           </Text>
@@ -484,14 +489,13 @@ const styles = StyleSheet.create({
   storageNotice: { gap: 8, marginBottom: 12 },
   flexShrink: { flex: 1, minWidth: 0 },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth },
-  headerSide: { width: 76 },
-  headerTitle: { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '600' },
-  headerBtn: { fontSize: 17 },
+  // minWidth, not width: "Done" / "Back" (and longer translations) must not be cut at large system text
+  headerSide: { minWidth: 76 },
+  headerTitle: { flex: 1, textAlign: 'center' },
   scroll: { padding: 16, gap: 8, width: '100%', maxWidth: 640, alignSelf: 'center' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 14, paddingRight: 8, minHeight: 58, paddingVertical: 8 },
   rowMain: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  rowTitle: { fontSize: 16 },
-  rowSub: { fontSize: 13, marginTop: 2 },
+  rowSub: { marginTop: 2 },
   radio: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
   radioDot: { width: 10, height: 10, borderRadius: 5 },
   editBtn: { padding: 8 },

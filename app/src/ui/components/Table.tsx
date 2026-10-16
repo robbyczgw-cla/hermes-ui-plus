@@ -223,7 +223,7 @@ export function Table({ node, bare }: NodeProps<HuiTable> & { bare?: boolean }) 
                 },
               ]}
             >
-              <HText variant="caption" weight="600" style={{ color: active ? t.colors.accent : t.colors.muted }} numberOfLines={1}>
+              <HText variant="caption" weight="600" style={{ color: active ? t.colors.accentText : t.colors.muted }} numberOfLines={1}>
                 {columns[ci] ?? ''}
               </HText>
               {active ? (

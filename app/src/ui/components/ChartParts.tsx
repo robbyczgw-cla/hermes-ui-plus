@@ -89,7 +89,7 @@ export function Tooltip({ t, x, top, label, rows, containerW, showNames }: { t: 
         opacity: size.w ? 1 : 0,
         maxWidth: 220,
         backgroundColor: t.colors.surface,
-        borderRadius: t.radii.s,
+        borderRadius: t.radii.control,
         borderWidth: 1,
         borderColor: t.colors.border,
         paddingHorizontal: 10,
@@ -176,7 +176,7 @@ export function Legend({
             accessibilityRole="switch"
             accessibilityState={{ checked: !off }}
             accessibilityLabel={toggleLabel ? toggleLabel(it.name, !off) : it.name}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 32, paddingHorizontal: 8, borderRadius: t.radii.pill, borderWidth: 1, borderColor: off ? t.colors.border : t.colors.borderStrong, maxWidth: '100%' }}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 32, paddingHorizontal: 8, borderRadius: t.radii.pill, borderWidth: 1, borderColor: off ? t.colors.border : t.colors.borderControl, maxWidth: '100%' }}
           >
             {swatch}
             {label}

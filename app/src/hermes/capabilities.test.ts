@@ -136,3 +136,11 @@ test('catalogSummary counts distinct models over usable providers only', () => {
   assert.deepEqual(catalogSummary(cat), { models: 3, providers: 2 });
   assert.equal(catalogSummary(null), null);
 });
+
+test('parseCapabilities: optional Hermes / bridge versions (report a problem)', () => {
+  assert.equal(parseCapabilities(CAPS)!.hermesVersion, undefined);
+  const c = parseCapabilities({ ...CAPS, runtime: { version: '0.22.0' }, bridge: { version: '0.1.0-alpha.1' } })!;
+  assert.equal(c.hermesVersion, '0.22.0');
+  assert.equal(c.bridgeVersion, '0.1.0-alpha.1');
+  assert.equal(parseCapabilities({ ...CAPS, version: '0.21.0', runtime: 'python' })!.hermesVersion, '0.21.0');
+});

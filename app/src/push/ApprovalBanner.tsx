@@ -3,10 +3,11 @@
  * routed by approvalInbox.routeApproval). Stays until opened, closed, resolved elsewhere or the estimated deadline.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Animated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Text } from '../ui/primitives/Text';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useT } from '../i18n';
-import { useTheme } from '../ui';
+import { textStyle, useTheme } from '../ui';
 
 const MAX_MS = 5 * 60_000;
 
@@ -37,15 +38,15 @@ export function ApprovalBanner({ command, expiresAt, onOpen, onClose }: { comman
         accessibilityRole="alert"
       >
         <Pressable onPress={onOpen} style={styles.textWrap} accessibilityRole="button" accessibilityLabel={`${text}. ${tr('push.approval.open')}`}>
-          <Text style={[styles.text, { color: t.colors.text }]} numberOfLines={2}>
+          <Text style={[textStyle(t, 'callout'), { color: t.colors.text, fontWeight: '600' }]} numberOfLines={2}>
             {text}
           </Text>
         </Pressable>
         <Pressable onPress={onOpen} hitSlop={8} accessibilityRole="button" style={({ pressed }) => pressed && { opacity: 0.6 }}>
-          <Text style={[styles.action, { color: t.colors.accent }]}>{tr('push.approval.open')}</Text>
+          <Text style={[textStyle(t, 'callout'), { color: t.colors.accentText, fontWeight: '700' }]}>{tr('push.approval.open')}</Text>
         </Pressable>
         <Pressable onPress={onClose} hitSlop={8} accessibilityRole="button" accessibilityLabel={tr('push.approval.dismiss')} style={({ pressed }) => pressed && { opacity: 0.6 }}>
-          <Text style={[styles.close, { color: t.colors.muted }]}>✕</Text>
+          <Text style={[styles.close, textStyle(t, 'body'), { color: t.colors.muted }]}>✕</Text>
         </Pressable>
       </View>
     </Animated.View>
@@ -56,7 +57,5 @@ const styles = StyleSheet.create({
   wrap: { position: 'absolute', left: 12, right: 12, alignItems: 'center', zIndex: 1001, elevation: 13 },
   banner: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 11, paddingHorizontal: 14, borderWidth: StyleSheet.hairlineWidth * 2, maxWidth: 560, width: '100%' },
   textWrap: { flex: 1 },
-  text: { fontSize: 14.5, fontWeight: '600' },
-  action: { fontSize: 14.5, fontWeight: '700' },
-  close: { fontSize: 15, paddingHorizontal: 2 },
+  close: { paddingHorizontal: 2 },
 });

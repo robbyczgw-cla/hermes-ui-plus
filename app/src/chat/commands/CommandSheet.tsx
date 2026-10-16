@@ -3,12 +3,14 @@
  * composer), /help (tap → command in the composer). Reuses the model picker's bottom-sheet chrome.
  */
 import { memo, useState, type ReactNode } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '../../ui/primitives/Text';
 import { useLocale, useT, type TKey } from '../../i18n';
-import { useTheme } from '../../ui';
+import { Button, useTheme } from '../../ui';
 import { ModelSheet } from '../ModelPicker';
 import type { Skill, SessionUsage, SkillsError } from './api';
 import type { CommandDef } from './registry';
+import { a11yState } from '../../ui/lib/a11yState';
 
 export type SheetState =
   | { kind: 'usage' | 'status'; loading: boolean; error?: string; data?: SessionUsage | null; local: { backend: string; model: string; options?: string } }
@@ -52,7 +54,7 @@ function Loading({ loading, error }: { loading: boolean; error?: string }) {
         <Text style={{ color: t.colors.muted }}>{tr('slash.sheet.loading')}</Text>
       </View>
     );
-  if (error) return <Text style={[styles.note, { color: t.colors.danger }]}>{error}</Text>;
+  if (error) return <Text style={[t.typography.caption, styles.note, { color: t.colors.danger }]}>{error}</Text>;
   return null;
 }
 
@@ -63,12 +65,17 @@ function ErrorWithDetails({ error }: { error: SkillsError }) {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <Text style={[styles.note, { color: t.colors.danger }]}>{error.kind === 'auth' ? tr('backends.hermes.errors.apiKeyInvalid') : error.kind === 'hermesBug' ? tr('slash.sheet.skillsHermesBug') : tr('slash.sheet.skillsError')}</Text>
-      <Pressable onPress={() => setOpen((o) => !o)} accessibilityRole="button" accessibilityState={{ expanded: open }} hitSlop={8}>
-        <Text style={[styles.note, { color: t.colors.muted }]}>{open ? tr('slash.sheet.detailsHide') : tr('slash.sheet.detailsShow')}</Text>
-      </Pressable>
+      <Text style={[t.typography.caption, styles.note, { color: t.colors.danger }]}>{error.kind === 'auth' ? tr('backends.hermes.errors.apiKeyInvalid') : error.kind === 'hermesBug' ? tr('slash.sheet.skillsHermesBug') : tr('slash.sheet.skillsError')}</Text>
+      <Button
+        label={open ? tr('slash.sheet.detailsHide') : tr('slash.sheet.detailsShow')}
+        variant="tertiary"
+        size="small"
+        onPress={() => setOpen((o) => !o)}
+        accessibilityState={{ expanded: open }}
+        style={{ alignSelf: 'flex-start' }}
+      />
       {open ? (
-        <Text selectable style={[styles.note, { color: t.colors.muted, fontFamily: t.fonts.mono }]}>
+        <Text selectable style={[t.typography.caption, styles.note, { color: t.colors.muted, fontFamily: t.fonts.mono }]}>
           {error.details}
         </Text>
       ) : null}
@@ -80,8 +87,8 @@ function KV({ k, v, strong }: { k: string; v: ReactNode; strong?: boolean }) {
   const t = useTheme();
   return (
     <View style={[styles.kv, { borderBottomColor: t.colors.border }]}>
-      <Text style={[styles.k, { color: t.colors.muted }]}>{k}</Text>
-      <Text style={[styles.v, { color: t.colors.text }, strong && { fontWeight: '700' }]} numberOfLines={1}>
+      <Text style={[t.typography.callout, { color: t.colors.muted }]}>{k}</Text>
+      <Text style={[t.typography.callout, styles.v, { color: t.colors.text }, strong && { fontWeight: '700' }]} numberOfLines={1}>
         {v}
       </Text>
     </View>
@@ -109,7 +116,7 @@ function Usage({ state }: { state: Extract<SheetState, { kind: 'usage' | 'status
     return (
       <>
         <Loading loading={state.loading} error={state.error} />
-        {!state.loading && !state.error && !d ? <Text style={[styles.note, { color: t.colors.muted }]}>{tr('slash.sheet.noData')}</Text> : null}
+        {!state.loading && !state.error && !d ? <Text style={[t.typography.caption, styles.note, { color: t.colors.muted }]}>{tr('slash.sheet.noData')}</Text> : null}
         {tokens}
       </>
     );
@@ -128,8 +135,8 @@ function Usage({ state }: { state: Extract<SheetState, { kind: 'usage' | 'status
           {d.apiCalls ? <KV k={tr('slash.sheet.apiCalls')} v={n(d.apiCalls)} /> : null}
           <KV k={tr('slash.sheet.started')} v={when(d.startedAt)} />
           <KV k={tr('slash.sheet.lastActive')} v={when(d.lastActive)} />
-          {d.endReason ? <Text style={[styles.note, { color: t.colors.muted }]}>{tr('slash.sheet.ended', { reason: d.endReason })}</Text> : null}
-          <Text style={[styles.section, { color: t.colors.muted }]}>{tr('slash.sheet.tokens')}</Text>
+          {d.endReason ? <Text style={[t.typography.caption, styles.note, { color: t.colors.muted }]}>{tr('slash.sheet.ended', { reason: d.endReason })}</Text> : null}
+          <Text style={[t.typography.caption, styles.section, { color: t.colors.muted }]}>{tr('slash.sheet.tokens')}</Text>
           {tokens}
         </>
       ) : null}
@@ -146,7 +153,7 @@ function Skills({ state, onFill }: { state: Extract<SheetState, { kind: 'skills'
       <Loading loading={state.loading} />
       {state.error ? <ErrorWithDetails error={state.error} /> : null}
       {!state.loading && !state.error ? (
-        <Text style={[styles.note, { color: t.colors.muted }]}>{skills.length ? tr('slash.sheet.skillsHint') : tr('slash.sheet.skillsEmpty')}</Text>
+        <Text style={[t.typography.caption, styles.note, { color: t.colors.muted }]}>{skills.length ? tr('slash.sheet.skillsHint') : tr('slash.sheet.skillsEmpty')}</Text>
       ) : null}
       {skills.map((s) => (
         <Pressable
@@ -155,12 +162,12 @@ function Skills({ state, onFill }: { state: Extract<SheetState, { kind: 'skills'
           accessibilityRole="button"
           style={({ pressed }) => [styles.item, { borderBottomColor: t.colors.border }, pressed && { backgroundColor: t.colors.surfacePressed }]}
         >
-          <Text style={[styles.itemName, { color: t.colors.text, fontFamily: t.fonts.mono }]}>
+          <Text style={[t.typography.callout, styles.itemName, { color: t.colors.text, fontFamily: t.fonts.mono }]}>
             {s.name}
             {s.category ? <Text style={{ color: t.colors.subtle, fontFamily: t.fonts.sans }}>{`  ${s.category}`}</Text> : null}
           </Text>
           {s.description ? (
-            <Text style={[styles.itemDesc, { color: t.colors.muted }]} numberOfLines={2}>
+            <Text style={[t.typography.caption, styles.itemDesc, { color: t.colors.muted }]} numberOfLines={2}>
               {s.description}
             </Text>
           ) : null}
@@ -175,7 +182,7 @@ function Help({ commands, onFill }: { commands: readonly CommandDef[]; onFill(te
   const tr = useT();
   return (
     <>
-      <Text style={[styles.note, { color: t.colors.muted }]}>{tr('slash.sheet.helpIntro')}</Text>
+      <Text style={[t.typography.caption, styles.note, { color: t.colors.muted }]}>{tr('slash.sheet.helpIntro')}</Text>
       {commands.map((c) => {
         const arg = tr(`slash.cmd.${c.id}.arg` as TKey);
         return (
@@ -185,11 +192,11 @@ function Help({ commands, onFill }: { commands: readonly CommandDef[]; onFill(te
             accessibilityRole="button"
             style={({ pressed }) => [styles.item, { borderBottomColor: t.colors.border }, pressed && { backgroundColor: t.colors.surfacePressed }]}
           >
-            <Text style={[styles.itemName, { color: t.colors.text, fontFamily: t.fonts.mono }]}>
+            <Text style={[t.typography.callout, styles.itemName, { color: t.colors.text, fontFamily: t.fonts.mono }]}>
               /{c.name}
               {arg ? <Text style={{ color: t.colors.subtle }}>{` ${arg}`}</Text> : null}
             </Text>
-            <Text style={[styles.itemDesc, { color: t.colors.muted }]}>
+            <Text style={[t.typography.caption, styles.itemDesc, { color: t.colors.muted }]}>
               {tr(`slash.cmd.${c.id}.desc` as TKey)}
               {c.aliases.length ? <Text style={{ color: t.colors.subtle }}>{`  ·  ${c.aliases.slice(0, 3).map((a) => `/${a}`).join(' ')}`}</Text> : null}
             </Text>
@@ -204,12 +211,11 @@ const styles = StyleSheet.create({
   scroll: { maxHeight: 460 },
   content: { paddingHorizontal: 8, paddingBottom: 8 },
   state: { flexDirection: 'row', gap: 10, alignItems: 'center', paddingVertical: 16 },
-  note: { fontSize: 13, lineHeight: 18, paddingVertical: 8 },
-  section: { fontSize: 12, fontWeight: '600', textTransform: 'uppercase', marginTop: 14, marginBottom: 2 },
+  note: { paddingVertical: 8 },
+  section: { fontWeight: '600', marginTop: 14, marginBottom: 2 },
   kv: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, paddingVertical: 9, borderBottomWidth: StyleSheet.hairlineWidth },
-  k: { fontSize: 14 },
-  v: { fontSize: 14, flexShrink: 1, textAlign: 'right', fontVariant: ['tabular-nums'] },
+  v: { flexShrink: 1, textAlign: 'right', fontVariant: ['tabular-nums'] },
   item: { paddingVertical: 10, paddingHorizontal: 4, borderBottomWidth: StyleSheet.hairlineWidth },
-  itemName: { fontSize: 14.5, fontWeight: '600' },
-  itemDesc: { fontSize: 13, marginTop: 2 },
+  itemName: { fontWeight: '600' },
+  itemDesc: { marginTop: 2 },
 });

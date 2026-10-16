@@ -68,7 +68,11 @@ test('migration: garbage / partial / invalid values are repaired', () => {
   assert.equal(migratePreferences(JSON.stringify({ fontSize: 'l' })).prefs.fontSize, 'l');
   assert.deepEqual(sanitizePreferences(null), { ...DEFAULT_PREFERENCES });
   assert.deepEqual(sanitizePreferences([1, 2]), { ...DEFAULT_PREFERENCES });
-  assert.equal(sanitizePreferences({ accent: 'teal' }).accent, 'teal');
+  assert.equal(sanitizePreferences({ accent: 'verdigris' }).accent, 'verdigris');
+  // swatches of earlier versions map to the closest curated one
+  assert.equal(sanitizePreferences({ accent: 'teal' }).accent, 'verdigris');
+  assert.equal(sanitizePreferences({ accent: 'Violet' }).accent, 'plum');
+  assert.equal(sanitizePreferences({ accent: 'constructor' }).accent, 'theme');
   assert.equal(sanitizePreferences({ accent: 'chartreuse' }).accent, 'theme');
 });
 

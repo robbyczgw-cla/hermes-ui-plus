@@ -45,7 +45,7 @@ export function reformatLabel(kind: ReformatKind, t: TFn): string {
   return t(`chat.transform.${kind as ReformatBaseKind}`);
 }
 
-/** The user message a chip sends: `[reformat:table] Bitte die letzte Antwort als Tabelle.` */
+/** The user message a chip sends: `[reformat:table] Bitte formuliere die letzte Antwort als Tabelle um.` */
 export function reformatMessage(kind: ReformatKind, t: TFn): string {
   if (kind.startsWith('translate:')) {
     const lang = kind.slice('translate:'.length) as TranslateLang;

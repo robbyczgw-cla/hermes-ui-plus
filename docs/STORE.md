@@ -92,7 +92,7 @@ doing so."*
 ### 2.2 What the app does
 
 - **Text** (`compliance.consent.*`, de/en/es): "Deine Nachrichten, Anhänge und Sprache werden an deinen Hermes-Server
-  gesendet und von dort an die KI-Anbieter, die in Hermes eingerichtet sind (z. B. OpenAI, Anthropic, xAI). Hermes UI+
+  gesendet und von dort an die KI-Anbieter, die in Hermes eingerichtet sind (z. B. OpenAI, Anthropic, xAI). HUI+
   selbst speichert oder sammelt nichts." A second line covers the voice bridge (STT/TTS providers) and image search
   providers. Then [Verstanden & weiter] and a link to the privacy page.
 - **When it is asked:**
@@ -207,12 +207,15 @@ such as end-to-end encryption.
 
 ### 3.5 Review notes (both stores, draft, English)
 
-> Hermes UI+ ("Hermes Interactive UI+") is an unofficial, open-source client for Hermes Agent, a self-hosted AI agent.
+> HUI+ for Hermes Agent (on the device: "HUI+"; project name "Hermes Interactive UI+") is an unofficial, open-source client for Hermes Agent, a self-hosted AI agent.
 > It is not affiliated with Nous Research. The app has no accounts and no developer-operated backend. It connects to
 > a Hermes server that the user runs.
 >
-> **To review without a server:** on the welcome screen tap "Just take a look around" (DE: "Erst mal nur umsehen"), or "Nur ausprobieren (Demo)" on the connection screen. The offline demo
-> replays bundled conversations, including interactive answers (checklists, charts, forms). No network is used.
+> **To review without a server:** on the first screen tap "Try it first (demo)" (or "Just take a look around" on the welcome screen). The "All set" screen lists six examples; the
+> strip under the chat title reads "DEMO - No server" and "Connect Hermes" there opens the real setup. The offline demo replays bundled, fictional
+> sample answers in English, German or Spanish, and every tap has a follow-up: a shopping list you can tick, an approval request (Allow once / Deny),
+> product cards with "Compare" and "I'll take this", a recipe with timers, a quiz and flashcards, a destination choice, reshape chips (Shorter / As a table)
+> and a long answer you can stop. No network is used (no photos, maps or web lookups). The exact tap path is in the private store folder (`review/app-review-notes.md`).
 >
 > **Full use** requires a self-hosted Hermes Agent, optionally with the Hermes UI+ bridge. For review, use this test
 > server: `<reviewer pairing link or URL + API key>` (welcome screen → connect → pairing link, or Settings → Verbindung hinzufügen).
@@ -232,15 +235,20 @@ link in the notes, and it must stay online during review). For Play, the same go
 
 ## 4. Store listings (drafts)
 
-Title: **Hermes Interactive UI+** (`name`). iOS subtitle / Play short description from the taglines below. The
-disclaimer line goes into every long description.
+Store name: **HUI+ for Hermes Agent** (`storeName` in `app/brand/identity.json`, 21 characters), the same in every
+language and in both stores. The name under the icon is **HUI+** (`displayName`), so the listing and the home screen
+match (App Store guideline 2.3.8). iOS subtitle: `Answers you can act on` / `Antworten zum Antippen`; Play short
+description from the taglines below. Fallback name if Apple rejects the name under 5.2.1 or Nous Research objects:
+**HUI+ Interactive Agent Chat** (27 characters; "Hermes Agent" then only in the description, not in the name or the
+keywords). The project, repository and website keep the name Hermes Interactive UI+ (Hermes UI+). The disclaimer line
+goes into every long description.
 
 ### Deutsch
 
 - **Kurzbeschreibung** (≤ 80): `Interaktiver Chat für deinen selbst gehosteten Hermes Agent` (59 Zeichen)
 - **Beschreibung:**
 
-  > Hermes UI+ ist ein interaktiver Chat für deinen eigenen Hermes Agent. Antworten werden zu Checklisten, Tabellen,
+  > HUI+ ist ein interaktiver Chat für deinen eigenen Hermes Agent. Antworten werden zu Checklisten, Tabellen,
   > Diagrammen, Formularen und Karten, die du direkt antippen kannst, statt nur Text zu sein.
   >
   > • Verbindet sich mit deinem selbst gehosteten Hermes Agent, direkt oder über die Hermes UI+ Bridge (QR-Pairing)
@@ -268,7 +276,7 @@ disclaimer line goes into every long description.
 - **Short description** (≤ 80): `Interactive chat for your self-hosted Hermes Agent` (50 chars)
 - **Description:**
 
-  > Hermes UI+ is an interactive chat client for your own Hermes Agent. Answers become checklists, tables, charts,
+  > HUI+ is an interactive chat client for your own Hermes Agent. Answers become checklists, tables, charts,
   > forms and cards you can tap, not just text.
   >
   > • Connects to your self-hosted Hermes Agent, directly or through the Hermes UI+ bridge (QR pairing)
@@ -295,10 +303,10 @@ Draft for the first Play listing (state 2026-10-14, nothing entered or uploaded)
 for people who **already run a Hermes Agent**. Every claim is true for the 0.1 alpha. Items marked **[OWNER]** need a
 decision or a fact only the owner has. Play listing rules (80 / 4000 characters) were counted, not looked up again.
 
-Console fields: **App name** `Hermes Interactive UI+` (22 of 30 characters), **Category** Productivity (alternative:
+Console fields: **App name** `HUI+ for Hermes Agent` (21 of 30 characters), **Category** Productivity (alternative:
 Tools), **Contact e-mail** `robby@robbyczesany.com`, **Privacy policy** `https://hermesui.xyz/privacy`, **Website**
 `https://hermesui.xyz`. Required graphics: app icon 512 x 512, **feature graphic 1024 x 500 (none exists in the repository
-yet, [OWNER] to make it)**, 2 to 8 phone screenshots (see "Screenshots" below). The title starts with "Hermes", so read
+yet, [OWNER] to make it)**, 2 to 8 phone screenshots (see "Screenshots" below). The title names Hermes Agent ("for …"), so read
 section 7 (trademark) before submitting.
 
 #### Short description (max 80)
@@ -306,10 +314,10 @@ section 7 (trademark) before submitting.
 - EN: `Approve, watch and steer your self-hosted Hermes Agent from your phone` (70 characters)
 - DE: `Deinen selbst gehosteten Hermes Agent vom Handy freigeben und verfolgen` (71 Zeichen)
 
-#### Full description, English (max 4000, 2480 used)
+#### Full description, English (max 4000, 2462 used)
 
 ```
-Hermes UI+ is a mobile client for people who already run a Hermes Agent on their own server and are tired of reading long answers in a terminal or a chat app.
+HUI+ is a mobile client for people who already run a Hermes Agent on their own server and are tired of reading long answers in a terminal or a chat app.
 
 WHAT YOU GET
 • Approvals from your phone: when Hermes wants to run a command, you see it in full and allow or deny it in the app. Unusual or hidden characters in a command are shown and flagged.
@@ -322,7 +330,7 @@ WHAT YOU GET
 • An offline demo: try the interface without any server.
 
 HOW IT WORKS
-Hermes UI+ talks to your own Hermes Agent, either directly or through the optional Hermes UI+ bridge, a small open-source service you run next to Hermes (npx hermes-ui-plus-bridge setup). The bridge pairs your phone with a QR code and gives each device its own revocable token. A private network path such as Tailscale is strongly recommended. Never expose Hermes to the public internet.
+HUI+ talks to your own Hermes Agent, either directly or through the optional Hermes UI+ bridge, a small open-source service you run next to Hermes (npx hermes-ui-plus-bridge setup). The bridge pairs your phone with a QR code and gives each device its own revocable token. A private network path such as Tailscale is strongly recommended. Never expose Hermes to the public internet.
 
 PRIVACY
 No accounts, no ads, no analytics, no tracking, and no server run by the developers. Conversations are stored on your device. Your messages and attachments go only to the server you set up, and from there to the AI providers you configured in Hermes.
@@ -332,15 +340,15 @@ GOOD TO KNOW (alpha)
 • There is no remote push notification on Android yet. You see a finished answer or an approval request when you open the app. While an answer is running, a notification shows its progress.
 • Expect rough edges and changes between alpha versions.
 
-Hermes UI+ is an unofficial community client. It is not affiliated with, endorsed by, or supported by Nous Research.
+HUI+ is an unofficial community client. It is not affiliated with, endorsed by, or supported by Nous Research.
 
 The app is open source. Source code, setup guide and privacy policy: hermesui.xyz
 ```
 
-#### Full description, German (max 4000, 2831 used)
+#### Full description, German (max 4000, 2813 used)
 
 ```
-Hermes UI+ ist ein mobiler Client für alle, die bereits einen Hermes Agent auf dem eigenen Server betreiben und keine Lust mehr haben, lange Antworten im Terminal oder in einer Chat-App zu lesen.
+HUI+ ist ein mobiler Client für alle, die bereits einen Hermes Agent auf dem eigenen Server betreiben und keine Lust mehr haben, lange Antworten im Terminal oder in einer Chat-App zu lesen.
 
 DAS BEKOMMST DU
 • Freigaben vom Handy: Will Hermes einen Befehl ausführen, siehst du ihn vollständig und erlaubst oder verweigerst ihn in der App. Ungewöhnliche oder versteckte Zeichen in einem Befehl werden angezeigt und markiert.
@@ -353,7 +361,7 @@ DAS BEKOMMST DU
 • Eine Offline-Demo: Probiere die Oberfläche ohne Server aus.
 
 SO FUNKTIONIERT ES
-Hermes UI+ spricht mit deinem eigenen Hermes Agent, direkt oder über die optionale Hermes UI+ Bridge, einen kleinen Open-Source-Dienst, den du neben Hermes betreibst (npx hermes-ui-plus-bridge setup). Die Bridge koppelt dein Handy per QR-Code und gibt jedem Gerät ein eigenes, widerrufbares Token. Ein privater Netzwerkweg wie Tailscale wird dringend empfohlen. Hermes nie ins öffentliche Internet stellen.
+HUI+ spricht mit deinem eigenen Hermes Agent, direkt oder über die optionale Hermes UI+ Bridge, einen kleinen Open-Source-Dienst, den du neben Hermes betreibst (npx hermes-ui-plus-bridge setup). Die Bridge koppelt dein Handy per QR-Code und gibt jedem Gerät ein eigenes, widerrufbares Token. Ein privater Netzwerkweg wie Tailscale wird dringend empfohlen. Hermes nie ins öffentliche Internet stellen.
 
 DATENSCHUTZ
 Keine Konten, keine Werbung, keine Analyse, kein Tracking und kein Server der Entwickler. Unterhaltungen liegen auf deinem Gerät. Deine Nachrichten und Anhänge gehen nur an den Server, den du eingerichtet hast, und von dort an die KI-Anbieter, die du in Hermes konfiguriert hast.
@@ -363,7 +371,7 @@ GUT ZU WISSEN (Alpha)
 • Auf Android gibt es noch keine Push-Benachrichtigung aus der Ferne. Eine fertige Antwort oder eine Freigabe-Anfrage siehst du, wenn du die App öffnest. Während eine Antwort läuft, zeigt eine Benachrichtigung den Fortschritt.
 • Rechne mit Ecken und Kanten und mit Änderungen zwischen den Alpha-Versionen.
 
-Hermes UI+ ist ein inoffizieller Community-Client. Er ist nicht mit Nous Research verbunden und wird von Nous Research weder unterstützt noch empfohlen.
+HUI+ ist ein inoffizieller Community-Client. Er ist nicht mit Nous Research verbunden und wird von Nous Research weder unterstützt noch empfohlen.
 
 Die App ist Open Source. Quellcode, Einrichtungsanleitung und Datenschutzerklärung: hermesui.xyz
 ```
@@ -435,15 +443,15 @@ Other declarations: ads **No**; government app **No**; financial features **none
 #### App access (instructions for reviewers)
 
 Play asks whether parts of the app need a login or special access. Answer **"All or some functionality is restricted"**,
-because full use needs a Hermes server. Instructions (max 500 characters, 312 used):
+because full use needs a Hermes server. Instructions (max 500 characters, 294 used):
 
 ```
-No login. Full use needs the user's own Hermes server, so please use the offline demo: on the welcome screen tap "Just take a look around" (or "Just try it (demo)" on the connection screen). It replays bundled conversations with interactive answers (checklists, charts, forms) and sends nothing over the network.
+No login. Full use needs the user's own Hermes server, so please use the offline demo: on the first screen tap "Try it first (demo)", then "Chart" or any example. It replays fictional sample answers you can act on (checklist, approval, product compare, recipe timers, quiz) and uses no network.
 ```
 
 **[OWNER]** If a reviewer Hermes instance exists, append its pairing link as a one-time code **in the Console only** (never
 in this repository) and keep it online during review, as for 3.5. Check the button names against the build before
-pasting (`app/src/i18n/ns/onboarding.*.ts`: `demoLink`, `demo.title`).
+pasting (`app/src/i18n/ns/onboarding*.ts`: `demoLink`, `demo.title`, the guided flow's `demo`).
 
 #### Screenshots (candidates from `dist/share/demos/`, nothing uploaded)
 
@@ -554,8 +562,10 @@ to 6 h per 24 h, and the service handles the timeout.
 - The current approach is **nominative use**: the name refers to the product the app works with ("for Hermes Agent").
   Every listing carries the line "Unofficial community client, not affiliated with Nous Research." The app uses no
   third-party logos. The icon (`petasos`) is its own design.
-- Risk: the store title starts with "Hermes" ("Hermes Interactive UI+"). That reads more like a brand than a
-  descriptive reference. A safer pattern is "<Own name> – client for Hermes Agent".
+- Store name since 0.1.1: **"HUI+ for Hermes Agent"**, i.e. the safer pattern "<own name> for <product>". Until 0.1
+  the title was "Hermes Interactive UI+", which starts with "Hermes" and reads more like a brand than a descriptive
+  reference. Another open-source project is called "Hermes UI"; "HUI+" keeps clear of it. Fallback if Apple (5.2.1) or
+  Nous Research objects: "HUI+ Interactive Agent Chat", with "Hermes Agent" only in the description.
 - **Recommended before release:** a trademark search in **EUIPO (eSearch plus / TMview)** and **USPTO**, at least for
-  **Nice classes 9 (software/apps) and 42 (SaaS/IT services)**, for "Hermes" and "Hermes UI". If in doubt, ask an IP
+  **Nice classes 9 (software/apps) and 42 (SaaS/IT services)**, for "HUI", "HUI+" and "Hermes". If in doubt, ask an IP
   lawyer. This note does not assess infringement risk.

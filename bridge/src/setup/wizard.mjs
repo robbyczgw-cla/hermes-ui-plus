@@ -20,7 +20,7 @@ import { directProviders, directProvidersLine } from '../cli.mjs';
 import { loadConfig } from '../config.mjs';
 import { defaultEnvFile, readEnvFile, mergeEnv, writeEnvFile, redactEnv, serializeEnv, findSkillSource, planSkillInstall, installSkill } from './files.mjs';
 import {
-  SERVICE_NAME, assertNoControl, execArgv, isNpxCachePath, systemdUnit, systemdUnitPath, systemdCommands, systemServiceProblem,
+  SERVICE_NAME, LAUNCHD_LABEL, assertNoControl, execArgv, isNpxCachePath, systemdUnit, systemdUnitPath, systemdCommands, systemServiceProblem,
   launchdPlist, launchdPlistPath, launchdCommands, composeSnippet,
 } from './service.mjs';
 
@@ -250,7 +250,14 @@ export async function runSetup(opts, deps = {}) {
     const profiles = listProfiles(hHome);
     report.hermes.profiles = profiles.map((x) => x.name);
     if (!opts.skill) log('  skipped (--no-skill)');
-    else {
+    else if (!hermes.exists) {
+      // never create ~/.hermes/skills/... for a Hermes that is not there: a later Hermes install would find a stray
+      // directory, and the skill would sit in the wrong place if Hermes lives elsewhere
+      log(`  not installed: there is no Hermes home at ${hHome}.`);
+      log('  Install Hermes first (or point --hermes-home / HERMES_HOME at it), then re-run setup to install the skill.');
+      report.skill.push({ target: 'main', dest: '', action: 'skipped', reason: 'no-hermes-home' });
+      report.nextSteps.push(`Install the hermes-ui skill: re-run setup once Hermes is installed (no Hermes home at ${hHome}).`);
+    } else {
       const src = findSkillSource();
       if (!src) warn('skill files not found in this package (expected skill/hermes-ui); install it by hand, see hermes-skill/INSTALL.md');
       else {
@@ -295,6 +302,25 @@ export async function runSetup(opts, deps = {}) {
       BRIDGE_WEB_DIR: opts.webDir ? resolve(opts.webDir) : undefined,
     };
     if (!hermes.api.key && !existing.HERMES_API_KEY) warn('no Hermes API key found; HERMES_API_KEY stays empty until the API server has a key (re-run setup then)');
+
+    // A root install becomes a hardened system unit (DynamicUser, ProtectHome): it reads neither the Hermes home
+    // (profile list) nor files in it (plugin secret). So it gets the profile list written out and the plugin secret as
+    // a systemd credential (LoadCredential, see the Service step) instead of a path.
+    const hardened = isRoot && platform === 'linux';
+    if (hardened && profiles.length && !existing.BRIDGE_PROFILES) {
+      updates.BRIDGE_PROFILES = profiles.map((x) => x.name).join(',');
+      log(`  BRIDGE_PROFILES=${updates.BRIDGE_PROFILES} (the system service cannot list the Hermes home itself; re-run setup after adding a profile)`);
+    }
+    // Schnellfrage (⚡): the hermes-ui-plus plugin's secret (hermes-plugin/install.py). The bridge has no default path.
+    const pluginSecret = hermes.exists ? join(hHome, 'hermes-ui-plus', 'secret') : '';
+    const hasPlugin = Boolean(pluginSecret) && existsSync(pluginSecret);
+    report.hermes.quickPlugin = hasPlugin;
+    if (hasPlugin && !hardened && !existing.BRIDGE_HERMES_PLUGIN_SECRET_FILE) {
+      updates.BRIDGE_HERMES_PLUGIN_SECRET_FILE = pluginSecret;
+      log(`  Schnellfrage: hermes-ui-plus plugin found, BRIDGE_HERMES_PLUGIN_SECRET_FILE=${pluginSecret}`);
+    } else if (hasPlugin && hardened && /^\/(root|home)(\/|$)/.test(existing.BRIDGE_HERMES_PLUGIN_SECRET_FILE || '')) {
+      warn(`BRIDGE_HERMES_PLUGIN_SECRET_FILE in ${envFile} points into a home directory, which the system service cannot read; remove that line, the unit passes the secret as a credential`);
+    }
 
     const has = (k) => Boolean(existing[k]);
     const fromEnv = (k) => env[k] || undefined;
@@ -348,6 +374,7 @@ export async function runSetup(opts, deps = {}) {
     step('Network');
     let publicUrl = existing.BRIDGE_PUBLIC_URL || '';
     let serveArgs = null;
+    const lan = lanAddresses(deps.interfaces ?? networkInterfaces());
     const ts = opts.tailscale ? exec(['tailscale', 'status', '--json']) : { code: -1, stdout: '' };
     const tsInfo = ts.code === 0 ? parseTailscaleStatus(ts.stdout) : { running: false, dnsName: '' };
     report.network.tailscale = { found: ts.code === 0, running: tsInfo.running, dnsName: tsInfo.dnsName };
@@ -365,7 +392,6 @@ export async function runSetup(opts, deps = {}) {
       report.network.mode = serveArgs ? 'tailscale' : keepCustom ? 'custom' : 'none';
     } else {
       log(`  Tailscale ${ts.code === 0 ? 'is installed but not running' : 'not found'} (recommended: https://tailscale.com/download).`);
-      const lan = lanAddresses(deps.interfaces ?? networkInterfaces());
       if (publicUrl) { log(`  keeping BRIDGE_PUBLIC_URL ${publicUrl}`); report.network.mode = 'custom'; }
       else if (lan.length) {
         log(`  LAN address: http://${lan[0]}:${opts.port}`);
@@ -377,7 +403,7 @@ export async function runSetup(opts, deps = {}) {
           report.network.mode = 'lan';
         } else report.network.mode = 'none';
       } else report.network.mode = 'none';
-      if (!publicUrl) report.nextSteps.push('Make the bridge reachable over HTTPS (tailscale serve or a TLS proxy) and re-run setup, or set BRIDGE_PUBLIC_URL.');
+      if (!publicUrl) report.nextSteps.push(`Give the bridge an address your phone can reach: set BRIDGE_PUBLIC_URL in ${envFile} (Tailscale: re-run setup once \`tailscale up\` ran; LAN test: BRIDGE_HOST=0.0.0.0 + BRIDGE_PUBLIC_URL=http://${lan[0] || '<lan-ip>'}:${opts.port}), restart the bridge, then create a pair link with \`devices add "Phone"\`.`);
     }
     updates.BRIDGE_PUBLIC_URL = publicUrl || undefined;
     report.network.publicUrl = publicUrl;
@@ -417,6 +443,9 @@ export async function runSetup(opts, deps = {}) {
     const nodeDir = dirname(deps.nodePath ?? process.execPath);
     const argv = execArgv({ nodePath: deps.nodePath ?? process.execPath, binPath: deps.binPath ?? BIN_PATH, npxPath: existsSync(join(nodeDir, 'npx')) ? join(nodeDir, 'npx') : 'npx', version, envFile: kind === 'systemd' ? null : envFile, fromNpxCache });
     report.service = { ...report.service, kind, argv };
+    if (hasPlugin && hardened && kind !== 'systemd' && !existing.BRIDGE_HERMES_PLUGIN_SECRET_FILE) {
+      report.nextSteps.push(`Schnellfrage: set BRIDGE_HERMES_PLUGIN_SECRET_FILE=${pluginSecret} in ${envFile} (the file must be readable by the user that runs the bridge).`);
+    }
     let started = false;
     if (kind === 'systemd') {
       const system = isRoot;
@@ -424,7 +453,10 @@ export async function runSetup(opts, deps = {}) {
       if (problem) { warn(problem); report.service.skipped = problem; }
       else {
         const unitPath = systemdUnitPath({ system, home, env });
-        const unit = systemdUnit({ argv, envFile, system, port: opts.port });
+        // the plugin secret lives in the Hermes home: a system unit gets it as a credential ($CREDENTIALS_DIRECTORY)
+        const credentials = system && hasPlugin ? [{ name: 'hui-plugin-secret', path: pluginSecret, env: 'BRIDGE_HERMES_PLUGIN_SECRET_FILE' }] : [];
+        const unit = systemdUnit({ argv, envFile, system, port: opts.port, credentials });
+        if (credentials.length) log(`  Schnellfrage: plugin secret passed as systemd credential (LoadCredential=hui-plugin-secret:${pluginSecret})`);
         const same = existsSync(unitPath) && readFileSync(unitPath, 'utf8') === unit;
         report.service.path = unitPath;
         if (dry) log(`  (dry-run) would write ${unitPath}:\n${unit.split('\n').map((l) => `    ${l}`).join('\n')}`);
@@ -447,7 +479,7 @@ export async function runSetup(opts, deps = {}) {
       started = !dry && results[results.length - 1].code === 0;
       report.nextSteps.push(`Logs: ~/Library/Logs/${SERVICE_NAME}.log`);
     } else if (kind === 'docker') {
-      const snippet = composeSnippet({ envFile, port: opts.port, hermesPort: hermes.api.port });
+      const snippet = composeSnippet({ envFile, port: opts.port, hermesPort: hermes.api.port, webDir: newEnv.BRIDGE_WEB_DIR || '' });
       report.service.compose = snippet;
       log('  Docker: use this compose service (the env file above is reused):\n');
       log(snippet.split('\n').map((l) => `    ${l}`).join('\n'));
@@ -493,15 +525,21 @@ export async function runSetup(opts, deps = {}) {
         // no HTTPS address yet: browsers treat http://127.0.0.1 as a secure origin, so the full web app (offline shell,
         // install) works there for a first test on the bridge machine itself. Same one-time code: whichever link is used first.
         const local = newEnv.BRIDGE_WEB_DIR && !/^https:/i.test(publicUrl || '') ? webPairLink(`http://127.0.0.1:${opts.port}`, d.code, pc.name) : '';
-        report.pair = { deviceId: d.id, link, webLink: web, localWebLink: local, expiresInMinutes: 60, oneTime: true };
-        if (!opts.json) {
-          log('  Scan with the Hermes UI+ app (Scan QR code). One-time pairing code: works once, expires in 1 hour.');
-          log(await qrTerminal(link));
+        report.pair = { deviceId: d.id, link, webLink: web, localWebLink: local, expiresInMinutes: 60, oneTime: true, localOnly: !publicUrl };
+        if (publicUrl) {
+          if (!opts.json) {
+            log('  Scan with the HUI+ app (Scan QR code). One-time pairing code: works once, expires in 1 hour.');
+            log(await qrTerminal(link));
+          }
+          log(`  Pair link: ${opts.json ? '(in the JSON report)' : link}`);
+        } else {
+          // a QR code for 127.0.0.1 looks usable but a phone would connect to itself: print no QR, say what to do
+          warn('no address a phone can reach yet: the pair link points to 127.0.0.1 (this machine only), so no QR code is shown');
+          log(`  Pair link for an app on this machine (desktop app): ${opts.json ? '(in the JSON report)' : link}`);
         }
-        log(`  Pair link: ${opts.json ? '(in the JSON report)' : link}`);
         if (web) log(`  Web app: ${opts.json ? '(in the JSON report)' : web}`);
         if (local) log(`  Web app, in a browser on this machine: ${opts.json ? '(in the JSON report)' : local}`);
-        if (!publicUrl) warn('the pair link points to 127.0.0.1 (no public URL yet); phones cannot use it');
+        if (!publicUrl) for (const l of phoneAddressHelp({ envFile, port: opts.port, httpsPort: opts.httpsPort, lanIp: lan[0], cli: report.service.cli, kind, system: isRoot })) log(l);
         log(`  New pair link later: ${report.service.cli} devices add "Phone" --env-file ${envFile}`);
         log(`  Revoke later: ${report.service.cli} devices revoke ${d.id} --env-file ${envFile}`);
       }
@@ -515,6 +553,33 @@ export async function runSetup(opts, deps = {}) {
   }
   if (report.nextSteps.length) { log('\nNext steps:'); for (const s of report.nextSteps) log(`  - ${s}`); }
   return report;
+}
+
+/**
+ * What to do when the bridge has no address a phone can reach (no Tailscale, no BRIDGE_PUBLIC_URL): where the setting
+ * lives, the two usual values, and how to get a fresh pair link afterwards.
+ */
+export function phoneAddressHelp({ envFile, port = 8790, httpsPort = 8790, lanIp = '', cli = SERVICE_NAME, kind = 'none', system = false }) {
+  const restart = kind === 'systemd' ? `systemctl ${system ? '' : '--user '}restart ${SERVICE_NAME}`
+    : kind === 'launchd' ? `launchctl kickstart -k gui/$(id -u)/${LAUNCHD_LABEL}`
+      : 'stop the bridge and start it again';
+  return [
+    '',
+    '  To pair a phone, give the bridge an address the phone can reach. Edit BRIDGE_PUBLIC_URL in',
+    `    ${envFile}`,
+    '  and pick one of:',
+    `    a) Tailscale (recommended, HTTPS, works for the app and the installable web app): install Tailscale on this`,
+    `       machine and the phone, run \`tailscale up\`, then simply re-run setup; it runs`,
+    `       tailscale serve --bg --https=${httpsPort} http://127.0.0.1:${port}`,
+    `       and sets BRIDGE_PUBLIC_URL=https://<machine>.<tailnet>.ts.net${httpsPort === 443 ? '' : `:${httpsPort}`} for you.`,
+    '    b) LAN test over plain HTTP (Android app only, trusted home network, never forward the port): put these two',
+    '       lines into the env file:',
+    '         BRIDGE_HOST=0.0.0.0',
+    `         BRIDGE_PUBLIC_URL=http://${lanIp || '<lan-ip-of-this-machine>'}:${port}`,
+    `  After b), restart the bridge (${restart}) and create a new pair link:`,
+    `    ${cli} devices add "Phone" --env-file ${envFile}`,
+    '',
+  ];
 }
 
 /** Docker (`/.dockerenv`) or Podman (`/run/.containerenv`) container? */

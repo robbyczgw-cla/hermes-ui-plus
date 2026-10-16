@@ -31,8 +31,8 @@ export function Summary({ node }: { node: Partial<HuiSummary> }) {
         borderLeftWidth: 3,
         borderLeftColor: t.colors.accent,
         backgroundColor: t.colors.accentSoft,
-        borderTopRightRadius: t.radii.m,
-        borderBottomRightRadius: t.radii.m,
+        borderTopRightRadius: t.radii.control,
+        borderBottomRightRadius: t.radii.control,
         paddingVertical: t.spacing.m,
         paddingLeft: t.spacing.m + 2,
         paddingRight: t.spacing.m,
@@ -42,7 +42,7 @@ export function Summary({ node }: { node: Partial<HuiSummary> }) {
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
         <Icon name="sparkle" size={13} color={t.colors.accent} />
-        <HText variant="micro" color="accent" weight="600" style={{ textTransform: 'uppercase', letterSpacing: 0.6 }} accessibilityRole="header">
+        <HText variant="caption" color="accent" weight="600" accessibilityRole="header">
           {tr('ui.summary.label')}
         </HText>
       </View>

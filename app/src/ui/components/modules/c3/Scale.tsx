@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Platform, View, type GestureResponderEvent } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withSequence, withSpring, withTiming } from 'react-native-reanimated';
 import { useTheme, useMotionReduced, type Theme } from '../../../theme';
+import { scaleFont } from '../../../themes';
 import { useHui } from '../../../primitives/context';
 import { BlockTitle, HText, PressableScale, Surface } from '../../../primitives/basics';
 import { haptic } from '../../../primitives/haptics';
@@ -182,7 +183,7 @@ function Emojis({ t, model, value, disabled, onChoose, describe }: ControlProps)
             style={{
               flex: 1,
               height: 56,
-              borderRadius: t.radii.m,
+              borderRadius: t.radii.control,
               alignItems: 'center',
               justifyContent: 'center',
               borderWidth: on ? 1.5 : 1,
@@ -192,7 +193,7 @@ function Emojis({ t, model, value, disabled, onChoose, describe }: ControlProps)
             }}
           >
             <Pop on={on}>
-              <HText style={{ fontSize: values.length > 7 ? 22 : 28, lineHeight: values.length > 7 ? 28 : 34 }}>{emojiFor(v, model)}</HText>
+              <HText style={values.length > 7 ? scaleFont(22, 28, t.fontScale) : scaleFont(28, 34, t.fontScale)}>{emojiFor(v, model)}</HText>
             </Pop>
           </PressableScale>
         );
@@ -206,7 +207,7 @@ function Emojis({ t, model, value, disabled, onChoose, describe }: ControlProps)
 function Segments({ t, model, value, lang, disabled, onChoose, describe }: ControlProps) {
   const values = scaleValues(model);
   return (
-    <View style={{ flexDirection: 'row', borderRadius: t.radii.m, borderWidth: 1, borderColor: t.colors.borderStrong, overflow: 'hidden' }} accessibilityRole="radiogroup">
+    <View style={{ flexDirection: 'row', borderRadius: t.radii.control, borderWidth: 1, borderColor: t.colors.borderControl, overflow: 'hidden' }} accessibilityRole="radiogroup">
       {values.map((v, i) => {
         const on = value === v;
         return (
@@ -280,7 +281,7 @@ function ScaleSlider({ t, model, value, lang, disabled, onChoose, describe, onDr
   return (
     <View style={{ gap: t.spacing.xs }}>
       <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'center', gap: 6, minHeight: 34 }} accessibilityLiveRegion="polite">
-        <HText variant="stat" tabular style={{ color: shown === null ? t.colors.subtle : t.colors.accent }}>
+        <HText variant="stat" tabular style={{ color: shown === null ? t.colors.subtle : t.colors.accentText }}>
           {shown === null ? '–' : trimNum(shown, lang)}
         </HText>
         <HText variant="callout" color="muted" tabular>

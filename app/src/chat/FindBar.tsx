@@ -3,7 +3,9 @@
  * (Enter / ⇧Enter on a keyboard), Esc or ✕ closes. Matching + highlighting: findInChat.ts / findContext.tsx.
  */
 import { memo, useEffect, useRef } from 'react';
-import { Platform, Pressable, StyleSheet, Text, TextInput, View, type NativeSyntheticEvent, type TextInputKeyPressEventData } from 'react-native';
+import { Platform, Pressable, StyleSheet, View, type NativeSyntheticEvent, type TextInputKeyPressEventData } from 'react-native';
+import { Text, TextInput } from '../ui/primitives/Text';
+import { noOutline } from '../ui/lib/webStyle';
 import { useT } from '../i18n';
 import { useTheme } from '../ui';
 import { useEscapeToClose } from '../ui/lib/useEscapeToClose';
@@ -55,7 +57,7 @@ export const FindBar = memo(function FindBar({ query, onChange, total, current, 
           onChangeText={onChange}
           placeholder={tr('menus.find.placeholder')}
           placeholderTextColor={t.colors.subtle}
-          style={[styles.input, { color: t.colors.text, fontFamily: t.fonts.sans }]}
+          style={[t.typography.body, styles.input, { color: t.colors.text, fontFamily: t.fonts.sans }]}
           returnKeyType="search"
           autoCorrect={false}
           autoCapitalize="none"
@@ -65,7 +67,7 @@ export const FindBar = memo(function FindBar({ query, onChange, total, current, 
           accessibilityLabel={tr('menus.find.field')}
         />
         {status ? (
-          <Text style={[styles.count, { color: total ? t.colors.muted : t.colors.danger }]} accessibilityLabel={statusA11y} accessibilityLiveRegion="polite" numberOfLines={1}>
+          <Text style={[t.typography.caption, styles.count, { color: total ? t.colors.muted : t.colors.danger }]} accessibilityLabel={statusA11y} accessibilityLiveRegion="polite" numberOfLines={1}>
             {status}
           </Text>
         ) : null}
@@ -99,8 +101,8 @@ function BarButton({ icon, label, onPress, disabled, flip }: { icon: IconName; l
 const styles = StyleSheet.create({
   wrap: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingHorizontal: 10, paddingVertical: 6, borderBottomWidth: StyleSheet.hairlineWidth },
   field: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, height: 40, marginRight: 4 },
-  input: { flex: 1, minWidth: 0, width: '100%', fontSize: 15, paddingVertical: 0, height: 40, outlineStyle: 'none' as never },
-  count: { fontSize: 12.5, fontVariant: ['tabular-nums'], flexShrink: 0 },
+  input: { flex: 1, minWidth: 0, width: '100%', paddingVertical: 0, height: 40, ...noOutline },
+  count: { fontVariant: ['tabular-nums'], flexShrink: 0 },
   icon: { flexShrink: 0 },
   btn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   flip: { transform: [{ rotate: '180deg' }] },

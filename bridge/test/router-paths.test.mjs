@@ -29,7 +29,7 @@ test('paths heuristic: clear de/en/es cues only', () => {
 });
 
 test('paths heuristic does not steal from compare / steps / text', () => {
-  assert.equal(f('Vergleiche iPhone 17 und Pixel 11').format, 'compare');
+  assert.equal(f('Vergleiche Lissabon und Porto').format, 'compare');
   assert.equal(f('Was ist der Unterschied zwischen Wetter und Klima?').format, 'compare');
   assert.equal(f('Vergleiche Docker und Podman').format, 'compare');
   assert.notEqual(f('Docker oder VM für Home Assistant?').format, 'paths', 'two-way choice is not paths');

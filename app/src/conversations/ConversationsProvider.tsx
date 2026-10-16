@@ -403,6 +403,8 @@ export type UseConversation = {
   save: (messages: ChatMessage[], opts?: { keepOrder?: boolean }) => void;
   /** `save` + write to storage now; resolves once written (before a turn request starts: durable send) */
   saveNow: (messages: ChatMessage[]) => Promise<void>;
+  /** write every pending save (transcripts + index) now, not on the debounce timer; resolves once written */
+  flush: () => Promise<void>;
   setSessionId: (sessionId: string) => void;
   /** per-conversation model override (undefined = profile default) */
   setModel: (model: string | undefined) => void;
@@ -444,6 +446,7 @@ export function useConversation(id: string | null | undefined): UseConversation 
   const meta = useMemo(() => (id ? state.items.find((c) => c.id === id) : undefined), [id, state.items]);
   const save = useCallback((messages: ChatMessage[], opts?: { keepOrder?: boolean }) => (id ? controller.save(id, messages, opts) : undefined), [id, controller]);
   const saveNow = useCallback((messages: ChatMessage[]) => (id ? controller.saveNow(id, messages) : Promise.resolve()), [id, controller]);
+  const flush = useCallback(() => controller.flush(), [controller]);
   const setSessionId = useCallback(
     (sessionId: string) => {
       if (id) controller.setSessionId(id, sessionId);
@@ -479,6 +482,7 @@ export function useConversation(id: string | null | undefined): UseConversation 
     meta,
     save,
     saveNow,
+    flush,
     setSessionId,
     setModel,
     setModelOptions,

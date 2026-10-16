@@ -41,6 +41,7 @@ BRIDGE_ALLOW_NO_AUTH=1 HERMES_BASE_URL=http://127.0.0.1:8787 HERMES_API_KEY=dev 
 
 ```bash
 scripts/check.sh all                       # app: tsc (app + tests), app unit tests, scripts/*.test.mjs
+scripts/check.sh quick                     # inner loop: only what your change can affect (not a merge gate)
 (cd bridge && npm test)                    # bridge tests
 (cd push && npm test)                      # push library tests
 (cd bridge && npm run eval)                # router evaluation set
@@ -51,6 +52,14 @@ node hermes-skill/examples/validate.mjs    # validates the answer blocks in the 
 `scripts/check.sh` has two modes. On Linux with a systemd user session it runs each step memory-capped
 (`systemd-run --user --scope`) and serialized with `flock`, for shared build machines. Everywhere else (macOS,
 Windows/WSL without systemd, containers, CI) it runs the same commands directly; force that with `HUI_CHECK_PLAIN=1`.
+`scripts/check.sh quick [--base REF]` is the fast inner loop. It compares merge-base(HEAD, main) with the working tree
+(staged, unstaged and untracked files) and maps the changed files to related tests with `scripts/lib/related-tests.mjs`
+(import graph plus path mentions). When the mapping is unsure (dependency, tsconfig or Expo config, test helpers or
+fixtures, runtime-loaded data, or a file more than 30 % of the tests depend on), it runs that area's full suite instead.
+tsc runs incrementally (cache in `~/.cache/hui-check/`) and is skipped when nothing it sees changed; leak-guard covers the
+working-tree changes. It takes the same lock and memory scope as `all`, in at most two short steps. It is not a merge
+gate: run `scripts/check.sh all` before merging.
+
 The underlying commands, if you prefer to run them yourself:
 
 ```bash
@@ -60,9 +69,24 @@ npm test                                   # node --test "src/**/*.test.ts" (Nod
 node --test ../scripts/*.test.mjs
 ```
 
-CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs the type check, the app, bridge, push and script tests
-and the leak checks on every push and pull request. Run them locally before opening a pull request. Do not start a
-native build just to test a JavaScript change.
+### What CI runs
+
+[.github/workflows/ci.yml](.github/workflows/ci.yml) runs on every pull request and on pushes to `main`. It needs no
+secrets, so pull requests from forks get the same checks:
+
+| Job | Same as locally |
+|---|---|
+| `app` | `scripts/check.sh all` (tsc app + tests, app unit tests, `scripts/*.test.mjs`) after `npm ci` in `app/` |
+| `services` | `cd bridge && npm ci && npm test`, `cd push && npm test` |
+| `website` | `node --test scripts/website.test.mjs` |
+| `leak-guard` | `node scripts/leak-guard.mjs --tree --generic-only` and its unit tests |
+| `gitleaks` | gitleaks over the git history with `.gitleaks.toml` |
+| `workflows` | actionlint and `node --test scripts/workflows.test.mjs` (pinned actions, read-only token, nothing publishes) |
+
+Run `scripts/check.sh all` and the bridge and push tests locally before opening a pull request. Do not start a native build just to test a JavaScript
+change. Workflow changes: actions stay pinned to a full commit SHA with a version comment, and `permissions` stay
+read-only; `scripts/workflows.test.mjs` fails otherwise. Dependabot opens grouped weekly update pull requests
+(`.github/dependabot.yml`); Expo packages are only bumped with `npx expo install`, so their minor and major updates are ignored.
 
 ## Internationalization (i18n)
 

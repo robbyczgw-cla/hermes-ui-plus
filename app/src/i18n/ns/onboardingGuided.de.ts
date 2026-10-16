@@ -24,7 +24,7 @@ export const guided = {
     title: 'Wie ist dein Hermes eingerichtet?',
     lead: 'Wähle, was auf dich zutrifft. Du kannst das später jederzeit ändern.',
     link: { title: 'Ich habe einen QR-Code oder Link', text: 'Von der {bridge} – scannen oder einfügen, fertig.', badge: 'Am schnellsten' },
-    noBridge: { title: 'Hermes läuft, aber ohne Bridge', text: 'Wir helfen dir, die Bridge einzurichten – oder verbinden direkt.' },
+    noBridge: { title: 'Hermes läuft, aber ohne Bridge', text: 'Wir helfen dir, die Bridge einzurichten – oder du verbindest direkt.' },
     noHermes: { title: 'Ich habe noch kein Hermes', text: 'Was Hermes ist und wie du startest – oder erst die Demo.' },
   },
   noBridge: {

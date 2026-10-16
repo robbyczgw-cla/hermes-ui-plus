@@ -4,6 +4,8 @@
 // override validation against Hermes' GET /api/model/options, and aborts the upstream call when the client leaves.
 // Feature off (404 feature_off) whenever the plugin is not configured, not reachable or answers garbage:
 // nothing else in the bridge depends on it. Message content is never logged. Docs: docs/HERMES-PLUGIN.md.
+// "Off" carries a machine-readable `reason` (config body and feature_off errors): the plugin's own self-test
+// result (plugin >= 0.1.1, e.g. profile_scope_unavailable) or the bridge's view (plugin_unreachable, ...).
 import { readFileSync } from 'node:fs';
 import { silentLogger } from './log.mjs';
 import { makeAuthorizer, makeCredentials } from './auth.mjs';
@@ -14,6 +16,9 @@ export const QUICK_CONFIG_PATH = '/bridge/quick/config';
 const BODY_MAX_BYTES = 64 * 1024;
 const num = (v, d) => (v === undefined || v === '' || !Number.isFinite(Number(v)) || Number(v) < 0 ? d : Number(v));
 const DEFAULT_ALIASES = new Set(['', 'auto', 'default', 'quick', 'hui-quick', 'hermes-agent', 'hermes']);
+/** a reason from the plugin is passed on only in this shape (no free text from upstream reaches the app) */
+const REASON_RE = /^[a-z][a-z0-9_]{0,63}$/;
+export const quickReason = (v, fallback) => (typeof v === 'string' && REASON_RE.test(v) ? v : fallback);
 
 /** @param {Record<string, string|undefined>} env */
 export function loadQuickConfig(env = process.env) {
@@ -65,7 +70,7 @@ export function createQuick(bridgeConfig, o = {}) {
   const authorized = makeAuthorizer(bridgeConfig);
   const credentials = makeCredentials(bridgeConfig);
   const limiter = createRateLimiter({ perMinute: cfg.perMinute, perDay: cfg.perDay, now });
-  let probe = { at: 0, config: null }; // plugin /quick/config (null = off)
+  let probe = { at: 0, config: null, reason: null }; // plugin /quick/config (null = off, `reason` says why)
   let catalog = { at: 0, rows: null };
 
   const routeOf = (req) => {
@@ -83,10 +88,11 @@ export function createQuick(bridgeConfig, o = {}) {
   }
 
   async function probePlugin(force = false) {
-    if (cfg.off) return null;
+    if (cfg.off) { probe = { at: now(), config: null, reason: 'bridge_off' }; return null; }
     if (!force && probe.at && now() - probe.at < cfg.probeTtlMs) return probe.config;
     const s = secret();
     let config = null;
+    let reason = s ? 'plugin_unreachable' : 'plugin_not_configured';
     if (s) {
       const ctl = new AbortController();
       const timer = setTimeout(() => ctl.abort(), cfg.probeTimeoutMs);
@@ -94,7 +100,9 @@ export function createQuick(bridgeConfig, o = {}) {
         const r = await doFetch(`${cfg.pluginUrl}/quick/config`, { headers: { authorization: `Bearer ${s}` }, signal: ctl.signal });
         if (r.ok) {
           const j = await r.json();
-          if (j && typeof j === 'object' && j.enabled === true) config = j;
+          // plugin < 0.1.1 has no `available`: `enabled` alone decides; >= 0.1.1 sets both from its self-test
+          if (j && typeof j === 'object' && j.enabled === true && j.available !== false) config = j;
+          else reason = quickReason(j?.reason, 'plugin_disabled');
         } else {
           await r.body?.cancel?.();
           log.warn('quick plugin probe failed', { status: r.status });
@@ -103,9 +111,12 @@ export function createQuick(bridgeConfig, o = {}) {
         log.debug?.('quick plugin unreachable', { err: e.name });
       } finally { clearTimeout(timer); }
     }
-    probe = { at: now(), config };
+    probe = { at: now(), config, reason: config ? null : reason };
     return config;
   }
+  const offReason = () => probe.reason ?? 'plugin_unreachable';
+  const featureOff = (req, res) =>
+    send(req, res, 404, { error: { message: 'quick answers are off (Hermes plugin not available)', type: 'invalid_request_error', code: 'feature_off', reason: offReason() } });
 
   /** Hermes' model picker inventory (public API), cached. Returns null when unavailable. */
   async function modelCatalog() {
@@ -186,7 +197,7 @@ export function createQuick(bridgeConfig, o = {}) {
     if (!authorized(req)) { req.resume(); return fail(req, res, 401, 'Invalid bridge token', 'invalid_api_key', { 'www-authenticate': 'Bearer' }); }
     if (route === 'config') {
       const c = await probePlugin();
-      if (!c) return send(req, res, 200, { available: false });
+      if (!c) return send(req, res, 200, { available: false, reason: offReason() });
       return send(req, res, 200, {
         available: true, source: 'hermes-plugin', model: c.last_route?.model || null, provider: c.last_route?.provider || null,
         auxTask: c.aux_task ?? null, limits: { ...(c.limits ?? {}), perDeviceMinute: cfg.perMinute, perDeviceDay: cfg.perDay },
@@ -194,7 +205,7 @@ export function createQuick(bridgeConfig, o = {}) {
       });
     }
     const plugin = await probePlugin();
-    if (!plugin) { req.resume(); return fail(req, res, 404, 'quick answers are off (Hermes plugin not available)', 'feature_off'); }
+    if (!plugin) { req.resume(); return featureOff(req, res); }
     let raw;
     try { raw = await readBody(req); } catch (e) {
       return fail(req, res, e.code === 'TOO_LARGE' ? 413 : 400, e.code === 'TOO_LARGE' ? 'body too large' : 'invalid body', null, { connection: 'close' });
@@ -208,7 +219,7 @@ export function createQuick(bridgeConfig, o = {}) {
     const bad = await checkOverride(body);
     if (bad) return fail(req, res, bad[0], bad[1], bad[2]);
     const s = secret();
-    if (!s) { probe = { at: 0, config: null }; return fail(req, res, 404, 'quick answers are off (Hermes plugin not available)', 'feature_off'); }
+    if (!s) { probe = { at: 0, config: null, reason: 'plugin_not_configured' }; return featureOff(req, res); }
 
     const t0 = now();
     const ctl = new AbortController();
@@ -223,6 +234,8 @@ export function createQuick(bridgeConfig, o = {}) {
         body: JSON.stringify(body),
       });
       status = up.status;
+      // the plugin's self-test switched quick off (404 feature_off + reason, passed through as is): re-probe next time
+      if (up.status === 404) probe = { ...probe, at: 0 };
       const ct = up.headers.get('content-type') || 'application/json';
       const extra = { 'content-type': ct };
       const ra = up.headers.get('retry-after');
@@ -238,10 +251,10 @@ export function createQuick(bridgeConfig, o = {}) {
     } catch (e) {
       if (ctl.signal.aborted && res.destroyed) { status = 499; return; }
       if (!res.headersSent) {
-        probe = { at: 0, config: null }; // re-probe next time
+        probe = { at: 0, config: null, reason: 'plugin_unreachable' }; // re-probe next time
         if (ctl.signal.aborted) { status = 504; return fail(req, res, 504, 'quick answer timed out', 'timeout'); }
         status = 404;
-        return fail(req, res, 404, 'quick answers are off (Hermes plugin not available)', 'feature_off');
+        return featureOff(req, res);
       }
       status = 502;
       res.destroy();

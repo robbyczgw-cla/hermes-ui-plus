@@ -18,17 +18,22 @@ Design and migration plan: [`docs/HERMES-PLUGIN.md`](../docs/HERMES-PLUGIN.md).
   `reasoning_effort: low`.
 - A loopback HTTP listener (stdlib asyncio) runs in its own daemon thread with its own event loop, so it never
   blocks the gateway. Hermes loads plugins in every process. The bind acts as the lock: the first process
-  that binds `server.port` serves (normally the gateway), and the others stay passive.
-- Model calls go through `agent.auxiliary_client.call_llm(task="hui_quick", stream=True)`. That is the only
-  Hermes import, in `hermes_ui_plus/hermes_adapter.py`. If a provider rejects streaming, the call is retried
+  that binds `server.port` serves (normally the gateway), and the others stay passive and retry the bind every
+  15 s, so a short-lived process that won the bind cannot leave the feature dead.
+- Model calls go through `agent.auxiliary_client.call_llm(task="hui_quick", stream=True)`. All Hermes
+  imports live in `hermes_ui_plus/hermes_adapter.py`. If a provider rejects streaming, the call is retried
   once without streaming and the answer is sent as one chunk.
+- On a gateway that multiplexes profiles (Hermes v0.22+), each quick call runs in the secret scope of the profile
+  that enabled the plugin. A self-test (no model call) checks that this works; if it does not, `/quick/config`
+  says `available: false` with `reason: "profile_scope_unavailable"` and the app hides ⚡. Details: "Multiple
+  profiles (bots)" in [`docs/HERMES-PLUGIN.md`](../docs/HERMES-PLUGIN.md).
 
 ## Endpoints (127.0.0.1 only)
 
 | Method | Path | Auth | |
 |---|---|---|---|
 | GET | `/health` | none | `{"ok": true}` |
-| GET | `/quick/config` | Bearer secret | enabled flag, aux slot, last route used, limits, prompt-size estimate |
+| GET | `/quick/config` | Bearer secret | `enabled`/`available` + `reason` (self-test), `scope` (diagnostics), aux slot, last route used, limits, prompt-size estimate |
 | POST | `/quick/v1/chat/completions` | Bearer secret | OpenAI-compatible; `stream: true` returns SSE `chat.completion.chunk` events and `[DONE]`; usage in the final chunk |
 
 Request limits:
@@ -49,11 +54,21 @@ bridge has already checked them against Hermes' `GET /api/model/options`.
 
 ```bash
 python3 hermes-plugin/install.py --hermes-home ~/.hermes            # symlink + secret (0600)
-#   --copy                    copy instead of symlink
+#   --copy                    copy instead of symlink (needed when Hermes runs in a container)
 #   --group-readable-secret   0640 secret + 0750 dir, for a bridge user in the file's group
-hermes plugins enable hermes-ui-plus                                 # or plugins.enabled in config.yaml
-# back up config.yaml, then restart the gateway
 ```
+
+Enable it in `config.yaml` (back up `config.yaml`, `.env` and `installs/` first), then restart the gateway:
+
+```yaml
+plugins:
+  enabled: [hermes-ui-plus]   # add to the existing list
+```
+
+Do not use `hermes plugins enable` on a running installation: on Hermes v0.22 it can make Hermes' package manager
+build a new environment under `HERMES_HOME/installs/` and start the gateway from it, without the extras the gateway
+needs (a live test lost the API server that way). After the restart, check that the gateway still runs from its usual
+Python environment and that the API answers.
 
 The installer never edits `config.yaml`, never touches services and never prints the secret. Without a
 secret file the plugin registers the slot but keeps the listener off.
@@ -65,6 +80,11 @@ BRIDGE_HERMES_PLUGIN_URL=http://127.0.0.1:8646
 BRIDGE_HERMES_PLUGIN_SECRET_FILE=<hermes-home>/hermes-ui-plus/secret
 # optional: BRIDGE_QUICK=off, BRIDGE_QUICK_RATE=20 (per device/min), BRIDGE_QUICK_DAILY=300
 ```
+
+A bridge that cannot read the Hermes home (a hardened systemd unit with `ProtectHome`/`DynamicUser`) gets the
+secret as a credential instead: `LoadCredential=hui-plugin-secret:<hermes-home>/hermes-ui-plus/secret` and
+`Environment=BRIDGE_HERMES_PLUGIN_SECRET_FILE=%d/hui-plugin-secret` in the unit (not in its env file, which would win).
+`hermes-ui-plus-bridge setup` writes both when it finds the secret.
 
 ## Settings (`plugins.entries.hermes-ui-plus.settings` in config.yaml)
 

@@ -1,0 +1,56 @@
+# Bug report form. The app's "Report a problem" (Settings → About, failure card) prefills the fields below by id
+# (`?template=bug_report.yml&title=…&version=…&platform=…`, app/src/support/report.ts). Keep the ids in sync.
+name: Bug report
+description: Something in HUI+ (Hermes UI+) or its bridge does not work as expected.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please do not paste server addresses, tokens, keys or private chat contents: this tracker is public.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+      placeholder: "1. Open …  2. Tap …  3. …"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: Settings → About → Version (version · build · commit).
+      placeholder: "HUI+ 0.1.0-alpha.1 · Build 42 (abc1234)"
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: Android / iOS / web / desktop app, OS version, build flavor.
+      placeholder: "Android (API 34) · flavor hermes"
+  - type: input
+    id: connection
+    attributes:
+      label: Connection
+      description: How the app reaches Hermes (bridge, direct, demo, other).
+      placeholder: bridge
+  - type: input
+    id: server
+    attributes:
+      label: Server versions
+      description: Hermes and bridge versions, if known.
+      placeholder: "Hermes 0.22.0, bridge 0.1.0-alpha.1"
+  - type: textarea
+    id: flags
+    attributes:
+      label: Enabled feature flags
+      description: Filled in by the app.
+  - type: input
+    id: last-error
+    attributes:
+      label: Last error
+      description: Category and code of the last error the app showed (no message text).
+      placeholder: "network/timeout"

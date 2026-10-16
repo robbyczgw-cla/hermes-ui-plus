@@ -1,12 +1,13 @@
 // Settings → Medien → Bildersuche: source selector, own provider + key (secure storage, masked, never logged), test.
 import { useEffect, useRef, useState } from 'react';
-import { Platform, Pressable, Text } from 'react-native';
+import { Platform, Pressable } from 'react-native';
+import { Text } from '../ui/primitives/Text';
 import { useT } from '../i18n';
 import { ownImageSearch, setOwnImageConfig } from '../images/web';
 import type { ImageSearchMode } from '../images/mode';
 import { IMAGE_PROVIDERS, type ImageProviderId } from '../images/providers';
 import type { OwnTestResult } from '../images/ownCore';
-import { useTheme } from '../ui';
+import { textStyle, useTheme } from '../ui';
 import { usePreferences } from './PreferencesProvider';
 import { persistImageKey } from './imageKey';
 import { loadImageKey, saveImageKey } from './storage';
@@ -129,7 +130,7 @@ export function ImageSearchSettings() {
               last
               trailing={
                 <Pressable onPress={() => setShow((v) => !v)} hitSlop={8} accessibilityRole="button">
-                  <Text style={{ color: th.colors.accent, fontSize: 14 }}>{show ? tr('settings.media.imageSearch.hide') : tr('settings.media.imageSearch.show')}</Text>
+                  <Text style={[textStyle(th, 'callout'), { color: th.colors.accentText }]}>{show ? tr('settings.media.imageSearch.hide') : tr('settings.media.imageSearch.show')}</Text>
                 </Pressable>
               }
             />

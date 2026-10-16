@@ -13,9 +13,11 @@ import { View } from 'react-native';
 import { useTheme, type Theme } from '../../../theme';
 import { useHui } from '../../../primitives/context';
 import { FadeIn, HText, InlineText, PressableScale, Surface } from '../../../primitives/basics';
+import { Button } from '../../../primitives/Button';
 import { Icon } from '../../../primitives/Icon';
 import { haptic } from '../../../primitives/haptics';
 import { NARROW_TEXT_PROPS } from '../../../lib/textWrap';
+import { useCaptureMode } from '../../../lib/capture';
 import { useNodeState } from '../../../../nodestate';
 import { useT } from '../../../../i18n';
 import type { HuiPaths } from '../../../types';
@@ -29,6 +31,8 @@ export function Paths({ node }: { node: Partial<HuiPaths> }) {
   const t = useTheme();
   const tr = useT();
   const { streaming } = useHui();
+  // share-as-image: no "tap to choose" instruction (an app-only hint)
+  const capture = useCaptureMode();
   const id = useModuleId('paths', node as Record<string, unknown>);
   const model = useMemo(() => readPaths(node), [node]);
   const [st, setSt] = useNodeState<PathsState>(id, INITIAL_PATHS_STATE);
@@ -70,7 +74,7 @@ export function Paths({ node }: { node: Partial<HuiPaths> }) {
         ))}
         {streaming ? <PathRowSkeleton /> : null}
       </View>
-      {select && canTap ? (
+      {select && canTap && !capture ? (
         <HText variant="caption" color="subtle" align="center">
           {tr('ui.paths.selectHint')}
         </HText>
@@ -93,11 +97,7 @@ export function Paths({ node }: { node: Partial<HuiPaths> }) {
               {tr('ui.paths.sent', { title: st.title ?? model.items.find((r) => r.key === st.picked)?.title ?? '' })}
             </HText>
           </View>
-          <PressableScale haptic={false} onPress={reopen} accessibilityRole="button" hitSlop={6} style={{ minHeight: 36, justifyContent: 'center' }}>
-            <HText variant="caption" color="accent" weight="500">
-              {tr('ui.paths.change')}
-            </HText>
-          </PressableScale>
+          <Button label={tr('ui.paths.change')} variant="tertiary" size="small" onPress={reopen} />
         </View>
       ) : null}
       <ProvenanceChip basis={model.basis} source={model.source} />
@@ -138,7 +138,7 @@ function Row({ t, row, select, selected, dimmed, disabled, onPress, hint }: { t:
       accessibilityState={{ selected, checked: selected, disabled }}
       style={{
         padding: t.spacing.m,
-        borderRadius: t.radii.m,
+        borderRadius: t.radii.control,
         borderWidth: selected ? 1.5 : 1,
         borderColor: selected ? t.colors.accent : t.colors.border,
         backgroundColor: selected ? t.colors.accentSoft : t.colors.surface,
@@ -179,7 +179,7 @@ function Badge({ t, text, tone }: { t: Theme; text: string; tone: Parameters<typ
 
 function Radio({ t, on }: { t: Theme; on: boolean }) {
   return (
-    <View style={{ width: 18, height: 18, borderRadius: 9, marginTop: 2, borderWidth: on ? 0 : 1.5, borderColor: t.colors.borderStrong, backgroundColor: on ? t.colors.accent : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+    <View style={{ width: 18, height: 18, borderRadius: 9, marginTop: 2, borderWidth: on ? 0 : 1.5, borderColor: t.colors.borderControl, backgroundColor: on ? t.colors.accent : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
       {on ? <Icon name="check" size={12} color={t.colors.onAccent} strokeWidth={2.5} /> : null}
     </View>
   );
@@ -201,7 +201,7 @@ function Chain({ t, path }: { t: Theme; path: PathStepModel[] }) {
 
 function StepPill({ t, step }: { t: Theme; step: PathStepModel }) {
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 1, paddingHorizontal: 9, paddingVertical: 4, borderRadius: step.detail ? t.radii.s : t.radii.pill, backgroundColor: t.colors.surfaceAlt }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 1, paddingHorizontal: 9, paddingVertical: 4, borderRadius: step.detail ? t.radii.control : t.radii.pill, backgroundColor: t.colors.surfaceAlt }}>
       {step.icon ? <PathIcon name={step.icon} size={14} color={t.colors.muted} /> : null}
       <View style={{ flexShrink: 1 }}>
         <HText {...NARROW_TEXT_PROPS} variant="caption" weight="500">

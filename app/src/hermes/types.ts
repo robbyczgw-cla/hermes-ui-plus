@@ -5,6 +5,7 @@
 import type { RouteDecision } from '../protocol/types';
 import type { Attachment } from '../attachments/types';
 import type { TKey, Vars } from '../i18n/core.ts';
+import type { TurnExtras } from './turnOverride';
 
 export type { RouteDecision };
 
@@ -124,8 +125,10 @@ export type ApprovalRequest = {
   deadlineAt?: number;
   /** true once the deadline passed: Hermes denied it ("silence is not consent"); the card stays, buttons disabled */
   expired?: boolean;
-  /** rebuilt from GET /v1/runs/{id} after a stream drop / restart (not from the live stream) */
+  /** rebuilt from GET /v1/runs/{id} or a recorded stream after a drop / restart */
   restored?: boolean;
+  /** server clock (ms) when a replayed event arrived, from the bridge advancing the original upstream clock */
+  serverNowMs?: number;
 };
 
 /** Outcome of an approval request in the persistent history (ChatMessage.approvalLog). */
@@ -134,6 +137,8 @@ export type ApprovalOutcome = ApprovalChoice | 'expired' | 'cancelled';
 /** One compact, persisted history row: "✓ Erlaubt (einmal): rm -rf build/". */
 export type ApprovalRecord = {
   requestId?: string;
+  /** original server timestamp (seconds): replay identity when no request id was supplied */
+  timestamp?: number;
   runId: string;
   /** redacted command, capped */
   command: string;
@@ -186,6 +191,11 @@ export type ChatMessage = {
   /** user messages only: images/files sent with this turn (metadata + local uri, never base64) */
   attachments?: Attachment[];
   /**
+   * user messages only: a stored message carried hidden app text (`[hui:note]` / `[hui:context]`, hermes/turnOverride.ts)
+   * that was cut from `text` when the transcript was loaded; the bubble shows a compact chip instead.
+   */
+  turnExtras?: TurnExtras;
+  /**
    * user messages only: sent while attachment uploads were still running (hermes/pendingSend.ts). The bubble shows
    * per-attachment progress; the turn starts when every upload is done. Runtime only: persisted as `sendQueued`.
    */
@@ -227,6 +237,17 @@ export type ChatMessage = {
    * message while its turn is unacknowledged (`sendUnacked`) and on its stored queued form: "Erneut senden" re-uses it.
    */
   sendKey?: string;
+  /**
+   * Hermes assistant messages: the UI bridge recorded this turn under `sendKey` (`X-Hermes-UI-Resume: 1`). A lost stream
+   * – also one persisted unfinished by an app that was killed – re-attaches live at the bridge (stream.ts `resumeFrom`)
+   * instead of waiting for the stored session. Dropped once the bridge refused the re-attach.
+   */
+  resumable?: true;
+  /**
+   * runtime only: ms when the resumable stream of this (streaming) answer was lost; it is re-attaching meanwhile
+   * ("Verbindung unterbrochen – verbinde neu…"). Cleared when bytes arrive again or the turn ends.
+   */
+  reconnecting?: number;
   /**
    * direct backends (no server-side run): ms when the stream died while the app was in the
    * background. Shown as a calm notice with "Fortsetzen" / "Neu starten" instead of a red error (background/cut.ts).

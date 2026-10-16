@@ -7,10 +7,11 @@
  * Pure logic: hermesTools.ts, mediaTags.ts, reminder.ts.
  */
 import { memo, useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
+import { Text } from '../ui/primitives/Text';
 import { formatBytes } from '../attachments/mime';
 import { useI18n } from '../i18n';
-import { useTheme } from '../ui';
+import { Button, useTheme } from '../ui';
 import { Photo, useNaturalAspect } from '../ui/components/imageParts';
 import { useCopy } from './actions';
 import type { MemoryNote } from './hermesTools';
@@ -30,7 +31,7 @@ export const ContextDivider = memo(function ContextDivider() {
     <View style={styles.divider} accessible accessibilityRole="text" accessibilityLabel={tr('hermesTools.compacted.a11y')}>
       <View style={[styles.dividerLine, { backgroundColor: t.colors.border }]} />
       <Icon name="compress" size={13} color={t.colors.subtle} />
-      <Text style={[styles.dividerText, { color: t.colors.subtle }]}>{tr('hermesTools.compacted.divider')}</Text>
+      <Text style={[t.typography.caption, { color: t.colors.subtle }]}>{tr('hermesTools.compacted.divider')}</Text>
       <View style={[styles.dividerLine, { backgroundColor: t.colors.border }]} />
     </View>
   );
@@ -49,10 +50,10 @@ export const MemoryNotes = memo(function MemoryNotes({ notes }: { notes: MemoryN
           key={n.id}
           accessible
           accessibilityLabel={n.text ? `${tr('hermesTools.memory.chipA11y')}: ${n.text}` : tr('hermesTools.memory.updated')}
-          style={[styles.note, { backgroundColor: t.colors.surfaceAlt }]}
+          style={[styles.note, { borderRadius: t.radii.pill }, { backgroundColor: t.colors.surfaceAlt }]}
         >
           <Icon name="brain" size={14} color={t.colors.muted} />
-          <Text style={[styles.noteText, { color: t.colors.muted }]} numberOfLines={2}>
+          <Text style={[t.typography.caption, styles.noteText, { color: t.colors.muted }]} numberOfLines={2}>
             {n.text ? `${tr('hermesTools.memory.chip')} · ${n.text}` : tr('hermesTools.memory.updated')}
           </Text>
         </View>
@@ -135,19 +136,21 @@ function MediaChip({ file, conn }: { file: MediaRef; conn: MediaConn | null }) {
       accessibilityRole="button"
       accessibilityLabel={`${tr('hermesTools.media.a11y', { kind, name: file.name })}. ${sub}`}
       accessibilityHint={state === 'server' ? tr('hermesTools.media.copyPath') : tr('hermesTools.media.open')}
-      style={({ pressed }) => [styles.file, { backgroundColor: pressed ? t.colors.surfacePressed : t.colors.surfaceAlt, borderColor: t.colors.border, borderRadius: t.radii.m }]}
+      style={({ pressed }) => [styles.file, { backgroundColor: pressed ? t.colors.surfacePressed : t.colors.surfaceAlt, borderColor: t.colors.border, borderRadius: t.radii.control }]}
     >
       <Icon name={KIND_ICON[file.kind]} size={20} color={t.colors.muted} />
       <View style={styles.fileText}>
-        <Text style={[styles.fileName, { color: t.colors.text }]} numberOfLines={1}>
+        <Text style={[t.typography.callout, styles.fileName, { color: t.colors.text }]} numberOfLines={1}>
           {file.name}
         </Text>
-        <Text style={[styles.fileSub, { color: t.colors.muted }]} numberOfLines={1}>
+        <Text style={[t.typography.caption, styles.fileSub, { color: t.colors.muted }]} numberOfLines={1}>
           {sub}
         </Text>
       </View>
       {state === 'server' ? (
-        <Pressable onPress={copyPath} hitSlop={8} accessibilityRole="button" accessibilityLabel={tr('hermesTools.media.copyPath')} style={styles.fileBtn}>
+        // a visual shortcut only: on the server the whole row already copies the path (its hint says so); a button nested
+        // in the row's button is unreachable for VoiceOver and invalid inside role="button" on web
+        <Pressable onPress={copyPath} hitSlop={8} accessible={false} aria-hidden tabIndex={-1} style={styles.fileBtn}>
           <Icon name="copy" size={17} color={t.colors.muted} />
         </Pressable>
       ) : (
@@ -177,7 +180,7 @@ function MediaImage({ file, conn }: { file: MediaRef; conn: MediaConn }) {
   }, [conn, file]);
 
   if (failed) return <MediaChip file={file} conn={null} />;
-  if (!uri) return <View style={[styles.imagePending, { backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.l }]} accessibilityLabel={file.name} />;
+  if (!uri) return <View style={[styles.imagePending, { backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.card }]} accessibilityLabel={file.name} />;
   return (
     <View style={styles.image}>
       <Photo
@@ -224,76 +227,54 @@ function ReminderCard({ r }: { r: Reminder }) {
   };
   return (
     <View
-      style={[styles.card, { backgroundColor: t.colors.surfaceAlt, borderColor: t.colors.border, borderRadius: t.radii.m }]}
+      style={[styles.card, { backgroundColor: t.colors.surfaceAlt, borderColor: t.colors.border, borderRadius: t.radii.control }]}
       accessible={false}
     >
       <View style={styles.cardHead} accessible accessibilityLabel={head}>
         <Icon name="bell" size={18} color={t.colors.accent} />
         <View style={{ flex: 1 }}>
-          <Text style={[styles.cardTitle, { color: t.colors.text }]} numberOfLines={3}>
+          <Text style={[t.typography.callout, { color: t.colors.text }]} numberOfLines={3}>
             <Text style={{ fontWeight: '600' }}>{title}</Text>
             {when ? ` · ${when}` : ''}
             {r.text ? ` · ${r.text}` : ''}
           </Text>
-          {showSchedule ? <Text style={[styles.cardSub, { color: t.colors.muted }]}>{r.schedule}</Text> : null}
+          {showSchedule ? <Text style={[t.typography.caption, styles.cardSub, { color: t.colors.muted }]}>{r.schedule}</Text> : null}
         </View>
       </View>
       {sent ? null : asking ? (
         <View style={styles.cardButtons}>
-          <Text style={[styles.cardAsk, { color: t.colors.muted }]}>{tr('hermesTools.reminder.deleteAsk')}</Text>
-          <CardButton label={tr('hermesTools.reminder.cancel')} onPress={() => setAsking(false)} />
-          <CardButton label={tr('hermesTools.reminder.deleteConfirm')} danger onPress={remove} />
+          <Text style={[t.typography.caption, styles.cardAsk, { color: t.colors.muted }]}>{tr('hermesTools.reminder.deleteAsk')}</Text>
+          <Button label={tr('hermesTools.reminder.cancel')} variant="tertiary" size="small" onPress={() => setAsking(false)} />
+          <Button label={tr('hermesTools.reminder.deleteConfirm')} variant="primary" tone="seal" size="small" onPress={remove} />
         </View>
       ) : (
         <View style={styles.cardButtons}>
-          <CardButton icon="edit" label={tr('hermesTools.reminder.change')} onPress={() => prefillComposer?.(reminderChangePrefill(tr, r))} disabled={!prefillComposer} />
-          <CardButton icon="trash" label={tr('hermesTools.reminder.delete')} danger onPress={() => setAsking(true)} disabled={!sendMessage} />
+          <Button label={tr('hermesTools.reminder.change')} icon={(color, size) => <Icon name="edit" size={size} color={color} />} size="small" onPress={() => prefillComposer?.(reminderChangePrefill(tr, r))} disabled={!prefillComposer} />
+          <Button label={tr('hermesTools.reminder.delete')} icon={(color, size) => <Icon name="trash" size={size} color={color} />} tone="seal" size="small" onPress={() => setAsking(true)} disabled={!sendMessage} />
         </View>
       )}
     </View>
   );
 }
 
-function CardButton({ label, onPress, icon, danger, disabled }: { label: string; onPress(): void; icon?: IconName; danger?: boolean; disabled?: boolean }) {
-  const t = useTheme();
-  const color = danger ? t.colors.danger : t.colors.text;
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      hitSlop={4}
-      style={({ pressed }) => [styles.cardBtn, { borderColor: danger ? t.colors.danger : t.colors.borderStrong, opacity: disabled ? 0.4 : pressed ? 0.6 : 1 }]}
-    >
-      {icon ? <Icon name={icon} size={15} color={color} /> : null}
-      <Text style={[styles.cardBtnText, { color }]}>{label}</Text>
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
   divider: { flexDirection: 'row', alignItems: 'center', gap: 8, marginVertical: 10 },
   dividerLine: { flex: 1, height: StyleSheet.hairlineWidth },
-  dividerText: { fontSize: 12.5 },
   notes: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
-  note: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, maxWidth: '100%' },
-  noteText: { fontSize: 13, flexShrink: 1 },
+  note: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 5, maxWidth: '100%' },
+  noteText: { flexShrink: 1 },
   media: { gap: 8, marginTop: 12 },
   file: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 10, borderWidth: StyleSheet.hairlineWidth, maxWidth: 420 },
   fileText: { flex: 1, minWidth: 0 },
-  fileName: { fontSize: 14.5, fontWeight: '500' },
-  fileSub: { fontSize: 12.5, marginTop: 1 },
+  fileName: { fontWeight: '500' },
+  fileSub: { marginTop: 1 },
   fileBtn: { padding: 4 },
   image: { maxWidth: 420 },
   imagePending: { width: '100%', maxWidth: 420, aspectRatio: 4 / 3 },
   cards: { gap: 8, marginTop: 12 },
   card: { padding: 12, borderWidth: StyleSheet.hairlineWidth, gap: 10, maxWidth: 480 },
   cardHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
-  cardTitle: { fontSize: 14.5, lineHeight: 20 },
-  cardSub: { fontSize: 12.5, marginTop: 2 },
+  cardSub: { marginTop: 2 },
   cardButtons: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
-  cardAsk: { fontSize: 13, marginRight: 4 },
-  cardBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
-  cardBtnText: { fontSize: 13.5, fontWeight: '500' },
+  cardAsk: { marginRight: 4 },
 });

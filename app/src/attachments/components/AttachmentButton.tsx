@@ -3,12 +3,14 @@
  * (ChatGPT-style tiles; same look on Android, iOS and web).
  */
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
+import { Text } from '../../ui/primitives/Text';
 import { useT, type TKey } from '../../i18n';
 import { SheetGrabber, SheetModal, useTheme } from '../../ui';
 import type { PickSource } from '../pickers';
 import { AttIcon } from './icons';
 import type { AttachmentIconName } from './icons';
+import { a11yState } from '../../ui/lib/a11yState';
 
 export type AttachmentButtonProps = {
   onSelect(source: PickSource): void;
@@ -46,7 +48,7 @@ export function AttachmentButton({ onSelect, disabled, busy, sources, size = 36 
         disabled={inactive}
         accessibilityRole="button"
         accessibilityLabel={tr('attachments.button.a11y')}
-        accessibilityState={{ disabled: !!inactive, busy: !!busy }}
+        {...a11yState({ disabled: !!inactive, busy: !!busy })}
         hitSlop={6}
         style={({ pressed }) => [
           styles.btn,
@@ -65,10 +67,10 @@ export function AttachmentButton({ onSelect, disabled, busy, sources, size = 36 
               onPress={() => choose(o.source)}
               accessibilityRole="button"
               accessibilityLabel={tr(o.labelKey)}
-              style={({ pressed }) => [styles.tile, { backgroundColor: pressed ? t.colors.surfacePressed : t.colors.surfaceAlt, borderRadius: t.radii.l }]}
+              style={({ pressed }) => [styles.tile, { backgroundColor: pressed ? t.colors.surfacePressed : t.colors.surfaceAlt, borderRadius: t.radii.card }]}
             >
               <AttIcon name={o.icon} size={26} color={t.colors.text} />
-              <Text style={[styles.tileLabel, { color: t.colors.text }]}>{tr(o.labelKey)}</Text>
+              <Text style={[t.typography.callout, styles.tileLabel, { color: t.colors.text }]}>{tr(o.labelKey)}</Text>
             </Pressable>
           ))}
         </View>
@@ -83,5 +85,5 @@ const styles = StyleSheet.create({
   grabber: { marginBottom: 14 },
   row: { flexDirection: 'row', gap: 10 },
   tile: { flex: 1, height: 84, alignItems: 'center', justifyContent: 'center', gap: 8 },
-  tileLabel: { fontSize: 14, fontWeight: '500' },
+  tileLabel: { fontWeight: '500' },
 });

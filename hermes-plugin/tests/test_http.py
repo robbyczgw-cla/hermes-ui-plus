@@ -158,6 +158,64 @@ class HttpTest(unittest.TestCase):
         self.assertTrue(wait_for(fb.cancelled.is_set, 3))
         self.assertTrue(wait_for(lambda: r.listener._service.inflight == 0, 3))
 
+    def test_backend_generator_closed_in_its_worker_thread(self):
+        # the adapter's profile scope is a contextvar: the generator must end in the thread that iterated it
+        fb = FakeBackend(deltas=["x"] * 200, delay=0.05)
+        r = self.run_with(fb)
+        body = json.dumps({**Q, "stream": True}).encode()
+        s = socket.create_connection(("127.0.0.1", r.port))
+        s.sendall(f"POST {CHAT} HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {SECRET}\r\n"
+                  f"Content-Length: {len(body)}\r\n\r\n".encode() + body)
+        self.assertIn(b"200", s.recv(200))
+        s.close()
+        self.assertTrue(wait_for(fb.finished.is_set, 3))
+        self.assertEqual([w for w, _ in fb.threads], ["start", "end"])
+        self.assertEqual(fb.threads[0][1], fb.threads[1][1])
+
+    def test_config_reports_available(self):
+        cfg = json.loads(self.run_with().request("GET", "/quick/config")[2])
+        self.assertEqual((cfg["enabled"], cfg["available"], cfg["reason"], cfg["scope"]), (True, True, None, None))
+
+    def test_failed_self_test_reports_unavailable_and_refuses_calls(self):
+        class ScopeBroken(FakeBackend):
+            def self_test(self):
+                return "profile_scope_unavailable"
+
+        fb = ScopeBroken()
+        r = self.run_with(fb)
+        status, _, body = r.request("GET", "/quick/config")
+        cfg = json.loads(body)
+        self.assertEqual(status, 200)
+        # enabled:false keeps older bridges (which only read `enabled`) from offering the button
+        self.assertEqual((cfg["enabled"], cfg["available"], cfg["reason"]),
+                         (False, False, "profile_scope_unavailable"))
+        status, _, body = r.request("POST", CHAT, {**Q, "stream": True})
+        self.assertEqual(status, 404)
+        self.assertEqual(json.loads(body)["error"]["code"], "feature_off")  # apps hide the button on this
+        self.assertEqual(json.loads(body)["error"]["reason"], "profile_scope_unavailable")
+        self.assertEqual(fb.calls, [])  # no model call
+
+    def test_registration_context_reaches_the_worker(self):
+        # Hermes binding the owning profile's scope at registration (#139123) must reach every quick call:
+        # register -> ListenerThread (copy) -> request task -> executor worker (copy)
+        import contextvars
+        cv = contextvars.ContextVar("profile_scope", default=None)
+        seen = []
+
+        class Recording(FakeBackend):
+            def stream(self, **kw):
+                seen.append(cv.get())
+                yield from super().stream(**kw)
+
+        def register():
+            cv.set("scope-of-profile-writer")
+            return self.run_with(Recording())
+
+        r = contextvars.copy_context().run(register)
+        self.assertIsNone(cv.get())  # the test's own context stays clean
+        self.assertEqual(r.request("POST", CHAT, Q)[0], 200)
+        self.assertEqual(seen, ["scope-of-profile-writer"])
+
     def test_no_content_in_logs(self):
         sentinel = "SENTINEL_QUESTION_TEXT"
         r = self.run_with(FakeBackend(deltas=["SENTINEL_ANSWER_TEXT"]))

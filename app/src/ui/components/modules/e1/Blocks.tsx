@@ -123,7 +123,7 @@ function Box({ t, box, width }: { t: Theme; box: BlockBoxModel; width: number })
         gap: 4,
         paddingVertical: 10,
         paddingHorizontal: 8,
-        borderRadius: t.radii.m,
+        borderRadius: t.radii.control,
         borderWidth: 1,
         borderColor: c.border ? t.colors[c.border] : c.bg ? t.colors[c.bg] : 'transparent',
         backgroundColor: c.bg ? t.colors[c.bg] : 'transparent',
@@ -161,9 +161,9 @@ function Base({ t, base }: { t: Theme; base: BlockBaseModel }) {
         gap: 4,
         paddingVertical: 10,
         paddingHorizontal: t.spacing.m,
-        borderRadius: t.radii.m,
+        borderRadius: t.radii.control,
         borderWidth: 1,
-        borderColor: t.colors.borderStrong,
+        borderColor: t.colors.borderControl,
         backgroundColor: t.colors.surfacePressed,
       }}
     >

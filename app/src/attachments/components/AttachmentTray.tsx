@@ -3,13 +3,15 @@
  * upload progress and error state (tap an errored item to retry).
  */
 import { AttachmentImage } from './AttachmentImage';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '../../ui/primitives/Text';
 import { useT, type TFn } from '../../i18n';
 import { useTheme } from '../../ui';
 import type { Theme } from '../../ui';
 import { formatBytes, typeLabel } from '../mime';
 import type { Attachment } from '../types';
 import { AttIcon } from './icons';
+import { a11yState } from '../../ui/lib/a11yState';
 
 export type AttachmentTrayProps = {
   attachments: readonly Attachment[];
@@ -43,7 +45,7 @@ export function AttachmentTray({ attachments, onRemove, onRetry, pending }: Atta
         )
       )}
       {pending ? (
-        <View style={[styles.thumb, styles.center, { backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.m }]}>
+        <View style={[styles.thumb, styles.center, { backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.control }]}>
           <ActivityIndicator color={t.colors.muted} />
         </View>
       ) : null}
@@ -86,8 +88,17 @@ function ImageItem({ att, t, onRemove, onRetry }: ItemProps) {
       <Pressable
         disabled={!error || !onRetry}
         onPress={() => onRetry?.(att.id)}
-        accessibilityLabel={error ? tr('attachments.tray.errorRetry', { name: att.name, error: errorText(att, tr) }) : att.name}
-        style={[styles.thumb, { borderRadius: t.radii.m, backgroundColor: t.colors.surfaceAlt, borderColor: error ? t.colors.danger : t.colors.border }]}
+        // retryable error: a button; otherwise the thumbnail is a picture (its × is the separate remove button)
+        accessibilityRole={error && onRetry ? 'button' : 'image'}
+        {...a11yState({ busy: att.status === 'uploading' })}
+        accessibilityLabel={
+          error
+            ? tr('attachments.tray.errorRetry', { name: att.name, error: errorText(att, tr) })
+            : att.status === 'uploading'
+              ? tr('attachments.tray.fileA11y', { name: att.name, sub: progressLabel(att, tr) })
+              : att.name
+        }
+        style={[styles.thumb, { borderRadius: t.radii.control, backgroundColor: t.colors.surfaceAlt, borderColor: error ? t.colors.danger : t.colors.border }]}
       >
         <AttachmentImage uri={att.uri} style={StyleSheet.absoluteFill} contentFit="cover" transition={120} recyclingKey={att.id} />
         {att.status === 'uploading' ? (
@@ -120,22 +131,24 @@ function FileItem({ att, t, onRemove, onRetry }: ItemProps) {
       <Pressable
         disabled={!error || !onRetry}
         onPress={() => onRetry?.(att.id)}
+        accessibilityRole={error && onRetry ? 'button' : 'text'}
+        {...a11yState({ busy: uploading })}
         accessibilityLabel={
           error && onRetry ? tr('attachments.tray.fileA11yRetry', { name: att.name, sub }) : tr('attachments.tray.fileA11y', { name: att.name, sub })
         }
         style={[
           styles.chip,
-          { borderRadius: t.radii.m, backgroundColor: error ? t.colors.dangerSoft : t.colors.surfaceAlt, borderColor: error ? t.colors.danger : t.colors.border },
+          { borderRadius: t.radii.control, backgroundColor: error ? t.colors.dangerSoft : t.colors.surfaceAlt, borderColor: error ? t.colors.danger : t.colors.border },
         ]}
       >
-        <View style={[styles.fileIcon, { backgroundColor: error ? t.colors.danger : t.colors.accent, borderRadius: t.radii.s }]}>
+        <View style={[styles.fileIcon, { backgroundColor: error ? t.colors.danger : t.colors.accent, borderRadius: t.radii.control }]}>
           {uploading ? <ActivityIndicator color={t.colors.onAccent} size="small" /> : <AttIcon name={error ? 'alert' : 'file'} size={18} color={error ? '#fff' : t.colors.onAccent} />}
         </View>
         <View style={styles.chipText}>
-          <Text numberOfLines={1} style={[styles.name, { color: t.colors.text }]}>
+          <Text numberOfLines={1} style={[t.typography.callout, styles.name, { color: t.colors.text }]}>
             {att.name}
           </Text>
-          <Text numberOfLines={2} style={[styles.sub, { color: error ? t.colors.danger : t.colors.muted }]}>
+          <Text numberOfLines={2} style={[t.typography.caption, styles.sub, { color: error ? t.colors.danger : t.colors.muted }]}>
             {sub}
           </Text>
         </View>
@@ -168,8 +181,8 @@ const styles = StyleSheet.create({
   },
   fileIcon: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
   chipText: { flex: 1, minWidth: 0 },
-  name: { fontSize: 14, fontWeight: '600' },
-  sub: { fontSize: 12, lineHeight: 15, marginTop: 1 },
+  name: { fontWeight: '600' },
+  sub: { marginTop: 1 },
   bar: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 3 },
   barFill: { height: 3 },
   remove: {

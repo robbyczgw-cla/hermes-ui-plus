@@ -6,7 +6,8 @@
  * Fed by the session components (chat/useSessionPersistence.ts → `useTurnActivity`), read by
  *  - ChatScreen: which hidden sessions stay mounted (`keptSessions`)
  *  - the drawer: "läuft" dot
- *  - the Android foreground service (background/keepAlive.ts): runs while any turn runs
+ *  - the Android foreground service (background/keepAlive.ts): runs while any turn runs, and until the final
+ *    transcript writes of ended turns are done (`settle`)
  *  - the notification "Stopp" action: `stopAll()`
  */
 
@@ -27,6 +28,8 @@ export type TurnRegistry = ReturnType<typeof createTurnRegistry>;
 
 export function createTurnRegistry() {
   let turns: readonly RunningTurn[] = [];
+  /** final transcript writes of ended turns still in flight */
+  let saving = 0;
   const listeners = new Set<() => void>();
   const emit = () => {
     for (const fn of listeners) fn();
@@ -51,6 +54,23 @@ export function createTurnRegistry() {
       if (!turns.some((x) => x.conversationId === conversationId)) return;
       turns = turns.filter((x) => x.conversationId !== conversationId);
       emit();
+    },
+    /**
+     * The final write of an ended turn (chat/useSessionPersistence.ts): the keep-alive service, and with it the
+     * headless task that keeps JS timers alive in the background, is held until it settled. Returns `write`.
+     */
+    settle<T>(write: Promise<T>): Promise<T> {
+      saving++;
+      if (saving === 1) emit();
+      const done = () => {
+        if (saving > 0 && --saving === 0) emit();
+      };
+      write.then(done, done);
+      return write;
+    },
+    /** final writes still in flight (`settle`) */
+    saving(): number {
+      return saving;
     },
     isRunning(conversationId: string): boolean {
       return turns.some((x) => x.conversationId === conversationId);
@@ -86,6 +106,7 @@ export function createTurnRegistry() {
     /** tests */
     reset(): void {
       turns = [];
+      saving = 0;
       emit();
     },
   };

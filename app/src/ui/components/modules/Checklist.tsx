@@ -1,15 +1,19 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Platform, Share, TextInput, View } from 'react-native';
-import Animated, { FadeOut, LinearTransition, useAnimatedStyle, useReducedMotion, useSharedValue, withSequence, withSpring, withTiming } from 'react-native-reanimated';
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { Platform, Share, View } from 'react-native';
+import { TextInput } from '../../primitives/Text';
+import { noOutline } from '../../lib/webStyle';
+import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withSequence, withSpring, withTiming } from 'react-native-reanimated';
 import * as Clipboard from 'expo-clipboard';
 import { useTheme, type Theme } from '../../theme';
 import { useHui } from '../../primitives/context';
 import { HText, InlineText, PressableScale, Surface, textStyle } from '../../primitives/basics';
+import { Button } from '../../primitives/Button';
 import { Icon } from '../../primitives/Icon';
 import { Skeleton } from '../../primitives/Skeleton';
 import { haptic } from '../../primitives/haptics';
 import { asOptString } from '../../lib/format';
 import { useSettledAfter } from '../../lib/useSettledAfter';
+import { keepWebFocusOnId } from '../../lib/webA11y';
 import { useNodeScope, useNodeState } from '../../../nodestate';
 import { listBus } from '../../../actions/listBus.ts';
 import { checklistCreatedAt, isChecklistState, withMessageCreatedAt } from '../../../actions/lists.ts';
@@ -32,9 +36,10 @@ import {
   type ChecklistState,
 } from './a/checklistModel.ts';
 import { ExtraIcon } from './a/ExtraIcon';
-import { SecondaryButton, UndoBar, useModuleId, useNodeStateReady, useSend } from './a/shared';
+import { UndoBar, useModuleId, useNodeStateReady, useSend } from './a/shared';
 import { useS } from './useS';
 import { ChecklistSkeleton } from '../../skeletons';
+import { useCaptureMode } from '../../lib/capture';
 
 let idSeq = 0;
 const newItemId = () => `u${Date.now().toString(36)}${(idSeq++).toString(36)}`;
@@ -83,6 +88,10 @@ export function Checklist({ node }: { node: Partial<HuiChecklist> }) {
 
   const [editing, setEditing] = useState(false);
   const [showDone, setShowDone] = useState(true);
+  // share-as-image: the list as it stands, without the share / edit buttons, the empty "add item" field, the "Done"
+  // chevron (done items always shown) and the Send button (a Button: hidden in capture mode by itself)
+  const capture = useCaptureMode();
+  const rowIdPrefix = `chk${useId().replace(/\W/g, '')}-`;
   const [removed, setRemoved] = useState<{ item: CItem; index: number } | null>(null);
   const [flash, setFlash] = useState<{ ids: string[]; note: string } | null>(null);
   const [shareNote, setShareNote] = useState<string | null>(null);
@@ -188,7 +197,7 @@ export function Checklist({ node }: { node: Partial<HuiChecklist> }) {
               </HText>
             ) : null}
           </View>
-          {interactive ? (
+          {interactive && !capture ? (
             <>
               <PressableScale haptic="selection" onPress={() => void share()} accessibilityLabel={S.checklist.share} hitSlop={6} style={{ width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' }}>
                 <ExtraIcon name="share" size={18} color={t.colors.muted} />
@@ -211,19 +220,21 @@ export function Checklist({ node }: { node: Partial<HuiChecklist> }) {
         <ProgressLine t={t} ratio={ratio} />
       </View>
 
-      {/* open items */}
+      {/* open items: plain Views without Reanimated layout / exit animations (their frames live on the UI thread only).
+          When the card grew at the turn end (counter + Share/Edit appear), the items stayed frozen at their old
+          position, 53 px up over the progress bar (E2E `checklist`, 2026-10-15). React owns the final layout. */}
       <View style={{ paddingHorizontal: t.spacing.s }}>
         {g.groups.map((grp) => (
-          <Animated.View key={grp.key || '_'} layout={LinearTransition.duration(220)}>
+          <View key={grp.key || '_'}>
             {grp.title ? (
-              <HText variant="micro" color="muted" style={{ textTransform: 'uppercase', letterSpacing: 0.6, paddingHorizontal: t.spacing.s, paddingTop: t.spacing.m, paddingBottom: 2 }} accessibilityRole="header">
+              <HText variant="caption" weight="600" color="muted" style={{ paddingHorizontal: t.spacing.s, paddingTop: t.spacing.m, paddingBottom: 2 }} accessibilityRole="header">
                 {categoryLabel(grp.title, S)}
               </HText>
             ) : null}
             {grp.items.map((it) => (
-              <Row key={it.id} t={t} item={it} onToggle={toggle} onDelete={remove} editing={editing && editable} deletable={editable} interactive={interactive} highlight={!!flash?.ids.includes(it.id)} />
+              <Row key={it.id} idPrefix={rowIdPrefix} t={t} item={it} onToggle={toggle} onDelete={remove} editing={editing && editable} deletable={editable} interactive={interactive} highlight={!!flash?.ids.includes(it.id)} />
             ))}
-          </Animated.View>
+          </View>
         ))}
         {!g.groups.length && !g.done.length && !streaming ? (
           <HText variant="callout" color="muted" style={{ padding: t.spacing.s }}>
@@ -253,24 +264,27 @@ export function Checklist({ node }: { node: Partial<HuiChecklist> }) {
             accessibilityState={{ expanded: showDone }}
             style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: t.spacing.s, minHeight: 36 }}
           >
-            <HText variant="micro" color="muted" style={{ textTransform: 'uppercase', letterSpacing: 0.6, flex: 1 }}>
+            <HText variant="caption" weight="600" color="muted" style={{ flex: 1 }}>
               {S.checklist.done(g.done.length)}
             </HText>
-            <View style={{ transform: [{ rotate: showDone ? '180deg' : '0deg' }] }}>
-              <Icon name="chevronDown" size={14} color={t.colors.muted} />
-            </View>
+            {capture ? null : (
+              <View style={{ transform: [{ rotate: showDone ? '180deg' : '0deg' }] }}>
+                <Icon name="chevronDown" size={14} color={t.colors.muted} />
+              </View>
+            )}
           </PressableScale>
-          {showDone
+          {/* share-as-image: the done items are always shown */}
+          {showDone || capture
             ? g.done.map((it) => (
-                <Row key={it.id} t={t} item={it} onToggle={toggle} onDelete={remove} editing={editing && editable} deletable={editable} interactive={interactive} highlight={false} />
+                <Row key={it.id} idPrefix={rowIdPrefix} t={t} item={it} onToggle={toggle} onDelete={remove} editing={editing && editable} deletable={editable} interactive={interactive} highlight={false} />
               ))
             : null}
         </View>
       ) : null}
 
-      {/* footer */}
-      <View style={{ padding: t.spacing.l, paddingTop: t.spacing.s, gap: t.spacing.m }}>
-        {editable && interactive ? <AddField t={t} kind={kind} onAdd={add} /> : null}
+      {/* footer (share-as-image: only the card's bottom padding, its controls are not in the picture) */}
+      <View style={capture ? { height: t.spacing.m } : { padding: t.spacing.l, paddingTop: t.spacing.s, gap: t.spacing.m }}>
+        {editable && interactive && !capture ? <AddField t={t} kind={kind} onAdd={add} /> : null}
         {removed ? (
           <UndoBar
             key={removed.item.id}
@@ -284,17 +298,17 @@ export function Checklist({ node }: { node: Partial<HuiChecklist> }) {
           />
         ) : null}
         {flash?.note || shareNote ? (
-          <Animated.View exiting={FadeOut.duration(180)} accessibilityLiveRegion="polite">
+          <View accessibilityLiveRegion="polite">
             <HText variant="caption" color="accent" weight="500">
               {flash?.note || shareNote}
             </HText>
-          </Animated.View>
+          </View>
         ) : null}
         {interactive && state.items.length ? (
-          <SecondaryButton
+          <Button
             label={state.sentAt ? S.checklist.sent : S.checklist.sendToHermes}
+            variant={state.sentAt ? 'secondary' : 'primary'}
             icon={state.sentAt ? 'check' : 'send'}
-            color={state.sentAt ? t.colors.success : undefined}
             onPress={() => {
               if (!send(checklistReplyFor(id, state.items))) return;
               update((s) => ({ ...s, sentAt: Date.now() }));
@@ -323,6 +337,7 @@ function ProgressLine({ t, ratio }: { t: Theme; ratio: number }) {
 }
 
 const Row = memo(function Row({
+  idPrefix,
   t,
   item,
   onToggle,
@@ -332,6 +347,8 @@ const Row = memo(function Row({
   interactive,
   highlight,
 }: {
+  /** web: DOM id prefix of this checklist, so a toggled row (it moves to the done group) can keep keyboard focus */
+  idPrefix: string;
   t: Theme;
   item: CItem;
   onToggle: (id: string) => void;
@@ -344,14 +361,23 @@ const Row = memo(function Row({
   const S = useS();
   const qty = formatQty(item);
   const label = itemLabel(item);
+  const domId = Platform.OS === 'web' ? `${idPrefix}${item.id}` : undefined;
   return (
-    <Animated.View exiting={FadeOut.duration(150)} layout={LinearTransition.duration(220)} style={{ flexDirection: 'row', alignItems: 'center' }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
       <PressableScale
         haptic={false}
         // while streaming the row is inert but NOT dimmed (disabled would fade it to 45 % and the
         // arriving list would look washed out / empty on a bright phone screen)
         scaleTo={interactive ? 0.985 : 1}
-        onPress={interactive ? () => onToggle(item.id) : undefined}
+        nativeID={domId}
+        onPress={
+          interactive
+            ? () => {
+                keepWebFocusOnId(domId);
+                onToggle(item.id);
+              }
+            : undefined
+        }
         onLongPress={deletable && interactive ? () => onDelete(item.id) : undefined}
         delayLongPress={450}
         accessibilityRole="checkbox"
@@ -372,7 +398,7 @@ const Row = memo(function Row({
           minHeight: 44,
           paddingHorizontal: t.spacing.s,
           paddingVertical: 6,
-          borderRadius: t.radii.s,
+          borderRadius: t.radii.control,
           backgroundColor: highlight ? t.colors.accentSoft : 'transparent',
         }}
         pressedStyle={interactive ? { backgroundColor: t.colors.surfacePressed } : undefined}
@@ -402,7 +428,7 @@ const Row = memo(function Row({
           <IconButtonTrash t={t} label={S.checklist.deleteA11y(label)} onPress={() => onDelete(item.id)} />
         </View>
       ) : null}
-    </Animated.View>
+    </View>
   );
 });
 
@@ -434,7 +460,7 @@ function CheckCircle({ t, on }: { t: Theme; on: boolean }) {
           height: 22,
           borderRadius: 11,
           borderWidth: on ? 0 : 1.5,
-          borderColor: t.colors.borderStrong,
+          borderColor: t.colors.borderControl,
           backgroundColor: on ? t.colors.success : 'transparent',
           alignItems: 'center',
           justifyContent: 'center',
@@ -467,9 +493,9 @@ function AddField({ t, kind, onAdd }: { t: Theme; kind: ReturnType<typeof asKind
           alignItems: 'center',
           gap: t.spacing.s,
           minHeight: 44,
-          borderRadius: t.radii.m,
+          borderRadius: t.radii.control,
           borderWidth: 1,
-          borderColor: focus ? t.colors.accent : t.colors.border,
+          borderColor: focus ? t.colors.accent : t.colors.borderControl,
           backgroundColor: t.colors.surfaceAlt,
           paddingHorizontal: t.spacing.m,
         }}
@@ -487,7 +513,7 @@ function AddField({ t, kind, onAdd }: { t: Theme; kind: ReturnType<typeof asKind
           onSubmitEditing={submit}
           onFocus={() => setFocus(true)}
           onBlur={() => setFocus(false)}
-          style={[textStyle(t, 'callout'), { flex: 1, color: t.colors.text, paddingVertical: 10, outlineStyle: 'none' } as object]}
+          style={[textStyle(t, 'callout'), { flex: 1, color: t.colors.text, paddingVertical: 10, ...noOutline } as object]}
         />
       </View>
       {text.trim() ? (
@@ -496,9 +522,9 @@ function AddField({ t, kind, onAdd }: { t: Theme; kind: ReturnType<typeof asKind
             haptic={false}
             onPress={submit}
             accessibilityLabel={S.checklist.add}
-            style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: t.colors.accent, alignItems: 'center', justifyContent: 'center' }}
+            style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: t.colors.ink, alignItems: 'center', justifyContent: 'center' }}
           >
-            <Icon name="plus" size={20} color={t.colors.onAccent} strokeWidth={2.25} />
+            <Icon name="plus" size={20} color={t.colors.onInk} strokeWidth={2.25} />
           </PressableScale>
         </View>
       ) : null}

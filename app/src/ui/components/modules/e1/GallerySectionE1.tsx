@@ -30,7 +30,7 @@ function Section({ heading, prefix, samples, onAction }: { heading: string; pref
       </HText>
       {samples.map((s, i) => (
         <View key={i} style={{ gap: t.spacing.s }} nativeID={`${prefix}-${i}`}>
-          <HText variant="micro" color="subtle" style={{ textTransform: 'uppercase', letterSpacing: 0.6 }}>
+          <HText variant="caption" weight="600" color="subtle">
             {s.title}
           </HText>
           <HuiView node={s.node} streaming={!!s.streaming} onAction={onAction} />

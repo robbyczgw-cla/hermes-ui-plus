@@ -142,7 +142,7 @@ export function HBarChart({ t, series, width, progress, unit }: V3Props) {
             const dim = selIdx !== null && !active;
             return (
               <G key={i} opacity={dim ? 0.45 : 1}>
-                {active ? <Rect x={0} y={i * rowH + 1} width={width} height={rowH - 2} rx={t.radii.s} fill={t.colors.surfaceAlt} /> : null}
+                {active ? <Rect x={0} y={i * rowH + 1} width={width} height={rowH - 2} rx={t.radii.control} fill={t.colors.surfaceAlt} /> : null}
                 <SvgText x={4} y={i * rowH + rowH / 2 + 4} fontSize={FONT + 1} fill={t.colors.text} fontWeight={active ? '600' : '400'} fontFamily={t.fonts.sans}>
                   {truncate(c, maxChars)}
                 </SvgText>

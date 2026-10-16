@@ -12,7 +12,7 @@ import {
 } from '../src/setup/detect.mjs';
 import { mergeEnv, quoteEnvValue, serializeEnv, writeEnvFile, readEnvFile, redactEnv, defaultEnvFile, planSkillInstall, installSkill, findSkillSource } from '../src/setup/files.mjs';
 import { systemdUnit, systemdUnitPath, systemdCommands, systemServiceProblem, execArgv, isNpxCachePath, launchdPlist, launchdCommands, composeSnippet } from '../src/setup/service.mjs';
-import { parseSetupArgs, runSetup, webPairLink, inContainer, cliName, createPrompter } from '../src/setup/wizard.mjs';
+import { parseSetupArgs, runSetup, webPairLink, inContainer, cliName, createPrompter, phoneAddressHelp } from '../src/setup/wizard.mjs';
 import { Readable, Writable } from 'node:stream';
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'hub-setup-'));
@@ -605,4 +605,111 @@ test('prompter: explicit --yes retains confirmation defaults', async () => {
   assert.equal(await p.confirm('Publish?', true), true);
   assert.equal(await p.confirm('Listen on LAN?', false), false);
   p.close();
+});
+
+// ---- fresh-user test of 0.1.0-alpha.1 ----
+const QR_BLOCKS = /[▀▄█]/; // qrcode's terminal output (half blocks)
+
+test('wizard without a Hermes home: no ~/.hermes/skills is created, the skill step says why', async () => {
+  const f = fixture();
+  rmSync(f.hermes, { recursive: true });
+  const r = await runSetup(parseSetupArgs(['--yes', '--service', 'none', '--no-tailscale', '--no-pair']), f.deps);
+  assert.equal(r.ok, true, r.error);
+  assert.equal(existsSync(f.hermes), false, 'no stray Hermes home');
+  assert.deepEqual(r.skill.map((s) => [s.action, s.reason]), [['skipped', 'no-hermes-home']]);
+  const human = f.lines.join('\n');
+  assert.match(human, /not installed: there is no Hermes home at /);
+  assert.ok(r.nextSteps.some((s) => /re-run setup once Hermes is installed/.test(s)));
+  rmSync(f.root, { recursive: true });
+});
+
+test('wizard without a reachable address: no 127.0.0.1 QR code, but where and how to set BRIDGE_PUBLIC_URL', async () => {
+  const f = fixture();
+  f.deps.exec = (argv) => { f.calls.push(argv.join(' ')); return argv[0] === 'tailscale' ? { code: -1, stdout: '', stderr: 'not found' } : { code: 0, stdout: '', stderr: '' }; };
+  f.deps.interfaces = { eth0: [{ address: '192.0.2.7', family: 'IPv4', internal: false }] };
+  const r = await runSetup(parseSetupArgs(['--yes', '--service', 'systemd']), f.deps); // --yes declines LAN listening
+  assert.equal(r.ok, true, r.error);
+  assert.equal(r.network.publicUrl, '');
+  assert.equal(r.pair.localOnly, true);
+  assert.match(r.pair.link, /u=http%3A%2F%2F127\.0\.0\.1%3A8790/);
+  const human = f.lines.join('\n');
+  assert.doesNotMatch(human, QR_BLOCKS, 'no QR code for a loopback address');
+  assert.doesNotMatch(human, /Scan with the Hermes UI\+ app/);
+  assert.match(human, /Pair link for an app on this machine/);
+  assert.ok(r.warnings.some((w) => /127\.0\.0\.1/.test(w) && /no QR code/.test(w)));
+  assert.ok(human.includes(`Edit BRIDGE_PUBLIC_URL in\n    ${r.envFile.path}`), 'names the env file');
+  assert.match(human, /tailscale serve --bg --https=8790 http:\/\/127\.0\.0\.1:8790/);
+  assert.match(human, /BRIDGE_HOST=0\.0\.0\.0\n\s+BRIDGE_PUBLIC_URL=http:\/\/192\.0\.2\.7:8790/);
+  assert.match(human, /systemctl --user restart hermes-ui-plus-bridge/);
+  assert.match(human, /devices add "Phone" --env-file /);
+  assert.ok(r.nextSteps.some((s) => s.includes(r.envFile.path) && s.includes('BRIDGE_PUBLIC_URL=http://192.0.2.7:8790')));
+  rmSync(f.root, { recursive: true });
+});
+
+test('wizard with a tailnet address still prints the QR code', async () => {
+  const f = fixture();
+  const r = await runSetup(parseSetupArgs(['--yes', '--service', 'none']), f.deps);
+  assert.equal(r.ok, true, r.error);
+  assert.equal(r.pair.localOnly, false);
+  const human = f.lines.join('\n');
+  assert.match(human, QR_BLOCKS);
+  assert.doesNotMatch(human, /Edit BRIDGE_PUBLIC_URL/);
+  rmSync(f.root, { recursive: true });
+});
+
+test('phoneAddressHelp: placeholder without a LAN address, port-less URL for 443, launchd restart', () => {
+  const t = phoneAddressHelp({ envFile: '/e', httpsPort: 443, kind: 'launchd' }).join('\n');
+  assert.match(t, /BRIDGE_PUBLIC_URL=http:\/\/<lan-ip-of-this-machine>:8790/);
+  assert.match(t, /https:\/\/<machine>\.<tailnet>\.ts\.net for you/);
+  assert.match(t, /launchctl kickstart -k gui\/\$\(id -u\)\/xyz\.hermesui\.bridge/);
+  assert.match(phoneAddressHelp({ envFile: '/e', kind: 'systemd', system: true }).join('\n'), /systemctl restart hermes-ui-plus-bridge/);
+});
+
+// ---- live test of profiles + the hermes-ui-plus plugin (Hermes v0.22, 2026-10-15) ----
+test('systemdUnit: credentials become LoadCredential + an env var pointing into %d', () => {
+  const u = systemdUnit({ argv: ['/usr/bin/node', '/usr/lib/b.mjs'], envFile: '/etc/x/env', system: true,
+    credentials: [{ name: 'hui-plugin-secret', path: '/root/.hermes/hermes-ui-plus/secret', env: 'BRIDGE_HERMES_PLUGIN_SECRET_FILE' }] });
+  assert.match(u, /^LoadCredential=hui-plugin-secret:\/root\/\.hermes\/hermes-ui-plus\/secret$/m);
+  assert.match(u, /^Environment=BRIDGE_HERMES_PLUGIN_SECRET_FILE=%d\/hui-plugin-secret$/m);
+  assert.match(systemdUnit({ argv: ['/n', '/b'], envFile: '/e', credentials: [{ name: 'c', path: '/a%b', env: 'X' }] }), /^LoadCredential=c:\/a%%b$/m);
+  assert.doesNotMatch(systemdUnit({ argv: ['/n', '/b'], envFile: '/e' }), /LoadCredential/);
+  for (const bad of [{ name: 'a b', path: '/p', env: 'X' }, { name: 'c', path: '/p', env: 'x=y' }, { name: 'c', path: '/p\nExecStartPre=/bin/evil', env: 'X' }]) {
+    assert.throws(() => systemdUnit({ argv: ['/n', '/b'], envFile: '/e', credentials: [bad] }));
+  }
+});
+
+function withPluginSecret(f) {
+  mkdirSync(join(f.hermes, 'hermes-ui-plus'), { recursive: true, mode: 0o700 });
+  writeFileSync(join(f.hermes, 'hermes-ui-plus', 'secret'), 'x'.repeat(64), { mode: 0o600 });
+  return join(f.hermes, 'hermes-ui-plus', 'secret');
+}
+
+test('wizard (user install) points the bridge at the plugin secret; profiles stay auto', async () => {
+  const f = fixture();
+  const secret = withPluginSecret(f);
+  const r = await runSetup(parseSetupArgs(['--yes', '--service', 'systemd']), f.deps);
+  assert.equal(r.ok, true, r.error);
+  assert.equal(r.hermes.quickPlugin, true);
+  const env = readEnvFile(join(f.home, '.config', 'hermes-ui-plus-bridge', 'env'));
+  assert.equal(env.BRIDGE_HERMES_PLUGIN_SECRET_FILE, secret);
+  assert.equal(env.BRIDGE_PROFILES, undefined); // a user service reads HERMES_HOME/profiles itself
+  const unit = readFileSync(join(f.home, '.config', 'systemd', 'user', 'hermes-ui-plus-bridge.service'), 'utf8');
+  assert.doesNotMatch(unit, /LoadCredential/);
+  assert.doesNotMatch(f.lines.join('\n'), /x{64}/);
+  rmSync(f.root, { recursive: true });
+});
+
+test('wizard (root, hardened system unit): explicit BRIDGE_PROFILES and the plugin secret as a credential', async () => {
+  // live: a ProtectHome unit could not read /root/.hermes, so ⚡ stayed off and profiles fell back to "any"
+  const f = fixture();
+  const secret = withPluginSecret(f);
+  const r = await runSetup(parseSetupArgs(['--yes', '--dry-run', '--service', 'systemd']), { ...f.deps, uid: 0, isRoot: true });
+  assert.equal(r.ok, true, r.error);
+  const human = f.lines.join('\n');
+  assert.match(human, /BRIDGE_PROFILES=work/);
+  assert.match(human, new RegExp(`LoadCredential=hui-plugin-secret:${secret.replace(/[.]/g, '\\.')}`));
+  assert.match(human, /Environment=BRIDGE_HERMES_PLUGIN_SECRET_FILE=%d\/hui-plugin-secret/);
+  assert.match(human, /^\s+BRIDGE_PROFILES=work$/m); // in the env file written
+  assert.doesNotMatch(human, /^\s+BRIDGE_HERMES_PLUGIN_SECRET_FILE=/m); // EnvironmentFile= would override the unit's value
+  rmSync(f.root, { recursive: true });
 });

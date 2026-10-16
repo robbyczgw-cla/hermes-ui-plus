@@ -113,7 +113,7 @@ self.addEventListener('install', (event) => {
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    Promise.all([caches.keys(), self.clients.matchAll({ type: 'window', includeUncontrolled: true })])
+    Promise.all([caches.keys(), self.clients.matchAll({ type: 'window', includeUncontrolled: true }), pruneShareInbox()])
       .then(([keys, wins]) => {
         const old = keys.filter((k) => k.startsWith(PREFIX) && k !== CACHE);
         const keep = new Set(wins.length ? old.slice(-KEEP_PREVIOUS) : []);
@@ -127,8 +127,97 @@ function isApi(url) {
   return /^\/(v1|api|bridge)(\/|$)/.test(url.pathname);
 }
 
+/*
+ * Web Share Target (manifest.webmanifest `share_target`, docs/SHARE-TARGET.md "Web"): the system share sheet POSTs
+ * title / text / url / files to /share-target. The share is stored in its own cache (never the shell cache) as
+ * `/__hui-share/<id>/meta` (JSON) + `/__hui-share/<id>/<n>` (file bodies) and the window is sent to `/#huiShare=<id>` (a fragment: the router never
+ * keeps it in its state);
+ * the app (src/share/webIntake.ts) consumes it into memory and deletes the entry before showing the share sheet.
+ * Unread entries older than a day are dropped on share, activation or navigation. A failure redirects to
+ * `#huiShare=failed` (the app says so).
+ */
+const SHARE_PATH = '/share-target';
+const SHARE_CACHE = 'hui-share-inbox';
+const SHARE_PREFIX = '/__hui-share/';
+const SHARE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const SHARE_MAX_FILES = 20;
+// Attachment limits: ten 20 MB files plus multipart/text overhead. Count bytes while reading too:
+// native share navigations need not supply Content-Length.
+const SHARE_MAX_BODY_BYTES = 201_048_576;
+const SHARE_MAX_FILE_BYTES = 20_000_000;
+
+function shareId() {
+  return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+}
+
+function pruneShares(cache) {
+  return cache.keys().then((reqs) =>
+    Promise.all(
+      reqs.map((r) => {
+        const m = /^\/__hui-share\/([a-z0-9]+)-/.exec(new URL(r.url).pathname);
+        const born = m ? parseInt(m[1], 36) : 0;
+        return Date.now() - born > SHARE_MAX_AGE_MS ? cache.delete(r) : false;
+      }),
+    ),
+  );
+}
+
+function pruneShareInbox() {
+  return caches.has(SHARE_CACHE).then((exists) => exists ? caches.open(SHARE_CACHE).then(pruneShares) : undefined);
+}
+
+async function receiveShare(req) {
+  // The target URL alone says nothing about the sender: a foreign HTML form can navigate here too.
+  // Native OS launches have no web origin (or an opaque one) and Fetch Metadata site "none".
+  const origin = req.headers?.get('origin');
+  const site = req.headers?.get('sec-fetch-site');
+  if (req.mode !== 'navigate' || (origin && origin !== 'null' && origin !== self.location.origin) || site === 'cross-site' || site === 'same-site') {
+    return new Response('Forbidden', { status: 403, headers: { 'cache-control': 'no-store' } });
+  }
+  const id = shareId();
+  const base = SHARE_PREFIX + id + '/';
+  let cache;
+  const written = [];
+  try {
+    if (Number(req.headers?.get('content-length')) > SHARE_MAX_BODY_BYTES) throw new Error('share too large');
+    let bytes = 0;
+    const body = req.body.pipeThrough(new TransformStream({ transform(chunk, controller) {
+      bytes += chunk.byteLength;
+      if (bytes > SHARE_MAX_BODY_BYTES) throw new Error('share too large');
+      controller.enqueue(chunk);
+    } }));
+    const form = await new Response(body, { headers: req.headers }).formData();
+    const str = (k) => {
+      const v = form.get(k);
+      // Keep one extra character so the app still explains text truncation.
+      return typeof v === 'string' ? v.slice(0, k === 'title' ? 300 : 65_537) : '';
+    };
+    const files = form.getAll('files').filter((f) => f && typeof f === 'object' && typeof f.arrayBuffer === 'function');
+    if (files.length > SHARE_MAX_FILES || files.some((f) => f.size > SHARE_MAX_FILE_BYTES)) throw new Error('share files exceed limits');
+    const meta = { title: str('title'), text: str('text'), url: str('url'), files: files.map((f) => ({ name: f.name || '', type: f.type || '' })) };
+    cache = await caches.open(SHARE_CACHE);
+    await pruneShares(cache);
+    // Sequential writes let rollback finish after the last write, including a quota failure halfway through.
+    for (let i = 0; i < files.length; i++) {
+      written.push(base + i);
+      await cache.put(base + i, new Response(files[i], { headers: { 'content-type': files[i].type || 'application/octet-stream' } }));
+    }
+    written.push(base + 'meta');
+    await cache.put(base + 'meta', new Response(JSON.stringify(meta), { headers: { 'content-type': 'application/json' } }));
+    return Response.redirect(new URL('/#huiShare=' + id, self.location.origin).href, 303);
+  } catch {
+    if (cache) await Promise.all(written.map((k) => cache.delete(k).catch(() => false)));
+    return Response.redirect(new URL('/#huiShare=failed', self.location.origin).href, 303);
+  }
+}
+
 self.addEventListener('fetch', (event) => {
   const req = event.request;
+  if (req.method === 'POST') {
+    const u = new URL(req.url);
+    if (u.origin === self.location.origin && u.pathname === SHARE_PATH) event.respondWith(receiveShare(req));
+    return;
+  }
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return; // API on another host, images, …
@@ -143,7 +232,7 @@ self.addEventListener('fetch', (event) => {
       ),
     );
     // refresh the offline shell within the event's lifetime (only this build's own shell)
-    event.waitUntil(net.then((x) => storeShell(x.res, x.copy)).catch(() => false));
+    event.waitUntil(Promise.all([net.then((x) => storeShell(x.res, x.copy)), pruneShareInbox()]).catch(() => false));
     return;
   }
 

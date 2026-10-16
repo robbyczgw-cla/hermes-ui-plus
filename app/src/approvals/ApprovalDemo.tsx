@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { useT, type TFn } from '../i18n';
-import { HText, HuiThemeProvider, PressableScale, useTheme, type ColorScheme } from '../ui';
+import { Button, HText, HuiThemeProvider, PressableScale, useTheme, type ColorScheme } from '../ui';
 import { ApprovalSheet } from './ApprovalSheet';
 import type { ApprovalChoiceValue, ApprovalInput } from './approvalModel';
 
@@ -80,9 +80,11 @@ function DemoBody({ scheme, setScheme }: { scheme: ColorScheme | null; setScheme
             key={String(s)}
             onPress={() => setScheme(s)}
             haptic="selection"
-            style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, backgroundColor: scheme === s ? t.colors.accent : t.colors.surfaceAlt }}
+            accessibilityRole="button"
+            accessibilityState={{ selected: scheme === s }}
+            style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 14, borderRadius: t.radii.pill, backgroundColor: scheme === s ? t.colors.accentSoft : t.colors.surfaceAlt }}
           >
-            <HText variant="callout" style={{ color: scheme === s ? t.colors.onAccent : t.colors.text }}>
+            <HText variant="callout" weight={scheme === s ? '600' : undefined} style={{ color: scheme === s ? t.colors.accentText : t.colors.text }}>
               {s === null ? tr('approvals.demo.theme.system') : s === 'light' ? tr('approvals.demo.theme.light') : tr('approvals.demo.theme.dark')}
             </HText>
           </PressableScale>
@@ -133,9 +135,7 @@ function DemoItem({ sample }: { sample: Sample }) {
       ) : (
         <View style={{ gap: 8 }}>
           <HText variant="callout">{log || tr('approvals.demo.hidden')}</HText>
-          <PressableScale onPress={reset} style={{ alignSelf: 'flex-start', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: 'gray' }}>
-            <HText variant="callout">{tr('approvals.demo.again')}</HText>
-          </PressableScale>
+          <Button label={tr('approvals.demo.again')} variant="secondary" size="small" onPress={reset} style={{ alignSelf: 'flex-start' }} />
         </View>
       )}
     </View>

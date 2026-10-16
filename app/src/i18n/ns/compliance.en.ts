@@ -9,12 +9,9 @@ export const compliance = {
     accept: 'Got it, continue',
     later: 'Later',
     privacy: 'Privacy policy',
-    needed: 'Please confirm the data-sharing notice first.',
   },
   report: {
-    more: 'More actions',
     action: 'Report',
-    actionA11y: 'Report answer',
     title: 'Report answer',
     lead: 'What is wrong with this answer?',
     reasons: {

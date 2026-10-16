@@ -3,7 +3,6 @@ import {
   Platform,
   Pressable,
   StyleSheet,
-  Text,
   View,
   type PressableProps,
   type StyleProp,
@@ -11,6 +10,7 @@ import {
   type TextStyle,
   type ViewStyle,
 } from 'react-native';
+import { Text } from './Text';
 import { webAriaState } from '../lib/ariaState';
 import Animated, {
   Easing,
@@ -37,9 +37,10 @@ export type HTextProps = TextProps & {
   tabular?: boolean;
 };
 
+/** Resolves text colours: `accent` is the readable text variant (`accentText`, 4.5:1 also for a custom accent). */
 export function resolveColor(t: Theme, c: string | undefined, fallback: ColorKey = 'text'): string {
   if (!c) return t.colors[fallback];
-  const v = (t.colors as Record<string, unknown>)[c];
+  const v = (t.colors as Record<string, unknown>)[c === 'accent' ? 'accentText' : c];
   return typeof v === 'string' ? v : c;
 }
 
@@ -92,7 +93,7 @@ export function InlineText({ text, ...props }: HTextProps & { text: string }) {
           st.borderRadius = 4;
         }
         if (s.href) {
-          st.color = t.colors.accent;
+          st.color = t.colors.accentText;
           st.textDecorationLine = s.strike ? 'underline line-through' : 'underline';
           const href = s.href;
           return (
@@ -147,7 +148,7 @@ export function PressableScale({ style, pressedStyle, haptic: h = 'light', scale
   return (
     <Pressable
       {...rest}
-      {...(Platform.OS === 'web' ? webAriaState(rest.accessibilityState) : null)}
+      {...(Platform.OS === 'web' ? webAriaState(rest.accessibilityState, rest.accessibilityRole ?? 'button') : null)}
       style={outer}
       disabled={disabled}
       accessibilityRole={rest.accessibilityRole ?? 'button'}
@@ -214,7 +215,7 @@ export function Surface({ children, style, padded = true, depth = 0 }: { childre
       style={[
         {
           backgroundColor: nested ? t.colors.surfaceAlt : t.colors.surface,
-          borderRadius: nested ? t.radii.m : t.radii.l,
+          borderRadius: nested ? t.radii.control : t.radii.card,
           borderWidth: nested ? 0 : 1,
           borderColor: t.colors.border,
           padding: padded ? (nested ? t.spacing.m : t.spacing.l) : 0,
@@ -228,11 +229,11 @@ export function Surface({ children, style, padded = true, depth = 0 }: { childre
   );
 }
 
-/** Small pill label. */
+/** Small pill label: one calm style (caption, 600, sentence case); the tone only picks the semantic colour pair. */
 export function Badge({ label, tone = 'accent' }: { label: string; tone?: 'accent' | 'neutral' | 'success' | 'warning' | 'danger' }) {
   const t = useTheme();
   const map = {
-    accent: [t.colors.accentSoft, t.colors.accent],
+    accent: [t.colors.accentSoft, t.colors.accentText],
     neutral: [t.colors.surfaceAlt, t.colors.muted],
     success: [t.colors.successSoft, t.colors.success],
     warning: [t.colors.warningSoft, t.colors.warning],
@@ -240,8 +241,8 @@ export function Badge({ label, tone = 'accent' }: { label: string; tone?: 'accen
   } as const;
   const [bg, fg] = map[tone];
   return (
-    <View style={{ backgroundColor: bg, borderRadius: t.radii.pill, paddingHorizontal: 8, paddingVertical: 2, alignSelf: 'flex-start' }}>
-      <HText variant="micro" style={{ color: fg }} numberOfLines={1}>
+    <View style={{ backgroundColor: bg, borderRadius: t.radii.pill, paddingHorizontal: 10, paddingVertical: 2, alignSelf: 'flex-start' }}>
+      <HText variant="caption" weight="600" style={{ color: fg }} numberOfLines={1}>
         {label}
       </HText>
     </View>

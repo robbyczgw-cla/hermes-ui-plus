@@ -62,7 +62,8 @@ const ORDER_GRAPHITE = [0, 3, 2, 1, 4, 5, 6, 7] as const; // ink, terracotta, ve
 const ORDER_GREEN = [2, 3, 0, 1, 4, 5, 6, 7] as const; // verdigris, terracotta, ink, brass, … (Wald)
 
 // Standard = "Bote" (messenger): ink + ivory + brass, the colours of the Petasos icon (app/brand/identity.json).
-// Neutral, slightly warm surfaces; the brass accent is reserved for primary actions, links, focus and selection.
+// Neutral, slightly warm surfaces. Ink fills the one primary action; the brass accent is reserved for selection,
+// progress, focus and links; seal red (the website's wax) marks approval and destructive moments only.
 // Status colours sit apart from the accent: sage green, burnt orange (not amber, which would read as brass), crimson.
 // Code: steel-blue functions, slate keywords, verdigris strings, terracotta numbers (none of them brass).
 const standardLight: ThemeSpec = {
@@ -81,6 +82,7 @@ const standardLight: ThemeSpec = {
   overrides: {
     surfacePressed: '#E7E2D8',
     accentSoft: '#F3ECDD',
+    seal: '#9E2B25',
     info: '#346AAC',
     infoSoft: '#EAF0F7',
     overlay: 'rgba(16,20,28,0.38)',
@@ -107,6 +109,7 @@ const standardDark: ThemeSpec = {
   overrides: {
     surfacePressed: '#272E3A',
     onAccent: '#0F131A',
+    seal: '#E0776B',
     accentSoft: 'rgba(212,168,92,0.15)',
     border: 'rgba(236,231,221,0.09)',
     borderStrong: 'rgba(236,231,221,0.18)',
@@ -406,18 +409,28 @@ export function familySchemes(family: ThemeFamilyId): ColorScheme[] {
 
 // ---------------------------------------------------------------- accent
 
+// Curated from the brand ("Bote": brass fittings, fountain-pen ink, verdigris, seal wax, plum, graphite) instead of
+// saturated UI-kit hues; anything else goes through the custom colour field.
 export const ACCENT_SWATCHES = [
-  { id: 'blue', light: '#2563EB', dark: '#6EA2FF' },
-  { id: 'indigo', light: '#4F46E5', dark: '#8F96FF' },
-  { id: 'violet', light: '#7C3AED', dark: '#B79AF8' },
-  { id: 'pink', light: '#C0266B', dark: '#F47EB8' },
-  { id: 'red', light: '#C8232C', dark: '#F87C7C' },
-  { id: 'orange', light: '#B9450E', dark: '#FB9A52' },
-  { id: 'amber', light: '#9A5B05', dark: '#F5BE3B' },
-  { id: 'green', light: '#15803D', dark: '#4ADE80' },
-  { id: 'teal', light: '#0F766E', dark: '#3ED3BE' },
+  { id: 'brass', light: '#8A6419', dark: '#D4A85C' },
+  { id: 'ink', light: '#2D4F94', dark: '#93B2EA' },
+  { id: 'verdigris', light: '#178B70', dark: '#5BC4A6' },
+  { id: 'seal', light: '#9E2B25', dark: '#E0776B' },
+  { id: 'plum', light: '#97549B', dark: '#D49AD8' },
   { id: 'graphite', light: '#3F3F46', dark: '#D4D4D8' },
 ] as const;
+/** Swatch ids of earlier versions → the closest curated swatch (stored preferences are mapped on load). */
+export const LEGACY_ACCENT_SWATCHES: Readonly<Record<string, AccentSwatchId>> = {
+  blue: 'ink',
+  indigo: 'ink',
+  violet: 'plum',
+  pink: 'plum',
+  red: 'seal',
+  orange: 'seal',
+  amber: 'brass',
+  green: 'verdigris',
+  teal: 'verdigris',
+};
 export type AccentSwatchId = (typeof ACCENT_SWATCHES)[number]['id'];
 
 /**
@@ -509,16 +522,37 @@ export function ensureContrastOnAll(color: string, bgs: readonly string[], min: 
 }
 
 /**
- * Secondary text tiers, light and dark: `subtle` ≥ 4.5:1 on bg / surface / surfaceAlt, and `muted` stays at least
+ * Secondary text tiers, light and dark: `subtle` ≥ 4.5:1 on bg / surface / surfaceAlt (plus `extraBgs`: the soft
+ * tints that chips and selected rows put small text on), and `muted` stays at least
  * one visible step stronger than `subtle` (≥ 4.5 and ≥ subtle + 1 on the weakest surface). Hand-picked values that
  * already pass are kept; others get the smallest nudge (darker on light, lighter on dark backgrounds).
  */
-export function textTiers(spec: Pick<ThemeSpec, 'bg' | 'surface' | 'surfaceAlt' | 'muted' | 'subtle'>): { muted: string; subtle: string } {
-  const bgs = [spec.bg, spec.surface, spec.surfaceAlt];
+export function textTiers(
+  spec: Pick<ThemeSpec, 'bg' | 'surface' | 'surfaceAlt' | 'muted' | 'subtle'>,
+  extraBgs: readonly string[] = [],
+): { muted: string; subtle: string } {
+  const bgs = [spec.bg, spec.surface, spec.surfaceAlt, ...extraBgs.filter(isHex)];
   const subtle = ensureContrastOnAll(spec.subtle, bgs, SMALL_TEXT_MIN_CONTRAST);
   const weakest = Math.min(...bgs.map((b) => contrast(subtle, b)));
   const muted = ensureContrastOnAll(spec.muted, bgs, Math.max(SMALL_TEXT_MIN_CONTRAST, weakest + 1));
   return { muted, subtle };
+}
+
+/** WCAG 1.4.11: a border that is the only thing marking a control needs 3:1 against what it sits on. */
+export const CONTROL_BORDER_MIN_CONTRAST = 3;
+
+/**
+ * Opaque outline colour for controls: `text` mixed into the surface in the smallest steps until it reaches
+ * CONTROL_BORDER_MIN_CONTRAST on bg, surface and surfaceAlt (the translucent border tokens are ~1.4:1).
+ */
+export function controlBorder(spec: Pick<ThemeSpec, 'bg' | 'surface' | 'surfaceAlt' | 'text'>): string {
+  const bgs = [spec.bg, spec.surface, spec.surfaceAlt];
+  let c = mix(spec.surface, spec.text, 0.2);
+  for (let k = 0.2; k <= 1; k += 0.01) {
+    c = mix(spec.surface, spec.text, k);
+    if (Math.min(...bgs.map((b) => contrast(c, b))) >= CONTROL_BORDER_MIN_CONTRAST) break;
+  }
+  return c;
 }
 
 /** Syntax colors are small mono text: same AA minimum as body text on the code background. */
@@ -545,10 +579,10 @@ export function softTint(surface: string, color: string, strength: number): stri
  * deltas, form errors), so each is nudged to small-text AA on bg, surface and its own soft tint (the tint is
  * derived from the hand-picked color first, so it keeps the family's hue).
  */
-export function statusColors(spec: ThemeSpec, o: Partial<ThemeColors>, soft: (c: string) => string) {
+export function statusColors(spec: ThemeSpec, o: Partial<ThemeColors>, soft: (c: string) => string, extraBgs: readonly string[] = []) {
   const one = (c: string, tint: string | undefined) => {
     const bgTint = tint ?? soft(c);
-    const fg = ensureContrastOnAll(c, [spec.bg, spec.surface, ...(isHex(bgTint) ? [bgTint] : [])], SMALL_TEXT_MIN_CONTRAST);
+    const fg = ensureContrastOnAll(c, [spec.bg, spec.surface, ...extraBgs, ...(isHex(bgTint) ? [bgTint] : [])], SMALL_TEXT_MIN_CONTRAST);
     return [fg, bgTint] as const;
   };
   const [success, successSoft] = one(spec.success, o.successSoft);
@@ -563,30 +597,44 @@ export function buildColors(family: ThemeFamilyId, scheme: ColorScheme, accent?:
   const dark = scheme === 'dark';
   const o = spec.overrides ?? {};
   const override = accentHex(accent, scheme);
-  const acc = override ? fitAccent(override, spec) : spec.accent;
-  const accentSoft = override ? softTint(spec.surface, acc, dark ? 0.2 : 0.11) : (o.accentSoft ?? softTint(spec.surface, acc, dark ? 0.2 : 0.11));
+  const pressed = o.surfacePressed ?? mix(spec.surfaceAlt, spec.text, dark ? 0.07 : 0.05);
+  // `accent` (fills, icons, borders) is held to 3:1 for a custom colour; the hand-picked family accents already pass 4.5:1
+  const acc = override ? fitAccent(override, spec) : ensureContrastOnAll(spec.accent, [spec.bg, spec.surface, spec.surfaceAlt], SMALL_TEXT_MIN_CONTRAST);
+  // `accentText` is the same hue as link / text-button colour: AA on every static surface it sits on (the transient
+  // pressed surface is exempt). The tint behind it is derived from it, so text on the tint passes as well.
+  const accentText = override ? ensureContrastOnAll(acc, [spec.bg, spec.surface, spec.surfaceAlt], SMALL_TEXT_MIN_CONTRAST) : acc;
+  const accentSoft = override ? softTint(spec.surface, accentText, dark ? 0.2 : 0.11) : (o.accentSoft ?? softTint(spec.surface, acc, dark ? 0.2 : 0.11));
   const onAccent = override ? bestOn(acc) : (o.onAccent ?? bestOn(acc, ['#ffffff', dark ? spec.bg : '#0b0b0f']));
   const soft = (c: string) => mix(spec.surface, c, dark ? 0.16 : 0.1);
   const code = (c: string) => ensureContrast(c, spec.codeBg, CODE_MIN_CONTRAST);
-  const tiers = textTiers(spec);
-  const status = statusColors(spec, o, soft);
+  const status = statusColors(spec, o, soft, [spec.surfaceAlt]);
+  // seal: the family's own wax red where it has one, else its danger colour (already contrast-checked)
+  const seal = o.seal ? ensureContrastOnAll(o.seal, [spec.bg, spec.surface], SMALL_TEXT_MIN_CONTRAST) : status.danger;
   // info: the family's own info hue (default: the accent) as a short label on bg / surface / its tint
   const infoSoft = override ? accentSoft : (o.infoSoft ?? (o.info ? softTint(spec.surface, o.info, dark ? 0.16 : 0.1) : accentSoft));
-  const info = override ? acc : o.info ? ensureContrastOnAll(o.info, [spec.bg, spec.surface, ...(isHex(infoSoft) ? [infoSoft] : [])], SMALL_TEXT_MIN_CONTRAST) : acc;
+  const info = override ? accentText : o.info ? ensureContrastOnAll(o.info, [spec.bg, spec.surface, spec.surfaceAlt, ...(isHex(infoSoft) ? [infoSoft] : [])], SMALL_TEXT_MIN_CONTRAST) : acc;
+  const tiers = textTiers(spec, [accentSoft, status.successSoft, status.warningSoft, status.dangerSoft, infoSoft]);
   const colors: ThemeColors = {
     bg: spec.bg,
     surface: spec.surface,
     surfaceAlt: spec.surfaceAlt,
-    surfacePressed: o.surfacePressed ?? mix(spec.surfaceAlt, spec.text, dark ? 0.07 : 0.05),
+    surfacePressed: pressed,
     text: spec.text,
     muted: tiers.muted,
     subtle: tiers.subtle,
     accent: acc,
+    accentText,
     onAccent,
     accentSoft,
     border: o.border ?? withAlpha(spec.text, dark ? 0.1 : 0.09),
     borderStrong: o.borderStrong ?? withAlpha(spec.text, dark ? 0.2 : 0.18),
+    borderControl: controlBorder(spec),
     ...status,
+    ink: spec.text,
+    onInk: o.onInk ?? bestOn(spec.text, [spec.surface, spec.bg]),
+    seal,
+    onSeal: o.onSeal ?? bestOn(seal, ['#ffffff', spec.bg]),
+    sealSoft: o.sealSoft ?? (o.seal ? soft(seal) : status.dangerSoft),
     info,
     infoSoft,
     codeBg: spec.codeBg,

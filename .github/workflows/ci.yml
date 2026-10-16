@@ -1,23 +1,27 @@
 name: ci
 
-# Tests and publish-safety checks on every push and pull request. Needs no repository secrets (GITHUB_TOKEN is the
-# automatic one; GITLEAKS_LICENSE is only needed for organisation-owned repositories and may stay unset).
-# - app:      tsc (app + tests), app unit tests, scripts/*.test.mjs  (scripts/check.sh in plain mode: CI=true)
-# - services: bridge tests, push tests
-# - leak-guard / gitleaks: secrets and publishable-safe patterns. The private denylist ($HUI_PRIVATE_DIR) is
-#   intentionally NOT available here; it runs in the local git hooks and in scripts/scan-artifact.sh
-#   (docs/LEAK-GUARD.md).
-# Actions are pinned to commit SHAs; update the SHA together with the version comment.
+# Tests and publish-safety checks on every pull request and on pushes to main. Needs NO secrets: pull requests from
+# forks run the same jobs with a read-only token (no pull_request_target, nothing is written back to the repository).
+#   app         tsc (app + tests), app unit tests, scripts/*.test.mjs + scripts/e2e/*.test.mjs (scripts/check.sh, plain mode
+#               because CI=true; includes the website tests and the leak-guard unit tests)
+#   services    bridge tests, push tests
+#   website     scripts/website.test.mjs on its own (generated pages equal the committed ones, no third-party requests)
+#   leak-guard  generic patterns over the tracked tree. The private denylist ($HUI_PRIVATE_DIR) is intentionally NOT
+#               available here; it runs in the maintainers' git hooks and in scripts/scan-artifact.sh (docs/LEAK-GUARD.md)
+#   gitleaks    secrets over the full git history (.gitleaks.toml)
+#   workflows   actionlint + scripts/workflows.test.mjs (pinned actions, least privilege, nothing publishes)
+# Actions are pinned to commit SHAs; update the SHA together with the version comment (dependabot does both).
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -26,6 +30,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
@@ -42,31 +48,49 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: bridge/package-lock.json
+      - name: npm ci (bridge)
+        working-directory: bridge
+        run: npm ci --no-audit --no-fund
       - name: bridge tests
         working-directory: bridge
-        run: |
-          npm ci --no-audit --no-fund
-          npm test
+        run: npm test
       - name: push tests
         working-directory: push
         run: npm test
+
+  website:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: website tests
+        run: node --test scripts/website.test.mjs
 
   leak-guard:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
       - name: leak-guard unit tests
         run: node --test scripts/leak-guard.test.mjs
-      - name: leak-guard generic patterns over the tracked tree
+      - name: leak-guard generic patterns over the tracked tree (public mode, no private denylist)
         run: node scripts/leak-guard.mjs --tree --generic-only
 
   gitleaks:
@@ -76,10 +100,23 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_CONFIG: .gitleaks.toml
-          GITLEAKS_VERSION: 8.30.1
-          # Needed only for organisation-owned repos (https://gitleaks.io); personal accounts need none.
-          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-gitleaks
+      - name: gitleaks over the git history
+        run: gitleaks git . --config .gitleaks.toml --redact --no-banner
+
+  workflows:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - uses: ./.github/actions/setup-actionlint
+      - name: actionlint
+        run: actionlint -color
+      - name: workflow policy tests
+        run: node --test scripts/workflows.test.mjs

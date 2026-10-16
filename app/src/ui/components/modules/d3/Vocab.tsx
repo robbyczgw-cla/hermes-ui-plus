@@ -6,12 +6,14 @@
  * Visuals follow Flashcards (flip faces) and Quiz (option rows, result).
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, TextInput, View } from 'react-native';
+import { ActivityIndicator, View } from 'react-native';
+import { TextInput } from '../../../primitives/Text';
 import Animated, { interpolate, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useLocale, useT } from '../../../../i18n';
 import { useMotionReduced, useTheme, type Theme } from '../../../theme';
 import { useHui } from '../../../primitives/context';
 import { FadeIn, HText, InlineText, PressableScale, Surface, textStyle } from '../../../primitives/basics';
+import { Button } from '../../../primitives/Button';
 import { Icon } from '../../../primitives/Icon';
 import { haptic } from '../../../primitives/haptics';
 import { useNodeState } from '../../../../nodestate';
@@ -102,7 +104,7 @@ export function Vocab({ node }: { node: Partial<HuiVocab> }) {
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s }}>
         <View style={{ flex: 1, gap: 2 }}>
           <InlineText variant="headline" text={model.title || tr('ui.vocab.title')} accessibilityRole="header" />
-          <HText variant="micro" color="muted" style={{ textTransform: 'uppercase', letterSpacing: 0.6 }} accessibilityLabel={`${languageName(model.from, ui)} → ${languageName(model.to, ui)}`}>
+          <HText variant="caption" weight="600" color="muted" accessibilityLabel={`${languageName(model.from, ui)} → ${languageName(model.to, ui)}`}>
             {route}
           </HText>
         </View>
@@ -218,7 +220,7 @@ function Boxes({ t, counts }: { t: Theme; counts: number[] }) {
         const color = i === BOXES - 1 ? t.colors.success : i === 0 ? t.colors.warning : t.colors.accent;
         return (
           <View key={i} style={{ alignItems: 'center', width: 13, gap: 2 }}>
-            <HText variant="micro" color="subtle" tabular style={{ fontSize: 9, lineHeight: 10 }}>
+            <HText variant="micro" color="subtle" tabular>
               {c || ''}
             </HText>
             <View style={{ width: 9, height: h, borderRadius: 2, backgroundColor: c ? color : t.colors.border, opacity: c ? 0.35 + 0.65 * (i / (BOXES - 1)) : 1 }} />
@@ -304,7 +306,7 @@ function Extras({ t, model, item }: { t: Theme; model: VocabModel; item: VocabIt
     <View style={{ gap: 4 }}>
       {item.example ? (
         <HText variant="callout" color="muted" accessibilityLanguage={model.from !== 'und' ? model.from : undefined}>
-          <HText variant="micro" color="subtle" style={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>
+          <HText variant="caption" weight="600" color="subtle">
             {`${tr('ui.vocab.example')}  `}
           </HText>
           <HText variant="callout" style={{ fontStyle: 'italic', color: t.colors.text }}>
@@ -349,7 +351,7 @@ function CardMode({ t, nodeId, model, item, answered, onAnswer }: { t: Theme; no
     right: 0,
     top: 0,
     minHeight: h,
-    borderRadius: t.radii.l,
+    borderRadius: t.radii.card,
     borderWidth: 1,
     borderColor: side === 'back' ? t.colors.accent : t.colors.border,
     backgroundColor: side === 'back' ? t.colors.accentSoft : t.colors.surfaceAlt,
@@ -389,7 +391,7 @@ function CardMode({ t, nodeId, model, item, answered, onAnswer }: { t: Theme; no
             </HText>
           </Animated.View>
           <Animated.View style={[face('back'), back]} onLayout={measure} pointerEvents="none">
-            <HText variant="micro" color="accent" style={{ textTransform: 'uppercase', letterSpacing: 0.6 }}>
+            <HText variant="caption" weight="600" color="accent">
               {item.term}
             </HText>
             <HText variant="title" align="center">
@@ -415,7 +417,7 @@ function CardMode({ t, nodeId, model, item, answered, onAnswer }: { t: Theme; no
         {flipped ? (
           <>
             <SecondaryButton label={tr('ui.vocab.unknown')} disabled={answered} onPress={() => onAnswer(false)} style={{ flex: 1 }} />
-            <PrimaryButton label={tr('ui.vocab.known')} tone="success" icon="check" disabled={answered} onPress={() => onAnswer(true)} style={{ flex: 1 }} />
+            <PrimaryButton label={tr('ui.vocab.known')} icon="check" disabled={answered} onPress={() => onAnswer(true)} style={{ flex: 1 }} />
           </>
         ) : (
           <SecondaryButton label={tr('ui.vocab.flip')} onPress={() => setFlipped(true)} style={{ flex: 1 }} />
@@ -439,7 +441,7 @@ function QuizMode({ t, nodeId, model, item, seed, answered, wasRight, isLast, on
   const lt = model.to !== 'und' ? model.to : undefined;
   return (
     <FadeIn rise={6} style={{ gap: t.spacing.m }}>
-      <View style={{ borderRadius: t.radii.l, backgroundColor: t.colors.surfaceAlt, padding: t.spacing.l, gap: t.spacing.s }}>
+      <View style={{ borderRadius: t.radii.card, backgroundColor: t.colors.surfaceAlt, padding: t.spacing.l, gap: t.spacing.s }}>
         <TermBlock t={t} nodeId={nodeId} model={model} item={item} />
       </View>
       <View style={{ gap: t.spacing.s }} accessibilityRole="radiogroup">
@@ -458,7 +460,7 @@ function QuizMode({ t, nodeId, model, item, seed, answered, wasRight, isLast, on
               accessibilityLabel={tr('ui.vocab.optionA11y', { label, state: st })}
               accessibilityLanguage={lt}
               scaleTo={answered ? 1 : 0.985}
-              style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.m, minHeight: 48, paddingHorizontal: t.spacing.m, paddingVertical: t.spacing.s + 2, borderRadius: t.radii.m, borderWidth: state === 'idle' || state === 'dim' ? 1 : 1.5, borderColor: border, backgroundColor: bg, opacity: state === 'dim' ? 0.6 : 1 }}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.m, minHeight: 48, paddingHorizontal: t.spacing.m, paddingVertical: t.spacing.s + 2, borderRadius: t.radii.control, borderWidth: state === 'idle' || state === 'dim' ? 1 : 1.5, borderColor: border, backgroundColor: bg, opacity: state === 'dim' ? 0.6 : 1 }}
               pressedStyle={answered ? undefined : { backgroundColor: t.colors.surfacePressed }}
             >
               <HText variant="body" style={{ flex: 1 }}>
@@ -471,7 +473,7 @@ function QuizMode({ t, nodeId, model, item, seed, answered, wasRight, isLast, on
       </View>
       {answered ? (
         <FadeIn rise={4} style={{ gap: t.spacing.s }}>
-          <View style={{ borderRadius: t.radii.m, backgroundColor: t.colors.surfaceAlt, padding: t.spacing.m, gap: 6 }} accessibilityLiveRegion="polite">
+          <View style={{ borderRadius: t.radii.control, backgroundColor: t.colors.surfaceAlt, padding: t.spacing.m, gap: 6 }} accessibilityLiveRegion="polite">
             <HText variant="bodyStrong" style={{ color: wasRight ? t.colors.success : t.colors.danger }}>
               {wasRight ? tr('ui.vocab.exact') : tr('ui.vocab.wrong')}
             </HText>
@@ -509,7 +511,7 @@ function TypeMode({ t, nodeId, model, item, answered, wasRight, isLast, onAnswer
   const target = languageName(model.from, lang as UiLang);
   return (
     <FadeIn rise={6} style={{ gap: t.spacing.m }}>
-      <View style={{ borderRadius: t.radii.l, backgroundColor: t.colors.surfaceAlt, padding: t.spacing.l, gap: 4 }}>
+      <View style={{ borderRadius: t.radii.card, backgroundColor: t.colors.surfaceAlt, padding: t.spacing.l, gap: 4 }}>
         <HText variant="title" accessibilityLanguage={model.to !== 'und' ? model.to : undefined}>
           {item.translation}
         </HText>
@@ -536,7 +538,7 @@ function TypeMode({ t, nodeId, model, item, answered, wasRight, isLast, onAnswer
           color: fg,
           minHeight: 48,
           paddingHorizontal: t.spacing.m,
-          borderRadius: t.radii.m,
+          borderRadius: t.radii.control,
           borderWidth: verdict === null ? 1 : 1.5,
           borderColor: verdict === null ? t.colors.borderStrong : ok ? t.colors.success : t.colors.danger,
           backgroundColor: verdict === null ? t.colors.surface : ok ? t.colors.successSoft : t.colors.dangerSoft,
@@ -544,7 +546,7 @@ function TypeMode({ t, nodeId, model, item, answered, wasRight, isLast, onAnswer
       />
       {verdict !== null ? (
         <FadeIn rise={4} style={{ gap: t.spacing.s }}>
-          <View style={{ borderRadius: t.radii.m, backgroundColor: t.colors.surfaceAlt, padding: t.spacing.m, gap: t.spacing.s }} accessibilityLiveRegion="polite">
+          <View style={{ borderRadius: t.radii.control, backgroundColor: t.colors.surfaceAlt, padding: t.spacing.m, gap: t.spacing.s }} accessibilityLiveRegion="polite">
             <HText variant="bodyStrong" style={{ color: ok ? t.colors.success : t.colors.danger }}>
               {msg}
             </HText>
@@ -555,11 +557,7 @@ function TypeMode({ t, nodeId, model, item, answered, wasRight, isLast, onAnswer
         </FadeIn>
       ) : (
         <View style={{ flexDirection: 'row', gap: t.spacing.s, alignItems: 'center' }}>
-          <PressableScale haptic="selection" onPress={giveUp} accessibilityRole="button" style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: t.spacing.s }}>
-            <HText variant="callout" color="muted" weight="500">
-              {tr('ui.vocab.dontKnow')}
-            </HText>
-          </PressableScale>
+          <Button label={tr('ui.vocab.dontKnow')} variant="tertiary" onPress={giveUp} />
           <PrimaryButton label={tr('ui.vocab.check')} disabled={!input.trim()} onPress={check} style={{ flex: 1 }} />
         </View>
       )}
@@ -575,7 +573,7 @@ function Summary({ t, correct, total, hard, sent, disabled, onAgain, onSend }: {
   return (
     <>
       <FadeIn style={{ alignItems: 'center', gap: 4 }}>
-        <HText variant="micro" color="muted" style={{ textTransform: 'uppercase', letterSpacing: 0.6 }}>
+        <HText variant="caption" weight="600" color="muted">
           {tr('ui.vocab.summaryTitle')}
         </HText>
         <HText variant="display" tabular accessibilityLabel={tr('ui.vocab.score', { correct, total })}>

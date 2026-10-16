@@ -23,6 +23,9 @@ function exportDir(root = mkdtempSync(join(tmpdir(), 'hui-wf-'))) {
   writeFileSync(join(d, '_expo', 'static', 'js', 'web', 'entry-abc.js'), 'console.log(1)');
   writeFileSync(join(d, '_expo', 'static', 'js', 'web', 'Lazy-def.js'), 'console.log(2)');
   writeFileSync(join(d, 'assets', 'fonts', 'x.ttf'), 'font');
+  mkdirSync(join(d, 'fonts'), { recursive: true });
+  writeFileSync(join(d, 'fonts', 'web.woff2'), 'font');
+  writeFileSync(join(d, 'fonts', 'OFL.txt'), 'licence');
   return { root, d, done: () => rmSync(root, { recursive: true, force: true }) };
 }
 
@@ -47,6 +50,7 @@ test('sw: version + precache written, registration added, version independent of
     const sw = readFileSync(join(a.d, 'sw.js'), 'utf8');
     assert.ok(sw.includes(`const SHELL_VERSION = '${ra.version}';`));
     assert.ok(sw.includes('"/_expo/static/js/web/Lazy-def.js"') && sw.includes('"/assets/fonts/x.ttf"'));
+    assert.ok(sw.includes('"/fonts/web.woff2"') && !sw.includes('OFL.txt'), 'web fonts precached, licence texts not');
     assert.match(readFileSync(join(a.d, 'index.html'), 'utf8'), /<script data-pwa="sw">/);
   } finally {
     a.done();
@@ -81,6 +85,20 @@ test('sw: an icon-, manifest- or shell-only change gives a new cache version', (
   }
 });
 
+test('share target: kept with the service worker (sw.js answers its POST)', () => {
+  const e = exportDir();
+  try {
+    run(e.d);
+    const st = JSON.parse(readFileSync(join(e.d, 'manifest.webmanifest'), 'utf8')).share_target;
+    assert.equal(st.action, '/share-target');
+    assert.equal(st.method, 'POST');
+    assert.equal(st.enctype, 'multipart/form-data');
+    assert.match(readFileSync(join(e.d, 'sw.js'), 'utf8'), /const SHARE_PATH = '\/share-target';/);
+  } finally {
+    e.done();
+  }
+});
+
 test('WEB_SW=0: no registration, sw.js becomes the retirement worker', () => {
   const e = exportDir();
   try {
@@ -88,6 +106,7 @@ test('WEB_SW=0: no registration, sw.js becomes the retirement worker', () => {
     assert.equal(r.withSw, false);
     assert.doesNotMatch(readFileSync(join(e.d, 'index.html'), 'utf8'), /data-pwa="sw"/);
     assert.equal(readFileSync(join(e.d, 'sw.js'), 'utf8'), RETIRE_SW);
+    assert.equal(JSON.parse(readFileSync(join(e.d, 'manifest.webmanifest'), 'utf8')).share_target, undefined, 'no worker → no share target');
   } finally {
     e.done();
   }
@@ -104,4 +123,40 @@ test('buildVersion hashes content, not mtimes or absolute paths', () => {
   } finally {
     e.done();
   }
+});
+
+// fresh-user test of 0.1.0-alpha.1: the public web bundle shipped <html lang="de">
+test('lang: the shell defaults to en (app.json and web-finalize), whatever the export filled in', () => {
+  const app = JSON.parse(readFileSync(new URL('../app/app.json', import.meta.url), 'utf8'));
+  assert.equal(app.expo.web.lang, 'en');
+  for (const filled of ['de', '%LANG_ISO_CODE%', 'en']) {
+    const a = exportDir();
+    try {
+      const f = join(a.d, 'index.html');
+      writeFileSync(f, readFileSync(f, 'utf8').replace(/<html lang="[^"]*"/, `<html lang="${filled}"`));
+      run(a.d);
+      assert.match(readFileSync(f, 'utf8'), /^<!DOCTYPE html>\n<html lang="en">/, filled);
+    } finally {
+      a.done();
+    }
+  }
+});
+
+test('lang: the inline shell script takes the saved UI language, else the browser language, else en', async () => {
+  const vm = await import('node:vm');
+  const html = readFileSync(join(PUBLIC, 'index.html'), 'utf8');
+  const src = /<script data-pwa="lang">([\s\S]*?)<\/script>/.exec(html)?.[1];
+  assert.ok(src, 'data-pwa="lang" script in <head>');
+  assert.ok(html.indexOf('data-pwa="lang"') < html.indexOf('</head>'));
+  const langFor = ({ saved = null, languages, language = '', storageThrows = false }) => {
+    const doc = { documentElement: { lang: 'x' } };
+    const localStorage = { getItem: (k) => { if (storageThrows) throw new Error('denied'); return k === 'hui.lang' ? saved : null; } };
+    vm.runInNewContext(src, { document: doc, localStorage, navigator: { languages, language } });
+    return doc.documentElement.lang;
+  };
+  assert.equal(langFor({ saved: 'es', languages: ['de-AT'] }), 'es');
+  assert.equal(langFor({ saved: 'system', languages: ['fr-FR', 'de-AT', 'en'] }), 'de');
+  assert.equal(langFor({ languages: [], language: 'es-MX' }), 'es');
+  assert.equal(langFor({ languages: ['fr', 'it'] }), 'en');
+  assert.equal(langFor({ storageThrows: true, languages: ['de'] }), 'de');
 });

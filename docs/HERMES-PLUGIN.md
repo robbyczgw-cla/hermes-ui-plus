@@ -18,8 +18,8 @@ App ──HTTPS/tailnet──> UI Bridge (Node) ──loopback + shared secret�
 The bridge stays the only network-facing component: pairing, device auth, proxy, push, uploads, web app.
 The plugin owns what needs Hermes' models and credentials, and nothing else. Chat never depends on the
 plugin. When the plugin is absent, disabled, unreachable or crashing, `/bridge/quick*` answers
-`404 feature_off`, `/bridge/quick/config` answers `{available: false}`, and every other route is unaffected.
-`bridge/test/quick.test.mjs` tests this with five failure modes.
+`404 feature_off`, `/bridge/quick/config` answers `{available: false, reason}`, and every other route is unaffected.
+`bridge/test/quick.test.mjs` tests this with seven failure modes.
 
 ## Hermes surfaces used (v0.21.x)
 
@@ -29,6 +29,8 @@ plugin. When the plugin is absent, disabled, unreachable or crashing, `/bridge/q
 | `PluginContext.get_config` | public plugin API | `plugins.entries.hermes-ui-plus.settings.*` |
 | `PluginContext.on_unload` | public plugin API | stop the listener on unload/reload |
 | `agent/auxiliary_client.py` `call_llm(task=, provider=, model=, messages=, max_tokens=, timeout=, stream=, stream_options=, route_info=)` | **internal**, the one allowed aux-call adapter (`hermes_adapter.py`) | the completion |
+| `agent.secret_scope` (`is_multiplex_active`, `current_secret_scope`, `build_profile_secret_scope`, `set_secret_scope`, `reset_secret_scope`) + `hermes_constants.set_hermes_home_override` | **internal**, same adapter, v0.22+ only | profile scope of a quick call on a gateway that multiplexes profiles |
+| `agent/auxiliary_client.py` `aux_probe_mode()` + `get_text_auxiliary_client(task)` | **internal**, same adapter, optional | self-test: resolves the slot's provider and credentials without a model call |
 | plugin discovery (`plugin.yaml` + `register(ctx)`, `plugins.enabled`) | public | loading |
 
 Every hook is feature-detected with `hasattr`, and the plugin uses the Python stdlib only.
@@ -51,9 +53,13 @@ What was deliberately **not** used:
 
 There is no public "gateway started" hook. The listener runs in its own daemon thread with its own asyncio
 loop, started from `register()`. The bind is the lock: Hermes loads plugins in every process (gateway, CLI,
-cron), and only the first process that binds `server.port` serves. That is normally the gateway, because it
-starts first and lives longest. If the gateway is down, a CLI process may serve briefly, with the same home,
-config and credentials. The thread runs in a copy of the registering context.
+cron), and only the first process that binds `server.port` serves. The others stay passive and retry the bind
+every 15 s, so the gateway, which lives longest, ends up owning the port. The retry matters with several
+profiles: the official image starts one gateway service per profile, and a secondary one
+(`hermes -p <profile> gateway run`) that exits because the main gateway multiplexes it could win the bind and leave
+quick answers dead until the next restart (seen on the test instance, 2026-10-16). If the gateway is down, a CLI
+process may serve briefly, with the same home, config and credentials. The thread runs in a copy of the
+registering context.
 
 ## Streaming
 
@@ -64,6 +70,9 @@ config and credentials. The thread runs in a copy of the registering context.
   the first content. The answer then arrives as one chunk.
 - That happened live with `opencode-go/qwen3.8-flash`: one chunk, total 2.3-10 s. That model is not
   recommended for quick answers.
+- **Not with `provider: anthropic`** (Hermes v0.22): Hermes' Anthropic auxiliary client consumes the stream inside
+  `create()` and returns the finished answer, so the app gets it as one chunk. Live on a test instance
+  (2026-10-15, `claude-haiku-5-5`): 0.8-2 s for the whole answer, so this costs little for short answers.
 - Reasoning deltas are dropped. Usage comes from the provider when it reports it (`include_usage`).
   Otherwise it is estimated and flagged `usage_estimated`.
 
@@ -117,6 +126,40 @@ A client disconnect mid-stream left the listener healthy. The upstream call stop
 - **Errors:** 429 shows "Limit erreicht – in X s/min/h wieder möglich" from `Retry-After`; network errors keep the
   normal retry.
 
+## Multiple profiles (bots)
+
+Requirements: Hermes Agent v0.22 or newer with `gateway.multiplex_profiles`, plugin 0.1.1 or newer. The 0.1.0
+plugin answers every quick question with 502 on such a gateway.
+
+A multiplexing gateway serves every profile from one process and reads provider keys only inside the scope of one
+profile (`UnscopedSecretError` outside one, so a profile never sees another's keys). Agent turns get that scope from
+the gateway. The plugin's listener does not, so the plugin does it itself:
+
+- Every quick call runs in the scope of the profile that enabled the plugin (its `HERMES_HOME`), built from that
+  profile's `.env` the way the gateway builds it for a turn (`hermes_adapter.profile_scope`). Only that profile's
+  keys and `auxiliary.hui_quick` route are used, whichever bot chat the app has open. ⚡ is not offered in bot chats.
+- The listener thread and each quick worker run in copies of the context that registered the plugin. When Hermes
+  binds that context to the owning profile (upstream issue
+  [NousResearch/hermes-agent#139123](https://github.com/NousResearch/hermes-agent/issues/139123), PR #139139), the
+  worker inherits that scope and the plugin's own scope step does nothing. The plugin's `GET /quick/config` shows
+  which case applies in `scope`: `needed` (the plugin enters the scope itself), `host` (Hermes bound it), `off`
+  (no multiplexing).
+- The scope helpers are private Hermes code. The plugin checks that it can resolve credentials for its slot in the
+  scope it will use: at listener start, again as soon as multiplexing switches on (the gateway does that after
+  loading plugins), then every 10 minutes, or after 1 minute while the check fails. It uses Hermes' availability probe
+  (`aux_probe_mode`), so the check makes no model call. A quick call that still fails with `UnscopedSecretError`
+  switches the feature off at once.
+
+If the check fails (a future Hermes renamed the helpers, the profile's `.env` cannot be read, credentials need a
+scope the plugin cannot build), the plugin reports `{"enabled": false, "available": false, "reason":
+"profile_scope_unavailable"}` on `GET /quick/config` and answers quick requests with `404 feature_off` and the same
+`reason`. The bridge passes the reason on (`GET /bridge/quick/config` → `{available: false, reason}`). The app then
+shows no ⚡ button, no "Schnellfrage" pill and no quick section in Settings; normal chats and bots are not
+affected. The agent log has one line `quick answers unavailable: profile_scope_unavailable` (no secret values).
+Older bridges read only `enabled` and hide ⚡ as well. Other reasons: `hermes_aux_unavailable` (Hermes has no
+`call_llm`), `disabled` (`quick.enabled: false`), and from the bridge `plugin_unreachable`, `plugin_not_configured`,
+`plugin_disabled`, `bridge_off`.
+
 ## Migration plan
 
 Each item moves only if it fits the plugin rules: public hooks plus at most the aux-call adapter.
@@ -148,6 +191,11 @@ Each migration keeps the bridge-side fallback, so a plugin outage costs the feat
     is invisible to the plugin, so set `server.secret_file` and a distinct `server.port` per profile.
   - The first profile to bind wins the port; the others stay passive and log that.
   - The bridge points at exactly one plugin URL, so profiles must stay explicit.
+  - **Secret scope (Hermes v0.22+).** A multiplexing gateway reads provider keys only inside a profile scope and
+    raises `UnscopedSecretError` outside one. The listener thread has none, so `hermes_adapter.profile_scope` runs
+    every quick call in the scope of the plugin's own `HERMES_HOME` (built from its `.env`). Without it every quick
+    answer failed with 502 on a live v0.22 gateway with two profiles (2026-10-15). A self-test hides ⚡ when the
+    private helpers change (see "Multiple profiles (bots)").
 - **Host credentials.** In the throwaway home, Hermes also detected provider logins that live outside
   `HERMES_HOME` (for example CLI OAuth files in the user's home). The slot route is what the operator
   configures. Prefer an explicit `auxiliary.hui_quick.provider` so a quick answer never refreshes a shared
@@ -159,13 +207,21 @@ Each migration keeps the bridge-side fallback, so a plugin outage costs the feat
 
 ## Installing on the real Hermes (owner)
 
-1. Back up `config.yaml` and `.env`.
-2. Run `python3 hermes-plugin/install.py --hermes-home <home> [--group-readable-secret]`.
-3. Run `hermes plugins enable hermes-ui-plus`.
+Try it on a throwaway instance first (`scripts/test-instance/` sets one up, in Docker on a Linux host or natively on a Mac). On the real Hermes:
+
+1. Back up `config.yaml`, `.env` **and `installs/`** of the Hermes home (Hermes' package manager keeps its
+   environments and the `facts.json` that selects one there).
+2. Run `python3 hermes-plugin/install.py --hermes-home <home> [--group-readable-secret]` (`--copy` when Hermes runs
+   in a container).
+3. Enable it in `config.yaml`: add `hermes-ui-plus` to `plugins.enabled`. **Not** `hermes plugins enable`: on
+   v0.22 that can make the package manager build a new environment under `installs/` and start the gateway from
+   it, without the extras the gateway needs (a live attempt lost the API server for 10 minutes that way).
 4. Optionally add an `auxiliary.hui_quick` block (provider + fast model).
-5. Restart the gateway.
+5. Restart the gateway. Check which Python runs it (its usual venv, not one under `installs/`) and that the API
+   server answers. If it did switch, move that install's `facts.json` aside and restart.
 6. Bridge env: `BRIDGE_HERMES_PLUGIN_URL`, `BRIDGE_HERMES_PLUGIN_SECRET_FILE`. The secret must be readable by
-   the bridge user. Restart the bridge.
+   the bridge user; a hardened system unit gets it with `LoadCredential=` (see `hermes-plugin/README.md`).
+   Restart the bridge.
 7. Check: `GET /bridge/quick/config` returns `available: true`.
 
-To roll back, use `HERMES_UI_PLUS_DISABLE=1` or `hermes plugins disable hermes-ui-plus`, then restart.
+To roll back, take it out of `plugins.enabled` (or set `HERMES_UI_PLUS_DISABLE=1`), then restart.

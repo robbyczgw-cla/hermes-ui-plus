@@ -7,8 +7,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { useTheme, type Theme } from '../../../theme';
+import { scaleFont } from '../../../themes';
 import { useHui } from '../../../primitives/context';
 import { HText, PressableScale, Surface } from '../../../primitives/basics';
+import { Button } from '../../../primitives/Button';
 import { Icon } from '../../../primitives/Icon';
 import { haptic } from '../../../primitives/haptics';
 import { useNodeState } from '../../../../nodestate';
@@ -145,7 +147,7 @@ function SingleTimer({ spec, t, ctl, clocks, sound, toggleSound, streaming, aler
               {done ? (
                 <Icon name="check" size={46} color={t.colors.success} strokeWidth={2.4} />
               ) : (
-                <HText variant="display" tabular numberOfLines={1} adjustsFontSizeToFit maxFontSizeMultiplier={1.3} style={{ fontSize: ms >= 3600_000 ? 36 : 44, lineHeight: ms >= 3600_000 ? 44 : 52, fontWeight: '300', letterSpacing: -0.5 }}>
+                <HText variant="display" tabular numberOfLines={1} adjustsFontSizeToFit maxFontSizeMultiplier={1.3} style={{ ...(ms >= 3600_000 ? scaleFont(36, 44, t.fontScale) : scaleFont(44, 52, t.fontScale)), fontWeight: '400', letterSpacing: -0.5 }}>
                   {digits}
                 </HText>
               )}
@@ -160,23 +162,18 @@ function SingleTimer({ spec, t, ctl, clocks, sound, toggleSound, streaming, aler
         {isWatch ? (
           <IconBtn t={t} icon="reset" label={tr('ui.timer.reset')} onPress={() => ctl.reset(MAIN)} disabled={!touched} />
         ) : (
-          <AdjustChip t={t} label={tr('ui.timer.minusMinute')} a11y={tr('ui.timer.minusMinuteA11y')} onPress={() => ctl.adjust(MAIN, -ADJUST_STEP_MS)} disabled={streaming || done || remainingMs(c, now) <= ADJUST_STEP_MS} />
+          <AdjustChip label={tr('ui.timer.minusMinute')} a11y={tr('ui.timer.minusMinuteA11y')} onPress={() => ctl.adjust(MAIN, -ADJUST_STEP_MS)} disabled={streaming || done || remainingMs(c, now) <= ADJUST_STEP_MS} />
         )}
         <PlayButton t={t} running={running} label={primaryLabel} onPress={primary} disabled={disabled} />
         {isWatch ? (
           <View style={{ width: 44 }} />
         ) : (
-          <AdjustChip t={t} label={tr('ui.timer.plusMinute')} a11y={tr('ui.timer.plusMinuteA11y')} onPress={() => ctl.adjust(MAIN, ADJUST_STEP_MS)} disabled={streaming} />
+          <AdjustChip label={tr('ui.timer.plusMinute')} a11y={tr('ui.timer.plusMinuteA11y')} onPress={() => ctl.adjust(MAIN, ADJUST_STEP_MS)} disabled={streaming} />
         )}
       </View>
       {!isWatch && touched ? (
         <View style={{ alignItems: 'center', marginTop: -t.spacing.s }}>
-          <PressableScale haptic="selection" onPress={() => ctl.reset(MAIN)} accessibilityLabel={tr('ui.timer.reset')} style={{ minHeight: 44, paddingHorizontal: t.spacing.l, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <D2Icon name="reset" size={15} color={t.colors.muted} />
-            <HText variant="callout" color="muted">
-              {tr('ui.timer.reset')}
-            </HText>
-          </PressableScale>
+          <Button label={tr('ui.timer.reset')} variant="tertiary" icon="reset" onPress={() => ctl.reset(MAIN)} />
         </View>
       ) : null}
       {alert ? <DoneAlert text={alert} onDismiss={dismiss} t={t} /> : running && !isWatch ? (
@@ -205,21 +202,8 @@ function PlayButton({ t, running, label, onPress, disabled, size = 68 }: { t: Th
   );
 }
 
-function AdjustChip({ t, label, a11y, onPress, disabled }: { t: Theme; label: string; a11y: string; onPress: () => void; disabled?: boolean }) {
-  return (
-    <PressableScale
-      haptic="selection"
-      disabled={disabled}
-      onPress={onPress}
-      accessibilityLabel={a11y}
-      style={{ minWidth: 76, minHeight: 44, paddingHorizontal: t.spacing.m, borderRadius: t.radii.pill, borderWidth: 1, borderColor: t.colors.borderStrong, alignItems: 'center', justifyContent: 'center' }}
-      pressedStyle={{ backgroundColor: t.colors.surfacePressed }}
-    >
-      <HText variant="callout" weight="600" tabular numberOfLines={1}>
-        {label}
-      </HText>
-    </PressableScale>
-  );
+function AdjustChip({ label, a11y, onPress, disabled }: { label: string; a11y: string; onPress: () => void; disabled?: boolean }) {
+  return <Button label={label} accessibilityLabel={a11y} onPress={onPress} disabled={disabled} style={{ minWidth: 76 }} />;
 }
 
 /* ───────────── countdown to a date/time ───────────── */
@@ -273,7 +257,7 @@ function UntilTimer({ spec, since, t, ctl, clocks, sound, toggleSound, streaming
                       {tr('ui.timer.days', { n: parts.days })}
                     </HText>
                   ) : null}
-                  <HText variant="display" tabular numberOfLines={1} adjustsFontSizeToFit maxFontSizeMultiplier={1.3} style={{ fontSize: parts.days ? 32 : 40, lineHeight: parts.days ? 40 : 48, fontWeight: '300' }}>
+                  <HText variant="display" tabular numberOfLines={1} adjustsFontSizeToFit maxFontSizeMultiplier={1.3} style={{ ...(parts.days ? scaleFont(32, 40, t.fontScale) : scaleFont(40, 48, t.fontScale)), fontWeight: '400' }}>
                     {clockText}
                   </HText>
                   <HText variant="caption" color="muted" weight="600">
@@ -295,11 +279,11 @@ function UntilTimer({ spec, since, t, ctl, clocks, sound, toggleSound, streaming
             accessibilityState={{ checked: reminding }}
             accessibilityLabel={tr('ui.timer.remind')}
             accessibilityHint={tr('ui.timer.remindHint')}
-            style={{ minHeight: 44, paddingHorizontal: t.spacing.l, borderRadius: t.radii.pill, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: reminding ? t.colors.accentSoft : 'transparent', borderWidth: reminding ? 0 : 1, borderColor: t.colors.borderStrong }}
+            style={{ minHeight: 44, paddingHorizontal: t.spacing.l, borderRadius: t.radii.pill, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: reminding ? t.colors.accentSoft : 'transparent', borderWidth: reminding ? 0 : 1, borderColor: t.colors.borderControl }}
             pressedStyle={{ opacity: 0.85 }}
           >
             <D2Icon name={reminding ? 'bell' : 'bellOff'} size={16} color={reminding ? t.colors.accent : t.colors.muted} />
-            <HText variant="callout" weight="600" style={{ color: reminding ? t.colors.accent : t.colors.text }}>
+            <HText variant="callout" weight="600" style={{ color: reminding ? t.colors.accentText : t.colors.text }}>
               {reminding ? tr('ui.timer.reminding') : tr('ui.timer.remind')}
             </HText>
           </PressableScale>
@@ -336,19 +320,11 @@ function MultiTimer({ spec, t, ctl, clocks, sound, toggleSound, streaming, alert
         ))}
       </View>
       {spec.items.length > 1 ? (
-        <PressableScale
-          haptic={false}
+        <Button
+          label={anyRunning ? tr('ui.timer.pauseAll') : tr('ui.timer.startAll')}
           disabled={streaming}
           onPress={allAction}
-          accessibilityLabel={anyRunning ? tr('ui.timer.pauseAll') : tr('ui.timer.startAll')}
-          style={{ minHeight: 44, borderRadius: t.radii.pill, borderWidth: 1, borderColor: t.colors.borderStrong, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}
-          pressedStyle={{ backgroundColor: t.colors.surfacePressed }}
-        >
-          <D2Icon name={anyRunning ? 'pause' : 'play'} size={14} color={t.colors.text} />
-          <HText variant="callout" weight="600">
-            {anyRunning ? tr('ui.timer.pauseAll') : tr('ui.timer.startAll')}
-          </HText>
-        </PressableScale>
+        />
       ) : null}
       {alert ? <DoneAlert text={alert} onDismiss={dismiss} t={t} /> : null}
     </Surface>

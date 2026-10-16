@@ -191,6 +191,7 @@ export type AnswerMenuState = {
   /** stream lost, answer being recovered */
   recovering: boolean;
   usedWeb: boolean;
+  /** "Als Bild teilen": setting on and the answer has something to draw (text or cards, shareModel.ts planShare) */
   shareImage: boolean;
   reported: boolean;
   /** the chat menu can branch (stored conversation) */
@@ -210,7 +211,8 @@ export function answerMenuItems(s: AnswerMenuState): AnswerItemKey[] {
     if (s.usedWeb) out.push('noWeb');
   }
   if (s.hasText && !s.streaming) out.push('copy', 'copyMarkdown', 'share');
-  if (s.hasText && !s.streaming && s.shareImage) out.push('shareImage');
+  // share as image: also for answers that are only cards (no markdown text); `shareImage` = setting on + something to draw
+  if (!s.streaming && s.shareImage) out.push('shareImage');
   if (done && !s.failed) out.push(s.reported ? 'undoReport' : 'report');
   return out;
 }

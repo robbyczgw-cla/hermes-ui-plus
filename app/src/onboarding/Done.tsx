@@ -3,7 +3,7 @@ import { StyleSheet, View } from 'react-native';
 import { FadeIn, HText, Icon, PressableScale, useTheme } from '../ui';
 import { useT } from '../i18n';
 import { DEMO_STARTERS, STARTERS, type StarterPrompt } from './starters';
-import { Button, Notice, OnbScreen } from './ui';
+import { Button, Notice, OnbScreen, HeroText } from './ui';
 
 export function Done({
   demo,
@@ -30,9 +30,7 @@ export function Done({
         <View style={[styles.check, { backgroundColor: t.colors.successSoft }]}>
           <Icon name="check" size={28} color={t.colors.success} />
         </View>
-        <HText variant="display" align="center" accessibilityRole="header">
-          {tr('onboarding.done.title')}
-        </HText>
+        <HeroText align="center">{tr('onboarding.done.title')}</HeroText>
         <HText variant="body" color="muted" align="center">
           {demo ? tr('onboarding.done.leadDemo') : tr('onboarding.done.leadConnected', { name: connectionName ? tr('onboarding.done.quotedName', { name: connectionName }) : 'Hermes' })}
         </HText>

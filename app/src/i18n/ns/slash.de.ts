@@ -5,7 +5,7 @@ export const slash = {
     new: { desc: 'Neuen Chat beginnen', arg: '' },
     title: { desc: 'Chat umbenennen', arg: '<Name>' },
     model: { desc: 'Modell für diesen Chat wählen', arg: '[Name]' },
-    reasoning: { desc: 'Denktiefe einstellen', arg: '[aus|niedrig|mittel|hoch|max]' },
+    reasoning: { desc: 'Denkaufwand einstellen', arg: '[aus|niedrig|mittel|hoch|max]' },
     fast: { desc: 'Schnellmodus an/aus', arg: '[an|aus]' },
     retry: { desc: 'Letzte Antwort neu erzeugen', arg: '' },
     stop: { desc: 'Laufende Antwort stoppen', arg: '' },

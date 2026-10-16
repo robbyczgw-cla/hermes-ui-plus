@@ -1,11 +1,15 @@
 /// <reference types="node" />
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanUserTitle, makeTitle, renameUnique, uniqueTitle } from './title.ts';
+import { cleanUserTitle, displayTitle, makeTitle, renameUnique, uniqueTitle } from './title.ts';
 
 test('short text stays', () => assert.equal(makeTitle('Hallo Welt'), 'Hallo Welt'));
 test('whitespace collapsed', () => assert.equal(makeTitle('  a \n\n b\t c '), 'a b c'));
 test('empty -> default', () => assert.equal(makeTitle('   '), 'Neuer Chat'));
+test('display: stored placeholder shows in the UI language, other titles unchanged', () => {
+  assert.equal(displayTitle(makeTitle(''), 'New chat'), 'New chat');
+  assert.equal(displayTitle('Umzug planen', 'New chat'), 'Umzug planen');
+});
 test('truncated to <= 40 chars incl. ellipsis, on word boundary', () => {
   const t = makeTitle('Erkläre mir bitte ausführlich wie ein Transformer Modell funktioniert');
   assert.ok(Array.from(t).length <= 40, t);

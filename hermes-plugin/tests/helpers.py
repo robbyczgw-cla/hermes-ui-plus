@@ -29,9 +29,11 @@ class FakeBackend:
         self.calls: list[dict] = []
         self.cancelled = threading.Event()
         self.finished = threading.Event()
+        self.threads: list[tuple[str, int]] = []  # (where, thread id): the generator's start and its finally
 
     def stream(self, *, messages, provider, model, max_tokens, timeout, cancel) -> Iterator[tuple[str, Any]]:
         self.calls.append(dict(messages=messages, provider=provider, model=model, max_tokens=max_tokens))
+        self.threads.append(("start", threading.get_ident()))
         try:
             yield "mode", "stream"
             yield "route", {"provider": provider or "fakeprov", "model": model or self.model}
@@ -53,6 +55,7 @@ class FakeBackend:
             if self.usage:
                 yield "usage", self.usage
         finally:
+            self.threads.append(("end", threading.get_ident()))
             self.finished.set()
 
 

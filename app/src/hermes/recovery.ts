@@ -6,6 +6,7 @@
  * finished turn in its session. So such a turn is not a failed answer:
  *
  *   streaming ──transport error after HTTP 200──▶ interrupted (status `stopped`, `interrupted` = ms; tools kept)
+ *   interrupted ──re-attached to the bridge's recording of the turn──▶ streaming again (live; hermes/reattach.ts)
  *   interrupted ──live inbox event of the session──▶ done (final text from the event; applyInboxAnswer)
  *   interrupted ──stored session has the final answer──▶ done (polled with backoff, on foreground / reconnect)
  *   interrupted ──nothing within RECOVERY_WINDOW_MS──▶ error (`interrupted` kept: "Erneut" checks the session first)
@@ -18,12 +19,14 @@ import { makeT } from '../i18n/core.ts';
 import { finalize } from './chatState.ts';
 import { closePending, isTerminalRunStatus, pendingOf, setPending } from './approvals.ts';
 import { mergeAssistantDetails, sameUserTurn } from './sessionMapping.ts';
-import type { ChatMessage } from './types';
+import type { ChatMessage, Usage } from './types';
 
 /** give up after this long without an answer (from the moment the stream was lost) */
 export const RECOVERY_WINDOW_MS = 10 * 60_000;
 /** poll delays of the stored session (the last one repeats) */
 export const RECOVERY_DELAYS_MS: readonly number[] = [3000, 6000, 12000, 20000, 30000, 45000, 60000];
+/** while the bridge may still re-attach the turn live: at once, then soon again (offline; the last one repeats) */
+export const REATTACH_DELAYS_MS: readonly number[] = [0, 1000, 2000, 4000, 8000, 15000];
 /** device vs. server clock tolerance when matching a stored turn / inbox event to the interrupted one */
 export const CLOCK_SKEW_MS = 5 * 60_000;
 
@@ -69,6 +72,20 @@ export function resumeCutOff(list: ChatMessage[]): ChatMessage[] {
   if (!last || last.role !== 'assistant' || last.status !== 'stopped' || last.interrupted !== undefined || last.metrics?.endedAt !== undefined) return list;
   if (list[list.length - 2]?.role !== 'user') return list;
   return [...list.slice(0, -1), { ...last, interrupted: last.createdAt }];
+}
+
+/**
+ * Token counts for an answer filled in later (the stream with its final usage chunk was lost): from the run status.
+ * Unchanged when the message already has counts.
+ */
+export function withRunUsage(m: ChatMessage, usage: Usage): ChatMessage {
+  if (m.usage || m.metrics?.inputTokens !== undefined || m.metrics?.outputTokens !== undefined) return m;
+  return { ...m, usage, metrics: { ...m.metrics, inputTokens: usage.promptTokens, outputTokens: usage.completionTokens } };
+}
+
+/** a filled-in answer without token counts whose run status may still have them */
+export function needsRunUsage(m: ChatMessage | undefined): m is ChatMessage {
+  return !!m && m.role === 'assistant' && m.status === 'done' && m.recoveredAt !== undefined && !!m.completionId && !m.usage && m.metrics?.inputTokens === undefined && m.metrics?.outputTokens === undefined;
 }
 
 /** recovery gave up: the normal error bubble with "Erneut" (`interrupted` stays: retry checks the session first) */
@@ -247,6 +264,13 @@ export type RecoveryDeps = {
   inboxAvailable(): boolean;
   /** status of the message's original run (GET /v1/runs/{completionId}); null = unknown (no id / not reachable) */
   runStatus?(m: ChatMessage): Promise<string | null>;
+  /** the recovering message can be re-attached live at the bridge (hermes/reattach.ts canReattach) */
+  canReattach?(m: ChatMessage): boolean;
+  /**
+   * re-attach it: `live` = it streams again (the hook owns it now; a new loss starts the recovery again), `gone` = the
+   * bridge refused (the stored session decides from now on), `retry` = offline / busy, try again later
+   */
+  reattach?(m: ChatMessage): Promise<'live' | 'gone' | 'retry'>;
   now?: () => number;
   timers?: RecoveryTimers;
   windowMs?: number;
@@ -301,7 +325,8 @@ export function createRecovery(d: RecoveryDeps): Recovery {
       return;
     }
     const left = (list[idx].interrupted as number) + windowMs - now();
-    const delay = Math.max(0, Math.min(delays[Math.min(attempt, delays.length - 1)], left));
+    const steps = d.canReattach?.(list[idx]) && d.reattach ? REATTACH_DELAYS_MS : delays;
+    const delay = Math.max(0, Math.min(steps[Math.min(attempt, steps.length - 1)], left));
     attempt++;
     timer = timers.set(() => {
       timer = null;
@@ -313,6 +338,24 @@ export function createRecovery(d: RecoveryDeps): Recovery {
     if (inflight || disposed) return;
     inflight = true;
     clear();
+    const before = d.get();
+    const at = recoveringIndex(before);
+    if (at >= 0 && d.reattach && d.canReattach?.(before[at])) {
+      // the bridge still has the turn: continue it live instead of waiting for the stored answer
+      let outcome: 'live' | 'gone' | 'retry';
+      try {
+        outcome = await d.reattach(before[at]);
+      } catch {
+        outcome = 'retry';
+      }
+      if (disposed) return;
+      if (outcome === 'live') {
+        inflight = false;
+        attempt = 0;
+        return; // streaming again: a new loss restarts the recovery (start())
+      }
+      if (outcome === 'gone') attempt = 0; // from now on the stored session, with its own delays
+    }
     let remote: ChatMessage[] | null | undefined;
     try {
       remote = await d.fetchRemote();

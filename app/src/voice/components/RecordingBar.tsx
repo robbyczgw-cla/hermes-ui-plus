@@ -5,7 +5,8 @@
  * On-device recognition: the live transcript replaces the waveform as soon as words arrive. Before the first
  * iOS 26 SpeechAnalyzer dictation in a language: spinner + "Sprachmodell wird geladen … x %".
  */
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { Text } from '../../ui/primitives/Text';
 import type { StyleProp, ViewStyle } from 'react-native';
 import { useT } from '../../i18n';
 import { useTheme } from '../../ui';
@@ -57,14 +58,14 @@ export function RecordingBar({ dictation, showStop = false, bars = 40, style }: 
       {loadingModel ? (
         <View style={styles.center} accessibilityLiveRegion="polite">
           <ActivityIndicator size="small" color={theme.colors.muted} />
-          <Text style={[styles.status, { color: theme.colors.muted }]} numberOfLines={1}>
+          <Text style={[theme.typography.body, { color: theme.colors.muted }]} numberOfLines={1}>
             {t('voice.recording.modelLoading', { percent: modelProgressPercent(modelProgress) })}
           </Text>
         </View>
       ) : transcribing ? (
         <View style={styles.center} accessibilityLiveRegion="polite">
           <ActivityIndicator size="small" color={theme.colors.muted} />
-          <Text style={[styles.status, { color: partial ? theme.colors.text : theme.colors.muted }]} numberOfLines={1} ellipsizeMode="head">
+          <Text style={[theme.typography.body, { color: partial ? theme.colors.text : theme.colors.muted }]} numberOfLines={1} ellipsizeMode="head">
             {partial || t('voice.recording.recognizing')}
           </Text>
         </View>
@@ -72,13 +73,13 @@ export function RecordingBar({ dictation, showStop = false, bars = 40, style }: 
         <>
           <View style={styles.timerWrap} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
             <View style={[styles.dot, { backgroundColor: theme.colors.danger, opacity: phase === 'recording' && Math.floor(elapsedMs / 600) % 2 === 0 ? 1 : 0.35 }]} />
-            <Text style={[styles.timer, { color: nearLimit ? theme.colors.warning : theme.colors.text }]}>
+            <Text style={[theme.typography.body, styles.timer, { color: nearLimit ? theme.colors.warning : theme.colors.text }]}>
               {nearLimit ? t('voice.recording.remaining', { seconds: Math.ceil(remaining / 1000) }) : formatElapsed(elapsedMs)}
             </Text>
           </View>
           <View style={styles.waveWrap} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
             {partial ? (
-              <Text style={[styles.partial, { color: theme.colors.text, opacity: hold ? Math.max(0.15, 1 + holdDragX / 90) : 1 }]} numberOfLines={1} ellipsizeMode="head">
+              <Text style={[theme.typography.body, { color: theme.colors.text, opacity: hold ? Math.max(0.15, 1 + holdDragX / 90) : 1 }]} numberOfLines={1} ellipsizeMode="head">
                 {partial}
               </Text>
             ) : (
@@ -93,7 +94,7 @@ export function RecordingBar({ dictation, showStop = false, bars = 40, style }: 
             )}
             {hold && !partial ? (
               <View pointerEvents="none" style={[styles.hintWrap, { transform: [{ translateX: holdDragX * 0.5 }] }]}>
-                <Text style={[styles.hint, { color: theme.colors.muted, backgroundColor: theme.dark ? theme.colors.surface : theme.colors.bg }]} numberOfLines={1}>
+                <Text style={[theme.typography.caption, styles.hint, { color: theme.colors.muted, backgroundColor: theme.dark ? theme.colors.surface : theme.colors.bg }]} numberOfLines={1}>
                   {t('voice.recording.swipeToCancel')}
                 </Text>
               </View>
@@ -122,14 +123,12 @@ const styles = StyleSheet.create({
   row: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 36 },
   iconBtn: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   center: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
-  status: { fontSize: 15 },
   timerWrap: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   dot: { width: 8, height: 8, borderRadius: 4 },
-  timer: { fontSize: 15, fontVariant: ['tabular-nums'], minWidth: 36 },
+  timer: { fontVariant: ['tabular-nums'], minWidth: 36 },
   waveWrap: { flex: 1, height: MAX_H + 4, justifyContent: 'center', overflow: 'hidden' },
   wave: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: BAR_GAP, height: MAX_H },
   bar: { width: BAR_W, borderRadius: BAR_W / 2 },
   hintWrap: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, alignItems: 'center', justifyContent: 'center' },
-  hint: { fontSize: 13, paddingHorizontal: 6 },
-  partial: { fontSize: 15 },
+  hint: { paddingHorizontal: 6 },
 });

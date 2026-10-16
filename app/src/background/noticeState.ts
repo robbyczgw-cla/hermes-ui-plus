@@ -135,7 +135,11 @@ export function createNoticeDelivery(deps: NoticeDeps) {
     switch (route) {
       case 'notification':
         markUnread(ev.conversationId);
-        if (deps.enabled()) deps.notify(ev);
+        if (deps.enabled()) {
+          const notify = () => deps.notify(ev);
+          if (ev.written) void ev.written.then(notify, notify);
+          else notify();
+        }
         break;
       case 'banner':
         markUnread(ev.conversationId);

@@ -4,7 +4,8 @@
  */
 import { AttachmentImage } from './AttachmentImage';
 import { memo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
+import { Text } from '../../ui/primitives/Text';
 import { useT } from '../../i18n';
 import { useImageEdit } from '../../imageedit/context';
 import { useTheme } from '../../ui';
@@ -58,7 +59,7 @@ export const MessageAttachments = memo(function MessageAttachments({ attachments
         <Pressable onPress={() => setViewing(single)} {...editProps(single)} accessibilityRole="imagebutton" accessibilityLabel={tr('attachments.message.openImage', { name: single.name })}>
           <AttachmentImage
             uri={single.uri}
-            style={{ width: singleW, height: Math.round(singleW / singleAspect), borderRadius: t.radii.l, backgroundColor: t.colors.surfaceAlt }}
+            style={{ width: singleW, height: Math.round(singleW / singleAspect), borderRadius: t.radii.card, backgroundColor: t.colors.surfaceAlt }}
             contentFit="cover"
             transition={150}
             recyclingKey={single.id}
@@ -70,7 +71,7 @@ export const MessageAttachments = memo(function MessageAttachments({ attachments
             <Pressable key={img.id} onPress={() => setViewing(img)} {...editProps(img)} accessibilityRole="imagebutton" accessibilityLabel={tr('attachments.message.openImage', { name: img.name })}>
               <AttachmentImage
                 uri={img.uri}
-                style={{ width: tile, height: tile, borderRadius: t.radii.m, backgroundColor: t.colors.surfaceAlt }}
+                style={{ width: tile, height: tile, borderRadius: t.radii.control, backgroundColor: t.colors.surfaceAlt }}
                 contentFit="cover"
                 transition={150}
                 recyclingKey={img.id}
@@ -88,17 +89,17 @@ export const MessageAttachments = memo(function MessageAttachments({ attachments
           accessibilityLabel={tr('attachments.message.fileA11y', { name: f.name, size: formatBytes(f.size) })}
           style={({ pressed }) => [
             styles.card,
-            { maxWidth, borderRadius: t.radii.l, borderColor: t.colors.border, backgroundColor: pressed ? t.colors.surfacePressed : t.dark ? t.colors.surface : t.colors.bg },
+            { maxWidth, borderRadius: t.radii.card, borderColor: t.colors.border, backgroundColor: pressed ? t.colors.surfacePressed : t.dark ? t.colors.surface : t.colors.bg },
           ]}
         >
-          <View style={[styles.fileIcon, { backgroundColor: t.colors.accent, borderRadius: t.radii.s }]}>
+          <View style={[styles.fileIcon, { backgroundColor: t.colors.accent, borderRadius: t.radii.control }]}>
             <AttIcon name="file" size={20} color={t.colors.onAccent} />
           </View>
           <View style={styles.cardText}>
-            <Text numberOfLines={1} style={[styles.name, { color: t.colors.text }]}>
+            <Text numberOfLines={1} style={[t.typography.callout, styles.name, { color: t.colors.text }]}>
               {f.name}
             </Text>
-            <Text numberOfLines={1} style={[styles.sub, { color: t.colors.muted }]}>
+            <Text numberOfLines={1} style={[t.typography.caption, styles.sub, { color: t.colors.muted }]}>
               {typeLabel(f.name, f.mimeType, tr)} · {formatBytes(f.size)}
             </Text>
           </View>
@@ -130,6 +131,6 @@ const styles = StyleSheet.create({
   },
   fileIcon: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   cardText: { flexShrink: 1, minWidth: 0 },
-  name: { fontSize: 14, fontWeight: '600' },
-  sub: { fontSize: 12, marginTop: 1 },
+  name: { fontWeight: '600' },
+  sub: { marginTop: 1 },
 });

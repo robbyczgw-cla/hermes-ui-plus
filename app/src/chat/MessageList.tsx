@@ -5,12 +5,12 @@ import {
   Platform,
   Pressable,
   StyleSheet,
-  Text,
   View,
   type ListRenderItem,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
+import { Text } from '../ui/primitives/Text';
 import { useT } from '../i18n';
 import { useTheme } from '../ui';
 import { usePreferences } from '../settings/PreferencesProvider';
@@ -26,6 +26,7 @@ import { MessageBoundary } from './MessageBoundary';
 import { AssistantMessage, UserMessage, type ActionHandler } from './MessageItem';
 import { createListDerive, createReversedList } from './listDerive';
 import { initialRenderCount } from './messageArea';
+import { perfWrap, usePerfOpen } from '../perf/react';
 import { createStick, STICK_AWAY_PX } from './stickToBottom';
 import { clearPill, pillStore, setNearBottom } from '../background/noticeState';
 
@@ -78,6 +79,7 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
   // lay out 12 of them before anything shows); the older ones follow in the list's batches right after, above the
   // visible area of the inverted list, so nothing on screen moves
   const [initialCount] = useState(() => initialRenderCount(messages));
+  usePerfOpen(conversationId ?? '', messages.length); // no-op unless EXPO_PUBLIC_HUI_PERF is set
   // edit pairs / reformat sources: scanned once for the stable prefix, only the last message per tick (listDerive.ts)
   const [derive] = useState(() => createListDerive<ChatMessage>());
   const derived = useMemo(() => derive(messages), [derive, messages]);
@@ -198,7 +200,7 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
           {item.role === 'user' ? (
             <UserMessage message={item} />
           ) : (
-            <AssistantMessage
+            perfWrap(item.id === lastId ? 'Answer' : 'OlderAnswer', <AssistantMessage
               message={item}
               isLast={item.id === lastId}
               isFirstTurn={item.id === firstAssistantId}
@@ -209,7 +211,7 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
               followups={item.id === lastId ? followups : null}
               compareBefore={editPairs.get(item.id)}
               reformatted={reformatted.has(item.id)}
-            />
+            />)
           )}
         </MessageBoundary>
       </View>
@@ -221,7 +223,7 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
   const historyMarker = useMemo(
     () =>
       historyTruncated ? (
-        <Text style={[styles.historyMarker, { color: t.colors.subtle }]} accessibilityRole="text">
+        <Text style={[t.typography.caption, styles.historyMarker, { color: t.colors.subtle }]} accessibilityRole="text">
           {tr('chat.list.historyTruncated')}
         </Text>
       ) : null,
@@ -284,12 +286,12 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
           style={({ pressed }) => [
             styles.jump,
             newAnswer && styles.jumpPill,
-            { backgroundColor: t.dark ? t.colors.surfaceAlt : t.colors.bg, borderColor: t.colors.borderStrong },
+            { backgroundColor: t.dark ? t.colors.surfaceAlt : t.colors.bg, borderColor: t.colors.borderControl },
             t.shadows.md,
             pressed && { opacity: 0.8 },
           ]}
         >
-          {newAnswer ? <Text style={[styles.pillText, { color: t.colors.text }]}>{tr('chat.list.newAnswer')}</Text> : null}
+          {newAnswer ? <Text style={[t.typography.caption, styles.pillText, { color: t.colors.text }]}>{tr('chat.list.newAnswer')}</Text> : null}
           <Icon name="arrowDown" size={18} color={t.colors.text} strokeWidth={2} />
         </Pressable>
       </Animated.View>
@@ -321,6 +323,6 @@ const styles = StyleSheet.create({
   jump: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth },
   // "Neue Antwort ↓": the same button, widened with a label
   jumpPill: { width: 'auto', flexDirection: 'row', gap: 6, paddingHorizontal: 14 },
-  pillText: { fontSize: 13.5, fontWeight: '600' },
-  historyMarker: { fontSize: 12.5, lineHeight: 17, textAlign: 'center', paddingTop: 14, paddingBottom: 4, paddingHorizontal: 24 },
+  pillText: { fontWeight: '600' },
+  historyMarker: { textAlign: 'center', paddingTop: 14, paddingBottom: 4, paddingHorizontal: 24 },
 });

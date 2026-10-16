@@ -115,6 +115,21 @@ async function importPickedFiles(files: readonly PickedFile[], remaining: number
 }
 
 /**
+ * "Share to HUI+" (share/): files another app shared (native file:// copies or content:// uris), prepared like picked
+ * documents (images like photos), at most `remaining`. Never throws.
+ */
+export async function importSharedFiles(files: readonly PickedFile[], remaining: number, onPrepared?: (att: Attachment) => void): Promise<PickResult> {
+  if (remaining <= 0) {
+    return { ...EMPTY, canceled: false, errors: [{ key: 'attachments.validate.tooMany', vars: { max: LIMITS.maxAttachments } }] };
+  }
+  try {
+    return await importPickedFiles(files, remaining, onPrepared);
+  } catch {
+    return { ...EMPTY, canceled: false, errors: [{ key: 'attachments.picker.failedDocument' }] };
+  }
+}
+
+/**
  * Web / desktop app: files from drag & drop or the clipboard. Object URLs only for accepted files and only while each
  * is prepared (webFiles.ts); the bytes end up in IndexedDB (webBlobs.ts).
  * `stillWanted` false (the desktop app lock engaged meanwhile) → the prepared file is deleted, the rest not read.

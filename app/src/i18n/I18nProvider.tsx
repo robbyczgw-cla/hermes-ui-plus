@@ -79,7 +79,7 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
 }
 
 export const useI18n = () => useContext(I18nContext);
-/** `const t = useT(); t('actions.send'); t('time.minutes', { count: 3 })` */
+/** `const t = useT(); t('actions.send'); t('errors.unknown', { message })` */
 export const useT = (): TFn => useContext(I18nContext).t;
 /** BCP47 tag + Intl helpers for the active locale. */
 export function useLocale() {

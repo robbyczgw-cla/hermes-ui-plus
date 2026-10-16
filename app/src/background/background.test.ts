@@ -8,7 +8,7 @@ import { createTurnRegistry, keptSessions, mountedSessionIds, MAX_BACKGROUND_TUR
 import { applyBackgroundCut, cancelRunningTools, CONTINUE_PROMPT, CONTINUE_PROMPT_EMPTY, isConnectionLoss, isCut, planContinue } from './cut.ts';
 import { createNoticeDeduper, firstLine, noticeKey, notificationBody, routeNotice, type NoticeContext } from './notice.ts';
 import { createNoticeDelivery, flashStore, pillStore, recoveredAnswers, unreadStore, markRead } from './noticeState.ts';
-import { createKeepAliveController } from './keepAlive.ts';
+import { createKeepAliveController, createTaskSlot } from './keepAlive.ts';
 import { createThrottledSaver } from '../conversations/partialSave.ts';
 import { mapRemoteMessages } from '../hermes/sessionMapping.ts';
 import { applyInboxAnswer, applyRemoteAnswer, markInterrupted } from '../hermes/recovery.ts';
@@ -246,6 +246,29 @@ test('notice delivery: one notice per finished turn even when inbox + sync + tur
   assert.ok(!unreadStore.get().has('A'));
 });
 
+test('notice delivery: routed at once, the system notification only once the answer is written', async () => {
+  let c = ctx({ appActive: false });
+  const notified: string[] = [];
+  const deliver = createNoticeDelivery({ context: () => c, enabled: () => true, notify: (e) => notified.push(e.message.id), banner: () => assert.fail('no banner'), now: () => T0 });
+  let written!: () => void;
+  const write = new Promise<void>((r) => (written = r));
+  assert.equal(deliver({ conversationId: 'W', message: answer({ id: 'w1' }), written: write }), 'notification');
+  assert.ok(unreadStore.get().has('W'), 'unread at once');
+  c = ctx({ openConversationId: 'W' }); // the user opens the app before the write is done: the decision stands
+  await tick();
+  assert.deepEqual(notified, [], 'nothing shown before the write');
+  written();
+  await write;
+  await tick();
+  assert.deepEqual(notified, ['w1']);
+  // a failed write (reported + retried by the repo) still shows the answer that is in memory
+  c = ctx({ appActive: false });
+  assert.equal(deliver({ conversationId: 'W', message: answer({ id: 'w3' }), written: Promise.reject(new Error('disk full')) }), 'notification');
+  await tick();
+  assert.deepEqual(notified, ['w1', 'w3']);
+  markRead('W');
+});
+
 test('notice delivery: banner + unread for another chat, pill when scrolled away, flash for a late answer, setting off', () => {
   const banners: string[] = [];
   let enabled = true;
@@ -427,6 +450,36 @@ test('keep-alive: foreground service for the duration of any running turn; text 
   ctl.dispose();
 });
 
+test('keep-alive: the service (and its headless task) is held until the ended turn\'s final write is done', async () => {
+  const reg = createTurnRegistry();
+  const f = fakeModule();
+  const ctl = createKeepAliveController({ module: f.module, registry: reg, enabled: () => true, texts });
+  reg.begin({ conversationId: 'A', label: 'ChatGPT', startedAt: 1 });
+  await tick();
+  let taskEnded = false;
+  void ctl.task().then(() => (taskEnded = true));
+  // turn end: the final write starts (useSessionPersistence onTurnEnd), then the registry hears the end (effect)
+  let written!: () => void;
+  const write = reg.settle(new Promise<void>((r) => (written = r)));
+  reg.end('A');
+  await tick();
+  assert.equal(reg.saving(), 1);
+  assert.equal(f.calls.includes('stop'), false, 'not stopped while the final write runs');
+  assert.equal(taskEnded, false, 'JS timers stay alive meanwhile');
+  written();
+  await write;
+  await tick();
+  assert.equal(reg.saving(), 0);
+  assert.equal(f.calls[f.calls.length - 1], 'stop');
+  assert.equal(taskEnded, true);
+  // a failed write releases it too; a write with no service running never starts one
+  void reg.settle(Promise.reject(new Error('disk full'))).catch(() => {});
+  await tick();
+  assert.equal(reg.saving(), 0);
+  assert.equal(f.calls.filter((c) => c.startsWith('start')).length, 1);
+  ctl.dispose();
+});
+
 test('keep-alive: notification "Stopp" stops every turn and does not restart until all have ended', async () => {
   const reg = createTurnRegistry();
   const f = fakeModule();
@@ -498,4 +551,58 @@ test('keep-alive: update() reporting a stopped service resets the running state'
   await tick();
   assert.equal(ctl.state(), 'idle');
   ctl.dispose();
+});
+
+
+test('a turn ending while service start is pending keeps the headless task through its final write', async () => {
+  const reg = createTurnRegistry();
+  const f = fakeModule();
+  let started!: (ok: boolean) => void;
+  f.module.start = () => new Promise<boolean>(r => { started = r; });
+  const ctl = createKeepAliveController({ module: f.module, registry: reg, enabled: () => true, texts });
+  reg.begin({ conversationId: 'test-chat', label: 'Hermes', startedAt: 1 });
+  let taskEnded = false;
+  void ctl.task().then(() => { taskEnded = true; });
+  let written!: () => void;
+  const write = reg.settle(new Promise<void>(r => { written = r; }));
+  reg.end('test-chat');
+  await tick();
+  assert.equal(taskEnded, false, 'starting state must also retain the task');
+  started(true);
+  await tick();
+  assert.equal(taskEnded, false);
+  written();
+  await write;
+  await tick();
+  assert.equal(taskEnded, true);
+  ctl.dispose();
+});
+
+test('activity relaunch (theme change): the old host unmounting after the new one mounted keeps the new headless task', async () => {
+  // smoke-3 2026-10-16: new surface "Running main" 37 ms before the old surface stopped; the old cleanup reset the
+  // task body, the next service's headless task ended at once and Android stopped the service 24 ms after its start
+  const slot = createTaskSlot();
+  const reg = createTurnRegistry();
+  const oldCtl = createKeepAliveController({ module: fakeModule().module, registry: reg, enabled: () => true, texts });
+  const releaseOld = slot.claim(() => oldCtl.task());
+  const f = fakeModule();
+  const newCtl = createKeepAliveController({ module: f.module, registry: reg, enabled: () => true, texts });
+  const releaseNew = slot.claim(() => newCtl.task()); // new surface mounts first …
+  releaseOld(); // … then the old one unmounts
+  oldCtl.dispose();
+  reg.begin({ conversationId: 'test-chat', label: 'Hermes', startedAt: 1 });
+  await tick();
+  let taskEnded = false;
+  void slot.run().then(() => { taskEnded = true; }); // the service's headless task
+  await tick();
+  assert.equal(taskEnded, false, 'the headless task must run until the turn ends');
+  reg.end('test-chat');
+  await tick();
+  assert.equal(taskEnded, true);
+  releaseNew();
+  let idleEnded = false;
+  void slot.run().then(() => { idleEnded = true; });
+  await tick();
+  assert.equal(idleEnded, true, 'without an owner the task ends at once');
+  newCtl.dispose();
 });

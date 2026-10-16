@@ -134,7 +134,7 @@ test('detect: no false positives on versions, IBANs, ids, prices, maths, paths, 
 });
 
 test('detect: linear on long adversarial text', () => {
-  // scaling ratio (25 KB vs 100 KB, testing/scaling.test.ts) instead of an absolute budget: robust on a loaded host
+  // CPU-time ratio 12.5 KB vs 200 KB (testing/scaling.test.ts) instead of an absolute budget: robust on a loaded host
   for (const unit of ['+4 ', '0660 ', '1.1.', 'a@', '@@', '2026-10-', '12.10.20 ', 'x@y.z.']) {
     const build = (n: number) => {
       let s = '';

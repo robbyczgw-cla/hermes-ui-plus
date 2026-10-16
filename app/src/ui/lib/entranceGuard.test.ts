@@ -42,6 +42,21 @@ test('entrance guard: no reanimated entering= layout animations (they can strand
   assert.deepEqual(hits, []);
 });
 
+test('entrance guard: no reanimated layout transitions, no exiting= in answer content (frames can freeze)', () => {
+  // a Reanimated layout={LinearTransition…} keeps the animated frame on the UI thread only. When a checklist card
+  // grew at the turn end (counter + Share/Edit appear), its items stayed frozen 53 px up over the progress bar,
+  // item 2 squashed to 1 px (E2E `checklist`, 2026-10-15). Answer content lets React own its final layout.
+  const transition = /\b(LinearTransition|SequencedTransition|FadingTransition|JumpingTransition|CurvedTransition|EntryExitTransition)\b/;
+  const hits: string[] = [];
+  for (const f of tsxFiles(SRC)) {
+    const src = readFileSync(f, 'utf8');
+    src.split('\n').forEach((line, i) => {
+      if (transition.test(line) || (rel(f).startsWith('ui/components/') && /\bexiting=/.test(line))) hits.push(`${rel(f)}:${i + 1}`);
+    });
+  }
+  assert.deepEqual(hits, []);
+});
+
 test('entrance guard: animated styles that start invisible hand their end state to React', () => {
   // file → marker proving the settled (plain, React-owned) final style is appended after the animated one
   const expected: Record<string, RegExp> = {

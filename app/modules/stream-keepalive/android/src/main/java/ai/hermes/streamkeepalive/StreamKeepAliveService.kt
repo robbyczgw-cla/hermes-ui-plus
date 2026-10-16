@@ -47,6 +47,7 @@ class StreamKeepAliveService : HeadlessJsTaskService() {
         return START_NOT_STICKY
       }
       ACTION_START -> {
+        startPending = false
         title = intent.getStringExtra(EXTRA_TITLE) ?: title
         text = intent.getStringExtra(EXTRA_TEXT) ?: text
         stopLabel = intent.getStringExtra(EXTRA_STOP_LABEL) ?: stopLabel
@@ -59,6 +60,12 @@ class StreamKeepAliveService : HeadlessJsTaskService() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0,
           )
           running = true
+          if (stopAfterStart) {
+            // stopped by JS while this start was on its way: the promotion above satisfied Android, now end it
+            stopAfterStart = false
+            shutdown()
+            return START_NOT_STICKY
+          }
         } catch (e: Exception) {
           // ForegroundServiceStartNotAllowedException / SecurityException: give up quietly, the app falls back
           // to its "connection lost in the background" recovery UI
@@ -173,6 +180,17 @@ class StreamKeepAliveService : HeadlessJsTaskService() {
 
     @Volatile
     var running = false
+
+    /**
+     * a start intent was handed to startForegroundService and onStartCommand has not run yet. Stopping the service in
+     * that window (stopService) makes Android kill the app (ForegroundServiceDidNotStartInTimeException): `stop` then
+     * only sets [stopAfterStart] and the service shuts down right after its startForeground.
+     */
+    @Volatile
+    var startPending = false
+
+    @Volatile
+    var stopAfterStart = false
 
     /** set by StreamKeepAliveModule: forwards notification actions / timeouts to JS */
     @Volatile

@@ -1,6 +1,6 @@
 # Privacy policy
 
-_Last updated: 2026-10-13. Applies to the Hermes Interactive UI+ apps ("Hermes UI+" on the home screen; Android, iOS, web, macOS) and the Hermes UI+ bridge._
+_Last updated: 2026-10-16. Applies to the Hermes Interactive UI+ apps ("HUI+" on the home screen, "HUI+ for Hermes Agent" in the stores; Android, iOS, web, macOS) and the Hermes UI+ bridge._
 
 Hermes Interactive UI+ is an unofficial, open-source community client for the Hermes Agent. It is not affiliated with Nous Research.
 
@@ -22,6 +22,9 @@ Hermes Interactive UI+ is an unofficial, open-source community client for the He
 | Images in answers | Product, place and event photos from Hermes' answers are fetched by **your bridge's image proxy** (on by default, `BRIDGE_IMAGE_PROXY=off` disables it): the image host sees your bridge's address, not your device's, and gets no cookies or referrer. Other images are loaded from the host named in the answer (for example Wikimedia); unknown hosts only after you tap, and that host sees your IP address as with any web page. |
 | Image search (optional) | If you set up your own image search provider and key in the app (for example Brave), search terms go from your device directly to that provider. |
 | Reports of answers ("Report") | Stored on your device only (reason, optional comment). Nothing is sent automatically. "Send to developer" opens your mail app with a prepared e-mail (reason, app version, an answer excerpt only if you tick it); you decide whether to send it. |
+| Update check ("Check for updates", on by default, Settings → About) | At most once a day, when the app comes to the foreground, the app asks GitHub's public API for the newest release of this project: `GET https://api.github.com/repos/robbyczgw-cla/hermes-ui-plus/releases/latest` (installed pre-release versions: `…/releases?per_page=10`). The request has no login, cookies, referrer or identifiers; GitHub sees your IP address and the app's user agent, as with any web request ([GitHub's privacy statement](https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement)). Not made on iOS, in store installs, or while the device reports being offline. Turn it off with the switch. |
+| "Report a problem" (Settings → About, failure cards) | Nothing is sent automatically. The app shows the exact text first, then opens a prefilled GitHub issue in your browser, or copies the text instead. It contains only the app version, build and commit, platform and OS version, build flavor, connection type (bridge / direct / demo), Hermes and bridge versions if your server reports them, enabled feature flags, and the category and code of the last error. Never server addresses, IP addresses, tokens, e-mail addresses or message contents. You decide whether to submit the issue on GitHub. |
+| Share to HUI+, "Share as image" | Content shared to HUI+ from another app stays on your device until you tap Send in the share sheet; then it goes to your Hermes like any message or attachment. A shared answer image is rendered on your device and only leaves it where you send it (share sheet, download, clipboard). No request to a third party. |
 | Map tiles | Requested from OpenStreetMap-based tile servers when you open a map. |
 | Interactive HTML widgets | May load script libraries from public CDNs (jsDelivr, unpkg, cdnjs, esm.sh). The widgets run in a sandbox without access to your stored data. |
 

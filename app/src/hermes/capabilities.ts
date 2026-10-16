@@ -30,6 +30,10 @@ export type HermesCapabilities = {
    * or `features.approval_timeout_seconds`). Hermes v0.21 does not (config only) → the app falls back to 300 s.
    */
   approvalTimeoutSeconds?: number;
+  /** Hermes version when the server names one (`version`, `runtime.version`, `runtime.hermes_version`) */
+  hermesVersion?: string;
+  /** UI bridge version when the bridge adds one (`bridge.version`) */
+  bridgeVersion?: string;
 };
 
 const posNum = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined);
@@ -55,6 +59,11 @@ export function parseCapabilities(json: unknown): HermesCapabilities | null {
   };
   const apTimeout = approvalTimeout(json, features);
   if (apTimeout) caps.approvalTimeoutSeconds = apTimeout;
+  const runtime = isObj(json.runtime) ? json.runtime : {};
+  const hermesVersion = str(json.version) ?? str(runtime.version) ?? str(runtime.hermes_version);
+  if (hermesVersion) caps.hermesVersion = hermesVersion.slice(0, 64);
+  const bridgeVersion = isObj(json.bridge) ? str(json.bridge.version) : undefined;
+  if (bridgeVersion) caps.bridgeVersion = bridgeVersion.slice(0, 64);
   return caps;
 }
 

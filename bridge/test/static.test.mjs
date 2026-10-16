@@ -119,13 +119,75 @@ test('API paths stay with the bridge; POST is never static', async () => {
   for (const p of ['/', '/index.html', '/v1x', '/apis', '/healthy']) assert.equal(isApiPath(p), false, p);
 });
 
-test('without BRIDGE_WEB_DIR the bridge does not serve / (auth error as before)', async () => {
-  const { server } = createServer({ HERMES_BASE_URL: 'http://127.0.0.1:9', BRIDGE_TOKEN: 'tok' }, { logger: silentLogger, backend: null });
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  const r = await new Promise((resolve) => http.get({ host: '127.0.0.1', port: server.address().port, path: '/' }, (res) => { res.resume(); resolve(res.statusCode); }));
-  server.close();
-  assert.equal(r, 401);
+test('share target POST without the service worker: body discarded, 303 to #huiShare=missed (never stored, never the API)', async () => {
+  const r = await get('/share-target', { method: 'POST', headers: { 'content-type': 'multipart/form-data; boundary=x' } });
+  assert.equal(r.status, 303);
+  assert.equal(r.headers.location, '/#huiShare=missed');
+  assert.equal(r.body.length, 0);
+  assert.equal((await get('/share-target/x', { method: 'POST' })).headers.location, undefined);
+  assert.notEqual((await get('/share-target', { method: 'PUT' })).status, 303);
+});
+
+test('without BRIDGE_WEB_DIR, / is a fixed status page (strict CSP, no state); everything else stays behind auth', async () => {
+  const BASE = { HERMES_BASE_URL: 'http://127.0.0.1:9', BRIDGE_TOKEN: 'tok-landing-test', BRIDGE_NAME: 'Secret Name Test' };
+  const tmp = mkdtempSync(join(tmpdir(), 'hub-landing-'));
+  const start = async (env) => {
+    const { server } = createServer(env, { logger: silentLogger, backend: null });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const req = (path, { method = 'GET', headers = {} } = {}) => new Promise((resolve, reject) => {
+      const r = http.request({ host: '127.0.0.1', port: server.address().port, path, method, headers }, (res) => {
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks).toString() }));
+      });
+      r.on('error', reject);
+      r.end();
+    });
+    return { server, req };
+  };
+  // pairing page codes enabled + a device store: the page must look exactly the same as without them
+  const a = await start({ ...BASE, BRIDGE_PAIRING: '1', BRIDGE_STATE_DIR: tmp });
+  const b = await start(BASE);
+  try {
+    const r = await a.req('/');
+    assert.equal(r.status, 200);
+    assert.equal(r.headers['content-type'], 'text/html; charset=utf-8');
+    assert.match(r.body, /Hermes UI\+ bridge is running/);
+    assert.match(r.body, /Web app not installed/);
+    assert.match(r.body, /https:\/\/github\.com\/[^"]+\/docs\/WEB-APP\.md/);
+    assert.match(r.body, /devices add "Phone"/);
+    assert.equal(r.body, (await b.req('/')).body, 'same page with and without pending pairing codes');
+    assert.equal(r.body, (await a.req('/?code=ABCD-EFGH')).body);
+    for (const leak of ['tok-landing-test', 'Secret Name Test', '127.0.0.1', tmp, 'code=']) assert.ok(!r.body.includes(leak), leak);
+    assert.equal(r.headers['cache-control'], 'no-store');
+    assert.equal(r.headers['x-frame-options'], 'DENY');
+    const csp = Object.fromEntries(r.headers['content-security-policy'].split(';').map((x) => x.trim().split(/\s+/)).map(([k, ...v]) => [k, v]));
+    assert.deepEqual(csp['default-src'], ["'none'"]);
+    assert.deepEqual(csp['frame-ancestors'], ["'none'"]);
+    assert.equal(csp['script-src'], undefined, 'no scripts at all');
+    assert.ok(!/<script|\son\w+=/i.test(r.body));
+    assert.match(csp['style-src'][0], /^'sha256-[A-Za-z0-9+/]+=*'$/);
+    const style = /<style>([\s\S]*?)<\/style>/.exec(r.body)[1];
+    const { createHash } = await import('node:crypto');
+    assert.equal(csp['style-src'][0], `'sha256-${createHash('sha256').update(style).digest('base64')}'`);
+    const head = await a.req('/', { method: 'HEAD' });
+    assert.equal(head.status, 200); assert.equal(head.body, '');
+    // only `/`: other paths and methods keep the old answers
+    assert.equal((await a.req('/', { method: 'POST' })).status, 401);
+    assert.equal((await a.req('/index.html')).status, 401);
+    assert.equal((await a.req('/v1/models')).status, 401);
+    assert.equal((await a.req('/api/sessions')).status, 401);
+  } finally {
+    a.server.close(); b.server.close();
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('with BRIDGE_WEB_DIR, / is the web app, not the status page', async () => {
+  const r = await get('/');
+  assert.match(r.body.toString(), /<title>app<\/title>/);
+  assert.doesNotMatch(r.body.toString(), /bridge is running/);
 });
 
 // Review finding (medium): CSP for the served PWA. The policy was checked in Chromium against a real Expo web export
