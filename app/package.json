@@ -53,7 +53,7 @@
     "eslint": "^9.0.0",
     "eslint-config-expo": "~57.0.2",
     "patch-package": "^8.0.1",
-    "typescript": "~6.0.3"
+    "typescript": "~7.0.2"
   },
   "scripts": {
     "start": "expo start",
