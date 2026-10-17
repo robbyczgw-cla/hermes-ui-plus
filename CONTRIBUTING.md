@@ -85,8 +85,8 @@ secrets, so pull requests from forks get the same checks:
 
 Run `scripts/check.sh all` and the bridge and push tests locally before opening a pull request. Do not start a native build just to test a JavaScript
 change. Workflow changes: actions stay pinned to a full commit SHA with a version comment, and `permissions` stay
-read-only; `scripts/workflows.test.mjs` fails otherwise. Dependabot opens grouped weekly update pull requests
-(`.github/dependabot.yml`); Expo packages are only bumped with `npx expo install`, so their minor and major updates are ignored.
+read-only; `scripts/workflows.test.mjs` fails otherwise. Dependency updates are made in the source repository and arrive
+with the next export (Expo packages only through `npx expo install`), so this repository has no automatic update pull requests.
 
 ## Internationalization (i18n)
 

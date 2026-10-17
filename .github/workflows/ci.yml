@@ -10,7 +10,7 @@ name: ci
 #               available here; it runs in the maintainers' git hooks and in scripts/scan-artifact.sh (docs/LEAK-GUARD.md)
 #   gitleaks    secrets over the full git history (.gitleaks.toml)
 #   workflows   actionlint + scripts/workflows.test.mjs (pinned actions, least privilege, nothing publishes)
-# Actions are pinned to commit SHAs; update the SHA together with the version comment (dependabot does both).
+# Actions are pinned to commit SHAs; update the SHA together with the version comment.
 
 on:
   push:

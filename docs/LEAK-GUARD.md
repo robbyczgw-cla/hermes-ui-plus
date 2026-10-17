@@ -86,7 +86,7 @@ Runs gitleaks (pinned release, checksum-verified by `.github/actions/setup-gitle
 and `leak-guard --tree --generic-only` plus its unit tests on every pull request and on pushes to main, next to the
 test jobs (app, services, website). No secret and no licence key is needed, so pull requests from forks run the same
 checks. The private denylist is not available in CI; it runs in the maintainers' hooks and release gate. Actions are
-pinned to commit SHAs; update the SHA together with the version comment (dependabot does both).
+pinned to commit SHAs; update the SHA together with the version comment.
 
 **Manual step for the repository owner (GitHub settings, cannot be done from the repo):**
 Settings -> Code security -> enable **Secret scanning** and **Push protection** (and Dependabot alerts).
