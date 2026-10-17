@@ -1,6 +1,9 @@
 # Copy to docker-compose.yml and an .env next to it (see README.md). There is no prebuilt image in 0.1: build it from a
 # checkout. `npm run bundle-skill` (copies the hermes-ui skill + bootstrap message into ./skill, the image needs them),
 # then `docker compose up -d --build`.
+# The image carries only the bootstrap message: install the skill itself into Hermes too (docs/SELF-HOSTING.md "With
+# Docker"), else every answer stays plain text; the startup log says "hermes-ui skill is NOT installed" then.
+# Hermes runs in Docker too? Use docker-compose.with-hermes.example.yml instead (one network, 8642 not published).
 services:
   bridge:
     build: .
@@ -16,8 +19,10 @@ services:
       # The URL your phone uses to reach the bridge (https://... via your reverse proxy / tunnel).
       BRIDGE_PUBLIC_URL: ${BRIDGE_PUBLIC_URL:-}
       BRIDGE_NAME: ${BRIDGE_NAME:-Hermes}
+      # HERMES_HOME: /hermes-home   # with the optional Hermes home volume below
       # Set to 1 to pair from another machine: `docker compose logs bridge` shows a path /bridge/pair?code=XXXX-XXXX;
-      # open it on the bridge URL within 10 minutes. Or create a pair link any time:
+      # that page code works once within 10 minutes, the pair link the page shows works once within 1 hour. Or create a
+      # pair link (1 hour) any time:
       #   docker compose exec bridge node bin/hermes-ui-bridge.mjs devices add "Phone"
       BRIDGE_PAIRING: ${BRIDGE_PAIRING:-}
       # Optional web app (PWA): unpack hermes-ui-plus-web-<version>.tar.gz into ./web next to this file
@@ -39,6 +44,9 @@ services:
     volumes:
       - bridge-data:/var/lib/hermes-ui-bridge
       # - ./web:/web:ro   # web app bundle for BRIDGE_WEB_DIR above (read-only)
+      # Optional: Hermes' home (data folder), read-only, so the startup check can see whether the hermes-ui skill is
+      # installed (Hermes 0.21.5 to 0.22.2 cannot list skills over the API). Uncomment both lines; the path must exist.
+      # - ${HOME}/.hermes:/hermes-home:ro
     read_only: true
     tmpfs:
       - /tmp

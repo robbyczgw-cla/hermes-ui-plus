@@ -116,7 +116,20 @@ export function readHermes(home, { fs = { existsSync, readFileSync } } = {}) {
   try { hermesEnv = envText ? parseEnv(envText) : {}; } catch { hermesEnv = {}; }
   const yaml = yamlText ? parseYamlSubset(yamlText) : {};
   const api = apiServerSettings(yaml, hermesEnv);
-  return { home, exists: fs.existsSync(home), configFile, configExists: yamlText !== null, configText: yamlText ?? '', api };
+  return { home, exists: fs.existsSync(home), configFile, configExists: yamlText !== null, configText: yamlText ?? '', api, envDuplicates: duplicateEnvKeys(envText ?? '') };
+}
+
+/**
+ * API_SERVER_* keys set more than once in Hermes' .env (an appended snippet next to a key Hermes' own setup wrote).
+ * The last line wins, for Hermes and for this wizard; a user who copies the first key gets a 401.
+ */
+export function duplicateEnvKeys(text) {
+  const seen = new Map();
+  for (const line of String(text).split(/\r?\n/)) {
+    const m = /^\s*(?:export\s+)?(API_SERVER_[A-Z_]+)\s*=/.exec(line);
+    if (m) seen.set(m[1], (seen.get(m[1]) ?? 0) + 1);
+  }
+  return [...seen].filter(([, n]) => n > 1).map(([k]) => k);
 }
 
 /** Hermes profiles (`HERMES_HOME/profiles/<name>/`), the targets of `/p/<profile>/` multiplexing. */
@@ -193,7 +206,7 @@ export function apiServerSnippet({ host = '127.0.0.1', port = DEFAULT_HERMES_POR
   ].join('\n');
 }
 
-export const HERMES_RESTART_HINT = 'restart the Hermes gateway, e.g. `hermes gateway restart` or `sudo systemctl restart hermes-gateway`';
+export const HERMES_RESTART_HINT = 'restart the Hermes gateway: `hermes gateway restart` for the service (or `sudo systemctl restart hermes-gateway`); if it runs in a terminal (`hermes gateway run`), stop it with Ctrl+C and start it again; in Docker restart its container';
 
 /**
  * Add an api_server block to config.yaml text. Only safe, unambiguous edits: no api_server key may exist yet.

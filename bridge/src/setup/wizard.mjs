@@ -41,6 +41,9 @@ Usage: hermes-ui-plus-bridge setup [options]
   --name <label>        name shown in the app (default Hermes)
   --service <kind>      auto | systemd | launchd | docker | none (default auto)
   --no-tailscale        do not use tailscale serve
+  --public-url <url>    the address your devices use (BRIDGE_PUBLIC_URL), e.g. when the detected LAN address is wrong
+                        (a container IP); skips the Tailscale / LAN detection. A plain http:// address on another host
+                        also makes the bridge listen on all interfaces (BRIDGE_HOST=0.0.0.0): trusted LAN only
   --web-dir <dir>       serve a built web app (BRIDGE_WEB_DIR) from the bridge
   --profiles <list>     also install the skill into these Hermes profiles (comma separated, or "all")
   --no-skill            do not install or update the hermes-ui skill
@@ -52,14 +55,14 @@ Usage: hermes-ui-plus-bridge setup [options]
                         (default No); with --yes they are skipped unless --extras is given.
 
 With --extras the keys can be passed as environment variables (never as arguments): SERPER_API_KEY or BRAVE_API_KEY
-(image search), GROQ_API_KEY (speech-to-text), DEEPGRAM_API_KEY (text-to-speech), ANTHROPIC_API_KEY or
-TYPESAFE_API_KEY (LLM router, titles). Without --extras those variables are ignored, and values already in the env
+(image search), GROQ_API_KEY (speech-to-text), DEEPGRAM_API_KEY (text-to-speech), ANTHROPIC_API_KEY,
+TYPESAFE_API_KEY or NACE_API_KEY (LLM router, titles). Web Push contact: BRIDGE_PUSH_VAPID_SUBJECT (mailto: or https:). Without --extras those variables are ignored, and values already in the env
 file are kept untouched. Router default: heuristic (rule based, no external call). Push (Web Push) is always offered.
 Hermes' own config is never changed without an interactive "y".`;
 
 /** @param {string[]} argv */
 export function parseSetupArgs(argv) {
-  const o = { yes: false, dryRun: false, json: false, envFile: '', hermesHome: '', port: 8790, httpsPort: 8790, name: '', service: 'auto', tailscale: true, webDir: '', profiles: '', skill: true, pair: true, extras: false, help: false };
+  const o = { yes: false, dryRun: false, json: false, envFile: '', hermesHome: '', port: 8790, httpsPort: 8790, name: '', service: 'auto', tailscale: true, publicUrl: '', webDir: '', profiles: '', skill: true, pair: true, extras: false, help: false };
   for (let i = 0; i < argv.length; i++) {
     let a = argv[i];
     let inline;
@@ -86,6 +89,7 @@ export function parseSetupArgs(argv) {
         o.service = v; break;
       }
       case '--no-tailscale': o.tailscale = false; break;
+      case '--public-url': o.publicUrl = publicUrlArg(take()); break;
       case '--web-dir': o.webDir = take(); break;
       case '--profiles': o.profiles = take(); break;
       case '--no-skill': o.skill = false; break;
@@ -212,6 +216,9 @@ export async function runSetup(opts, deps = {}) {
     if (!hermes.exists) warn(`no Hermes home at ${hHome}; set HERMES_HOME or --hermes-home if Hermes lives elsewhere`);
     log(`  config: ${hermes.configExists ? hermes.configFile : 'config.yaml not found'}`);
     log(`  API server: ${hermes.api.enabled ? 'enabled' : 'not enabled'}, ${hermes.api.host}:${hermes.api.port}, key ${hermes.api.hasKey ? 'present' : 'missing'}`);
+    for (const k of hermes.envDuplicates ?? []) {
+      warn(`${join(hHome, '.env')} sets ${k} more than once; the last line counts (for Hermes and for this setup). Delete the other lines so nobody copies a stale value (a stale key gives HTTP 401)`);
+    }
 
     if (!hermes.api.enabled || !hermes.api.hasKey) {
       log('\n  The bridge needs the Hermes API server. Add this to config.yaml (or set API_SERVER_ENABLED=true and');
@@ -347,14 +354,17 @@ export async function runSetup(opts, deps = {}) {
       }
       // router
       if (!existing.ROUTER_BACKEND || !opts.yes) {
-        const preset = existing.ROUTER_BACKEND || (fromEnv('ANTHROPIC_API_KEY') ? 'claude' : fromEnv('TYPESAFE_API_KEY') ? 'jev' : 'heuristic');
-        const choice = (await p.ask('  Router: heuristic (free, rule based) | claude (Anthropic key) | jev (Jev key)', preset)).toLowerCase();
+        const preset = existing.ROUTER_BACKEND || (fromEnv('ANTHROPIC_API_KEY') ? 'claude' : fromEnv('TYPESAFE_API_KEY') ? 'jev' : fromEnv('NACE_API_KEY') ? 'nace' : 'heuristic');
+        const choice = (await p.ask('  Router: heuristic (free, rule based) | claude (Anthropic key) | jev (Jev key) | nace (Nace Drex key)', preset)).toLowerCase();
         if (existing.ROUTER_BACKEND && choice === existing.ROUTER_BACKEND.toLowerCase()) { /* unchanged, keep as is */ } else if (choice.startsWith('c')) {
           const k = existing.ANTHROPIC_API_KEY || fromEnv('ANTHROPIC_API_KEY') || await p.secret('  Anthropic API key');
           if (k) { updates.ANTHROPIC_API_KEY = existing.ANTHROPIC_API_KEY ? undefined : k; updates.ROUTER_BACKEND = 'claude'; } else warn('no Anthropic key given, keeping the heuristic router');
         } else if (choice.startsWith('j')) {
           const k = existing.TYPESAFE_API_KEY || fromEnv('TYPESAFE_API_KEY') || await p.secret('  Jev (Typesafe) API key');
           if (k) { updates.TYPESAFE_API_KEY = existing.TYPESAFE_API_KEY ? undefined : k; updates.ROUTER_BACKEND = 'jev'; } else warn('no Jev key given, keeping the heuristic router');
+        } else if (choice === 'nace' || choice.startsWith('drex')) {
+          const k = existing.NACE_API_KEY || fromEnv('NACE_API_KEY') || await p.secret('  Nace (Drex) API key');
+          if (k) { updates.NACE_API_KEY = existing.NACE_API_KEY ? undefined : k; updates.ROUTER_BACKEND = 'nace'; } else warn('no Nace key given, keeping the heuristic router');
         } else updates.ROUTER_BACKEND = 'heuristic';
       }
       if (!existing.ROUTER_BACKEND && !updates.ROUTER_BACKEND) updates.ROUTER_BACKEND = 'heuristic';
@@ -362,23 +372,35 @@ export async function runSetup(opts, deps = {}) {
       if (!existing.BRIDGE_META && (existing.ANTHROPIC_API_KEY || updates.ANTHROPIC_API_KEY)) updates.BRIDGE_META = 'on';
     }
     // web push (VAPID): free, no account; the private key goes into the 0600 env file (readable by the service)
-    if (!has('BRIDGE_PUSH_VAPID_PUBLIC_KEY')) {
+    let vapid = has('BRIDGE_PUSH_VAPID_PUBLIC_KEY');
+    if (!vapid) {
       if (await p.confirm('  Generate Web Push (VAPID) keys for notifications in the web app?', true)) {
         const { generateVapidKeys } = await import('../push/webpush.mjs');
         const v = generateVapidKeys();
-        Object.assign(updates, { BRIDGE_PUSH_VAPID_PUBLIC_KEY: v.publicKey, BRIDGE_PUSH_VAPID_PRIVATE_KEY: v.privateKey, BRIDGE_PUSH_VAPID_SUBJECT: 'mailto:admin@localhost' });
+        Object.assign(updates, { BRIDGE_PUSH_VAPID_PUBLIC_KEY: v.publicKey, BRIDGE_PUSH_VAPID_PRIVATE_KEY: v.privateKey });
+        vapid = true;
       }
     }
 
     // ---------- 4. Network (decides BRIDGE_PUBLIC_URL / BRIDGE_HOST before the env file is written) ----------
     step('Network');
-    let publicUrl = existing.BRIDGE_PUBLIC_URL || '';
+    let publicUrl = opts.publicUrl || existing.BRIDGE_PUBLIC_URL || '';
     let serveArgs = null;
     const lan = lanAddresses(deps.interfaces ?? networkInterfaces());
-    const ts = opts.tailscale ? exec(['tailscale', 'status', '--json']) : { code: -1, stdout: '' };
+    const ts = opts.tailscale && !opts.publicUrl ? exec(['tailscale', 'status', '--json']) : { code: -1, stdout: '' };
     const tsInfo = ts.code === 0 ? parseTailscaleStatus(ts.stdout) : { running: false, dnsName: '' };
     report.network.tailscale = { found: ts.code === 0, running: tsInfo.running, dnsName: tsInfo.dnsName };
-    if (tsInfo.running && tsInfo.dnsName) {
+    if (opts.publicUrl) {
+      log(`  BRIDGE_PUBLIC_URL=${publicUrl} (--public-url; no Tailscale / LAN detection)`);
+      report.network.mode = 'custom';
+      // plain HTTP to another machine's address: a phone can only connect when the bridge listens beyond loopback
+      const host = new URL(publicUrl).hostname;
+      if (/^http:$/i.test(new URL(publicUrl).protocol) && !LOOPBACK_NAMES.has(host) && !['0.0.0.0', '::'].includes(existing.BRIDGE_HOST || '')) {
+        updates.BRIDGE_HOST = '0.0.0.0';
+        log('  plain http:// address on another host: the bridge listens on all interfaces (BRIDGE_HOST=0.0.0.0). Unencrypted:');
+        log('  trusted home network only, never forward the port.');
+      }
+    } else if (tsInfo.running && tsInfo.dnsName) {
       const url = tailnetUrl(tsInfo.dnsName, opts.httpsPort);
       const args = tailscaleServeArgs(opts.httpsPort, opts.port);
       log(`  Tailscale is running (${tsInfo.dnsName}).`);
@@ -407,6 +429,27 @@ export async function runSetup(opts, deps = {}) {
     }
     updates.BRIDGE_PUBLIC_URL = publicUrl || undefined;
     report.network.publicUrl = publicUrl;
+
+    // Web Push contact (VAPID "sub", RFC 8292): push services use it to reach the operator. A contact set in the env file
+    // stays; the placeholder older versions wrote (mailto:admin@localhost) is replaced.
+    const subjectNow = existing.BRIDGE_PUSH_VAPID_SUBJECT || '';
+    if (vapid && (!subjectNow || subjectNow === PLACEHOLDER_VAPID_SUBJECT)) {
+      const fallback = /^https:/i.test(publicUrl) ? publicUrl : '';
+      let subject = vapidContact(env.BRIDGE_PUSH_VAPID_SUBJECT);
+      if (!subject && !opts.yes) {
+        const a = await p.ask(`  Web Push contact for the push services (your e-mail address or an https URL; Enter = ${fallback || 'none'})`, '');
+        subject = a ? vapidContact(a) : fallback;
+        if (a && !subject) warn(`"${a}" is neither an e-mail address nor an https URL; ${fallback ? `using ${fallback}` : 'no Web Push contact set'}`);
+        if (a && !subject) subject = fallback;
+      } else if (!subject) subject = fallback;
+      if (subject) { updates.BRIDGE_PUSH_VAPID_SUBJECT = subject; log(`  Web Push contact: ${subject}`); }
+      else {
+        if (subjectNow) updates.BRIDGE_PUSH_VAPID_SUBJECT = '';
+        log('  Web Push contact: none. Set BRIDGE_PUSH_VAPID_SUBJECT=mailto:<your address> in the env file (push services use');
+        log('  it to reach you about problems with your pushes).');
+        report.nextSteps.push(`Web Push: set BRIDGE_PUSH_VAPID_SUBJECT=mailto:<your address> in ${envFile}, then restart the bridge.`);
+      }
+    }
 
     step('Env file');
     const { env: newEnv, changed } = mergeEnv(existing, updates);
@@ -479,7 +522,7 @@ export async function runSetup(opts, deps = {}) {
       started = !dry && results[results.length - 1].code === 0;
       report.nextSteps.push(`Logs: ~/Library/Logs/${SERVICE_NAME}.log`);
     } else if (kind === 'docker') {
-      const snippet = composeSnippet({ envFile, port: opts.port, hermesPort: hermes.api.port, webDir: newEnv.BRIDGE_WEB_DIR || '' });
+      const snippet = composeSnippet({ envFile, port: opts.port, hermesPort: hermes.api.port, webDir: newEnv.BRIDGE_WEB_DIR || '', hermesHome: hermes.exists ? hHome : '' });
       report.service.compose = snippet;
       log('  Docker: use this compose service (the env file above is reused):\n');
       log(snippet.split('\n').map((l) => `    ${l}`).join('\n'));
@@ -516,8 +559,10 @@ export async function runSetup(opts, deps = {}) {
         const { createDeviceStore } = await import('../devices.mjs');
         const { buildPairUri, loadPairConfig, qrTerminal } = await import('../pair.mjs');
         const store = createDeviceStore({ dir: stateDir });
-        const d = store.issue(`setup ${now().toISOString().slice(0, 16).replace('T', ' ')}`);
+        // a re-run replaces the unused link of the previous run instead of piling up pending devices
+        const d = store.issue(`${SETUP_LABEL}${now().toISOString().slice(0, 16).replace('T', ' ')}`, { replacePending: (l) => l.startsWith(SETUP_LABEL) });
         fixOwnership(store.file, stateDir, isRoot);
+        if (d.replaced) log(`  (replaces the unused pair link${d.replaced > 1 ? 's' : ''} of an earlier setup run)`);
         const pc = loadPairConfig({ ...newEnv, BRIDGE_PUBLIC_URL: publicUrl });
         const url = pc.publicUrl || `http://127.0.0.1:${opts.port}`;
         const link = buildPairUri({ url, code: d.code, name: pc.name, scheme: pc.scheme });
@@ -605,4 +650,31 @@ function fixOwnership(file, dir, isRoot) {
     const st = statSync(dir);
     if (st.uid !== 0) chownSync(file, st.uid, st.gid);
   } catch { /* best effort */ }
+}
+
+/** Label prefix of the pending device a setup run creates (a re-run replaces its own unused one). */
+export const SETUP_LABEL = 'setup ';
+/** VAPID subject older setup versions wrote: not a contact anybody reads. */
+export const PLACEHOLDER_VAPID_SUBJECT = 'mailto:admin@localhost';
+const LOOPBACK_NAMES = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
+
+/** `--public-url`: an absolute http(s) URL without path, query or trailing slash. */
+export function publicUrlArg(v) {
+  let u;
+  try { u = new URL(String(v).trim()); } catch { throw new Error('--public-url must be an absolute http(s) URL, e.g. http://192.0.2.10:8790'); }
+  if (!/^https?:$/.test(u.protocol)) throw new Error('--public-url must be an absolute http(s) URL, e.g. http://192.0.2.10:8790');
+  if (u.username || u.password || u.search || u.hash) throw new Error('--public-url must not contain credentials, a query or a fragment');
+  return u.toString().replace(/\/+$/, '');
+}
+
+/** A Web Push contact: `mailto:` + address, a bare address (gets `mailto:`) or an https URL. '' when not usable. */
+export function vapidContact(v) {
+  const t = String(v ?? '').trim();
+  if (!t || t === PLACEHOLDER_VAPID_SUBJECT) return '';
+  const mail = /^(?:mailto:)?([^\s@:/]+@[^\s@/]+\.[^\s@/]+)$/i.exec(t);
+  if (mail) return `mailto:${mail[1]}`;
+  if (/^https:\/\//i.test(t)) {
+    try { const u = new URL(t); return /\S/.test(u.hostname) && !LOOPBACK_NAMES.has(u.hostname) ? u.toString().replace(/\/+$/, '') : ''; } catch { return ''; }
+  }
+  return '';
 }

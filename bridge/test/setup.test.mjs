@@ -207,6 +207,11 @@ test('launchd plist, compose snippet', () => {
   assert.match(c, /env_file: \["\/home\/u\/.config\/hermes-ui-plus-bridge\/env"\]/);
   assert.match(c, /127\.0\.0\.1:8790:8790/);
   assert.match(c, /host.docker.internal:8645/);
+  assert.doesNotMatch(c, /hermes-home/);
+  // with a Hermes home: mounted read-only, so the startup check can see the skill (fresh-user scenario C re-run)
+  const h = composeSnippet({ envFile: '/e', hermesHome: '/home/u/.hermes' });
+  assert.match(h, /HERMES_HOME: \/hermes-home/);
+  assert.match(h, /- "\/home\/u\/\.hermes:\/hermes-home:ro"/);
 });
 
 test('parseSetupArgs', () => {
@@ -711,5 +716,109 @@ test('wizard (root, hardened system unit): explicit BRIDGE_PROFILES and the plug
   assert.match(human, /Environment=BRIDGE_HERMES_PLUGIN_SECRET_FILE=%d\/hui-plugin-secret/);
   assert.match(human, /^\s+BRIDGE_PROFILES=work$/m); // in the env file written
   assert.doesNotMatch(human, /^\s+BRIDGE_HERMES_PLUGIN_SECRET_FILE=/m); // EnvironmentFile= would override the unit's value
+  rmSync(f.root, { recursive: true });
+});
+
+// ---------- fresh-user test of 0.1.1: setup quick wins ----------
+test('setup --public-url: validated; plain http to another host listens on all interfaces, no Tailscale detection', async () => {
+  const { publicUrlArg } = await import('../src/setup/wizard.mjs');
+  assert.equal(parseSetupArgs(['--public-url', 'http://192.0.2.10:8790/']).publicUrl, 'http://192.0.2.10:8790');
+  assert.equal(publicUrlArg('https://box.example.ts.net'), 'https://box.example.ts.net');
+  for (const bad of ['192.0.2.10:8790', 'ftp://x', 'http://u:p@192.0.2.10', 'http://192.0.2.10/?a=1']) assert.throws(() => parseSetupArgs(['--public-url', bad]), /--public-url/, bad);
+  const f = fixture();
+  const r = await runSetup(parseSetupArgs(['--json', '--service', 'none', '--public-url', 'http://192.0.2.10:8790']), f.deps);
+  assert.equal(r.ok, true, r.error);
+  const env = readEnvFile(r.envFile.path);
+  assert.equal(env.BRIDGE_PUBLIC_URL, 'http://192.0.2.10:8790');
+  assert.equal(env.BRIDGE_HOST, '0.0.0.0');
+  assert.equal(r.network.mode, 'custom');
+  assert.ok(!f.calls.some((c) => c.startsWith('tailscale')), 'no tailscale status / serve');
+  assert.match(r.pair.link, /u=http%3A%2F%2F192\.0\.2\.10%3A8790/);
+  // https (a TLS proxy in front): the bridge stays on loopback
+  const g = fixture();
+  const r2 = await runSetup(parseSetupArgs(['--json', '--service', 'none', '--public-url', 'https://bridge.example.com']), g.deps);
+  assert.equal(readEnvFile(r2.envFile.path).BRIDGE_HOST, undefined);
+  rmSync(f.root, { recursive: true }); rmSync(g.root, { recursive: true });
+});
+
+test('setup re-run: replaces its own unused pair link instead of piling up pending devices', async () => {
+  const f = fixture();
+  const opts = parseSetupArgs(['--yes', '--service', 'none']);
+  const r1 = await runSetup(opts, f.deps);
+  const { createDeviceStore } = await import('../src/devices.mjs');
+  const dir = readEnvFile(r1.envFile.path).BRIDGE_STATE_DIR;
+  const other = createDeviceStore({ dir }).issue('Tablet'); // created by `devices add`: never touched by setup
+  f.lines.length = 0;
+  const r2 = await runSetup(opts, f.deps);
+  const r3 = await runSetup(opts, f.deps);
+  const pending = createDeviceStore({ dir }).list().filter((d) => d.status === 'pending');
+  assert.deepEqual(pending.map((d) => d.id).sort(), [other.id, r3.pair.deviceId].sort());
+  assert.ok(f.lines.some((l) => /replaces the unused pair link of an earlier setup run/.test(l)));
+  const code = (link) => new URL(link.replace('hermesuiplus://pair', 'https://x/')).searchParams.get('c');
+  assert.equal(createDeviceStore({ dir }).redeem(code(r2.pair.link)), null, 'the replaced link is dead');
+  // a redeemed (active) setup device is never removed
+  assert.ok(createDeviceStore({ dir }).redeem(code(r3.pair.link)));
+  await runSetup(opts, f.deps);
+  const list = createDeviceStore({ dir }).list();
+  assert.ok(list.some((d) => d.id === r3.pair.deviceId && d.status === 'active'));
+  assert.equal(list.filter((d) => d.status === 'pending' && d.label.startsWith('setup ')).length, 1);
+  rmSync(f.root, { recursive: true });
+});
+
+test('setup: Web Push contact from the environment, the https address or a prompt; never the localhost placeholder', async () => {
+  const { vapidContact, PLACEHOLDER_VAPID_SUBJECT } = await import('../src/setup/wizard.mjs');
+  assert.equal(vapidContact('alice@example.com'), 'mailto:alice@example.com');
+  assert.equal(vapidContact('mailto:alice@example.com'), 'mailto:alice@example.com');
+  assert.equal(vapidContact('https://bridge.example.com/'), 'https://bridge.example.com');
+  for (const bad of ['', PLACEHOLDER_VAPID_SUBJECT, 'admin@localhost', 'http://bridge.example.com', 'https://localhost', 'alice']) assert.equal(vapidContact(bad), '', bad);
+  // --yes with Tailscale: the tailnet https address
+  const f = fixture();
+  const r = await runSetup(parseSetupArgs(['--json', '--service', 'none']), f.deps);
+  assert.equal(readEnvFile(r.envFile.path).BRIDGE_PUSH_VAPID_SUBJECT, 'https://box.example.ts.net:8790');
+  // a configured contact wins, also over an old placeholder in the env file
+  const g = fixture();
+  writeEnvFileFor(g, { BRIDGE_PUSH_VAPID_PUBLIC_KEY: 'BPub', BRIDGE_PUSH_VAPID_PRIVATE_KEY: 'test-private-000', BRIDGE_PUSH_VAPID_SUBJECT: PLACEHOLDER_VAPID_SUBJECT });
+  const r2 = await runSetup(parseSetupArgs(['--json', '--service', 'none']), { ...g.deps, env: { ...g.deps.env, BRIDGE_PUSH_VAPID_SUBJECT: 'alice@example.com' } });
+  assert.equal(readEnvFile(r2.envFile.path).BRIDGE_PUSH_VAPID_SUBJECT, 'mailto:alice@example.com');
+  // a real contact already in the file stays
+  const r3 = await runSetup(parseSetupArgs(['--json', '--service', 'none']), g.deps);
+  assert.equal(readEnvFile(r3.envFile.path).BRIDGE_PUSH_VAPID_SUBJECT, 'mailto:alice@example.com');
+  // interactive without Tailscale: asks, and an answer is used
+  const h = fixture();
+  const prompter = recordingPrompter({ extras: false });
+  prompter.ask = async (q, d) => { prompter.asked.push(['ask', q]); return /Web Push contact/.test(q) ? 'bob@example.com' : d; };
+  const r4 = await runSetup(parseSetupArgs(['--service', 'none', '--no-tailscale']), { ...h.deps, prompter });
+  assert.ok(prompter.asked.some(([, q]) => /Web Push contact for the push services \(your e-mail address or an https URL; Enter = none\)/.test(q)));
+  assert.equal(readEnvFile(r4.envFile.path).BRIDGE_PUSH_VAPID_SUBJECT, 'mailto:bob@example.com');
+  // --yes, no https address, no contact: no placeholder written, a next step says what to set
+  const k = fixture();
+  const r5 = await runSetup(parseSetupArgs(['--json', '--service', 'none', '--no-tailscale']), k.deps);
+  assert.equal(readEnvFile(r5.envFile.path).BRIDGE_PUSH_VAPID_SUBJECT, undefined);
+  assert.ok(r5.nextSteps.some((s) => /BRIDGE_PUSH_VAPID_SUBJECT=mailto:<your address>/.test(s)));
+  for (const x of [f, g, h, k]) rmSync(x.root, { recursive: true });
+});
+
+function writeEnvFileFor(f, values) {
+  writeEnvFile(join(f.home, '.config', 'hermes-ui-plus-bridge', 'env'), values);
+}
+
+test('bridge runtime: VAPID subject falls back to the https public URL, not to localhost', async () => {
+  const { vapidSubject } = await import('../src/push-hermes.mjs');
+  assert.equal(vapidSubject({ BRIDGE_PUSH_VAPID_SUBJECT: 'mailto:alice@example.com', BRIDGE_PUBLIC_URL: 'https://b.example.com' }), 'mailto:alice@example.com');
+  assert.equal(vapidSubject({ BRIDGE_PUBLIC_URL: 'https://b.example.com/' }), 'https://b.example.com');
+  assert.equal(vapidSubject({ BRIDGE_PUBLIC_URL: 'http://192.0.2.10:8790' }), 'mailto:admin@localhost');
+});
+
+test('setup: duplicate API_SERVER_KEY lines in Hermes .env are named (the last one counts, a stale copy gives 401)', async () => {
+  const { duplicateEnvKeys, HERMES_RESTART_HINT } = await import('../src/setup/detect.mjs');
+  assert.deepEqual(duplicateEnvKeys('API_SERVER_KEY=a\nOTHER=1\nAPI_SERVER_ENABLED=true\nexport API_SERVER_KEY=b\n# API_SERVER_KEY=c\n'), ['API_SERVER_KEY']);
+  assert.deepEqual(duplicateEnvKeys(''), []);
+  const f = fixture();
+  writeFileSync(join(f.hermes, '.env'), `API_SERVER_KEY=${'a'.repeat(48)}\nAPI_SERVER_KEY=${KEY}\n`);
+  const r = await runSetup(parseSetupArgs(['--json', '--service', 'none', '--no-pair']), f.deps);
+  assert.ok(r.warnings.some((w) => /sets API_SERVER_KEY more than once; the last line counts/.test(w)));
+  assert.ok(!JSON.stringify(r).includes('a'.repeat(48)), 'no key in the report');
+  // gateway restart hint covers a gateway in a terminal (fresh-user 0.1.1 #6: `gateway restart` stopped it for good)
+  assert.match(HERMES_RESTART_HINT, /Ctrl\+C and start it again/);
   rmSync(f.root, { recursive: true });
 });

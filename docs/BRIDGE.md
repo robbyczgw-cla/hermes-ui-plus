@@ -310,7 +310,7 @@ outside Hermes (a later version will move these extras into a Hermes plugin, wit
 
 | Extra (opt in) | Sent to | What |
 |---|---|---|
-| LLM router (`ROUTER_BACKEND=claude` or `jev`; default `heuristic` = rule based, no external call) | the router model you configure (e.g. Anthropic, Jev) | the last few messages, truncated, to pick a format |
+| LLM router (`ROUTER_BACKEND=claude`, `jev` or `nace`; default `heuristic` = rule based, no external call) | the router model you configure (e.g. Anthropic, Jev, Nace Drex) | the last few messages, truncated, to pick a format |
 | Chat titles / follow-up suggestions (`BRIDGE_META=on` + `ANTHROPIC_API_KEY`) | Anthropic (Claude Haiku) | the first exchange of a chat |
 | Image search (`SERPER_API_KEY` / `BRAVE_API_KEY`) | Serper or Brave | the search term |
 | Speech-to-text (`GROQ_API_KEY`, or `OPENAI_API_KEY` with `BRIDGE_STT_PROVIDER=openai`) | Groq or OpenAI | the recorded audio |

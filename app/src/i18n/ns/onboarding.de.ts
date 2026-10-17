@@ -285,13 +285,13 @@ export const onboarding = {
   starters: {
     chart: {
       title: 'Zeig ein Diagramm',
-      subtitle: 'Wetter der nächsten 7 Tage',
-      prompt: 'Zeig mir das Wetter der nächsten 7 Tage als Diagramm.',
+      subtitle: 'Wetter in Berlin, nächste 7 Tage',
+      prompt: 'Zeig mir das Wetter in Berlin für die nächsten 7 Tage als Diagramm.',
     },
     compare: {
       title: 'Vergleiche',
-      subtitle: 'zwei Smartphones in einer Tabelle',
-      prompt: 'Vergleiche zwei aktuelle Smartphones in einer Tabelle – Kamera, Akku, Preis.',
+      subtitle: 'iPhone und Pixel in einer Tabelle',
+      prompt: 'Vergleiche die aktuellen Basismodelle von iPhone und Google Pixel in einer Tabelle – Kamera, Akku, Preis.',
     },
     calculator: {
       title: 'Bau mir einen Rechner',

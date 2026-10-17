@@ -1,6 +1,7 @@
 import { createAnthropicBackend } from './anthropic.mjs';
 import { createHeuristicBackend } from './heuristic.mjs';
 import { createJevBackend } from './jev.mjs';
+import { createNaceBackend } from './nace.mjs';
 import { createChainBackend } from './chain.mjs';
 import { createOpenAIBackend } from './openai.mjs';
 
@@ -24,7 +25,9 @@ function createOne(kind, rc) {
       if (!rc.baseUrl || !rc.model) throw new Error('ROUTER_BACKEND=openai needs BRIDGE_ROUTER_BASE_URL and BRIDGE_ROUTER_MODEL');
       return createOpenAIBackend({ baseUrl: rc.baseUrl, apiKey: rc.apiKey, model: rc.model, jsonMode: rc.jsonMode, extraBody: rc.extraBody });
     case 'jev':
-      return createJevBackend({ apiKey: rc.jevApiKey, model: rc.jevModel });
+      return createJevBackend({ apiKey: rc.jevApiKey, model: rc.jevModel, url: rc.jevBaseUrl || undefined });
+    case 'nace':
+      return createNaceBackend({ apiKey: rc.naceApiKey, model: rc.naceModel, baseUrl: rc.naceBaseUrl || undefined });
     case 'heuristic':
     case 'off':
       return null;
@@ -33,4 +36,4 @@ function createOne(kind, rc) {
   }
 }
 
-export { createChainBackend, createAnthropicBackend, createHeuristicBackend, createJevBackend, createOpenAIBackend };
+export { createChainBackend, createAnthropicBackend, createHeuristicBackend, createJevBackend, createNaceBackend, createOpenAIBackend };

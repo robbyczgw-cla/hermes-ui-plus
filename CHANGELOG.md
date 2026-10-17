@@ -2,6 +2,42 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com), and the project aims to follow [Semantic Versioning](https://semver.org).
 
+## 0.1.2 - 2026-10-17
+
+Smoother streaming, answers in the user's language, a router that understands more languages, and setup fixes from a
+fresh-user test of 0.1.1 (three new users: no Hermes yet, Hermes already running, everything in Docker).
+
+### Added
+
+- **Router backend `nace`** (Nace.AI Drex) next to `jev`, both through one System One client, and **heuristic-first chains** such as `ROUTER_BACKEND=heuristic,jev`: the rules decide when one fires, the model is asked only when none fires or the message is clearly not German, English or Spanish. Opt-in like every model router; the default stays `heuristic` (no external call). Measurements in docs/ROUTER.md.
+- **Bridge startup checks the skill:** the bridge asks Hermes (`GET /v1/skills`) whether the `hermes-ui` skill is installed and warns when it is missing ("app answers stay plain text"). Hermes 0.21.5 to 0.22.2 cannot list their skills (HTTP 500); then the bridge looks into Hermes' skills folder when it can see it (same machine, or `HERMES_HOME` pointing at Hermes' data folder mounted read-only, as in the new compose file). If Hermes is not up yet when the bridge starts, the bridge checks again in the background and reports once Hermes answers.
+- **Hermes in Docker:** a "Hermes runs in Docker too" section in docs/SELF-HOSTING.md (`API_SERVER_HOST=0.0.0.0`, one Docker network, port 8642 not published, data folder ownership) and `bridge/docker-compose.with-hermes.example.yml`, which runs Hermes and the bridge together that way.
+- **`setup --public-url <url>`** sets the address devices use when the detected LAN address is wrong (for example a container's internal IP). A plain `http://` address on another host also makes the bridge listen on all interfaces.
+- **`GET /bridge/live`:** an unauthenticated liveness path ("ok", no Hermes call). The Docker healthcheck uses it, so the log no longer shows a 401 line every 30 seconds.
+- **Optional universal APK** (arm64-v8a + x86_64) as an extra release asset: `scripts/release.sh --build --universal-apk` (off by default, see docs/RELEASING.md).
+
+### Changed
+
+- **Smoother streaming:** while an answer streams, only the answer itself re-renders; the chat list, the answer frame and the composer update at boundaries (start, tool steps, interactive blocks, end, at least once a second). Measured on an Android emulator: 13 to 18 % less JS time, 32 to 46 % fewer allocations and about a quarter fewer dropped frames for long answers and long chats.
+- **Cards in the user's language:** the `hermes-ui` skill no longer assumes German. All visible card text (titles, labels, items, categories, units, notes, buttons) follows the language of the user's latest message; the examples are English. In a test with English prompts, German words in cards went from common to none.
+- **Default cards instead of questions back:** when a request lacks details ("make me a shopping list"), Hermes builds a sensible card and offers to adjust it instead of asking in prose.
+- **Router in more languages:** the rule-based router now recognises shopping lists, product comparisons, places, weather and timers in English, Spanish, French, Italian and Portuguese much more often (multilingual test set: 50 % to 82 %), with no extra calls and no unwanted cards; German is unchanged.
+- **README step 1** only adds the API server settings that are missing (it used to append a second `API_SERVER_KEY` next to the one Hermes' setup wrote) and has a `docker exec` variant for a Hermes container, whose data folder belongs to the container's user.
+- **Docker path:** the docs now install the `hermes-ui` skill into Hermes as a separate step; the bridge image only carries the bootstrap message.
+- **Gateway restart:** README, docs and the setup wizard say that a gateway started with `hermes gateway run` in a terminal needs Ctrl+C and a new start; `hermes gateway restart` only manages the service. The bridge's "Hermes not reachable" line points to `hermes gateway status`.
+- **"Hermes rejected the key" (401)** mentions duplicate `API_SERVER_KEY` lines (the last one counts), and the setup wizard warns when Hermes' `.env` has them.
+- **Pairing wording:** the pairing page no longer says both "the code is used up" and "reload for another device"; log, page and docs name both lifetimes (page code from the log: 10 minutes; every pair link: 1 hour).
+- **Re-running setup** replaces the unused pair link of its previous run instead of adding another pending device each time.
+- **Web Push contact:** setup asks for an e-mail address or https URL (or takes `BRIDGE_PUSH_VAPID_SUBJECT` from the environment, else the bridge's https address) instead of writing `mailto:admin@localhost`; the bridge falls back to its https address, too.
+- **Start suggestions** carry the details a first answer needs, so the first tap gives a card instead of a question back (shopping list names the dish, train or plane names what to weigh, the weather chart names a city).
+- **README and website:** the Android APK does not start on x86 emulators or x86 ChromeOS, even with ARM translation; use the web app there.
+
+### Fixed
+
+- **Jev router choices:** the choice list sent to Jev was out of date, so Jev could not pick places, products, guides, coding views and a few more components (holdout accuracy 87.6 % before, 96.1 % after). The rule-based router was not affected.
+- **Product names:** "Pixel 11" (two-digit model numbers) and the Spanish singular "móvil" are recognised as products.
+- **Pair hint inside a container:** the startup hint printed `docker compose exec bridge …` for any container, also for `npx` in a plain container. The compose form now appears only in the official image (`HUI_BRIDGE_IMAGE=1`), elsewhere `npx hermes-ui-plus-bridge devices add "Phone"`.
+
 ## 0.1.1 - 2026-10-16
 
 Fixes from a fresh-user test of 0.1.0-alpha.1.

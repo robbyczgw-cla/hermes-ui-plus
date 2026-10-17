@@ -153,9 +153,13 @@ export function launchdCommands({ uid, plistPath }) {
 }
 
 /** docker compose service for the bridge, reading the same env file. */
-export function composeSnippet({ envFile, port = 8790, hermesPort = 8642, webDir = '' }) {
+export function composeSnippet({ envFile, port = 8790, hermesPort = 8642, webDir = '', hermesHome = '' }) {
   // the env file's BRIDGE_WEB_DIR is a host path: mount it and point the container at the mount instead
   const web = webDir ? { env: '\n      BRIDGE_WEB_DIR: /web', volume: `\n      - ${JSON.stringify(`${webDir}:/web:ro`)}` } : { env: '', volume: '' };
+  // Hermes' home, read-only: the startup check sees the hermes-ui skill there (Hermes 0.21.5 to 0.22.2 cannot list
+  // skills over the API), and the bridge lists Hermes profiles
+  const home = hermesHome
+    ? { env: '\n      HERMES_HOME: /hermes-home', volume: `\n      - ${JSON.stringify(`${hermesHome}:/hermes-home:ro`)}` } : { env: '', volume: '' };
   return `# docker-compose.yml (build from the bridge directory of the repo, or use your own image name)
 services:
   bridge:
@@ -168,13 +172,13 @@ services:
       HERMES_BASE_URL: http://host.docker.internal:${hermesPort}
       BRIDGE_HOST: 0.0.0.0
       BRIDGE_PORT: "8790"
-      BRIDGE_STATE_DIR: /var/lib/hermes-ui-bridge${web.env}
+      BRIDGE_STATE_DIR: /var/lib/hermes-ui-bridge${web.env}${home.env}
     ports:
       - "127.0.0.1:${port}:8790"   # loopback only; tailscale serve / a TLS proxy goes in front
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - bridge-data:/var/lib/hermes-ui-bridge${web.volume}
+      - bridge-data:/var/lib/hermes-ui-bridge${web.volume}${home.volume}
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]

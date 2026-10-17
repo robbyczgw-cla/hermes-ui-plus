@@ -1,7 +1,9 @@
 // Start screen content (pure, node-tested): time-of-day greeting + the starter tiles. Each starter is picked
 // to produce one kind of interactive answer (checklist, agenda + map, decision, chart, recipe with timers,
 // steps), and its tile shows a stroke icon of that card type. Prompts are sent as the user's message, so
-// they are translated like the rest of the UI; the German ones hit the demo scenarios (pickScenario).
+// they are translated like the rest of the UI; every language hits the demo scenarios (pickScenario). On a real
+// Hermes the tile is the first message of a chat, so each prompt is self-contained (dish and people, places, what to
+// weigh): the first answer can be a card instead of a question back (starters.test.ts pins this).
 import type { TFn } from '../i18n/core.ts';
 
 export const STARTER_KINDS = ['checklist', 'agenda', 'compare', 'chart', 'recipe', 'explain'] as const;

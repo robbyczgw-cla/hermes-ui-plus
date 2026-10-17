@@ -1,8 +1,9 @@
-// Regenerates eval/cases.jsonl and eval/holdout.jsonl from their .src.mjs files and validates labels.
+// Regenerates eval/cases.jsonl, eval/holdout.jsonl and eval/multilingual.jsonl from their .src.mjs files and validates labels.
 import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import cases from './cases.src.mjs';
 import holdout from './holdout.src.mjs';
+import multilingual from './multilingual.src.mjs';
 import { ROUTE_FORMATS } from '../src/router/taxonomy.mjs';
 
 function write(list, name) {
@@ -19,3 +20,4 @@ function write(list, name) {
 }
 write(cases, 'cases.jsonl');
 write(holdout, 'holdout.jsonl');
+write(multilingual, 'multilingual.jsonl');

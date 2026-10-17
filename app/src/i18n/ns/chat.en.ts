@@ -95,7 +95,7 @@ export const chat = {
       checklist: {
         title: 'Shopping list',
         subtitle: 'To tick off',
-        prompt: "I'm cooking for four tonight. Make me a shopping list I can tick off.",
+        prompt: "I'm cooking lasagne for four tonight. Make me a shopping list I can tick off.",
       },
       agenda: {
         title: 'Weekend plan',
@@ -105,7 +105,7 @@ export const chat = {
       compare: {
         title: 'Weigh it up',
         subtitle: 'Train or plane?',
-        prompt: 'Help me decide: train or plane from Hamburg to Munich? Ask me first what matters to me.',
+        prompt: 'Help me decide: train or plane from Hamburg to Munich? Weigh price, travel time and CO₂ and recommend one.',
       },
       chart: {
         title: 'As a chart',

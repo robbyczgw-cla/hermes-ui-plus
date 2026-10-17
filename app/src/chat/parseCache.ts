@@ -84,11 +84,11 @@ export function storeSegments(key: string, text: string, segs: Segment[]): void 
   segments.set(key, { text, segs }, text.length);
 }
 
-/** useSegments state; `parser` is null for an answer whose final segments came from the cache (nothing to feed). */
+/** segments state of an answer (MessageItem useAnswerText); `parser` is null for an answer whose final segments came from the cache (nothing to feed). */
 export type SegmentsState = { parser: StreamParser | null; text: string; segs: Segment[]; ended: boolean; run?: AppendRun };
 
 /**
- * One render of useSegments: feeds only the delta of a growing text to the stream parser (closed segments keep
+ * One render of an answer's segments: feeds only the delta of a growing text to the stream parser (closed segments keep
  * their identity), ends it once `complete`. `cacheKey` (message id): a finished answer's final segments are stored,
  * and a fresh mount of a finished answer takes them from the cache instead of parsing. Idempotent per
  * (text, complete); returns the state to keep (the same object, updated, or a new one).

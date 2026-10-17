@@ -1,4 +1,5 @@
-// Deterministic keyword/regex router (German + English). Zero latency, no network.
+// Deterministic keyword/regex router (German, English, Spanish; French / Italian / Portuguese for shopping lists,
+// products, places, weather and timers). Zero latency, no network.
 // Used as fallback when the decision model times out or errors, and as a baseline in the eval.
 // Philosophy: explicit format requests are reliable; implicit cues get moderate confidence;
 // everything else is text with low confidence (=> no hint is injected).
@@ -51,36 +52,89 @@ const STRUCTURE = re(String.raw`\b<(architektur|architecture|aufbau|ablauf|proze
 
 
 // --- v4 cue vocab (DE / EN / ES) ----------------------------------------------------------------
-const PLACE_NOUN = String.raw`(restaurants?|cafés?|cafes?|lokale?|bistros?|kneipen?|bars?|pubs?|biergärten|biergarten|bäckereien|bäckerei|bäcker|metzgerei\p{L}*|apotheken?|tankstellen?|supermärkte?|supermarkt|friseure?|friseur|eisdielen?|imbiss\p{L}*|pizzerien|pizzeria|hotels?|pensionen|fitnessstudios?|werkstätten|werkstatt|zahnärzte?|zahnarzt|hausarzt|italiener|griechen|asiaten|inder|döner|brunch|coffee ?shops?|bakery|bakeries|pharmac(y|ies)|gas stations?|hairdressers?|gyms?|diners?|restaurantes?|cafeterías?|bares?|panader[ií]as?|farmacias?|gasolineras?|peluquer[ií]as?|gimnasios?|tapas|chiringuitos?)`;
-const PLACE_CUE = String.raw`(empfiehl\p{L}*|such\p{L}*|find\p{L}*|zeig\p{L}*|gibt es|gibt'?s|kennst du|beste[nrms]?|gute[nrms]?|schöne[nrms]?|günstige[nrms]?|nette[nrms]?|recommend\p{L}*|looking for|any|best|good|cheap|nice|busca\p{L}*|recomienda\p{L}*|recomi[eé]ndame|hay|mejor(es)?|buen[oa]s?)`;
-const NEAR = String.raw`(in der nähe|nahe|nearby|near me|close by|close to me|around here|cerca de m[ií]|cerca de aqu[ií]|por aqu[ií]|um die ecke|around the corner|öffnungszeiten|opening hours|horario|noch offen|jetzt geöffnet|jetzt offen|open now|abierto ahora)`;
-const PRODUCT_NOUN = String.raw`(kopfhörer|ohrhörer|earbuds|headphones|auriculares|laptops?|notebooks?|portátil(es)?|smartphones?|handys?|móviles?|fernseher|tv-geräte|televisor(es)?|staubsauger|saugroboter|aspiradora|kaffeemaschinen?|kaffeevollautomat\p{L}*|waschmaschinen?|trockner|spülmaschinen?|monitore?|tablets?|kameras?|cámaras?|drucker|router|rucksäcke?|rucksack|laufschuhe|wanderschuhe|schuhe|matratzen?|e-?bikes?|fahrräder|smartwatch\p{L}*|lautsprecher|soundbars?|speakers?|mikrowellen?|backofen|toaster|mixer|bohrmaschinen?|akkuschrauber|powerbanks?|gaming-?(maus|tastatur|stuhl)|tastaturen?|mäuse|e-?reader|drohnen?|zelte?|schlafsäcke?|handhelds?|retro-?handhelds?|spielkonsolen?|konsolen?|consoles?|controller|gamepads?|vacuums?|washing machines?|dishwashers?|cameras?|keyboards?|monitors?|sneakers|running shoes|mattress(es)?)`;
+const PLACE_NOUN_DE_EN_ES = String.raw`(restaurants?|cafés?|cafes?|lokale?|bistros?|kneipen?|bars?|pubs?|biergärten|biergarten|bäckereien|bäckerei|bäcker|metzgerei\p{L}*|apotheken?|tankstellen?|supermärkte?|supermarkt|friseure?|friseur|eisdielen?|imbiss\p{L}*|pizzerien|pizzeria|hotels?|pensionen|fitnessstudios?|werkstätten|werkstatt|zahnärzte?|zahnarzt|hausarzt|italiener|griechen|asiaten|inder|döner|brunch|coffee ?shops?|bakery|bakeries|pharmac(y|ies)|gas stations?|hairdressers?|gyms?|diners?|restaurantes?|cafeterías?|bares?|panader[ií]as?|farmacias?|gasolineras?|peluquer[ií]as?|gimnasios?|tapas|chiringuitos?)`;
+const PLACE_CUE_DE_EN_ES = String.raw`(empfiehl\p{L}*|such\p{L}*|find\p{L}*|zeig\p{L}*|gibt es|gibt'?s|kennst du|beste[nrms]?|gute[nrms]?|schöne[nrms]?|günstige[nrms]?|nette[nrms]?|recommend\p{L}*|looking for|any|best|good|cheap|nice|busca\p{L}*|recomienda\p{L}*|recomi[eé]ndame|hay|mejor(es)?|buen[oa]s?)`;
+const NEAR_DE_EN_ES = String.raw`(in der nähe|nahe|nearby|near me|close by|close to me|around here|cerca de m[ií]|cerca de aqu[ií]|por aqu[ií]|um die ecke|around the corner|öffnungszeiten|opening hours|horario|noch offen|jetzt geöffnet|jetzt offen|open now|abierto ahora)`;
+const PRODUCT_NOUN_DE_EN_ES = String.raw`(kopfhörer|ohrhörer|earbuds|headphones|auriculares|laptops?|notebooks?|portátil(es)?|smartphones?|handys?|m[oó]vil(es)?|fernseher|tv-geräte|televisor(es)?|staubsauger|saugroboter|aspiradora|kaffeemaschinen?|kaffeevollautomat\p{L}*|waschmaschinen?|trockner|spülmaschinen?|monitore?|tablets?|kameras?|cámaras?|drucker|router|rucksäcke?|rucksack|laufschuhe|wanderschuhe|schuhe|matratzen?|e-?bikes?|fahrräder|smartwatch\p{L}*|lautsprecher|soundbars?|speakers?|mikrowellen?|backofen|toaster|mixer|bohrmaschinen?|akkuschrauber|powerbanks?|gaming-?(maus|tastatur|stuhl)|tastaturen?|mäuse|e-?reader|drohnen?|zelte?|schlafsäcke?|handhelds?|retro-?handhelds?|spielkonsolen?|konsolen?|consoles?|controller|gamepads?|vacuums?|washing machines?|dishwashers?|cameras?|keyboards?|monitors?|sneakers|running shoes|mattress(es)?)`;
 const NUMW = String.raw`(\d+|einem|einer|zwei|drei|vier|fünf|sechs|acht|zehn|zwölf|one|two|three|four|five|six|eight|ten|twelve|un|una|dos|tres|cuatro|cinco|seis|ocho|doce)`;
 const SPAN = String.raw`(wochen?|monate?n?|tage?n?|weeks?|months?|days?|semanas?|meses|d[ií]as?)`;
-const DURATION = String.raw`(\d+|einer|einem|zehn|fünf|zwanzig|dreißig|eine halbe|ten|five|twenty|thirty|half|a|an|one|un|una|diez|cinco|veinte|treinta|media) ?(min\p{L}*|stunde\p{L}*|std\b>|sek\p{L}*|h\b>|hours?|hrs?|seconds?|horas?|segundos?|minutes?|minutos?)`;
+const DURATION = String.raw`(\d+|einer|einem|zehn|fünf|zwanzig|dreißig|eine halbe|ten|five|twenty|thirty|half an|half|a|an|one|un|una|diez|cinco|veinte|treinta|media|une|une demi-|un quart d['’]|deux|dix|quinze|vingt|trente|uno|due|cinque|dieci|quindici|venti|trenta|mezz['’]|mezza|um|uma|dois|duas|dez|vinte|trinta|meia) ?(min\p{L}*|stunde\p{L}*|std\b>|sek\p{L}*|h\b>|hours?|hrs?|seconds?|horas?|segundos?|minutes?|minutos?|heures?|secondes?|ore|ora|secondi)`;
+
+// --- multilingual additions (en / es, plus fr / it / pt for the high-value classes) ----------------------------
+// Kept per language so a reviewer can read each list on its own. Only words that point at a lookup on their own:
+// no bare "phone"/"tv" (phone number, TV shows), no Italian "libreria" (code library), no French "enceinte" alone
+// (pregnant), no "près de" / "perto de" / "pas loin de" alone (they also mean "nearly 50 %").
+const alt = (...xs) => `(${xs.join('|')})`;
+const PLACE_NOUN_ML = alt(
+  // en
+  String.raw`(ramen|sushi|pizza|burger|taco|brunch|breakfast|coffee|thai|indian|chinese|vegan|vegetarian) (places?|spots?|joints?)|places? to eat|takeaways?|take-?outs?|(hardware|grocery|book|bike|shoe|charity|thrift|convenience|liquor|pet|toy|furniture|sports?) (stores?|shops?)|bookshops?|bookstores?|supermarkets?|drugstores?`,
+  // es
+  String.raw`supermercados?|ferreter[ií]as?|helader[ií]as?|hostales?|hoteles?|churrer[ií]as?|marisquer[ií]as?|(sitios?|lugar(es)?) (para|donde|d[oó]nde) (comer|cenar|almorzar|desayunar|tapear|tomar (algo|copas|tapas|un caf[eé]))`,
+  // fr
+  String.raw`restos?|pharmacies?|boulangeries?|p[aâ]tisseries?|brasseries?|bistrots?|cr[eê]peries?|supermarch[eé]s?|[eé]piceries?|coiffeurs?|salles? de sport|h[oô]tels?|stations?[- ]service|boucheries?|fromageries?|endroits? (pour|o[uù]) (manger|d[iî]ner|d[eé]jeuner|bruncher|boire)`,
+  // it
+  String.raw`ristoranti?|trattori[ae]|osteri[ae]|pizzeri[ae]|caff[eè]|panifici?o?|panetteri[ae]|pasticceri[ae]|farmaci[ae]|supermercat[oi]|gelateri[ae]|parrucchier[ei]|palestr[ae]|alberghi|albergo|benzina[io]|enotec(a|he)|posti? (per|dove) (mangiare|cenare|pranzare|bere)`,
+  // pt
+  String.raw`padarias?|farm[aá]cias?|lanchonetes?|pizzarias?|sorveterias?|botecos?|churrascarias?|barbearias?|pastelarias?|academias?|hot[eé]is|postos? de gasolina|lugar(es)? (pra|para) (comer|jantar|almo[cç]ar|beber|tomar)`,
+);
+// asking for a recommendation / a lookup (fr / it / pt); adjectives alone ("bon", "buon") only count together with NEAR
+const PLACE_ASK_ROM = String.raw`(trouve\p{L}*|cherche\p{L}*|conseill\p{L}*|recommand\p{L}*|indique\p{L}*|trova\p{L}*|cerco|cercami|consiglia\p{L}*|consigli|suggerisci\p{L}*|encontr\p{L}*|procur\p{L}*|recomend\p{L}*|indica\p{L}*|sugere|sugira)`;
+const NEAR_ML = alt(
+  String.raw`nearest|closest|still open|open (right )?now|in my area|around me`,
+  String.raw`(aqu[ií]|por aqu[ií]) cerca|cerca de (casa|mi casa)|m[aá]s cercan[oa]s?|m[aá]s pr[oó]xim[oa]s?|de guardia|abiert[oa]s? (ahora|hoy|todav[ií]a)|por la zona|en mi zona`,
+  String.raw`pr[eè]s d['’]ici|pr[eè]s de chez moi|pr[eè]s de moi|dans le coin|pas loin d['’]ici|[aà] proximit[eé]|autour de moi|dans le quartier|(le|la|les) plus proches?|ouverte?s? (maintenant|en ce moment|ce soir|aujourd['’]hui|le dimanche)|de garde`,
+  String.raw`qui vicino|qua vicino|vicino a me|vicino (a|al|alla|allo|ai|alle|all['’])|nei dintorni|in zona|qui intorno|pi[uù] vicin[oaie]|apert[oaie] (adesso|ora|stasera|oggi|la domenica)|di turno`,
+  String.raw`aqui perto|perto (de mim|daqui|de casa)|por perto|nas redondezas|(na minha|aqui na) regi[aã]o|mais pr[oó]xim[oa]s?|abert[oa]s? (agora|hoje|ainda|no domingo)|de plant[aã]o`,
+);
+// "where can I eat …": a food place lookup in any of the languages
+const WHERE_TO_EAT = String.raw`(where can (i|we) (eat|get food|have (lunch|dinner|breakfast|brunch))|wo (kann|können) (ich|man|wir)\b>.{0,40}\b<(essen|frühstücken|brunchen)|d[oó]nde (puedo|podemos|se puede) (comer|cenar|desayunar|almorzar|tapear)|o[uù] (manger|d[iî]ner|d[eé]jeuner|bruncher)|o[uù] (est-ce qu['’]on peut|est-ce que je peux|puis-je|peut-on) (manger|d[iî]ner|d[eé]jeuner|bruncher)|dove (posso|possiamo|si pu[oò]) (mangiare|cenare|pranzare|fare colazione)|onde (eu )?(posso|podemos|d[aá] pra) (comer|jantar|almo[cç]ar|tomar caf[eé]))`;
+// "where can I get … around here" (getting / buying something; "where can I find the settings" is not a place)
+const WHERE_CAN_I = String.raw`(where (can|do) (i|we) (get|buy|grab)|where to (get|buy|grab)|d[oó]nde (puedo |se puede )?(comprar|conseguir|tomar)|d[oó]nde (hay|venden)|o[uù] (puis-je |est-ce que je peux |peut-on )?(acheter|trouver|boire)|dove (posso |si pu[oò] )?(comprare|trovare|bere)|dove (trovo|compro)|onde (eu )?(posso )?(comprar|encontrar|tomar)|onde (tem|h[aá]|encontro|compro))`;
+const PRODUCT_NOUN_ML = alt(
+  String.raw`espresso machines?|coffee (machines?|makers?)|air ?fryers?|e-?scooters?|smart ?watch(es)?|earphones|headsets?`,
+  String.raw`freidoras?( de aire)?|cafeteras?|lavadoras?|lavavajillas|robots? aspiradores?|patinetes?( el[eé]ctricos?)?|colch[oó]n(es)?|zapatillas|altavoz|altavoces|relojes inteligentes`,
+  String.raw`[eé]couteurs|casques? (audio|bluetooth|sans fil|[aà] r[eé]duction de bruit)|aspirateurs?( robots?)?|ordinateurs? portables?|ordis? portables?|pc portables?|machines? [aà] caf[eé]|cafeti[eè]res?|lave-linge|lave-vaisselle|t[eé]l[eé]viseurs?|trottinettes?( [eé]lectriques?)?|matelas|chaussures de (running|course|rando)|montres? connect[eé]es?|enceintes? (bluetooth|connect[eé]es?|portables?|sans fil)|imprimantes?|friteuses?( sans huile)?|tablettes? tactiles?|appareils? photo`,
+  String.raw`cuffie|auricolari|aspirapolvere|portatil[ei]|cellular[ei]|telefonin[oi]|macchin(a|e|etta|ette) (del|da|per il) caff[eè]|lavatric[ei]|lavastoviglie|televisor[ei]|monopattin[oi]( elettric[oi])?|materass[oi]|scarpe da (corsa|running|trekking)|friggitric[ei]( ad aria)?|stampant[ei]|fotocamer[ae]|casse (bluetooth|wireless)`,
+  String.raw`fones?( de ouvido)?|aspirador(es)?( rob[oô])?|rob[oô] aspirador|port[aá]teis|celular(es)?|telem[oó]ve(l|is)|cafeteiras?|m[aá]quinas? de (caf[eé]|lavar)|lava-lou[cç]as|televis(ão|ões|or(es)?)|smart ?tvs?|colch(ão|ões)|t[eê]nis de corrida|rel[oó]gios? inteligentes?|fritadeiras?|impressoras?|caixas? de som`,
+);
+const PLACE_NOUN = `(${PLACE_NOUN_DE_EN_ES}|${PLACE_NOUN_ML})`;
+const PLACE_CUE = PLACE_CUE_DE_EN_ES;
+const NEAR = `(${NEAR_DE_EN_ES}|${NEAR_ML})`;
+const PRODUCT_NOUN = `(${PRODUCT_NOUN_DE_EN_ES}|${PRODUCT_NOUN_ML})`;
+// price ceilings: "unter 200 €", "under $300", "por menos de 100 €", "à moins de 100 €", "sotto i 300 euro", "até 300 reais"
+const PRICE_PREP = String.raw`(unter|bis|für|under|below|up to|for under|por menos de|hasta|[aà] moins de|moins de|pour moins de|jusqu['’][aà]|sous les|sotto( i)?|sui|intorno ai|fino a|entro|massimo|at[eé]|abaixo de|menos de|por at[eé])`;
+const MONEY = String.raw`(\d[\d.,]* ?(€|eur\b>|euros?|dollars?|\$|usd|£|pounds?|quid|reais|r\$)|(€|\$|£|r\$) ?\d)`;
+// "which X should I buy" in fr / it / pt / es: after the product noun
+const WHICH = String.raw`(welche[rsnm]?|which|qu[eé]|cu[aá]l(es)?|quel(le)?s?|lequel|laquelle|quale|quali|che|qual|quais)`;
+const BUY_AFTER = String.raw`(soll\p{L}*|should|kaufen|buy|comprar|compro|me compro|nehmen|take|empfiehl\p{L}*|recommend\p{L}*|recomiend\p{L}*|budget|lohnt\p{L}*|worth|elegir|merece la pena|vale la pena|achet(er|e)|prendre|choisir|conseill\p{L}*|vaut (le coup|la peine)|comprare|compro|prendo|prendere|scegliere|consigli\p{L}*|conviene|levar|escolher|recomend\p{L}*|vale a pena|compensa|${PRICE_PREP} \d)`;
+const NEED_BEFORE = String.raw`(such\p{L}*|brauche|need|looking for|busco|necesito|empfiehl\p{L}*|recommend\p{L}*|recomienda\p{L}*|kauf\p{L}*|buy|comprar|compro|cherche|il me faut|j['’]ai besoin d['’]une?|conseill\p{L}*|recommand\p{L}*|cerco|mi serve|ho bisogno di|consigliami|procuro|preciso de|recomenda\p{L}*|indica\p{L}*)`;
 
 // The user asks the assistant to question them first -> form, not the module itself.
-const ASKS_FIRST = re(String.raw`\b<(stell\p{L}* mir .{0,25}fragen|frag mich|fragst du mich|ask me .{0,25}questions|ask me first|preg[uú]ntame)`);
+const ASKS_FIRST = re(String.raw`\b<(stell\p{L}* mir .{0,25}fragen|frag mich|fragst du mich|ask me .{0,25}questions|ask me first|preg[uú]ntame|hazme (unas |algunas )?preguntas|pose-moi .{0,20}questions|fammi (delle |qualche )?domande|me (faz|fa[cç]a) (algumas )?perguntas)`);
 const notAskingFirst = (t) => ASKS_FIRST.test(t);
 // Writing a review / description ABOUT a place or product is text, not a lookup.
-const WRITE_FIRST = re(String.raw`^\s*(bitte\s+)?(schreib|verfass|formulier|entwirf|write|draft|compose|escribe|redacta)\p{L}*\b>`);
+const WRITE_FIRST = re(String.raw`^\s*(bitte\s+)?(schreib|verfass|formulier|entwirf|write|draft|compose|escribe|redacta|[eé]cri[st]|[eé]crire|r[eé]dige|scrivi|scrivere|escrev[ae]|escrever)\p{L}*\b>`);
 // programming "events" (DOM, event sourcing, webhooks …) are not things to go to
 const TECH_EVENTS = /\b(javascript|typescript|dom|api|listener|handler|event[- ]?(sourcing|loop|bus|driven|emitter)|webhook|kafka|react|node|python|java|kotlin|swift|callback|trigger)\b/i;
 const notAskingOrWriting = (t) => ASKS_FIRST.test(t) || WRITE_FIRST.test(t);
+// "Necesito el número de móvil de Ana" asks for a contact, not a device
+const PHONE_NUMBER = re(String.raw`\b<(n[uú]mero|num[eé]ro|number|nummer)\b>.{0,20}\b<(m[oó]vil|celular|tel[eé]fon\p{L}*|phone|handy|cellulare|telem[oó]vel)|\b<(m[oó]vil|celular|phone|cell)\s*(number|nummer)`);
+const notProductLookup = (t) => notAskingOrWriting(t) || PHONE_NUMBER.test(t);
 
 // --- product comparison (compare cue + concrete buyable products → products with component "compare") --------------
 // Precision over recall: only product lines that name a device on their own ("iPhone 17", "Odin 2 mini", "Steam Deck")
 // or a maker followed by a model token ("Sony XM6", "Bose QC", "BMW i4"). Concepts, plans and services ("Kubernetes vs
 // Nomad", "Miete vs Kauf", "Apple Music vs Spotify") match neither and stay compare.
-const PRODUCT_LINE = String.raw`(iphone|ipad|macbook|imac|mac mini|mac studio|airpods|apple watch|pixel \d|pixel (pro|fold|buds|watch)|galaxy (s|z|a|tab|watch|buds)\s?\d*|xperia|oneplus|redmi|fairphone|thinkpad|ideapad|zenbook|vivobook|surface (pro|laptop|go|book)|kindle|kobo|tolino|playstation|ps[345]|xbox|nintendo|switch (\d|oled|lite)|steam deck|rog ally|legion go|ayaneo|trimui|anbernic|miyoo|retroid|powkiddy|odin \d|rg ?\d{2,3}\p{L}*|rg (rotate|cube|arc|nano|ds)|game ?boy|gopro|garmin|fitbit|roborock|dyson|thermomix|nespresso|tesla model|model [3ysx]\b>|vw id\.?\s?\d|wh-1000\p{L}*\d*|quietcomfort)`;
+const PRODUCT_LINE = String.raw`(iphone|ipad|macbook|imac|mac mini|mac studio|airpods|apple watch|pixel \d+|pixel (pro|fold|buds|watch)|galaxy (s|z|a|tab|watch|buds)\s?\d*|xperia|oneplus|redmi|fairphone|thinkpad|ideapad|zenbook|vivobook|surface (pro|laptop|go|book)|kindle|kobo|tolino|playstation|ps[345]|xbox|nintendo|switch (\d|oled|lite)|steam deck|rog ally|legion go|ayaneo|trimui|anbernic|miyoo|retroid|powkiddy|odin \d|rg ?\d{2,3}\p{L}*|rg (rotate|cube|arc|nano|ds)|game ?boy|gopro|garmin|fitbit|roborock|dyson|thermomix|nespresso|tesla model|model [3ysx]\b>|vw id\.?\s?\d|wh-1000\p{L}*\d*|quietcomfort)`;
 const PRODUCT_MAKER = String.raw`(apple|google|samsung|sony|bose|sennheiser|beyerdynamic|jbl|lg|lenovo|dell|hp|asus|acer|msi|razer|logitech|canon|nikon|fujifilm|panasonic|philips|bosch|siemens|miele|xiaomi|huawei|honor|oppo|anker|ecovacs|dji|nothing phone|vw|volkswagen|bmw|audi|mercedes|toyota|skoda|hyundai|kia|volvo|porsche|ford|renault|tesla)`;
 // a model token right after the maker: has a digit ("XM6", "i4", "S25") or is a typical model word ("QC", "Ultra")
 const MODEL_TOKEN = String.raw`([\p{L}-]*\d[\p{L}\p{N}-]*|qc|ultra|pro|max|mini|air|plus|lite|ultralight)`;
-const PRODUCT_ITEM = re(String.raw`\b<${PRODUCT_LINE}\b>|\b<${PRODUCT_MAKER}\s+${MODEL_TOKEN}\b>`);
-const COMPARE_CUE = re(String.raw`\b<(vergleich\p{L}*|gegenüberstell\p{L}*|vs\.?|versus|unterschied(e)? zwischen|difference(s)? between|compare|comparison|comparar|comparativa)\b>`);
+const PRODUCT_ITEM_SRC = String.raw`(\b<${PRODUCT_LINE}\b>|\b<${PRODUCT_MAKER}\s+${MODEL_TOKEN}\b>)`;
+const PRODUCT_ITEM = re(PRODUCT_ITEM_SRC);
+const COMPARE_CUE = re(String.raw`\b<(vergleich\p{L}*|gegenüberstell\p{L}*|vs\.?|versus|unterschied(e)? zwischen|difference(s)? between|compare|comparison|comparar|comparativa|comp[aá]r(a|ame|alos|alas)|comparaci[oó]n|comparer|comparez|comparatif|comparaison|confronta(re|mi)?|confronto|paragona(re|mi)?|comparação|comparativo)\b>`);
 const PRODUCT_CATEGORY = re(String.raw`\b<${PRODUCT_NOUN}(n|s|en)?\b>`);
-const SHOPPING_CUE = re(String.raw`\b<(preis\p{L}*|prices?|precios?|kosten|kaufen|buy|comprar|angebot\p{L}*|deals?)\b>|\d ?(€|\$|eur\b>|euro)`);
-const EITHER_OR = re(String.raw`\b<(oder|or|o)\b>`);
+const SHOPPING_CUE = re(String.raw`\b<(preis\p{L}*|prices?|precios?|prix|prezz[oi]|pre[cç]os?|kosten|kaufen|buy|comprar|acheter|comprare|angebot\p{L}*|deals?|offerte?)\b>|${MONEY}`);
+const EITHER_OR = re(String.raw`\b<(oder|or|o|ou)\b>`);
 
 /** Does a comparison message name concrete buyable products (devices, gadgets, appliances, cars)? */
 export function looksLikeProductComparison(text) {
@@ -117,9 +171,9 @@ const chartComponent = (t) =>
   : undefined;
 const mapComponent = (t) => (/route|roadtrip|road trip|reise|itinerar|weg |wegbeschreibung|directions|von .{1,40} nach|from .{1,40} to/i.test(t) ? 'route' : 'markers');
 const checklistComponent = (t) =>
-  /pack|koffer|reisegepäck|mitnehmen|einpacken|camping|campen|zelten|urlaub|luggage|suitcase/i.test(t) ? 'packing'
-  : /einkauf|zutat|supermarkt|shopping|grocery|groceries|besorg|kaufen|einkaufen/i.test(t) ? 'shopping'
-  : /to-?do|aufgaben|erledig|tasks?\b|umzug|steuererklärung|projekt/i.test(t) ? 'todo'
+  /pack|koffer|reisegepäck|mitnehmen|einpacken|camping|campen|zelten|urlaub|luggage|suitcase|maleta|acampada|valise|valigia|\bmala\b/i.test(t) ? 'packing'
+  : /einkauf|zutat|supermarkt|shopping|grocery|groceries|besorg|kaufen|einkaufen|compra|courses|commissions|spesa|mercado|s[uú]per/i.test(t) ? 'shopping'
+  : /to-?do|aufgaben|erledig|tasks?\b|umzug|steuererklärung|projekt|tareas|pendientes|t[aâ]ches|cose da fare|tarefas/i.test(t) ? 'todo'
   : undefined;
 const quizComponent = (t) => (/karteikarte|flashcard|lernkarte|vokabel|vocab/i.test(t) ? 'flashcards' : 'quiz');
 const choiceComponent = (t) => (/termin|uhrzeit|zeiten|zeitfenster|slots?\b|meeting|telefonat|appointment/i.test(t) ? 'slots' : undefined);
@@ -180,24 +234,31 @@ const EXPLICIT = [
   { format: 'table', why: 'explicit table request', conf: 0.9,
     re: re(String.raw`\b<(tabell|(?<!(book|reserve|get) an? )table|tabular|spreadsheet|excel|csv|übersichtstabelle|matrix (mit|of)|spalten|columns)`) },
   { format: 'weather', why: 'weather forecast', conf: 0.86,
-    unless: (t) => /(?<![\p{L}\p{N}])(klima\p{L}*|climate|unterschied|difference|warum|wieso|weshalb|why|entsteht|entstehen|erklär\p{L}*|explain|wie funktioniert|how does)/iu.test(t) && !/(?<![\p{L}\p{N}])(morgen|heute|übermorgen|wochenende|tomorrow|today|tonight|ma[ñn]ana|hoy)(?![\p{L}\p{N}])/iu.test(t),
-    re: re(String.raw`\b<(wetter(vorhersage|bericht|app|aussichten|lage|prognose)?|weather|forecast|regnet es|wird es regnen|schneit es|gibt es .{0,30}(regen|schnee|gewitter|sonne|frost|nebel|sturm)|is there .{0,20}(rain|snow)|regenschirm|umbrella|will it (rain|snow)|is it (going to )?(rain|snow)|how'?s the weather|wie warm wird|wie kalt wird|how (hot|cold|warm) (is|will)|el tiempo (en|de|para|hoy|mañana|ma[ñn]ana)|qu[eé] tiempo (hace|har[aá])|va a llover|llover[aá]|pron[oó]stico|previsi[oó]n del tiempo|temperatur (morgen|heute|in|am|im))`) },
+    unless: (t) => /(?<![\p{L}\p{N}])(klima\p{L}*|climate|clima\p{L}*|climat\p{L}*|unterschied|difference|diferencia|diff[eé]rence|differenza|diferen[cç]a|warum|wieso|weshalb|why|por ?qu[eé]|pourquoi|perch[eé]|entsteht|entstehen|erklär\p{L}*|explain|expli\p{L}*|spiega\p{L}*|wie funktioniert|how does)/iu.test(t) && !/(?<![\p{L}\p{N}])(morgen|heute|übermorgen|wochenende|tomorrow|today|tonight|ma[ñn]ana|hoy|finde|fin de semana|demain|aujourd['’]hui|ce soir|week-end|domani|oggi|stasera|fine settimana|amanh[aã]|hoje|fim de semana)(?![\p{L}\p{N}])/iu.test(t),
+    re: re(String.raw`\b<(wetter(vorhersage|bericht|app|aussichten|lage|prognose)?|weather|forecast|regnet es|wird es regnen|schneit es|gibt es .{0,30}(regen|schnee|gewitter|sonne|frost|nebel|sturm)|is there .{0,20}(rain|snow)|regenschirm|umbrella|will it (rain|snow)|is it (going to )?(rain|snow)|how'?s the weather|wie warm wird|wie kalt wird|how (hot|cold|warm) (is|will)|el tiempo (en|de|para|hoy|mañana|ma[ñn]ana)|qu[eé] tiempo (hace|har[aá])|va a llover|llover[aá]|pron[oó]stico|previsi[oó]n del tiempo|temperatur (morgen|heute|in|am|im)|qu[eé] tiempo (va a hacer|hizo)|c[oó]mo (va a estar|estar[aá]) el tiempo|va a (nevar|hacer (fr[ií]o|calor|viento|sol))|nevar[aá]|har[aá] (fr[ií]o|calor|viento|sol)|paraguas|m[eé]t[eé]o\b>|quel temps (fait-il|fera-t-il|il fait|il fera|va-t-il faire|il va faire)|(il|ça) va (pleuvoir|neiger|faire (chaud|froid|beau))|va-t-il (pleuvoir|neiger)|pleuvra|neigera|il (fait|fera) combien|parapluie|pr[eé]visions? (m[eé]t[eé]o|du temps)|meteo\b>|che tempo (fa|far[aà])|previsioni (del tempo|meteo)|piover[aà]|nevicher[aà]|far[aà] (caldo|freddo|bello|brutto)|ombrello|(piove|nevica)\b>.{0,30}\b<(oggi|domani|stasera|adesso|weekend|fine settimana)|\b<(oggi|domani|stasera)\b>.{0,30}\b<(piove|nevica)|previs[aã]o do tempo|como (vai estar|est[aá]|estar[aá]|vai ficar|fica) o (tempo|clima)|vai (chover|nevar|fazer (frio|calor|sol))|chover[aá]|guarda-chuva|(chove|chovendo)\b>.{0,30}\b<(hoje|amanh[aã]|agora))`) },
   { format: 'map', why: 'explicit map request', conf: 0.88, component: mapComponent,
     re: re(String.raw`\b<((auf|in) (einer|der|die) (land)?karte|on a map|auf der map|landkarte|karte (von|mit|der|aller)|map (of|with|showing)|kartenansicht|map view|reiseroute|routenplan|roadtrip|road trip|wegbeschreibung|directions (to|from))`) },
   { format: 'map', why: 'trip plan / itinerary', conf: 0.78, component: () => 'route',
     re: re(String.raw`\b<(reise ?plan|reiseverlauf|reiseprogramm|itinerar|trip plan|city ?trip plan|(plan|plane|plant|planen|planung|vorschlag|schlag|zeig)\p{L}*\b.{0,50}\b<(\d+|\d+-tages|ein|einen|einem|zwei|drei|vier|fünf|sechs|sieben|a|one|two|three|four|five|wochenend\p{L}*)[- ]?(tag|tage|tagen|tages|tagesroute|wochenende|wochenend\p{L}*|day|days|weekend|nächte|nights)\b.{0,40}\b<(in|nach|durch|auf|an|to|through|entlang|für)\b\s+\p{L}{3,}|(route|radtour|wandertour|rundreise|tagesausflug|city ?trip)\b.{0,50}\b<(durch|nach|entlang|in|von)\b)`) },
   { format: 'places', why: 'local places / opening hours', conf: 0.86, unless: notAskingOrWriting,
     re: re(String.raw`\b<${PLACE_CUE}\b>.{0,50}\b<${PLACE_NOUN}\b>.{0,40}\b<(in|bei|um|nahe|am|an|at|near|around|en|cerca|nearby|hier|here)\b>|\b<${PLACE_NOUN}\b>.{0,40}\b<${NEAR}|\b<${NEAR}\b>.{0,40}\b<${PLACE_NOUN}\b>`) },
+  // fr / it / pt: a request verb + a place noun + a location ("Trouve-moi un resto dans le 11e", "Consigliami una trattoria a Bologna")
+  { format: 'places', why: 'local places (fr / it / pt)', conf: 0.86, unless: notAskingOrWriting,
+    re: re(String.raw`\b<${PLACE_ASK_ROM}\b>.{0,40}\b<${PLACE_NOUN}\b>.{0,40}\b<(à|a|au|aux|dans|en|em|no|na|nos|nas|in|nel|nella|vers|près|perto|vicino)\b>`) },
+  { format: 'places', why: 'where to eat', conf: 0.86, unless: notAskingOrWriting,
+    re: re(String.raw`\b<${WHERE_TO_EAT}\b>`) },
+  { format: 'places', why: 'where to get something nearby', conf: 0.82, unless: notAskingOrWriting,
+    re: re(String.raw`\b<${WHERE_CAN_I}\b>.{0,50}\b<${NEAR}`) },
   { format: 'places', why: 'events / what is on (city or date)', conf: 0.86, unless: (t) => notAskingOrWriting(t) || TECH_EVENTS.test(t),
     re: re(String.raw`\b<(events?|veranstaltung\p{L}*|konzert\p{L}*|konzerte|theater\p{L}*|festivals?|ausstellung\p{L}*|partys?|kino ?programm|spielplan|lesung\p{L}*|concerts?|gigs?|shows?|exhibitions?|eventos?|conciertos?|qu[eé] hacer)\b>.{0,50}\b<(heute|morgen|übermorgen|abend|heute abend|am wochenende|wochenende|diese woche|nächste woche|tonight|today|tomorrow|this weekend|weekend|this week|hoy|mañana|este fin de semana|(in|im|bei|near|en) \p{Lu}\p{L}{2,})\b|\b<(was ist|was geht|what'?s on|what is on|what'?s happening|qu[eé] hay)\b>.{0,40}\b<(los|on|happening|que hacer)\b>.{0,40}\b<(in|im|en)\b\s+\p{L}{3,}`) },
   { format: 'places', why: 'opening hours', conf: 0.76, unless: notAskingOrWriting,
-    re: re(String.raw`\b<(öffnungszeiten|opening hours|horario de apertura|horarios de apertura)`) },
-  { format: 'products', why: 'product buying guide / comparison', conf: 0.86, unless: notAskingOrWriting,
-    re: re(String.raw`\b<(kaufempfehlung\p{L}*|kaufberatung|kauftipps?|preisvergleich|produktvergleich|vergleich (von |der |zwischen )?(produkten|geräten)|testsieger|buying guide|product comparison|price comparison|guía de compra|comparativa de productos)|\b<(beste[rnms]?|bestes|gute[rnms]?|günstige[rnms]?|best|top|cheapest|mejor(es)?|el mejor|la mejor)\b>.{1,60}\b<(unter|bis|für|under|below|up to|por menos de|hasta) \d[\d.,]* ?(€|eur\b>|euro|dollar|\$|usd)`) },
-  { format: 'products', why: 'product ranking / best on the market', conf: 0.86, unless: notAskingOrWriting,
-    re: re(String.raw`\b<(top[- ]?\d{1,2}|beste[rnms]?|bestes|komfortabelste[rnms]?|leichteste[rnms]?|günstigste[rnms]?|best|most comfortable|lightest|mejor(es)?|ranking|rangliste)\b>.{0,80}\b<${PRODUCT_NOUN}\b>|\b<${PRODUCT_NOUN}\b>.{0,80}\b<(am markt|auf dem markt|on the market|en el mercado|top[- ]?\d{1,2}|ranking|rangliste)\b>`) },
-  { format: 'products', why: 'which product to buy', conf: 0.78, unless: notAskingOrWriting,
-    re: re(String.raw`\b<(such\p{L}*|brauche|need|looking for|busco|necesito|empfiehl\p{L}*|recommend\p{L}*|recomienda\p{L}*|kauf\p{L}*|buy|comprar|compro)\b>.{0,50}\b<${PRODUCT_NOUN}\b>|\b<(welche[rsnm]?|which|qué|cuál(es)?)\b>.{0,50}\b<${PRODUCT_NOUN}\b>.{0,60}\b<(soll\p{L}*|should|kaufen|buy|comprar|nehmen|take|empfiehl\p{L}*|recommend\p{L}*|recomiend\p{L}*|budget|lohnt\p{L}*|worth|(unter|bis|under|below|up to|hasta|por menos de) \d)|\b<${PRODUCT_NOUN}\b>.{0,50}\b<(kaufen|kauf|buy|comprar|empfehlung|recommendation|recomendaci[oó]n|lohnt sich|worth (it|buying)|testsieger)\b>`) },
+    re: re(String.raw`\b<(öffnungszeiten|opening hours|horarios? de apertura|horaires d['’]ouverture|orari(o)? di apertura|hor[aá]rios? de (funcionamento|abertura))`) },
+  { format: 'products', why: 'product buying guide / comparison', conf: 0.86, unless: notProductLookup,
+    re: re(String.raw`\b<(kaufempfehlung\p{L}*|kaufberatung|kauftipps?|preisvergleich|produktvergleich|vergleich (von |der |zwischen )?(produkten|geräten)|testsieger|buying guide|product comparison|price comparison|guía de compra|comparativa de productos)|\b<(beste[rnms]?|bestes|gute[rnms]?|günstige[rnms]?|best|good|top|cheapest|mejor(es)?|el mejor|la mejor|meilleur(e)?s?|miglior[ei]?|melhor(es)?)\b>.{1,60}\b<${PRICE_PREP} ${MONEY}`) },
+  { format: 'products', why: 'product ranking / best on the market', conf: 0.86, unless: notProductLookup,
+    re: re(String.raw`\b<(top[- ]?\d{1,2}|beste[rnms]?|bestes|komfortabelste[rnms]?|leichteste[rnms]?|günstigste[rnms]?|best|most comfortable|lightest|mejor(es)?|meilleur(e)?s?|miglior[ei]?|melhor(es)?|ranking|rangliste)\b>.{0,80}\b<${PRODUCT_NOUN}\b>|\b<${PRODUCT_NOUN}\b>.{0,80}\b<(am markt|auf dem markt|on the market|en el mercado|top[- ]?\d{1,2}|ranking|rangliste)\b>`) },
+  { format: 'products', why: 'which product to buy', conf: 0.78, unless: notProductLookup,
+    re: re(String.raw`\b<${NEED_BEFORE}\b>.{0,50}\b<${PRODUCT_NOUN}\b>|\b<${WHICH}\b>.{0,50}\b<${PRODUCT_NOUN}\b>.{0,60}\b<${BUY_AFTER}|\b<${PRODUCT_NOUN}\b>.{0,50}\b<(kaufen|kauf|buy|comprar|empfehlung|recommendation|recomendaci[oó]n|lohnt sich|worth (it|buying)|testsieger|vale a pena|vale la pena|merece la pena|vaut le coup|compensa|calidad-precio|custo-benef[ií]cio|rapport qualit[eé]-prix|qualit[aà]-prezzo)\b>`) },
   { format: 'workout', why: 'workout / training plan', conf: 0.86, unless: notAskingFirst,
     re: re(String.raw`\b<(trainingsplan|trainingspläne\p{L}*|workouts?|work-out|trainingsprogramm|hiit\b>|fitness ?plan|übungsplan|trainingseinheit|beintraining|brusttraining|rückentraining|bauchtraining|home workout|training plan|exercise (plan|routine)|gym (plan|routine)|(push|pull|leg)[- ]day|plan de entrenamiento|rutina de (ejercicios|entrenamiento|gimnasio)|entrenamiento de fuerza)`) },
   { format: 'studyplan', why: 'learning plan', conf: 0.86, unless: notAskingFirst,
@@ -205,15 +266,21 @@ const EXPLICIT = [
   { format: 'vocab', why: 'vocabulary drill', conf: 0.86, unless: notAskingFirst,
     re: re(String.raw`\b<(vokabel\p{L}*|vocab\b>|vocabulary|vocabulario|wortschatz)`) },
   { format: 'timer', why: 'timer / countdown request', conf: 0.88,
-    re: re(String.raw`\b<(timer|countdown|eieruhr|küchentimer|kuechentimer|stoppuhr|stopwatch|cronómetro|cronometro|temporizador|cuenta atrás|cuenta regresiva|stell\p{L}* (mir )?(einen |den )?(\d+ ?(min\p{L}*|sek\p{L}*|stunden?|h) ?)?(stoppuhr))`) },
+    re: re(String.raw`\b<(timer|countdown|eieruhr|küchentimer|kuechentimer|stoppuhr|stopwatch|cronómetro|cronometro|cron[oô]metro|temporizador|cuenta atrás|cuenta regresiva|minuteur|minuterie|compte [aà] rebours|chrono(m[eè]tre)?\b>|conto alla rovescia|contagem regressiva|stell\p{L}* (mir )?(einen |den )?(\d+ ?(min\p{L}*|sek\p{L}*|stunden?|h) ?)?(stoppuhr))`) },
   { format: 'timer', why: 'relative-duration reminder = timer', conf: 0.8,
     re: re(String.raw`\b<(erinner\p{L}*|remind\p{L}*|weck\p{L}*|wake|recuérda\p{L}*|recuerda\p{L}*|avísa\p{L}*|avisa\p{L}*)\b>.{0,12}\b<(mich|me|mir)\b>.{0,12}\b<(in|en|after|nach) ${DURATION}`) },
+  // es / fr / it / pt: the pronoun is often glued on ("avísame", "rappelle-moi", "ricordami", "me lembra")
+  { format: 'timer', why: 'relative-duration reminder = timer', conf: 0.8,
+    re: re(String.raw`\b<(recu[eé]rda\p{L}*|av[ií]sa\p{L}*|rappelle\p{L}*|pr[eé]viens\p{L}*|ricorda\p{L}*|avvisa\p{L}*|lembr[ae]\p{L}*|avise\p{L}*)\b>.{0,20}\b<(en|dentro de|dans|tra|fra|daqui a|em) ${DURATION}`) },
   { format: 'quiz', why: 'quiz / flashcards / learning request', conf: 0.86, component: quizComponent,
     re: re(String.raw`\b<(quiz|quizz|karteikarten|flashcards?|lernkarten|vokabeltrainer|vokabeln?\b.{0,40}(lernen|üben|abfragen|trainieren)|(lern|üb)\p{L}* .{0,40}vokabeln|teste mich|test me|quiz me|prüf mich|quiz mich|abfragen|frag mich (zu|über|die|das|meine) .{0,50}\b<(ab|vokabeln|begriffe|fragen)|frag mich .{0,50}fragen (zu|über))`) },
   { format: 'recipe', why: 'cooking recipe request', conf: 0.86,
     re: re(String.raw`\b<(rezept|recipe|kochanleitung|backanleitung|wie (backe|koche|brate|grille|mache|bereite) ich .{0,60}(zu|auf|für|nach)?|wie (backt|kocht|brät) man|how (do i|to) (bake|cook|make|roast|grill) )`) },
+  { format: 'recipe', why: 'cooking recipe request (es)', conf: 0.86,
+    unless: (t) => /receta (m[eé]dica|electr[oó]nica)|del m[eé]dico|sin receta/iu.test(t),
+    re: re(String.raw`\b<recetas?\b>|\b<c[oó]mo (se )?(cocina|cocino|prepara|preparo|hornea|horneo)\b>`) },
   { format: 'checklist', why: 'shopping / packing / to-do list', conf: 0.88, component: checklistComponent,
-    re: re(String.raw`\b<(einkaufs(liste|zettel)|einkaufsliste|shopping list|grocery list|groceries list|packliste|packing list|koffer ?liste|to-?do-?liste|to-?do list|todo list|aufgabenliste|checkliste|checklist|merkliste|(auf|für) (die|eine|meine) (einkaufs)?liste|was (muss|soll|sollte) ich (alles )?(einpacken|mitnehmen|einkaufen|mitbringen)|was (gehört|muss) (alles )?(in|auf) (den koffer|die liste|die packliste)|what (do|should) i (need to )?(pack|bring|buy))`) },
+    re: re(String.raw`\b<(einkaufs(liste|zettel)|einkaufsliste|shopping list|grocery list|groceries list|packliste|packing list|koffer ?liste|to-?do-?liste|to-?do list|todo list|aufgabenliste|checkliste|checklist|merkliste|(auf|für) (die|eine|meine) (einkaufs)?liste|was (muss|soll|sollte) ich (alles )?(einpacken|mitnehmen|einkaufen|mitbringen)|was (gehört|muss) (alles )?(in|auf) (den koffer|die liste|die packliste)|what (do|should) i (need to )?(pack|bring|buy)|lista de (la )?compras?|lista del (s[uú]per|supermercado|mercado)|lista de tareas|lista de pendientes|qu[eé] (me )?(llevo|meto|tengo que llevar|debo llevar) (en|a) (la )?(maleta|mochila)|listes? (de|des) courses|liste de commissions|listes? de t[aâ]ches|qu['’]est-ce que (je|j['’]) ?(dois )?(mets|mettre|prends|prendre|emporte|emporter) dans (ma|la|mon) (valise|sac)|lista della spesa|lista per la spesa|lista (delle|di) cose da fare|cosa (mi )?(porto|metto|devo portare|devo mettere) in (valigia|zaino)|lista (de|do) (compras|mercado|supermercado)|lista de tarefas|o que (eu )?(levo|coloco|ponho|devo levar) na (mala|mochila))`) },
   { format: 'agenda', why: 'plan a day/week with times', conf: 0.86,
     re: re(String.raw`\b<(tagesplan|tagesablauf|wochenplan|agenda|stundenplan für (heute|morgen)|zeitplan (für|fürs) |schedule for (today|tomorrow|my day|the week)|plane? (mir )?(meinen|mir den|den|meine|die) (tag|morgen|abend|vormittag|nachmittag|samstag|sonntag|montag|dienstag|mittwoch|donnerstag|freitag|woche)|plan (out )?my (day|morning|evening|saturday|sunday|monday|week|friday)|organi[sz]\p{L}* (mir )?(meinen|den|my|meine|die) (tag|woche|day|week)|strukturier\p{L}* (meinen|den) tag|time[- ]?block\p{L}*|planific\p{L}* (mi|el|la) (d[ií]a|semana|ma[ñn]ana|tarde)|organiza mi (d[ií]a|semana)|mi agenda|plan(ea|ear)\p{L}* (mi|el) d[ií]a)`) },
   { format: 'timeline', why: 'explicit timeline request', conf: 0.88,
@@ -240,8 +307,15 @@ const EXPLICIT = [
   // Blick", "aus welchen Bausteinen besteht", "unterscheiden sich … im Aufbau" (drawings with arrows stay diagram)
   { format: 'blocks', why: 'architecture / setup at a glance', conf: 0.75,
     re: re(String.raw`\b<(architektur|aufbau|setup|architecture|arquitectura|estructura)\b>.{0,40}\b<(auf einen blick|im überblick|at a glance|de un vistazo)\b>|\b<aus welchen (bausteinen|komponenten|schichten) (besteht|bestehen)\b>|\b<what (building blocks|components|layers) (make up|does .{1,40} consist of|is .{1,40} made of)|\b<de qu[eé] (bloques|componentes|capas) (se compone|consta)|\b<(unterscheid|unterschied)\p{L}*\b>.{0,60}\b<(im|vom|in der|in ihrer|in seiner) (aufbau|architektur)\b>|\b<im (aufbau|architektur)\b>.{0,30}\b<unterscheid\p{L}*|\b<differ\p{L}* in (their |its )?(architecture|setup|structure)\b>|\b<(architectural|architecture) differences?\b>|\b<diferencias? de arquitectura`) },
+  // two named products joined by "or" (en / es / fr / it / pt: "AirPods Pro 3 or Galaxy Buds 4", "iPhone 17 o Pixel 11",
+  // "la PS5 o la Switch 2"); how-to questions about two devices ("¿Cómo paso fotos del iPhone o iPad al PC?") stay out.
+  // Needs a question or a short message. German "oder" is left to the compare rules (holdout h20 "MacBook Air oder
+  // ThinkPad X1" is labelled compare).
+  { format: 'products', why: 'product comparison (either / or)', conf: 0.84, component: () => 'compare',
+    unless: (t) => HOW_TO_ASK.test(t) || /^[\s¿¡]*(c[oó]mo|comment|come|como|wie|warum|why|por ?qu[eé]|pourquoi|perch[eé])\b/iu.test(t) || !(t.includes('?') || t.length < 40),
+    re: re(String.raw`${PRODUCT_ITEM_SRC}(\s+[\p{L}\p{N}+-]+){0,2}\s*,?\s+(or|o|ou|vs\.?|versus)\s+((the|la|le|el|il|lo|o|a|der|die|das|den)\s+|l['’])?${PRODUCT_ITEM_SRC}`) },
   { format: 'compare', why: 'comparison request', conf: 0.78,
-    re: re(String.raw`\b<(vergleich|vergleiche|gegenüberstell|vs\.?\b|versus|unterschied(e)? zwischen|difference(s)? between|compare|comparison|pros?( and | & | und )cons?|vor- und nachteile|vorteile und nachteile|(überlege|entscheide|schwanke) (mich )?zwischen|(choose|choosing|decide|deciding|torn) between|was ist besser|welche[rs]? ist besser|which is better|which (one )?should i (buy|choose|pick|get|take)|was soll ich nehmen|soll ich .{1,40} oder .{1,40}(nehmen|kaufen|wählen|machen|holen)\??$)`) },
+    re: re(String.raw`\b<(vergleich|vergleiche|gegenüberstell|vs\.?\b|versus|unterschied(e)? zwischen|difference(s)? between|compare|comparison|comp[aá]r(a|ame|alos|alas)\b>|comparar\b>|comparaci[oó]n|comparativa|ventajas (e|y) (inconvenientes|desventajas)|pros y contras|diferencias? (hay )?entre|qu[eé] (es|ser[ií]a) mejor|cu[aá]l es mejor|comparer|comparez|comparatif|comparaison|avantages et inconv[eé]nients|le pour et le contre|confronta(re|mi)?\b>|metti a confronto|paragona(re|mi)?\b>|pro e contro|vantaggi e svantaggi|compara(r|ção)?\b>|comparativo|pr[oó]s e contras|vantagens e desvantagens|pros?( and | & | und )cons?|vor- und nachteile|vorteile und nachteile|(überlege|entscheide|schwanke) (mich )?zwischen|(choose|choosing|decide|deciding|torn) between|was ist besser|welche[rs]? ist besser|which is better|which (one )?should i (buy|choose|pick|get|take)|was soll ich nehmen|soll ich .{1,40} oder .{1,40}(nehmen|kaufen|wählen|machen|holen)\??$)`) },
   { format: 'choice', why: 'appointment times to pick', conf: 0.75, component: () => 'slots',
     re: re(String.raw`\b<(schlag\p{L}* (mir )?.{0,30}(termin\p{L}*|uhrzeit\p{L}*|zeit\p{L}*|zeitfenster) .{0,30}vor|(mach|gib)\p{L}* mir .{0,25}vorschläge? (für|zu)\p{L}* .{0,20}(termin|zeit\p{L}*|uhrzeit\p{L}*)|vorschläge? (für|zu) (termine?n?|zeiten|uhrzeiten)|propose .{0,20}(times|slots)|suggest .{0,20}(times|slots)|find\p{L}* (mir )?(einen |ein )?(termin|zeitfenster|slot)\b)`) },
   { format: 'choice', why: 'user needs help deciding', conf: 0.8,
@@ -298,7 +372,7 @@ const CODING = [
     unless: (t) => HOW_TO_ASK.test(t) || WRITE_FIRST.test(t),
     re: re(String.raw`\b<${RUN_VERB}\b>.{0,25}\b<${RUN_OBJECT}\b>|\b<(die |den |das |the |los |las |el )?${RUN_OBJECT}\b>.{0,25}\b<(aus ?führ\p{L}*|laufen|durchlaufen|ausführen|run|execute)\b>|\b<(ausgabe|output|log|ergebnis(se)?|salida|logs)\b>\s+(von|vom|des|der|of|from|de|del)\s+(dem |den |the |el |la )?\x60?${RUN_OBJECT}\b>|\b<(test|build|lint|ci|npm|git|docker|befehl|command|comando)-?\s?(output|ausgabe|log|logs|salida)\b>|\b<(show|zeig\p{L}*|muestra\p{L}*|gib)\b>.{0,25}\b<(output|ausgabe|log|salida)\b>.{0,20}\b<(of|from|von|vom|de|del)\b>.{0,20}\x60?${RUN_OBJECT}\b>`) },
   { format: 'changes', why: 'files changed in a task', conf: 0.8,
-    re: re(String.raw`\b<(welche )?(dateien|files|archivos)\b>.{0,25}\b<(hast du|habt ihr|hat der agent|did you|have you|were|wurden|has the agent|has el agente|cambiaste|has cambiado|modificaste|has modificado)\b>.{0,20}\b<(geändert|verändert|angefasst|bearbeitet|angepasst|change[d]?|touch(ed)?|edit(ed)?|modif(y|ied)|cambiad\p{L}*|modificad\p{L}*)|\b<(which|what) files (did you|have you|were|got)\b>|\b<(geänderte|veränderte|bearbeitete|changed|modified|touched|edited|modificados|cambiados)\s+(dateien|files|archivos)\b>|\b<(list|liste|zeig\p{L}*|show)\b>.{0,25}\b<(changed|modified|geänderten|geänderte|veränderten) (files|dateien)\b>|\b<(archivos|ficheros) (modificados|cambiados|que (cambiaste|modificaste))\b>|\b<qué (archivos|ficheros) (cambiaste|has cambiado|modificaste|has modificado|tocaste)\b>|\b<git status\b>|\b<(zusammenfassung|übersicht|summary|overview|resumen) (der |von |of |de )?(deine[nr] |your |tus )?(änderungen|changes|cambios)\b>`) },
+    re: re(String.raw`\b<(welche )?(dateien|files|archivos)\b>.{0,25}\b<(hast du|habt ihr|hat der agent|did you|have you|were|wurden|has the agent|has el agente|cambiaste|has cambiado|modificaste|has modificado)\b>.{0,20}\b<(geändert|verändert|angefasst|bearbeitet|angepasst|change[d]?|touch(ed)?|edit(ed)?|modif(y|ied)|cambiad\p{L}*|modificad\p{L}*)|\b<(which|what) files (did you|have you|were|got)\b>|\b<(geänderte|veränderte|bearbeitete|changed|modified|touched|edited|modificados|cambiados)\s+(dateien|files|archivos)\b>|\b<(list|liste|zeig\p{L}*|show)\b>.{0,25}\b<(changed|modified|geänderten|geänderte|veränderten) (files|dateien)\b>|\b<(archivos|ficheros) (modificados|cambiados|que (cambiaste|modificaste))\b>|\b<qu[eé] (archivos|ficheros) (cambiaste|has cambiado|modificaste|has modificado|tocaste|has tocado)\b>|\b<git status\b>|\b<(zusammenfassung|übersicht|summary|overview|resumen) (der |von |of |de )?(deine[nr] |your |tus )?(änderungen|changes|cambios)\b>`) },
   { format: 'changes', why: 'what did you change (agent task)', conf: 0.6,
     re: re(String.raw`\b<(was hast du (alles |denn |eigentlich )?(geändert|verändert|angepasst)|what (all )?did you (change|modify|touch|edit)|what have you (changed|modified|edited)|qué (has )?(cambiado|cambiaste|modificaste))\b>`) },
 ];
@@ -397,7 +471,8 @@ export function classifyHeuristic(turns) {
   }
 
   if (SHORT_FACT.test(text)) return decision('text', 0.6, 'short factual question');
-  return decision('text', 0.4, 'no visual cue');
+  // No rule fired: `fallthrough` tells a heuristic-first router to ask the model instead.
+  return { ...decision('text', 0.4, 'no visual cue'), fallthrough: true };
 }
 
 /** Backend adapter (same shape as LLM backends). */

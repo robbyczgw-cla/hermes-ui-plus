@@ -237,7 +237,7 @@ OpenAI envelope `{"error":{"message","type","param","code"}}` (AS:906-923):
 ## Known Hermes issues (as of Hermes v0.22.0)
 The client is tested with Hermes v0.22.0; the wire facts in this document were verified against v0.21.4.
 
-- **`GET /v1/skills` answers 500** `Failed to enumerate skills` on unpatched Hermes 0.21.5 to 0.22.0 (stray `include_editorial` argument; upstream issue #120831, fix in PR #124861). The app's `/skills` sheet recognises the error, says it is a Hermes bug and that skills still work in chats. There is no fallback endpoint behind the bridge.
+- **`GET /v1/skills` answers 500** `Failed to enumerate skills` on unpatched Hermes 0.21.5 to 0.22.2 (0.22.2 rechecked 2026-10-17) (stray `include_editorial` argument; upstream issue #120831, fix in PR #124861). The app's `/skills` sheet recognises the error, says it is a Hermes bug and that skills still work in chats. There is no fallback endpoint behind the bridge.
 - **Providers that Hermes runs as an external process do not stream** (for example the Claude subscription plugin): `/v1/chat/completions` with `stream: true` sends the finished answer as a single chunk at the end. Upstream PR #124566 lets such providers stream when their profile opts in; the plugin has to set that too. Clients see one big delta instead of a token stream; there is nothing to fix on the client side.
 
 ## Client implications (summary)

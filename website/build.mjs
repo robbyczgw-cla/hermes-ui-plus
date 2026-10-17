@@ -16,6 +16,8 @@ import { fileURLToPath } from 'node:url';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
 const read = (p) => readFileSync(join(ROOT, p), 'utf8');
+// the released app version (all version fields agree, scripts/release-version-check.mjs)
+const VERSION = JSON.parse(read('app/package.json')).version;
 const ID = JSON.parse(read('app/brand/identity.json'));
 
 const SITE = ID.homepage.replace(/\/+$/, '');
@@ -349,7 +351,7 @@ const FEATURES = [
 ];
 
 const PLATFORMS = [
-  ['Android', `Signed APK from <a href="${DOWNLOAD}">GitHub Releases</a>, or add the repository to <a href="https://obtainium.imranr.dev">Obtainium</a> for automatic updates (turn on “Include prereleases”). Google Play: internal testing only, not public yet. Android 7.0 or newer, 64-bit ARM. No remote push in 0.1: no notification while the app is closed.`, 'Alpha', ''],
+  ['Android', `Signed APK from <a href="${DOWNLOAD}">GitHub Releases</a>, or add the repository to <a href="https://obtainium.imranr.dev">Obtainium</a> for automatic updates (turn on “Include prereleases”). Google Play: internal testing only, not public yet. Android 7.0 or newer, 64-bit ARM (it does not start on x86 emulators or x86 ChromeOS; use the web app there). No remote push in 0.1: no notification while the app is closed.`, 'Alpha', ''],
   ['Web app (PWA)', `Prebuilt bundle from GitHub Releases, served by your own bridge, installable to the home screen. <a href="${REPO}/blob/main/docs/WEB-APP.md">Install guide</a>.`, 'Alpha', ''],
   ['macOS', `Native desktop app for Apple Silicon (macOS 13+) from <a href="${DOWNLOAD}">GitHub Releases</a> (DMG), signed and notarized: menus and shortcuts, approval actions in notifications, dock badge, menu bar mode, Touch ID lock. See the <a href="${REPO}/blob/main/desktop/README.md">desktop notes</a>.`, 'Notarized', 'st-ink'],
   ['Linux', `Desktop app as AppImage or .deb (x86_64, Ubuntu 22.04 / Debian 12 or newer) from <a href="${DOWNLOAD}">GitHub Releases</a>, see the <a href="${REPO}/blob/main/desktop/README.md">desktop notes</a>. Still alpha.`, 'Alpha', ''],
@@ -455,11 +457,11 @@ ${no(3)}
 <header class="sec-head">
 ${no(4)}
 <h2 id="h-platforms">Where it runs</h2>
-<p class="sec-lead">The current version is an alpha (0.1.0-alpha.1). Expect rough edges. It is not in the public Google Play Store or the Apple App Store.</p>
+<p class="sec-lead">The current version is ${esc(VERSION)}, an early release. Expect rough edges. It is not in the public Google Play Store or the Apple App Store yet.</p>
 <p><a class="btn btn-ink" href="${DOWNLOAD}">Download the latest release</a></p>
 </header>
 <div class="receipt"><div class="rc-paper">
-<p class="rc-head"><span>${esc(APP)}</span><span>0.1.0-alpha.1</span></p>
+<p class="rc-head"><span>${esc(APP)}</span><span>${esc(VERSION)}</span></p>
 <ul class="rc-rows">
 ${PLATFORMS.map(([name, how, status, cls]) => `<li><h3>${name}</h3><p>${how}</p><span class="stamp ${cls}">${status}</span></li>`).join('\n')}
 </ul>

@@ -1,6 +1,6 @@
 // CLI logic for `hermes-ui-bridge` (bin/hermes-ui-bridge.mjs): argument parsing, env files, token state file,
 // startup checks and the feature summary. Kept free of side effects at import time so it can be tested.
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync, accessSync, constants } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, accessSync, constants } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -127,8 +127,17 @@ export function prepareEnv(opts, baseEnv = process.env, cwd = process.cwd()) {
   return { env, stateDir, tokenInfo };
 }
 
-/** Startup checks against Hermes. Never throws; returns {level: 'ok'|'warn'|'error', message}[]. */
-export async function preflight(config, { fetch: doFetch = fetch, timeoutMs = 5000 } = {}) {
+/** Name of the skill the app's answers need in Hermes (hermes-skill/hermes-ui). */
+export const UI_SKILL = 'hermes-ui';
+
+/**
+ * Startup checks against Hermes. Never throws; returns {level: 'ok'|'info'|'warn'|'error', message}[].
+ * `hermesHome`: Hermes home on this machine, only used to look for the skill on disk when `GET /v1/skills` cannot
+ * answer (HTTP 500 on Hermes 0.21.5 to 0.22.2) and either HERMES_BASE_URL is a loopback address (same machine) or the
+ * home was set explicitly (`hermesHomeExplicit`: HERMES_HOME, e.g. Hermes' data folder mounted read-only into the
+ * bridge container).
+ */
+export async function preflight(config, { fetch: doFetch = fetch, timeoutMs = 5000, hermesHome = '', hermesHomeExplicit = false } = {}) {
   const base = config.upstream.baseUrl;
   const out = [];
   const get = async (path, headers = {}) => {
@@ -140,18 +149,106 @@ export async function preflight(config, { fetch: doFetch = fetch, timeoutMs = 50
   };
   const h = await get('/health');
   if (h.error) {
-    out.push({ level: 'warn', fatalWhenStrict: true, message: `Hermes not reachable at ${base} (${h.error}). Check HERMES_BASE_URL and that the Hermes API server is running.` });
+    out.push({ level: 'warn', fatalWhenStrict: true, message: `Hermes not reachable at ${base} (${h.error}). Check HERMES_BASE_URL and that the Hermes gateway runs: \`hermes gateway status\` (started with \`hermes gateway run\` in a terminal? It must still run there; \`hermes gateway restart\` only manages the service).` });
     return out;
   }
   out.push(h.ok ? { level: 'ok', message: `Hermes reachable at ${base} (/health ${h.status})` }
     : { level: 'warn', message: `Hermes answered /health with HTTP ${h.status} (continuing)` });
-  const m = await get('/v1/models', config.upstream.apiKey ? { authorization: `Bearer ${config.upstream.apiKey}` } : {});
+  const auth = config.upstream.apiKey ? { authorization: `Bearer ${config.upstream.apiKey}` } : {};
+  const m = await get('/v1/models', auth);
   if (m.error) out.push({ level: 'warn', message: `/v1/models failed (${m.error})` });
-  else if (m.status === 401 || m.status === 403) out.push({ level: 'error', message: `Hermes rejected the key (HTTP ${m.status}). Check HERMES_API_KEY (Hermes API_SERVER_KEY).` });
-  else if (!m.ok) out.push({ level: 'warn', message: `/v1/models answered HTTP ${m.status}` });
+  else if (m.status === 401 || m.status === 403) {
+    out.push({ level: 'error', message: `Hermes rejected the key (HTTP ${m.status}). HERMES_API_KEY must equal Hermes' API_SERVER_KEY. `
+      + 'If Hermes\' .env has more than one API_SERVER_KEY line, the last one counts (check: grep -c \'^API_SERVER_KEY=\' ~/.hermes/.env).' });
+  } else if (!m.ok) out.push({ level: 'warn', message: `/v1/models answered HTTP ${m.status}` });
   else out.push({ level: 'ok', message: config.upstream.apiKey ? 'API key accepted (/v1/models)' : 'Hermes accepts requests without a key' });
+  if (m.ok) out.push(await skillCheck(get, auth, { base, hermesHome, explicit: hermesHomeExplicit }));
   return out;
 }
+
+/** Is the hermes-ui skill installed in Hermes? Without it every app answer stays plain text (a "Skill not found" tool error). */
+async function skillCheck(get, auth, { base, hermesHome, explicit }) {
+  const missing = `${UI_SKILL} skill is NOT installed in Hermes: app answers stay plain text (Hermes logs "Skill '${UI_SKILL}' not found"). `
+    + 'Install it on the Hermes host with `npx hermes-ui-plus-bridge setup`, or copy hermes-skill/hermes-ui into Hermes\' skills folder '
+    + '(Hermes in Docker: docker cp, see docs/SELF-HOSTING.md "With Docker"). No Hermes restart needed; start a new chat.';
+  const r = await get('/v1/skills', auth);
+  let listed = null;
+  if (!r.error && r.ok) {
+    try { listed = listedSkill(await r.json()); } catch { listed = null; }
+  }
+  if (listed === 'enabled') return { level: 'ok', message: `${UI_SKILL} skill installed in Hermes` };
+  if (listed === 'disabled') return { level: 'warn', message: `${UI_SKILL} skill is installed in Hermes but disabled: enable it (hermes skills list), else app answers stay plain text.` };
+  if (listed === 'missing') return { level: 'warn', message: missing };
+  // the list is not available: Hermes 0.21.5 to 0.22.2 answer 500 (upstream issue #120831). Same machine or an
+  // explicitly given Hermes home: look on disk.
+  const why = r.error ? r.error : `HTTP ${r.status}`;
+  const onDisk = isLoopbackUrl(base) || explicit ? skillOnDisk(hermesHome) : null;
+  if (onDisk === true) return { level: 'ok', message: `${UI_SKILL} skill found in ${hermesHome}/skills (GET /v1/skills: ${why})` };
+  if (onDisk === false) return { level: 'warn', message: missing };
+  return { level: 'info', message: `could not check whether the ${UI_SKILL} skill is installed (GET /v1/skills: ${why}); if app answers stay plain text, run \`hermes skills list\` on the Hermes host (bridge in Docker: mount Hermes' data folder read-only and set HERMES_HOME, see docs/SELF-HOSTING.md)` };
+}
+
+/**
+ * Hermes was not reachable at start (in Docker compose the bridge usually starts before Hermes' gateway is up): check
+ * again every `intervalMs` for up to `maxMs` and report the remaining checks (key, skill) once Hermes answers. Never
+ * throws; returns a stop function. Timers are unref'd, so they never keep the process alive.
+ * @param {() => Promise<{level: string, message: string, fatalWhenStrict?: boolean}[]>} check
+ * @param {(lines: {level: string, message: string}[], afterMs: number) => void} report
+ */
+export function recheckUntilReachable(check, report, { intervalMs = 5000, maxMs = 180_000, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout } = {}) {
+  const start = now();
+  let timer = null;
+  let stopped = false;
+  const tick = async () => {
+    if (stopped) return;
+    let results = [];
+    try { results = await check(); } catch { results = []; }
+    if (stopped) return;
+    const up = results.length && !results[0].fatalWhenStrict;
+    if (up) return report(results, now() - start);
+    if (now() - start + intervalMs > maxMs) {
+      return report([{ level: 'warn', message: `Hermes is still not reachable after ${Math.round((now() - start) / 1000)} s; the bridge keeps running, and requests reach Hermes as soon as it answers` }], now() - start);
+    }
+    timer = setTimer(tick, intervalMs);
+    timer?.unref?.();
+  };
+  timer = setTimer(tick, intervalMs);
+  timer?.unref?.();
+  return () => { stopped = true; if (timer) clearTimer(timer); };
+}
+
+/** `[ok]` / `[--]` / `[!!]` / `[XX]` prefix of a startup check line. */
+export const checkMark = (level) => ({ ok: 'ok', info: '--', warn: '!!' }[level] ?? 'XX');
+
+/** `GET /v1/skills` body → 'enabled' | 'disabled' | 'missing', or null for an unknown shape. */
+export function listedSkill(body) {
+  const list = Array.isArray(body?.data) ? body.data : Array.isArray(body) ? body : Array.isArray(body?.skills) ? body.skills : null;
+  if (!list) return null;
+  const entry = list.find((s) => (typeof s === 'string' ? s : s?.name ?? s?.id) === UI_SKILL);
+  if (!entry) return 'missing';
+  return entry?.enabled === false || entry?.disabled === true ? 'disabled' : 'enabled';
+}
+
+/**
+ * The skill on disk: `<home>/skills/hermes-ui/SKILL.md` or one category level deeper. null = cannot tell (no
+ * readable skills folder here, e.g. the bridge runs in its own container or as another user).
+ */
+export function skillOnDisk(home, { exists = existsSync, readdir = readdirSync } = {}) {
+  if (!home) return null;
+  const skills = join(home, 'skills');
+  if (!exists(skills)) return null;
+  if (exists(join(skills, UI_SKILL, 'SKILL.md'))) return true;
+  try {
+    for (const d of readdir(skills, { withFileTypes: true })) {
+      if (d.isDirectory() && exists(join(skills, d.name, UI_SKILL, 'SKILL.md'))) return true;
+    }
+  } catch { return null; }
+  return false;
+}
+
+const isLoopbackUrl = (u) => {
+  try { return ['127.0.0.1', 'localhost', '[::1]', '::1'].includes(new URL(u).hostname); } catch { return false; }
+};
 
 /**
  * Short, meaningful reason for a failed fetch: undici throws a bare `TypeError: fetch failed` and hides the real cause
@@ -172,19 +269,25 @@ export function fetchErrorReason(e) {
 /**
  * Startup hint how to pair, when no --pair QR was printed. Behind Docker's port mapping the request to /bridge/pair
  * does not arrive from loopback, so "open it on this machine" does not work there; with BRIDGE_PAIRING=1 the page
- * needs the one-time page code from the log line above (`/bridge/pair?code=…`).
+ * needs the one-time page code from the log line above (`/bridge/pair?code=…`). The `docker compose exec` form only
+ * fits the official image (HUI_BRIDGE_IMAGE=1, set in bridge/Dockerfile); npx inside any other container gets the
+ * npx command.
+ * @param {{port: number, pairingEnabled?: boolean, inImage?: boolean, inContainer?: boolean, cli?: string, envFile?: string}} o
  */
-export function pairHint({ port, pairingEnabled = false, inContainer = false }) {
-  const add = inContainer
+export function pairHint({ port, pairingEnabled = false, inImage = false, inContainer = false, cli = 'npx hermes-ui-plus-bridge', envFile = '' }) {
+  const add = inImage
     ? 'docker compose exec bridge node bin/hermes-ui-bridge.mjs devices add "Phone"'
-    : 'hermes-ui-plus-bridge devices add "Phone" (or npx hermes-ui-plus-bridge ...)';
+    : `${cli} devices add "Phone"${envFile ? ` --env-file ${envFile}` : ''}`;
   if (pairingEnabled) {
     return `Pair the app: open the /bridge/pair?code=... path from the "pairing enabled" log line above on the bridge URL `
-      + `(valid 10 minutes, one-time), or run: ${add}`;
+      + `(that page code works once within 10 minutes; the pair link the page shows works once within 1 hour), or run: ${add}`;
   }
-  if (inContainer) return `Pair the app: ${add}`;
+  if (inImage || inContainer) return `Pair the app: run ${add} (a one-time pair link, valid 1 hour)`;
   return `Pair the app: restart with --pair, run ${add}, or open http://127.0.0.1:${port}/bridge/pair on this machine.`;
 }
+
+/** Official bridge image (bridge/Dockerfile sets HUI_BRIDGE_IMAGE=1). */
+export const inBridgeImage = (env = process.env) => env.HUI_BRIDGE_IMAGE === '1';
 
 const writable = (dir) => { try { accessSync(dir, constants.W_OK); return true; } catch { return false; } };
 
@@ -201,6 +304,7 @@ export function directProviders(env, routerKind = 'heuristic') {
   for (const k of String(routerKind).split(',')) {
     if (k === 'anthropic' && env.ANTHROPIC_API_KEY) router.push('claude');
     else if (k === 'jev' && env.TYPESAFE_API_KEY) router.push('jev');
+    else if (k === 'nace' && env.NACE_API_KEY) router.push('nace');
     else if (k === 'openai' && env.BRIDGE_ROUTER_BASE_URL) router.push('openai-compatible');
   }
   if (router.length) out.router = router.join('>');

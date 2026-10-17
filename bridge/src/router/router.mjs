@@ -8,6 +8,7 @@ import { neutralDecision, normalizeDecision } from './taxonomy.mjs';
 import { LruCache } from './lru.mjs';
 import { reformatDecision } from './reformat.mjs';
 import { silentLogger } from './log.mjs';
+import { isForeignToHeuristic } from './lang.mjs';
 
 /**
  * @typedef {{id: string, model: string, label?: string, decide: (turns: any[], o?: {signal?: AbortSignal}) => Promise<any>}} Backend
@@ -18,9 +19,19 @@ import { silentLogger } from './log.mjs';
 const latestUserText = (turns) => [...turns].reverse().find((t) => t.role === 'user')?.content ?? '';
 
 /**
+ * Heuristic-first (`ROUTER_BACKEND=heuristic,<model>…`): the heuristic decides whenever one of its rules fired; the model
+ * is asked only when no rule fired, or when the message is in a language the rules do not cover (not de/en/es) and the
+ * heuristic is not confident (< 0.85). Model-first (default): the model decides unless the heuristic fast path applies.
+ * @param {{role: string, content: string}[]} turns @param {{confidence: number, fallthrough?: boolean}} h
+ */
+export function heuristicFirstAsksModel(turns, h) {
+  return Boolean(h.fallthrough) || (h.confidence < 0.85 && isForeignToHeuristic(latestUserText(turns)));
+}
+
+/**
  * @param {{backend?: Backend|null, timeoutMs?: number, cache?: LruCache|null,
- *   fallback?: 'heuristic'|'neutral', fastPathMin?: number, logger?: ReturnType<import('./log.mjs').createLogger>,
- *   now?: () => number}} [opts]
+ *   fallback?: 'heuristic'|'neutral', fastPathMin?: number, mode?: 'model-first'|'heuristic-first',
+ *   logger?: ReturnType<import('./log.mjs').createLogger>, now?: () => number}} [opts]
  */
 export function createRouter(opts = {}) {
   const backend = opts.backend ?? null;
@@ -30,7 +41,8 @@ export function createRouter(opts = {}) {
   const now = opts.now ?? (() => performance.now());
   const fallbackMode = opts.fallback ?? 'heuristic';
   const fastPathMin = opts.fastPathMin ?? 0;
-  const salt = `${PROMPT_VERSION}|${backend ? `${backend.id}:${backend.label ?? backend.model}` : 'heuristic'}`;
+  const heuristicFirst = opts.mode === 'heuristic-first';
+  const salt = `${PROMPT_VERSION}|${heuristicFirst ? 'hf|' : ''}${backend ? `${backend.id}:${backend.label ?? backend.model}` : 'heuristic'}`;
 
   function fallback(turns, started, why) {
     if (fallbackMode === 'neutral') return neutralDecision(HEURISTIC_MODEL, now() - started, `fallback (${why})`);
@@ -66,10 +78,13 @@ export function createRouter(opts = {}) {
     /** @type {RouteDecision} */
     let d;
     let fellBack = '';
-    const fast = backend && fastPathMin > 0 ? classifyHeuristic(turns) : null;
+    const fast = backend && (fastPathMin > 0 || heuristicFirst) ? classifyHeuristic(turns) : null;
     if (!backend) {
       d = fallback(turns, started, 'no backend');
-    } else if (fast && fast.confidence >= fastPathMin) {
+    } else if (heuristicFirst && fast && !heuristicFirstAsksModel(turns, fast)) {
+      d = normalizeDecision(fast, { model: HEURISTIC_MODEL, ms: now() - started });
+      d.reason = `heuristic first: ${d.reason}`;
+    } else if (!heuristicFirst && fast && fast.confidence >= fastPathMin) {
       // Fast path: unambiguous explicit requests / strong text guards skip the model call
       // (100% precise at >= 0.85 on both eval sets; saves ~1.2-1.5 s for ~40% of messages).
       d = normalizeDecision(fast, { model: HEURISTIC_MODEL, ms: now() - started });
@@ -124,5 +139,5 @@ export function createRouter(opts = {}) {
     return fellBack ? { ...d, fallback: fellBack } : d;
   }
 
-  return { route, backend, timeoutMs, cache };
+  return { route, backend, timeoutMs, cache, mode: heuristicFirst ? 'heuristic-first' : 'model-first' };
 }

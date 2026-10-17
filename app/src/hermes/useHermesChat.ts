@@ -4,7 +4,8 @@
  * - session continuation: a client-generated session id is sent on EVERY request, only the new user
  *   message is in the body (server keeps the history; docs/HERMES-API.md)
  * - React updates are throttled (~30 fps) so long streams do not jank; the stream itself is applied
- *   to a ref immediately
+ *   to a ref immediately. A tick that only grows the streaming answer's text / reasoning goes to the live text store
+ *   (liveMessages.ts: only the answer's live part re-renders); the list state is committed at the turn's boundaries
  * - per-chat `modelOptions` (reasoning effort / fast) are sent as body `model_options`
  * - after a turn that used tools, the stored session messages are fetched once and the turn's
  *   ToolEvents get the real arguments/results (+ reasoning) – `fetchToolDetails`, default on;
@@ -62,6 +63,7 @@ import { adoptReplay, canReattach, covers, failedReattach, MAX_REATTACHES, REATT
 import { approvalMayHaveArrived, keyedHermesError, type StreamChatResult } from './stream';
 import { branchSeedText, withContextSeed, withTurnNote, type TurnOverride } from './turnOverride';
 import { createThrottle, streamIntervalFor } from './throttle';
+import { liveMessages, liveOnlyTick } from './liveMessages';
 import { PERF, perfDelta, perfFlush, perfMark, perfNow, perfSpan, perfTurnEnd, perfTurnStart } from '../perf/probe';
 import { checkTicket, takeTicket } from './turnTicket';
 import { answerInSession, newSendKey, reusableSendKey, sendKeyAfterFailure } from './idempotency';
@@ -238,13 +240,24 @@ export function newSessionId(): string {
 
 export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = {}): UseHermesChat {
   // an answer persisted mid-stream (app killed) is completed from the stored session (recovery.ts)
-  const [messages, setMessages] = useState<ChatMessage[]>(() => resumeCutOff(options.initialMessages ?? []));
+  const [messages, setMessagesState] = useState<ChatMessage[]>(() => resumeCutOff(options.initialMessages ?? []));
   const [status, setStatus] = useState<ChatStatus>('idle');
   const [sessionId, setSessionId] = useState<string>(() => options.sessionId ?? newSessionId());
   const [error, setError] = useState<string | undefined>(undefined);
 
   // source of truth for the stream (state is a throttled mirror)
   const messagesRef = useRef<ChatMessage[]>(messages);
+  /** the list React state last got, when, and the streaming answer it keeps a live store entry for (liveMessages.ts) */
+  const committedRef = useRef<{ list: ChatMessage[]; at: number; liveId: string | null }>({ list: messages, at: 0, liveId: null });
+  /** every state update of the list: the live store entry follows it */
+  const setMessages = useCallback((list: ChatMessage[]) => {
+    const c = committedRef.current;
+    c.list = list;
+    c.at = Date.now();
+    // after unmount (a late settle of the aborted turn) no entry is created: a remount must not find a stale one
+    c.liveId = mountedRef.current ? liveMessages.commit(c.liveId, list) : null;
+    setMessagesState(list);
+  }, []);
   const sessionRef = useRef(sessionId);
   const connRef = useRef(conn);
   const optsRef = useRef(options);
@@ -287,7 +300,11 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
     () =>
       createThrottle(() => {
         perfFlush();
-        setMessages(messagesRef.current);
+        const next = messagesRef.current;
+        const c = committedRef.current;
+        // only the streaming answer's text / reasoning grew: its live part re-renders, not the chat and the list
+        if (liveOnlyTick(c.list, next, Date.now() - c.at)) liveMessages.publish(next[next.length - 1]);
+        else setMessages(next);
       }, options.updateIntervalMs ?? (() => streamIntervalFor(messagesRef.current))),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
@@ -298,6 +315,8 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
     return () => {
       mountedRef.current = false;
       throttle.cancel();
+      liveMessages.drop(committedRef.current.liveId);
+      committedRef.current.liveId = null;
       abortRef.current?.abort();
       // chat closed / deleted while its uploads ran (a switch keeps the session mounted: it counts as running). The
       // files stay: the stored transcript keeps the message as queued (re-send later); deleting the chat removes them

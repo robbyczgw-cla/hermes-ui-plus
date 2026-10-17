@@ -1,4 +1,4 @@
-import { memo, useCallback, useDeferredValue, useMemo, useState } from 'react';
+import { memo, useCallback, useDeferredValue, useMemo, useState, type ComponentProps, type ReactNode } from 'react';
 import { LayoutAnimation, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Text } from '../ui/primitives/Text';
 import { ApprovalHistory } from '../approvals/ApprovalHistory';
@@ -58,7 +58,8 @@ import { parseReminders } from './reminder';
 import { CutNotice, LateMark } from './TurnNotices';
 import { FailureText } from './FailureText';
 import { ProgressNotesDisclosure, ToolDetailSheet, ToolTimelinePanel, TurnFooter } from './ToolTimeline';
-import { useSegments } from './useSegments';
+import { useLiveMessage } from './useLiveMessage';
+import { advanceSegments, type SegmentsState } from './parseCache';
 import { PERF, perfNow, perfSpan } from '../perf/probe';
 import { perfWrap, usePerfCommit } from '../perf/react';
 import { usePendingBubble, useQueuedBubble, type PendingBubble } from './pendingSendContext';
@@ -288,44 +289,16 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
   // UX1: interim notes before tool calls ("Ich schaue kurz nach…") leave the answer body for the tool
   // timeline; the answer is the text after the last tool round (Settings → Antworten keeps them inline)
   const notesInline = usePreferences().prefs['answers.progressNotes'];
-  const split = notesInline ? null : splitProgressNotes(message);
-  const shownText = split ? split.answer : message.text;
-  // same notes → same array (memoized timeline rows / disclosure don't re-render per streamed token)
-  const notesKey = split?.notes.length ? split.notes.map((n) => `${n.toolId}\u0000${n.at}\u0000${n.text}`).join('\u0001') : '';
-  const progressNotes = useMemo(() => (split?.notes.length ? split.notes : NO_NOTES), [notesKey]); // eslint-disable-line react-hooks/exhaustive-deps
-  // Hermes `MEDIA:<path>` tags become file chips / inline images below the answer; the raw path is not shown
-  // while streaming only the tail after the last complete line is scanned again (per-message memo, mediaTags.ts; it
-  // checks that the text still extends what it froze, so a discarded render or a replaced answer cannot corrupt it)
-  const mediaCaches = useMemo<[MediaTagCache, MediaTagCache]>(() => [createMediaTagCache(), createMediaTagCache()], []);
-  // the answer text's append run (chatState.ts): parsers skip their full-text "still the same start?" compare
-  const textRun = textAppendRun(message);
-  const shownRun = shownText === message.text ? textRun : undefined;
-  const media = useMemo(() => {
-    const extract = (text: string, i: 0 | 1) =>
-      streaming ? extractMediaCached(text, true, mediaCaches[i], i === 0 ? shownRun : textRun) : extractMedia(text, false);
-    const m = extract(shownText, 0);
-    // tags inside interim notes still become file chips
-    return shownText === message.text ? m : { ...m, refs: extract(message.text, 1).refs };
-  }, [shownText, message.text, streaming, mediaCaches, shownRun, textRun]);
-  const tSeg = PERF ? perfNow() : 0;
-  const rawSegments = useSegments(media.text, !streaming, message.id, media.text === shownText ? shownRun : undefined);
-  if (PERF) perfSpan(streaming ? 'segments' : 'segments.final', tSeg);
-  usePerfCommit(!!isLast, message.text.length, streaming); // no-op unless EXPO_PUBLIC_HUI_PERF is set
-  // finished answers: B3 closing `[n]` sources list → sources block + numeric pills; UX8 duplicated translation text
-  const cited = useMemo(
-    () => (streaming ? { segments: rawSegments, cites: 0, research: false } : withCitationSources(dedupeTranslations(rawSegments))),
-    [rawSegments, streaming],
-  );
-  // WSP / web search: cited items joined with what the turn's web tools retrieved (snippets, "not retrieved" hint)
-  const turnTools = message.tools;
-  const segments = useMemo(() => (streaming ? cited.segments : withRetrievedSources(cited.segments, turnTools)), [cited.segments, turnTools, streaming]);
-  const hasRich = segments.some((s) => s.kind !== 'markdown');
+  // the text pipeline runs here for a finished answer (menus, action row, share); while the answer streams, its live
+  // part (LiveAnswer) runs it per live tick and this frame renders only at the turn's commit boundaries
+  // (hermes/liveMessages.ts). Both share one incremental parser state: the final render only feeds the last tail
+  const textState = useMemo<AnswerTextState>(() => ({ segs: { current: null }, media: [createMediaTagCache(), createMediaTagCache()] }), []);
+  const answerText = useAnswerText(streaming ? null : message, notesInline, textState);
+  const { shownText, media, cited, segments } = answerText;
   // the answer's own follow-ups (skill: `suggestions` at the end) win over the bridge's meta follow-ups: one zone only
   const ownSuggestions = segments.some((s) => s.kind === 'hui' && s.node?.type === 'suggestions');
   // skeleton shape announced by the router (`component` refines `format`, e.g. choice → slots)
   const routeShape = skeletonShapeForRoute(message.route?.format, message.route?.component) ?? null;
-  const showSkeleton = streaming && !!routeShape && !hasRich;
-  const empty = !media.text.trim();
   // copy text is built lazily in the handlers (O(text) per streaming update otherwise); "is there any
   // copyable text" = any markdown segment (text outside ```hui / ```hui-html blocks)
   const hasCopy = segments.some((sg) => sg.kind === 'markdown');
@@ -354,9 +327,6 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
   const mediaConn = useMemo(() => (profile?.kind === 'hermes' && profile.bridge && profile.baseUrl ? { baseUrl: profile.baseUrl, apiKey: profile.apiKey } : null), [profile]);
   const waitState = useMemo(() => waitStateOf({ tools: message.tools, routeShape }), [message.tools, routeShape]);
   const waitStartedAt = message.createdAt || undefined;
-  // the status row sits ABOVE a route skeleton (where the first streamed line will appear), never on top of its
-  // cards; self-labeled skeleton shapes need it only while a tool runs
-  const thinking = streaming && empty && (!showSkeleton || routeBadgeVisible(routeShape!, waitState));
   const mdBase = useMarkdownImageBase();
   const compareAfter = useMemo(() => (compareBefore && !streaming ? resultImageUrl(message, mdBase) : null), [compareBefore, streaming, message, mdBase]);
   // Settings → Schriftgröße also reaches the shell texts around the answer (Markdown scales itself)
@@ -516,42 +486,32 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
       focusable={false}
     >
       {mode === 'compact' && message.tools.length ? <ToolChips tools={message.tools} /> : null}
-      {verbose ? <ToolTimelinePanel message={message} onOpen={setSheetKey} notes={progressNotes} /> : null}
-      {!verbose && progressNotes.length ? <ProgressNotesDisclosure notes={progressNotes} /> : null}
-      <ApprovalHistory log={message.approvalLog} />
-      {showReasoning ? <Reasoning text={message.reasoning ?? ''} live={streaming && empty} /> : null}
-      {thinking && !showReasoning && !message.approval ? <WaitingIndicator state={waitState} mode={waitMode} seed={seed} persona={persona} startedAt={waitStartedAt} /> : null}
-      {streaming && (message.statusNote || (empty && progressNotes.length)) ? (
-        // server status line, else the agent's latest interim note while its tools run (UX1)
-        <Text style={[t.typography.caption, styles.statusNote, { color: t.colors.muted }]} numberOfLines={2} accessibilityLiveRegion="polite">
-          {message.statusNote || progressNotes[progressNotes.length - 1].text}
-        </Text>
-      ) : null}
-      {compareBefore && compareAfter ? <BeforeAfter before={compareBefore} after={compareAfter} /> : null}
-      {extraAtts?.length && !streaming ? (
-        <View style={styles.attachments}>
-          <MessageAttachments attachments={extraAtts} align="start" />
-        </View>
-      ) : null}
-      {compacted ? <ContextDivider /> : null}
-      <AnswerScope segments={segments} streaming={streaming} cites={cited.cites}>
-        {perfWrap(streaming ? 'Segments' : 'SegmentsDone', segments.map((seg, i) => (seg.kind === 'hui' && seg.node?.type === 'suggestions' && !uiPrefs.showFollowups ? null : (
-          perfWrap(`seg.${seg.kind}${streaming ? '' : '.done'}`, <SegmentView
-            key={seg.key}
-            seg={seg}
-            first={i === 0}
-            live={streaming && !message.approval && i === segments.length - 1}
-            onAction={onAction}
-            route={routeShape}
-            collapse={seg.kind === 'markdown' && (summaryBefore(segments, i) || (cited.research && i === firstMarkdown(segments) ? 'section' : false))}
-          />, seg.key)
-        ))))}
-      </AnswerScope>
-      {showSkeleton && routeShape ? (
-        <View style={empty && !thinking ? undefined : styles.segGap}>
-          <RouteSkeleton format={routeShape} />
-        </View>
-      ) : null}
+      <LiveAnswer
+        message={message}
+        done={streaming ? null : answerText}
+        textState={textState}
+        notesInline={notesInline}
+        isLast={!!isLast}
+        verbose={verbose}
+        showReasoning={showReasoning}
+        onOpenSheet={setSheetKey}
+        onAction={onAction}
+        routeShape={routeShape}
+        showFollowups={uiPrefs.showFollowups}
+        wait={{ state: waitState, mode: waitMode, seed, persona, startedAt: waitStartedAt }}
+        approvals={<ApprovalHistory log={message.approvalLog} />}
+        beforeAnswer={
+          <>
+            {compareBefore && compareAfter ? <BeforeAfter before={compareBefore} after={compareAfter} /> : null}
+            {extraAtts?.length && !streaming ? (
+              <View style={styles.attachments}>
+                <MessageAttachments attachments={extraAtts} align="start" />
+              </View>
+            ) : null}
+            {compacted ? <ContextDivider /> : null}
+          </>
+        }
+      />
       {!streaming && media.refs.length ? <MediaFiles refs={media.refs} conn={mediaConn} /> : null}
       {notes.length ? <MemoryNotes notes={notes} /> : null}
       {reminders.length ? <ReminderCards reminders={reminders} /> : null}
@@ -642,6 +602,142 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
 }
 
 const NO_NOTES: readonly ProgressNote[] = [];
+
+/** the text-derived parts of an answer (useAnswerText) */
+type AnswerText = {
+  progressNotes: readonly ProgressNote[];
+  /** the answer text without the interim notes before tool calls (UX1) */
+  shownText: string;
+  media: ReturnType<typeof extractMedia>;
+  cited: ReturnType<typeof withCitationSources>;
+  segments: readonly Segment[];
+};
+
+/** incremental state of an answer's text pipeline, owned by its frame, advanced by whoever renders the text */
+type AnswerTextState = { segs: { current: SegmentsState | null }; media: [MediaTagCache, MediaTagCache] };
+
+const NO_TEXT_MESSAGE: ChatMessage = { id: '', role: 'assistant', text: '', tools: [], status: 'done', createdAt: 0 };
+const NO_SEGMENTS: readonly Segment[] = [];
+
+/**
+ * The answer text pipeline: interim notes split off, `MEDIA:` tags, segments (incremental while streaming), sources.
+ * `m` null: the other component of the answer runs it (an empty result; the memos idle, `st` stays untouched).
+ */
+function useAnswerText(m: ChatMessage | null, notesInline: boolean, st: AnswerTextState): AnswerText {
+  const message = m ?? NO_TEXT_MESSAGE;
+  const streaming = message.status === 'streaming';
+  const split = notesInline || !m ? null : splitProgressNotes(message);
+  const shownText = split ? split.answer : message.text;
+  // same notes → same array (memoized timeline rows / disclosure don't re-render per streamed token)
+  const notesKey = split?.notes.length ? split.notes.map((n) => `${n.toolId}\u0000${n.at}\u0000${n.text}`).join('\u0001') : '';
+  const progressNotes = useMemo(() => (split?.notes.length ? split.notes : NO_NOTES), [notesKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Hermes `MEDIA:<path>` tags become file chips / inline images below the answer; the raw path is not shown
+  // while streaming only the tail after the last complete line is scanned again (per-message memo, mediaTags.ts; it
+  // checks that the text still extends what it froze, so a discarded render or a replaced answer cannot corrupt it)
+  const mediaCaches = st.media;
+  // the answer text's append run (chatState.ts): parsers skip their full-text "still the same start?" compare
+  const textRun = textAppendRun(message);
+  const shownRun = shownText === message.text ? textRun : undefined;
+  const media = useMemo(() => {
+    const extract = (text: string, i: 0 | 1) =>
+      streaming ? extractMediaCached(text, true, mediaCaches[i], i === 0 ? shownRun : textRun) : extractMedia(text, false);
+    const x = extract(shownText, 0);
+    // tags inside interim notes still become file chips
+    return shownText === message.text ? x : { ...x, refs: extract(message.text, 1).refs };
+  }, [shownText, message.text, streaming, mediaCaches, shownRun, textRun]);
+  let rawSegments = NO_SEGMENTS;
+  if (m) {
+    const tSeg = PERF ? perfNow() : 0;
+    // useSegments with the answer's shared state (parseCache.advanceSegments, idempotent per text)
+    st.segs.current = advanceSegments(st.segs.current, media.text, !streaming, message.id, media.text === shownText ? shownRun : undefined);
+    rawSegments = st.segs.current.segs;
+    if (PERF) perfSpan(streaming ? 'segments' : 'segments.final', tSeg);
+  }
+  // finished answers: B3 closing `[n]` sources list → sources block + numeric pills; UX8 duplicated translation text
+  const cited = useMemo(
+    () => (streaming ? { segments: rawSegments, cites: 0, research: false } : withCitationSources(dedupeTranslations(rawSegments))),
+    [rawSegments, streaming],
+  );
+  // WSP / web search: cited items joined with what the turn's web tools retrieved (snippets, "not retrieved" hint)
+  const turnTools = message.tools;
+  const segments = useMemo(() => (streaming ? cited.segments : withRetrievedSources(cited.segments, turnTools)), [cited.segments, turnTools, streaming]);
+  return { progressNotes, shownText, media, cited, segments };
+}
+
+type LiveAnswerProps = {
+  /** the answer as the list committed it */
+  message: ChatMessage;
+  /** the frame's text pipeline of a finished answer; null while it streams (then this part runs it) */
+  done: AnswerText | null;
+  textState: AnswerTextState;
+  notesInline: boolean;
+  isLast: boolean;
+  verbose: boolean;
+  showReasoning: boolean;
+  onOpenSheet: (key: string) => void;
+  onAction: ActionHandler;
+  routeShape: string | null;
+  showFollowups: boolean;
+  wait: Omit<ComponentProps<typeof WaitingIndicator>, 'state'> & { state: ComponentProps<typeof WaitingIndicator>['state'] };
+  /** frame elements between the live rows (same element objects between frame renders: React skips them) */
+  approvals: ReactNode;
+  beforeAnswer: ReactNode;
+};
+
+/**
+ * The part of an answer that changes while it streams: tool timeline / interim notes, reasoning, the waiting row and
+ * status line, the segments and the route skeleton. It reads the newest live tick of the answer (useLiveMessage) and
+ * re-renders per tick on its own; the frame around it (AssistantBody), the list and the chat view re-render only when
+ * the list is committed (hermes/liveMessages.ts).
+ */
+function LiveAnswer({ message: committed, done, textState, notesInline, isLast, verbose, showReasoning, onOpenSheet, onAction, routeShape, showFollowups, wait, approvals, beforeAnswer }: LiveAnswerProps) {
+  const t = useTheme();
+  const message = useLiveMessage(committed);
+  const streaming = message.status === 'streaming';
+  const own = useAnswerText(done ? null : message, notesInline, textState);
+  const { progressNotes, media, cited, segments } = done ?? own;
+  usePerfCommit(isLast, message.text.length, streaming); // no-op unless EXPO_PUBLIC_HUI_PERF is set
+  const hasRich = segments.some((s) => s.kind !== 'markdown');
+  const showSkeleton = streaming && !!routeShape && !hasRich;
+  const empty = !media.text.trim();
+  // the status row sits ABOVE a route skeleton (where the first streamed line will appear), never on top of its
+  // cards; self-labeled skeleton shapes need it only while a tool runs
+  const thinking = streaming && empty && (!showSkeleton || routeBadgeVisible(routeShape!, wait.state));
+  return (
+    <>
+      {verbose ? <ToolTimelinePanel message={message} onOpen={onOpenSheet} notes={progressNotes} /> : null}
+      {!verbose && progressNotes.length ? <ProgressNotesDisclosure notes={progressNotes} /> : null}
+      {approvals}
+      {showReasoning ? <Reasoning text={message.reasoning ?? ''} live={streaming && empty} /> : null}
+      {thinking && !showReasoning && !message.approval ? <WaitingIndicator {...wait} /> : null}
+      {streaming && (message.statusNote || (empty && progressNotes.length)) ? (
+        // server status line, else the agent's latest interim note while its tools run (UX1)
+        <Text style={[t.typography.caption, styles.statusNote, { color: t.colors.muted }]} numberOfLines={2} accessibilityLiveRegion="polite">
+          {message.statusNote || progressNotes[progressNotes.length - 1].text}
+        </Text>
+      ) : null}
+      {beforeAnswer}
+      <AnswerScope segments={segments} streaming={streaming} cites={cited.cites}>
+        {perfWrap(streaming ? 'Segments' : 'SegmentsDone', segments.map((seg, i) => (seg.kind === 'hui' && seg.node?.type === 'suggestions' && !showFollowups ? null : (
+          perfWrap(`seg.${seg.kind}${streaming ? '' : '.done'}`, <SegmentView
+            key={seg.key}
+            seg={seg}
+            first={i === 0}
+            live={streaming && !message.approval && i === segments.length - 1}
+            onAction={onAction}
+            route={routeShape}
+            collapse={seg.kind === 'markdown' && (summaryBefore(segments, i) || (cited.research && i === firstMarkdown(segments) ? 'section' : false))}
+          />, seg.key)
+        ))))}
+      </AnswerScope>
+      {showSkeleton && routeShape ? (
+        <View style={empty && !thinking ? undefined : styles.segGap}>
+          <RouteSkeleton format={routeShape} />
+        </View>
+      ) : null}
+    </>
+  );
+}
 
 /** "Modell: Sonnet 5.5 · Denken: Hoch" (unknown parts omitted) */
 function modelLine(info: AnswerModelInfo, tr: TFn): string {

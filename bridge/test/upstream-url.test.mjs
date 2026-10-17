@@ -45,7 +45,7 @@ test('preflight uses the base path too', async () => {
   const seen = [];
   const fetch = async (url) => { seen.push(String(url)); return new Response('{"data":[]}', { status: 200 }); };
   await preflight({ upstream: { baseUrl: 'https://example.com/hermes', apiKey: '' } }, { fetch });
-  assert.deepEqual(seen, ['https://example.com/hermes/health', 'https://example.com/hermes/v1/models']);
+  assert.deepEqual(seen, ['https://example.com/hermes/health', 'https://example.com/hermes/v1/models', 'https://example.com/hermes/v1/skills']);
 });
 
 async function setup(basePath) {

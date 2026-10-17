@@ -58,7 +58,8 @@ Per `POST /v1/chat/completions`:
    ids are only unique per profile), which makes Hermes interrupt the agent
    (`_write_sse_chat_completion`).
 
-Other endpoints: `GET /health` and `/v1/health` (no auth, proxied), `GET /bridge/status` (auth;
+Other endpoints: `GET /health` and `/v1/health` (no auth, proxied), `GET`/`HEAD /bridge/live` (no auth, answers "ok"
+while the bridge process runs; no Hermes call, no state: the Docker healthcheck), `GET /bridge/status` (auth;
 router kind/model, cache size, sessions). Under `/v1` only an explicit allow-list is a streaming pass-through (auth):
 `GET /v1/models`, `GET /v1/capabilities`, `GET /v1/skills`, `GET /v1/runs/{id}` and `POST /v1/runs/{id}/approval`
 (needed to answer `approval.request` events); any other `/v1` path → 404 (e.g. `POST /v1/runs`, `/v1/responses`,
@@ -183,6 +184,20 @@ programming help without running commands or showing changes". No new hint synta
 `format=<f> confidence=<c>` line; the skill reference already says real output only. The `r7` prompt is ~22.7k chars
 (router.test.mjs budget 23k); eval cases cd01-cd16.
 
+**Multilingual heuristic (2026-10-16, no prompt change).** The heuristic now covers English and Spanish where they missed
+and French / Italian / Portuguese for the high-value classes only: shopping / packing / to-do lists (`liste de courses`,
+`lista della spesa`, `lista de compras`, `lista de la compra`), products and product comparisons (`meilleurs écouteurs à
+moins de 100 €`, `Confronta iPhone 17 e Pixel 11`, `qual fone vale a pena até 300 reais`), places (`boulangerie près
+d'ici`, `pizzeria qui vicino`, `padaria aqui perto`, "where can I eat …" in all six languages), weather (`quel temps fera-t-il`,
+`che tempo fa`, `vai chover`) and timers (`minuteur`, `Rappelle-moi dans 15 minutes`, `ricordami tra mezz'ora`). The word
+lists are per language (`PLACE_NOUN_ML`, `NEAR_ML`, `PRODUCT_NOUN_ML`, `PRICE_PREP`, `MONEY` in `heuristic.mjs`). Two named
+products joined by "or" (en/es/fr/it/pt; a question or a short message, not a how-to) are `products:compare`; German `oder`
+is left to the compare rules. Guards: phone numbers are not device lookups, "près de / perto de / pas loin de" alone are
+not "near" (they also mean "nearly"), Italian `libreria` is not a shop, writing requests in fr/it/pt stay text, weather
+explanations (`¿por qué…?`, `pourquoi`, `perché`) stay text. Not covered on purpose: fr/it/pt recipes and coding views,
+Dutch, Polish, Turkish (heuristic-first sends those to the model). Tests: `test/router-multilingual.test.mjs` (positives
+and negatives per language, and no unwanted visual on any eval set).
+
 **Taxonomy v3 (prompt version `r3`, skill-router-v3).** Seven new formats and seven chart components on top of v2:
 
 | format | renderer | component hints |
@@ -254,6 +269,17 @@ Backends (`src/router/backends/`):
   `claude-haiku-5-5`, `output_config: {effort, format: {type: 'json_schema', schema}}`,
   `thinking: {type: adaptive|disabled|between_tools}`, system prompt with `cache_control`, no
   sampling params (Haiku 5.5 rejects them), `maxRetries: 0`. Refusal / max_tokens → error → fallback.
+- `systemone.mjs` – shared System One client used by `jev.mjs` and `nace.mjs` (provider preset: base URL, key env,
+  default model; optional own timeout on top of the router budget; HTTP errors report the status only; Drex
+  `usage.input_tokens` is passed through for the eval's cost estimate). Since 2026-10-16 its choice set covers the
+  full taxonomy (v4/v5 added: `places`, `products`, `products_compare`, `guide`, `workout`, `studyplan`, `vocab`,
+  `mindmap`, `paths`, `blocks`, `diff`, `terminal`, `changes`); a test keeps every RouteFormat reachable.
+- `nace.mjs` – Nace.AI Drex, same API: `POST https://console.nace.ai/v1/systemone`, `Authorization: Bearer
+  $NACE_API_KEY`, model `drex-v2.0` pinned (`drex-latest` would move on announced dates). Hosted models (2026-10-16):
+  drex-v1.0 (32k state), drex-v1.5, drex-v2.0 (131k state; MoE 3B active). Billing: input tokens only, $0.04 / 0.05 /
+  0.06 per 1M; one routing call is ~3.1k input tokens (criteria + instructions dominate). Free tier 120 RPM / 8 in
+  flight, paid 600 / 16; 429 and 529 (capacity) carry `retry-after-ms`; the bridge does not retry inside its budget,
+  the chain moves on. Eval results: section "Nace Drex eval (2026-10-16)" below.
 - `jev.mjs` – TypeSafe System One `POST https://api.typesafe.ai/v1/systemone`, model `jev-latest`, one
   `choice` question whose options are flattened `format[_component]` ids (`chart_line`, `route_map`, …),
   `state: {conversation: [...]}`. Shape verified against docs.typesafe.ai/api.md and exercised live (eval).
@@ -282,7 +308,11 @@ Backends (`src/router/backends/`):
   tolerant JSON extraction). For Groq/OpenRouter/OpenCode Go/Concentrate/local models.
 - `heuristic.mjs` – deterministic German/English regex router (explicit requests, negations, text guards,
   implicit cues, follow-up inheritance from the previous `hui` block). Fast path + fallback.
-- `chain.mjs` – `ROUTER_BACKEND=jev,claude`: next link on error, all within one budget; heuristic last.
+- `chain.mjs` – `ROUTER_BACKEND=jev,claude` (or `nace,claude`, `nace,jev`): next link on error, all within one budget; heuristic last.
+- Heuristic-first (`ROUTER_BACKEND=heuristic,jev`, `router.mjs` `mode: 'heuristic-first'`): the heuristic decides whenever
+  one of its rules fired (its default "no visual cue" decision carries `fallthrough: true`); the model chain is asked only
+  for those fall-through turns, or when `lang.mjs` sees a clearly non-de/en/es message (function-word counts, a few µs) and
+  the heuristic is below 0.85. Same budget and heuristic fallback as model-first; the cache key includes the mode.
 
 Logging (JSON lines on stdout → journald): `route` events with reqId, format, component, confidence,
 model, ms, cached, fallback; `http` access lines; `route_backend_failed` with status/error class.
@@ -311,6 +341,73 @@ v2 skill (`hermes-skill/hermes-ui/`, see INSTALL.md): the v2 skill understands `
 an old skill would receive hints it does not know and fall back to its own table.
 
 ## Evaluation
+
+**Multilingual set (2026-10-16).** `eval/multilingual.jsonl` (source `multilingual.src.mjs`, same format and tags as the
+holdout): 209 everyday requests written natively, not translated (en 38, es 38, fr 37, it 36, pt 36, nl / pl / tr 8 each),
+covering products and product comparisons vs. concept comparisons, shopping / packing / to-do lists, places, weather,
+timers vs. alarms and clock-time reminders, recipes, coding views, live data, chit-chat and widget replies. 40 cases are
+tagged `blind`: written together with the rest but never looked at while the heuristic was extended (tune with
+`--skip blind`, measure with `--only blind`). Hosted runs: one paced pass per model (`--rpm 100` Jev, `--rpm 80` Drex,
+`--concurrency 4`), latency from a dev machine; heuristic-first via the router replay as above.
+
+| backend | multilingual 209 | blind 40 | unwanted visual | errors | p50 / p95 ms | model-first | heuristic-first: acc. / model asked / added ms mean, p95 | $ / 1000 calls |
+|---|---|---|---|---|---|---|---|---|
+| heuristic before | 49.8 % | 40.0 % | 0 | 0 | <1 | – | – | 0 |
+| heuristic now | **82.3 %** | **95.0 %** | 0 | 0 | <1 | – | – | 0 |
+| jev-latest | 99.0 % | 100 % | 2 | 0 | 325 / 418 | 99.0 % | **100 % / 92 / 147, 375** | 0.16 |
+| drex-v2.0 | 99.0 % | 100 % | 2 | 0 | 507 / 622 | 99.0 % | 100 % / 92 / 219, 548 | 0.18 |
+
+Heuristic per language before → now: en 31 → 37/38, es 23 → 37/38, fr 15 → 31/37, it 16 → 31/36, pt 14 → 31/36, nl 2/8,
+pl 2/8, tr 1/8 (not extended). Per class: checklist 9 → 21/24, products 8 → 30/36, places 2 → 19/23, weather 4 → 15/19,
+timer 13 → 16/18, compare 7 → 8/8; recipe 3/12 and coding views 6/15 stay low because fr/it/pt are not covered there. Text
+cases 44/44 before and after (no unwanted visual). `cases` 100 % and holdout 95.3 % are unchanged, as are model-first and
+heuristic-first on the recorded cases/holdout runs (holdout heuristic-first asks the model once less, 22 instead of 23).
+- Both models get every class right on this set; their only errors are the two `[poll:…]` widget replies (→ poll / chart).
+  Model-first sends those to the model (the widget-reply rule is 0.3); heuristic-first keeps them as text.
+- With the old heuristic, heuristic-first would ask the model on 158/209 turns (24 % stay under 1 ms, mean +255 ms with Jev)
+  and reach 98.1 %; with the extended rules it asks on 92/209 (56 % under 1 ms, mean +147 ms) and reaches 100 %. Model
+  asked per language: en 3/38, es 12/38, fr 19/37, it 17/36, pt 18/36, nl 7/8, pl 8/8, tr 8/8. Model-first's fast path
+  (≥ 0.85) covers 77/209 turns (was 25).
+- Caveat: the multilingual set has clearer cues than the German holdout (the models score 99 % here vs. 94-96 % there), so
+  it mainly shows coverage per language; it is not a harder benchmark.
+
+**Jev / Nace Drex eval and heuristic-first (2026-10-16).** One hosted pass per set and model (`--rpm 100 --concurrency 4`,
+latency from a dev machine), with the System One choice set extended to the full v5 taxonomy ("jev v3 set" = the old
+choice set from before that fix, holdout only). `cases.jsonl` is the set the heuristic was tuned on (its 100 % is not a
+fair comparison); **the holdout is the fair number**. The two right-hand columns are what the bridge would emit, computed by
+replaying each recorded model answer through the real router (`eval/run.mjs --replay <run.json>`, no extra calls):
+*model-first* = `ROUTER_BACKEND=<model>` (heuristic fast path at confidence ≥ 0.85, model otherwise), *heuristic-first* =
+`ROUTER_BACKEND=heuristic,<model>` (model only when no heuristic rule fired or the language is not de/en/es). Both fall back
+to the heuristic on errors. All errors were HTTP 429 from the Drex free tier (120 RPM) despite pacing at 100 RPM.
+
+| backend | set | lenient (raw) | unwanted visual | errors | p50 / p95 ms | model-first | heuristic-first: acc. / model asked / added ms mean, p95 | $ / 1000 calls |
+|---|---|---|---|---|---|---|---|---|
+| heuristic | holdout 129 | 95.3 % | 0 (6 missed) | 0 | <1 | – | – | 0 |
+| jev-latest | holdout 129 | **96.1 %** | 3 | 0 | 314 / 388 | 96.1 % | 96.1 % / 23 / 57, 324 | 0.16 |
+| jev-latest, v3 set | holdout 129 | 87.6 % | 0 (7 missed) | 0 | 286 / 364 | 96.1 % | 96.9 % / 23 / 52, 301 | ~0.14 |
+| drex-v1.5 | holdout 129 | 95.3 % | 5 | 0 | 445 / 559 | 95.3 % | 96.1 % / 23 / 78, 471 | 0.15 |
+| drex-v2.0 | holdout 129 | 93.8 % | 3 | 0 | 540 / 728 | 94.6 % | 96.1 % / 23 / 99, 586 | 0.18 |
+| heuristic | cases 338 | 100 % | 0 | 0 | <1 | – | – | 0 |
+| jev-latest | cases 338 | 95.3 % | 12 | 0 | 316 / 436 | 95.9 % | 99.1 % / 30 / 28, 308 | 0.16 |
+| drex-v1.5 | cases 338 | 90.8 % | 22 | 4 | 439 / 593 | 93.5 % | 99.1 % / 30 / 35, 425 | 0.15 |
+| drex-v2.0 | cases 338 | 86.7 % | 12 | 27 | 517 / 683 | 96.4 % | 99.4 % / 30 / 44, 503 | 0.17 |
+
+Costs: Jev bills input only at $0.042 per 1M tokens (~3.8k tokens per routing call), Drex $0.05 / $0.06 (~3.0k tokens).
+Findings:
+- **The old Jev choice set was a real bug**: raw holdout 87.6 % → 96.1 % with the full set. Before the fix Jev could not
+  answer places (→ map ×3), products (→ text/compare), guide, workout, studyplan, vocab or mindmap. In the bridge this was
+  mostly hidden because the heuristic fast path catches the explicit v4 requests first (model-first 96.1 % either way).
+- Important classes (cases + holdout), Jev: products 13/13, compare 12/15 (`compare` → `products` for `h20` MacBook vs
+  ThinkPad, which arguably is products:compare, and `h40` Hetzner vs Netcup VPS, a real miss), coding views diff/terminal/
+  changes 11/11, places 10/10, weather 10/10, timer 13/13, checklist 10/10. Drex: products 12-13/13, compare 13/15, coding
+  views 11/11, places 10/10, weather 10/10.
+- Remaining model errors are mostly visuals for text cases: clock-time reminders and alarms → timer (Drex v1.5), a
+  `[poll:…]` widget reply → poll/chart (all three), "Was heißt ubiquitär?" → translation (Drex v2.0).
+- **Heuristic-first** asks the model for only 18 % (holdout) / 9 % (cases) of the turns, so the mean added latency is
+  30-100 ms, and it is at least as accurate as model-first on both sets. Differences between the backends on the holdout are
+  one or two cases (0.8-1.6 points); they are within noise. Not yet measured on non-German messages: the eval sets are
+  ~77 % German, and heuristic-first sends clearly non-de/en/es messages to the model (`src/router/lang.mjs`), which is
+  where it should matter most.
 
 **Taxonomy v4 (2026-10-11).** `cases.jsonl` is now 302 cases and `holdout.jsonl` 129 (431 total); 101 are tagged `v4` (73 in cases, 28 in the holdout: per new format 7-10 cases in `cases` incl. negatives, DE/EN/ES, widget replies, plus 2-4 independently phrased holdout cases per format).
 Nine older cases were relabelled because the taxonomy changed (`ta09` opening hours → places, `ta11` training plan → workout, `st02`/`st08` "Schritt für Schritt" → guide, `d03` mind map → mindmap, `qz02` vocab cards → vocab, `tm03` duration reminder → timer, holdout `h23` → guide and `h36` → vocab), each keeping the old label as accepted alternative where sensible.
@@ -420,6 +517,9 @@ npm run eval:holdout        # heuristic on holdout.jsonl
 #   D=/tmp/hui-eval; mkdir -p $D   (then from the laptop: tar -C bridge -cf - package.json src eval | ssh hermes-host tar -C /tmp/hui-eval -xf -)
 #   cd $D && export TYPESAFE_API_KEY="$(sed -n 's/^TYPESAFE_API_KEY=//p' /root/.hermes/.env | tr -d "\"'")"
 #   node eval/run.mjs --backend jev --cases eval/cases.jsonl,eval/holdout.jsonl --sample 80; cd / && rm -rf $D
+# Nace Drex (key in the private env file, never printed); --rpm keeps the free tier (120 RPM) free of 429s:
+(set -a; . <(grep -E '^NACE_API_KEY=' "${HUI_PRIVATE_DIR:-$HOME/work/hermesiui-private}/.env.local"); set +a; \
+   node eval/run.mjs --backend heuristic,nace --models drex-v1.5,drex-v2.0 --cases eval/holdout.jsonl --rpm 100 --concurrency 4)
 # Any OpenAI-compatible model:
 BRIDGE_ROUTER_BASE_URL=... BRIDGE_ROUTER_API_KEY=... node eval/run.mjs --backend openai --models m1,m2
 ```
@@ -512,13 +612,14 @@ real Hermes for `/health` and `/v1/models` only (no real chat turn was sent thro
 | `HERMES_API_KEY` | – | Hermes `API_SERVER_KEY`, sent upstream only |
 | `BRIDGE_TOKEN` | – (required) | token the app sends; `BRIDGE_ALLOW_NO_AUTH=1` for local dev only |
 | `BRIDGE_HOST` / `BRIDGE_PORT` | `127.0.0.1` / `8790` | listen address |
-| `ROUTER_BACKEND` (alias `BRIDGE_ROUTER`) | `heuristic` (provider keys alone never select a model router) | `claude`\|`jev`\|`openai`\|`heuristic`\|`off`, or a chain `jev,claude` |
+| `ROUTER_BACKEND` (alias `BRIDGE_ROUTER`) | `heuristic` (provider keys alone never select a model router) | `claude`\|`jev`\|`nace`\|`openai`\|`heuristic`\|`off`, a chain `jev,claude` / `nace,claude`, or heuristic-first `heuristic,jev` (model only when no heuristic rule fired or the language is not de/en/es) |
 | `ANTHROPIC_API_KEY` | – | Claude backend key |
 | `ROUTER_CLAUDE_MODEL` | `claude-haiku-5-5` | Claude model (`BRIDGE_ROUTER_MODEL` also applies if no openai link) |
 | `ROUTER_EFFORT` | `low` | `low`\|`medium`\|`high` |
 | `BRIDGE_ROUTER_THINKING` | `adaptive` | `adaptive`\|`disabled`\|`between_tools` (Sonnet 5.5 needs `between_tools`, not `disabled`) |
 | `BRIDGE_ROUTER_MAX_TOKENS` | 2048 adaptive / 256 otherwise | |
-| `TYPESAFE_API_KEY`, `JEV_MODEL` | –, `jev-latest` | Jev backend |
+| `TYPESAFE_API_KEY`, `JEV_MODEL`, `JEV_BASE_URL` | –, `jev-latest`, `https://api.typesafe.ai` | Jev backend |
+| `NACE_API_KEY`, `NACE_MODEL`, `NACE_BASE_URL` | –, `drex-v2.0`, `https://console.nace.ai` | Nace Drex backend (same System One API; base URL may point to a self-hosted Drex `serve.py`) |
 | `BRIDGE_ROUTER_BASE_URL`, `BRIDGE_ROUTER_API_KEY`, `BRIDGE_ROUTER_MODEL`, `BRIDGE_ROUTER_JSON_MODE`, `BRIDGE_ROUTER_EXTRA_BODY` | –, –, –, `schema`, – | OpenAI-compatible backend |
 | `BRIDGE_ROUTER_TIMEOUT_MS` | `2000` | total model budget per message, then heuristic |
 | `BRIDGE_ROUTER_FASTPATH_MIN` | `0.85` | heuristic confidence that skips the model (`off` disables) |
@@ -867,6 +968,17 @@ port 8790 are free (checked 2026-10-10). The bridge has its own env file `/root/
 
 ## Recommendation
 
+- **2026-10-16 (multilingual): switch to `ROUTER_BACKEND=heuristic,jev` when the user OKs a bridge change.** On the
+  multilingual set heuristic-first with Jev reached 100 % (heuristic alone 82.3 %, Jev alone 99.0 %) while 56 % of the turns
+  stay under 1 ms and the mean added latency is ~150 ms (p95 ~0.4 s); on the German holdout it equals Jev's best (96.1 %).
+  Drex gives the same accuracy but ~1.5× the latency. Until then the extended heuristic alone already lifts non-German
+  routing from ~50 % to ~82 % at zero cost.
+- **2026-10-16 (Jev, Drex, heuristic-first): keep `heuristic` until the multilingual holdout is measured; the next
+  candidate is `ROUTER_BACKEND=heuristic,jev`.** Heuristic-first with Jev matched or beat every other setup on both sets
+  (96.1 % holdout, 99.1 % cases) while calling the model on only 9-18 % of the turns (mean added latency ~30-60 ms, p95 ~0.3 s);
+  Jev is faster than Drex (p50 ~0.3 s vs 0.45-0.55 s), similarly priced and had no rate-limit errors. A second link
+  (`heuristic,jev,claude`) only adds value as an outage fallback; the router's own heuristic fallback already covers errors.
+  Drex (`nace`) stays available but is not recommended: no accuracy gain over Jev, slower, and 429s on the free tier.
 - **Jev as primary, Claude Haiku as second link, heuristic last** (`ROUTER_BACKEND=jev,claude`):
   Jev matched Haiku on format accuracy here (100 % lenient on the 80-case sample) at ~5× lower latency
   (p50 247 ms vs ~1.2 s, measured from hermes-host vs. this machine – Haiku latency from hermes-host not measured).

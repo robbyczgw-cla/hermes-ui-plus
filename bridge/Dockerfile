@@ -4,7 +4,9 @@
 # Without Node on the host: mkdir -p skill && cp -r ../hermes-skill/hermes-ui ../hermes-skill/bootstrap-system-message.txt skill/
 # (the state path /var/lib/hermes-ui-bridge keeps its pre-rename name so existing volumes keep working)
 FROM node:22-alpine
+# HUI_BRIDGE_IMAGE=1: this official image; the startup pair hint then says `docker compose exec bridge ...`
 ENV NODE_ENV=production \
+    HUI_BRIDGE_IMAGE=1 \
     BRIDGE_HOST=0.0.0.0 \
     BRIDGE_PORT=8790 \
     BRIDGE_STATE_DIR=/var/lib/hermes-ui-bridge
@@ -23,9 +25,10 @@ RUN mkdir -p /var/lib/hermes-ui-bridge && chown node:node /var/lib/hermes-ui-bri
 USER node
 VOLUME ["/var/lib/hermes-ui-bridge"]
 EXPOSE 8790
-# Liveness of the bridge itself (any HTTP answer < 500 counts; does not depend on Hermes being up).
+# Liveness of the bridge itself: /bridge/live needs no token and does not depend on Hermes being up (an authenticated
+# path here would log a 401 every 30 s).
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:'+(process.env.BRIDGE_PORT||8790)+'/bridge/voice/config').then(r=>process.exit(r.status<500?0:1),()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.BRIDGE_PORT||8790)+'/bridge/live').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
 # `--` before the script: Node.js itself would otherwise grab a `--env-file` argument meant for the bridge and stop with
 # a bare "node: <file>: not found"; this way the bridge reports a missing file itself.
 ENTRYPOINT ["node", "--", "bin/hermes-ui-bridge.mjs"]

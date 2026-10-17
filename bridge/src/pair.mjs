@@ -140,7 +140,7 @@ export function createPairing(bridgeConfig, o = {}) {
   }
   if (cfg.enabled) {
     const shown = issueCode();
-    log.info('pairing enabled: open the path below on the bridge URL within 10 minutes (one-time)', { path: `${PAIR_PATH}?code=${shown}` });
+    log.info('pairing enabled: open the path below on the bridge URL; this page code works once within 10 minutes (the pair link the page then shows works once within 1 hour)', { path: `${PAIR_PATH}?code=${shown}` });
   }
 
   const devices = o.devices ?? null;
@@ -344,9 +344,9 @@ export function createPairing(bridgeConfig, o = {}) {
     const warn = cfg.publicUrl ? '' : '<p><strong>BRIDGE_PUBLIC_URL is not set.</strong> The QR points to the local address above, which a phone can only reach inside the same network. Set BRIDGE_PUBLIC_URL to the URL the app should use.</p>';
     const web = pair.webUri ? `<p>Web app: <a href="${esc(pair.webUri)}">open and pair</a></p>` : '';
     const secret = pair.code
-      ? 'This QR code contains a one-time pairing code: it works once and expires in 1 hour. Reload the page for another device.'
+      ? 'This QR code contains a one-time pairing code: it works once and expires in 1 hour.'
       : pair.uri.includes('&t=') ? '<strong>This QR code contains BRIDGE_TOKEN (BRIDGE_PAIR_ADMIN_TOKEN=1)</strong>, a permanent admin credential; do not share a screenshot.' : '';
-    const html = page('Pair HUI+', `<h1>Pair HUI+</h1><p>Open the app, choose "Scan QR code" and scan:</p>${await qrSvg(uri)}<p>Bridge: <code>${esc(effectiveUrl())}</code><br>Name: ${esc(cfg.name)}</p>${warn}<p><a href="${esc(uri)}">Open in the app on this device</a></p>${web}<p>${verdict === 'code' ? 'The page code is now used up. Restart the bridge to open this page remotely again.' : 'Shown because you are on the bridge machine itself.'} ${secret}</p>`);
+    const html = page('Pair HUI+', `<h1>Pair HUI+</h1><p>Open the app, choose "Scan QR code" and scan:</p>${await qrSvg(uri)}<p>Bridge: <code>${esc(effectiveUrl())}</code><br>Name: ${esc(cfg.name)}</p>${warn}<p><a href="${esc(uri)}">Open in the app on this device</a></p>${web}<p>${secret}</p><p>${verdict === 'code' ? 'This page\'s code is used up. For another device run <code>devices add "Phone"</code> on the bridge, or restart the bridge for a new page code.' : 'Shown because you are on the bridge machine itself. Reload the page for another device.'}</p>`);
     return send(res, 200, 'text/html; charset=utf-8', html);
   }
 

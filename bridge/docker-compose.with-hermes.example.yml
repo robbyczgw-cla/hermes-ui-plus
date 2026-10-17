@@ -1,0 +1,72 @@
+# Hermes Agent AND the HUI+ bridge in Docker, on one compose network (docs/SELF-HOSTING.md, "Hermes runs in Docker too").
+# Hermes' API server is reachable only on that network: no service publishes port 8642.
+# Copy to docker-compose.yml in bridge/ of a git checkout. There is no prebuilt bridge image: it is built from here.
+#
+# Once, before the first start (in bridge/):
+#   1. Hermes data folder, owned by you (HERMES_UID/HERMES_GID below), and Hermes' own setup:
+#        mkdir -p hermes-data && printf 'HERMES_UID=%s\nHERMES_GID=%s\n' "$(id -u)" "$(id -g)" > .env
+#        docker compose run --rm hermes setup
+#   2. Hermes' API server: on, listening on the compose network, with a key. Only adds what is missing (Hermes' setup
+#      may already have written a key; a second API_SERVER_KEY line would replace it):
+#        f=hermes-data/.env
+#        grep -q '^API_SERVER_ENABLED=true' $f || echo 'API_SERVER_ENABLED=true' >> $f
+#        grep -q '^API_SERVER_HOST=0.0.0.0' $f || echo 'API_SERVER_HOST=0.0.0.0' >> $f
+#        grep -q '^API_SERVER_KEY=.' $f || echo "API_SERVER_KEY=$(openssl rand -hex 32)" >> $f
+#   3. The bridge settings in .env next to this file: the same key (never printed), Hermes by its service name:
+#        grep '^API_SERVER_KEY=' hermes-data/.env | tail -n 1 | sed 's/^API_SERVER_KEY=/HERMES_API_KEY=/' >> .env
+#        printf 'HERMES_BASE_URL=http://hermes:8642\nBRIDGE_PUBLIC_URL=https://<your-host>.<tailnet>.ts.net\nBRIDGE_PAIRING=1\n' >> .env
+#   4. The skill: into the bridge image (bootstrap message) AND into Hermes (the skill itself; without it every answer
+#      stays plain text):
+#        npm run bundle-skill   # without Node: mkdir -p skill && cp -r ../hermes-skill/hermes-ui ../hermes-skill/bootstrap-system-message.txt skill/
+#        mkdir -p hermes-data/skills && cp -r ../hermes-skill/hermes-ui hermes-data/skills/
+#   5. docker compose up -d --build
+#      docker compose logs bridge   # "[ok] hermes-ui skill installed in Hermes" and the pairing path /bridge/pair?code=...
+services:
+  hermes:
+    image: nousresearch/hermes-agent:latest
+    command: ["gateway", "run"]
+    restart: unless-stopped
+    environment:
+      # files in ./hermes-data stay owned by you instead of the image's own user
+      HERMES_UID: ${HERMES_UID:?set HERMES_UID in .env (step 1)}
+      HERMES_GID: ${HERMES_GID:?set HERMES_GID in .env (step 1)}
+    volumes:
+      - ./hermes-data:/opt/data
+    # no `ports:` on purpose: the API server (8642) is only for the bridge, over this compose network. Publishing it
+    # with API_SERVER_HOST=0.0.0.0 would open Hermes' API (terminal and file tools) to your network.
+
+  bridge:
+    build: .
+    image: hermes-ui-plus-bridge:local
+    restart: unless-stopped
+    depends_on: [hermes]
+    environment:
+      HERMES_BASE_URL: ${HERMES_BASE_URL:-http://hermes:8642}
+      HERMES_API_KEY: ${HERMES_API_KEY:?set HERMES_API_KEY in .env (step 3)}
+      # Hermes' data folder, read-only (volume below): the startup check sees whether the hermes-ui skill is installed
+      # (Hermes 0.21.5 to 0.22.2 cannot list skills over the API), and the bridge lists Hermes profiles ("bots")
+      HERMES_HOME: /hermes-home
+      BRIDGE_TOKEN: ${BRIDGE_TOKEN:-}
+      # The URL your phone uses to reach the bridge (https://... via tailscale serve or another TLS proxy).
+      BRIDGE_PUBLIC_URL: ${BRIDGE_PUBLIC_URL:-}
+      BRIDGE_NAME: ${BRIDGE_NAME:-Hermes}
+      # 1 = pair from another machine: `docker compose logs bridge` shows /bridge/pair?code=XXXX-XXXX. That page code
+      # works once within 10 minutes; the pair link the page shows works once within 1 hour. A new pair link any time:
+      #   docker compose exec bridge node bin/hermes-ui-bridge.mjs devices add "Phone"
+      BRIDGE_PAIRING: ${BRIDGE_PAIRING:-}
+      # Optional web app (PWA): unpack the web bundle into ./web, then uncomment this line and the ./web volume below.
+      # BRIDGE_WEB_DIR: /web
+    ports:
+      - "127.0.0.1:8790:8790"   # loopback only; put TLS in front (tailscale serve --bg 8790, a reverse proxy, ...)
+    volumes:
+      - bridge-data:/var/lib/hermes-ui-bridge
+      - ./hermes-data:/hermes-home:ro
+      # - ./web:/web:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+volumes:
+  bridge-data:

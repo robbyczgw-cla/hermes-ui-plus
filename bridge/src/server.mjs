@@ -23,6 +23,9 @@ import { checkRequestPath } from './paths.mjs';
 import { createStatic, isLandingRequest, serveLanding } from './static.mjs'; // optional web app: BRIDGE_WEB_DIR (src/static.mjs)
 import { createProfiles } from './profiles.mjs'; // Hermes profiles under /p/<name>/ (BRIDGE_PROFILES)
 
+/** Unauthenticated liveness path (`GET /bridge/live` → 200 "ok"): says only that the bridge process answers. */
+export const LIVE_PATH = '/bridge/live';
+
 /** Where device tokens live: BRIDGE_STATE_DIR, else systemd's $STATE_DIRECTORY (first entry), else none. */
 export function deviceStateDir(env) {
   if (/^(0|off|false|no)$/i.test(env.BRIDGE_DEVICE_TOKENS ?? '')) return '';
@@ -52,6 +55,7 @@ export function createServer(env = process.env, o = {}) {
     timeoutMs: config.router.timeoutMs,
     fallback: config.router.fallback,
     fastPathMin: config.router.fastPathMin,
+    mode: config.router.mode,
     cache: new LruCache({ max: config.router.cacheSize, ttlMs: config.router.cacheTtlMs }),
     logger,
   });
@@ -111,6 +115,11 @@ export function createServer(env = process.env, o = {}) {
     if (!checkRequestPath(req.url).ok) {
       res.writeHead(400, { 'content-type': 'application/json', 'x-hermes-ui-bridge': '1' });
       return res.end('{"error":{"message":"Invalid request path","type":"invalid_request_error","code":"invalid_path"}}');
+    }
+    // liveness of the bridge process itself (Docker HEALTHCHECK): no auth, no Hermes call, no log line, no state
+    if (req.url === LIVE_PATH && (req.method === 'GET' || req.method === 'HEAD')) {
+      res.writeHead(200, { 'content-type': 'text/plain', 'cache-control': 'no-store', 'x-hermes-ui-bridge': '1' });
+      return res.end(req.method === 'HEAD' ? undefined : 'ok\n');
     }
     if (deviceAdmin.matches(req)) return void deviceAdmin.handle(req, res).catch((e) => { logger.error('devices failed', { err: e.message }); if (!res.headersSent) res.writeHead(500); res.end(); });
     if (pairing.matches(req)) return pairing.handle(req, res).catch((e) => { logger.error('pairing failed', { err: e.message }); if (!res.headersSent) res.writeHead(500); res.end(); });

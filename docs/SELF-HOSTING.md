@@ -21,13 +21,13 @@ The wizard walks through everything in this guide:
 
 1. **Hermes:** finds `$HERMES_HOME` (default `~/.hermes`), reads `platforms.api_server` from `config.yaml` (host, port, whether a key is set; the key is only read into memory and never printed), calls `/health` and shows the Hermes version. If the API server is off, it prints the exact snippet and restart command and offers to add the block (backup first) only after an explicit "y". It never restarts Hermes.
 2. **Skill:** installs or updates `~/.hermes/skills/hermes-ui` (the old version goes to `~/.hermes/skill-backups/`). If you use Hermes profiles (`/p/<profile>/`), it lists them and asks whether to install there too.
-3. **Optional features:** Web Push (generates VAPID keys). By default the bridge stays a pure pass-through to Hermes and the router is `heuristic` (rule based, no external call). The wizard asks once, default No: "Configure optional direct-provider extras (router, titles, image search, voice)?". Only with a "y" (or `--extras`) does it ask for the extras: image search (Serper or Brave key), voice (Groq, Deepgram) and an LLM router (Claude or Jev, which also switches on generated titles and follow-ups). These call providers directly from the bridge, outside Hermes. Keys are typed with hidden input. Without an image search key, product cards show photos only when Hermes' answer carries one (its extract tool returned the page image); places, food and sights still get Wikipedia photos.
+3. **Optional features:** Web Push (generates VAPID keys and asks for a contact the push services can use: your e-mail address or an https URL; with `--yes` it takes `BRIDGE_PUSH_VAPID_SUBJECT` from the environment, else the bridge's https address). By default the bridge stays a pure pass-through to Hermes and the router is `heuristic` (rule based, no external call). The wizard asks once, default No: "Configure optional direct-provider extras (router, titles, image search, voice)?". Only with a "y" (or `--extras`) does it ask for the extras: image search (Serper or Brave key), voice (Groq, Deepgram) and an LLM router (Claude, Jev or Nace Drex, which also switches on generated titles and follow-ups). These call providers directly from the bridge, outside Hermes. Keys are typed with hidden input. Without an image search key, product cards show photos only when Hermes' answer carries one (its extract tool returned the page image); places, food and sights still get Wikipedia photos.
 4. **Settings:** writes the env file (default `~/.config/hermes-ui-plus-bridge/env`, as root `/etc/hermes-ui-plus-bridge/env`) with mode 0600. Existing values and unknown keys are kept.
 5. **Service:** a systemd user unit (`systemctl --user`, with the hardening options an unprivileged systemd supports), a hardened system unit when run as root (`DynamicUser`, `ProtectSystem=strict`, `ProtectHome`; needs a global install, `npm i -g hermes-ui-plus-bridge`), a launchd agent on macOS, or a compose snippet for Docker (`--service docker`). It starts the service and checks that the bridge answers. Inside a container (Hermes itself runs in Docker or Podman) there is no service manager: the wizard prints the start command, and you run the bridge in that container next to Hermes.
-6. **Network:** with Tailscale running it offers `tailscale serve --bg --https=8790 http://127.0.0.1:8790` and sets `BRIDGE_PUBLIC_URL` to `https://<your-host>.<tailnet>.ts.net:8790`. Without Tailscale it shows the LAN address and warns that plain HTTP is unencrypted; listening on the LAN needs an explicit "y".
-7. **Pairing:** creates a one-time pairing code and prints the QR code, the pair link and, if the bridge serves the web app (`--web-dir`), a web-app link. Without an HTTPS address it also prints a web-app link for a browser on the bridge machine itself (`http://127.0.0.1:8790/#pair?...`); all links share the one code, so only the first one you open works.
+6. **Network:** with Tailscale running it offers `tailscale serve --bg --https=8790 http://127.0.0.1:8790` and sets `BRIDGE_PUBLIC_URL` to `https://<your-host>.<tailnet>.ts.net:8790`. Without Tailscale it shows the LAN address and warns that plain HTTP is unencrypted; listening on the LAN needs an explicit "y". Wrong address detected (for example a container's internal IP)? Pass the right one with `--public-url http://<lan-ip>:8790` (or an `https://` name of your TLS proxy).
+7. **Pairing:** creates a one-time pairing code and prints the QR code, the pair link and, if the bridge serves the web app (`--web-dir`), a web-app link. Without an HTTPS address it also prints a web-app link for a browser on the bridge machine itself (`http://127.0.0.1:8790/#pair?...`); all links share the one code, so only the first one you open works. Running setup again replaces the unused link of the previous run (`devices list` shows one pending setup device, not one per run).
 
-Flags: `--yes` (defaults, no questions), `--json` (report for scripts and agents; implies `--yes`), `--dry-run`, `--env-file`, `--hermes-home`, `--port`, `--https-port`, `--service auto|systemd|launchd|docker|none`, `--no-tailscale`, `--web-dir`, `--profiles <list|all>`, `--no-skill`, `--no-pair`, `--extras`. With `--yes`, the extras are skipped unless you also pass `--extras`; their keys then come from environment variables (`SERPER_API_KEY`, `BRAVE_API_KEY`, `GROQ_API_KEY`, `DEEPGRAM_API_KEY`, `ANTHROPIC_API_KEY`, `TYPESAFE_API_KEY`), never from arguments. Without `--extras` those variables are ignored. Values already in an existing env file are never removed or changed by a re-run. Re-run the wizard to change or update anything; it works in place. Without a terminal (for example `</dev/null`) the questions take their defaults, like `--yes`.
+Flags: `--yes` (defaults, no questions), `--json` (report for scripts and agents; implies `--yes`), `--dry-run`, `--env-file`, `--hermes-home`, `--port`, `--https-port`, `--service auto|systemd|launchd|docker|none`, `--no-tailscale`, `--public-url`, `--web-dir`, `--profiles <list|all>`, `--no-skill`, `--no-pair`, `--extras`. With `--yes`, the extras are skipped unless you also pass `--extras`; their keys then come from environment variables (`SERPER_API_KEY`, `BRAVE_API_KEY`, `GROQ_API_KEY`, `DEEPGRAM_API_KEY`, `ANTHROPIC_API_KEY`, `TYPESAFE_API_KEY`, `NACE_API_KEY`), never from arguments. Without `--extras` those variables are ignored. Values already in an existing env file are never removed or changed by a re-run. Re-run the wizard to change or update anything; it works in place. Without a terminal (for example `</dev/null`) the questions take their defaults, like `--yes`.
 
 `--env-file <file>` must point to an existing file: Node.js itself reads a `--env-file` argument and stops with `node: <file>: not found` before the wizard runs. For a new location create it first, for example `install -m 600 /dev/null ~/bridge.env`.
 
@@ -37,7 +37,7 @@ The rest of this guide explains each piece and the manual setup.
 
 ## 1. Prerequisites
 
-- **Hermes Agent v0.21 or newer** with its API server enabled: in the Hermes environment file `~/.hermes/.env` set `API_SERVER_ENABLED=true` and a long random `API_SERVER_KEY` (for example `openssl rand -hex 32`), or in `~/.hermes/config.yaml` under `platforms.api_server` (`enabled: true`, and `host`, `port`, `key` under `extra:`). The API server is part of the **Hermes gateway**, so the gateway must run: `hermes gateway install` sets it up as a service (`hermes gateway status` to check; `hermes gateway restart` after a config change). In Docker or WSL without systemd, run `hermes gateway run` in the foreground or from your supervisor. The API server listens on `127.0.0.1:8642` by default, which is what you want when the bridge runs on the same machine.
+- **Hermes Agent v0.21 or newer** with its API server enabled: in the Hermes environment file `~/.hermes/.env` set `API_SERVER_ENABLED=true` and a long random `API_SERVER_KEY` (for example `openssl rand -hex 32`), or in `~/.hermes/config.yaml` under `platforms.api_server` (`enabled: true`, and `host`, `port`, `key` under `extra:`). The API server is part of the **Hermes gateway**, so the gateway must run: `hermes gateway install` sets it up as a service (`hermes gateway status` to check; `hermes gateway restart` after a config change). In Docker or WSL without systemd, run `hermes gateway run` in the foreground or from your supervisor; after a config change stop it with Ctrl+C and start it again (`hermes gateway restart` only manages the service and can stop a foreground gateway without starting it again). Add the two settings only if they are missing: a second `API_SERVER_KEY` line replaces the first, and a client that copied the first one gets HTTP 401 (the README's step 1 has a snippet that checks first). Hermes itself in Docker: see [Hermes runs in Docker too](#hermes-runs-in-docker-too). The API server listens on `127.0.0.1:8642` by default, which is what you want when the bridge runs on the same machine.
 - **Node.js 22+** or Docker on the machine that runs the bridge. The Hermes installer brings its own private Node.js, which is not on your `PATH`, so you may have no `npx` at all. Distribution packages are often too old (Ubuntu 24.04's `nodejs` is 18; the bridge then stops with "needs Node.js 22 or newer"). Install a current LTS from <https://nodejs.org/en/download>, for example with the NodeSource packages or nvm, then check `node --version`.
 - The `hermes-ui` skill installed on Hermes (see [../hermes-skill/INSTALL.md](../hermes-skill/INSTALL.md)). Without it, Hermes answers in plain Markdown and you lose the interactive components.
 
@@ -85,7 +85,7 @@ The wizard above does all of this for you. By hand: create an env file. These ar
 | `BRIDGE_IMAGE_PROXY_CACHE_MB` | no | Disk cache of the image proxy in `<BRIDGE_STATE_DIR>/image-cache`. Default `200`, `0` = no cache. Entries live 24 h |
 | `BRIDGE_IMAGE_PROXY_RATE_LIMIT` | no | Uncached image proxy fetches per device and minute. Default `120` |
 | `ANTHROPIC_API_KEY` | no | Key for the Claude extras. The key alone enables nothing: the Claude router needs `ROUTER_BACKEND=claude`, titles and follow-ups need `BRIDGE_META=on`. So a key exported in your shell is never used by accident |
-| `ROUTER_BACKEND` | no | `heuristic` (default: rule based, no external call), `claude`, `jev`, `openai` (OpenAI-compatible, with `BRIDGE_ROUTER_BASE_URL`), `off`, or a fallback chain like `jev,claude`. Direct-provider extra unless `heuristic`/`off` |
+| `ROUTER_BACKEND` | no | `heuristic` (default: rule based, no external call), `claude`, `jev`, `nace` (Nace.AI Drex, with `NACE_API_KEY`; `NACE_MODEL` default `drex-v2.0`, `NACE_BASE_URL` for a self-hosted Drex), `openai` (OpenAI-compatible, with `BRIDGE_ROUTER_BASE_URL`), `off`, or a fallback chain like `jev,claude` or `nace,claude`. A leading `heuristic` (`heuristic,jev`) is heuristic-first: the model is only asked when no rule fired or the message is not German, English or Spanish. Direct-provider extra unless `heuristic`/`off`. Jev and Drex receive the same data as the Claude router: the last few messages, shortened |
 | `BRIDGE_META` | no | `on` enables generated chat titles and follow-up suggestions via Claude (needs `ANTHROPIC_API_KEY`). Default: off |
 | `GROQ_API_KEY`, `OPENAI_API_KEY`, `DEEPGRAM_API_KEY`, `ELEVENLABS_API_KEY` | no | Direct-provider extra, voice: speech-to-text and text-to-speech. A feature without a key is simply off |
 
@@ -118,9 +118,29 @@ npm run bundle-skill              # copies the skill + bootstrap message into ./
 cp docker-compose.example.yml docker-compose.yml
 printf 'HERMES_BASE_URL=http://host.docker.internal:8642\nHERMES_API_KEY=<key>\nBRIDGE_PUBLIC_URL=https://<your-host>.<tailnet>.ts.net\nBRIDGE_PAIRING=1\n' > .env
 docker compose up -d --build
-docker compose logs bridge        # shows the pairing page path /bridge/pair?code=XXXX-XXXX (valid 10 minutes)
+docker compose logs bridge        # "[ok] hermes-ui skill installed in Hermes" and the pairing page path /bridge/pair?code=XXXX-XXXX
 docker compose exec bridge node bin/hermes-ui-bridge.mjs devices add "Phone"   # or: a pair link + QR code right away
 ```
+
+**Install the skill into Hermes, too.** The image carries only the bootstrap message that tells Hermes to use the
+skill; the skill itself (`hermes-skill/hermes-ui`) must be in Hermes' skills folder. Without it every answer is plain
+text with a tool error ("Skill 'hermes-ui' not found"), and the bridge log says `hermes-ui skill is NOT installed in
+Hermes`. No Hermes restart is needed; start a new chat afterwards. Hermes 0.21.5 to 0.22.2 cannot list their skills over
+the API (HTTP 500), so for this check the bridge reads Hermes' skills folder: uncomment the read-only Hermes home volume
+and `HERMES_HOME` in the compose file (otherwise the log says "could not check").
+
+```bash
+# Hermes on the host:
+mkdir -p ~/.hermes/skills && cp -r ../hermes-skill/hermes-ui ~/.hermes/skills/
+# Hermes in Docker with its data in ~/.hermes (mounted as /opt/data; the folder belongs to the container's user):
+sudo mkdir -p ~/.hermes/skills && sudo cp -r ../hermes-skill/hermes-ui ~/.hermes/skills/
+sudo chown -R --reference ~/.hermes ~/.hermes/skills/hermes-ui
+# check: the skill is listed
+hermes skills list | grep hermes-ui      # Docker: docker exec <hermes-container> hermes skills list | grep hermes-ui
+```
+
+Page code and pair link have different lifetimes: the `/bridge/pair?code=…` page code from the log works once within
+10 minutes; the pair link (QR) that page shows, and every link from `devices add`, works once within 1 hour.
 
 With `BRIDGE_PAIRING=1` open the logged `/bridge/pair?code=…` path on the bridge URL (for example
 `https://<your-host>.<tailnet>.ts.net/bridge/pair?code=XXXX-XXXX`). Opening a bare `/bridge/pair` from the Docker host does
@@ -134,7 +154,28 @@ mkdir -p web && tar -xzf hermes-ui-plus-web-<version>.tar.gz -C web --strip-comp
 docker compose up -d
 ```
 
-The image is built locally, runs as an unprivileged user, and keeps its state in a volume. It contains the bootstrap system message that makes Hermes use the app's interactive components; the build stops with a clear message if `npm run bundle-skill` was not run (without Node on the host: `mkdir -p skill && cp -r ../hermes-skill/hermes-ui ../hermes-skill/bootstrap-system-message.txt skill/`). At startup the bridge prints a `skill` line; it says `MISSING` and logs a warning if the message could not be found. The port is published on loopback only, which is intentional. Hermes must listen on an address the container can reach (`host.docker.internal` is mapped to the host in the example compose file).
+The image is built locally, runs as an unprivileged user, and keeps its state in a volume. It contains the bootstrap system message that makes Hermes use the app's interactive components; the build stops with a clear message if `npm run bundle-skill` was not run (without Node on the host: `mkdir -p skill && cp -r ../hermes-skill/hermes-ui ../hermes-skill/bootstrap-system-message.txt skill/`). At startup the bridge prints a `skill` line; it says `MISSING` and logs a warning if the message could not be found. The port is published on loopback only, which is intentional. Hermes must listen on an address the container can reach (`host.docker.internal` is mapped to the host in the example compose file). The image's healthcheck calls `GET /bridge/live`, which needs no token and answers only "ok".
+
+### Hermes runs in Docker too
+
+Three things differ from a Hermes installed on the host (the official image `nousresearch/hermes-agent`, data folder
+mounted at `/opt/data`):
+
+1. **The API server listens on 127.0.0.1 inside the Hermes container** by default, so neither the host nor another
+   container reaches it, and a published `-p 8642:8642` leads nowhere. Set `API_SERVER_HOST=0.0.0.0` in Hermes' `.env`.
+   Then do **not** publish port 8642: with `0.0.0.0` that would open Hermes' API (terminal and file tools) to your network.
+2. **Put Hermes and the bridge on one Docker network** and point the bridge at Hermes by name:
+   `HERMES_BASE_URL=http://hermes:8642` (the service or container name). `docker-compose.with-hermes.example.yml` in
+   `bridge/` runs both services that way, with the setup steps in its header. A Hermes you started with `docker run`:
+   `docker network create hui && docker network connect hui <hermes-container>`, and attach the bridge to the `hui` network.
+3. **The data folder belongs to the container's user**, so `printf … >> ~/.hermes/.env` fails with "Permission
+   denied". Edit Hermes' `.env` through the container (README step 1 has the `docker exec` snippet that only adds
+   missing lines), or start Hermes with `-e HERMES_UID=$(id -u) -e HERMES_GID=$(id -g)` so the files stay yours (the
+   compose file above does that). The skill goes into `<data folder>/skills/hermes-ui` (see "Install the skill" above).
+
+After a change to Hermes' `.env`, restart the Hermes container (`docker restart <hermes-container>`). Check from the
+bridge: `docker compose logs bridge` shows `[ok] Hermes reachable`, `[ok] API key accepted` and
+`[ok] hermes-ui skill installed in Hermes`.
 
 ## 3. Reach the bridge from your devices
 
@@ -176,7 +217,7 @@ If you do not want Tailscale, use the bridge on your home network only.
 Every pairing QR or link carries a **one-time pairing code**, never a token. The app trades the code for its own device token when you tap **Connect** on its connection screen (`POST /bridge/pair/redeem`); scanning or opening the link alone sends nothing. The code works once and expires after one hour; a link that leaks after that (chat, screenshot, log) is worthless. The admin token (`BRIDGE_TOKEN`) is never put into a QR with the defaults. Pairing needs the state directory (device list); without it the bridge refuses to pair instead of handing out the admin token.
 
 - **From the bridge machine:** start with `--pair`, or open `http://127.0.0.1:8790/bridge/pair` in a browser on that machine. In the app: **Scan QR code**.
-- **From another machine or Docker:** set `BRIDGE_PAIRING=1`. The log prints a one-time code (valid 10 minutes, usable once; 5 wrong codes lock pairing for 10 minutes) and a path like `/bridge/pair?code=XXXX-XXXX`. Open `<BRIDGE_PUBLIC_URL>/bridge/pair?code=...`.
+- **From another machine or Docker:** set `BRIDGE_PAIRING=1`. The log prints a one-time page code and a path like `/bridge/pair?code=XXXX-XXXX`. Open `<BRIDGE_PUBLIC_URL>/bridge/pair?code=...`. The page code works once within 10 minutes (5 wrong codes lock pairing for 10 minutes); the QR / pair link the page then shows works once within 1 hour, like every pair link. For another device run `devices add` or restart the bridge for a new page code.
 - **Pair link instead of QR:** the QR content is a `hermesuiplus://pair?...` link. The pairing page shows it, so you can open it on the same device.
 
 Manage devices:
@@ -228,6 +269,9 @@ BRIDGE_PUSH_VAPID_PUBLIC_KEY=<publicKey>
 BRIDGE_PUSH_VAPID_PRIVATE_KEY_FILE=/path/to/vapid-private.key
 BRIDGE_PUSH_VAPID_SUBJECT=mailto:<your address>
 ```
+
+The subject is the contact push services see (an e-mail address or an https URL). Without it the bridge uses its own
+`https://` address (`BRIDGE_PUBLIC_URL`), else the placeholder `mailto:admin@localhost`, which reaches nobody.
 
 Then enable notifications in the web app's settings (the permission prompt needs a tap). On iPhone and iPad, Web Push works only for the app installed to the home screen (iOS 16.4+). Push endpoints are operated by the browser vendor (Google, Mozilla, Apple), but the payload is encrypted end to end to your device.
 
@@ -287,14 +331,15 @@ First steps: `npx hermes-ui-plus-bridge setup --dry-run` lists what is missing, 
 | `npx: command not found`, or "needs Node.js 22 or newer" | Install a current Node.js LTS (section 1). The Node.js inside the Hermes install is private and not on your `PATH`. |
 | `node: <file>: not found` right after starting a command with `--env-file` | The file does not exist yet; Node.js checks `--env-file` itself. Create it (`install -m 600 /dev/null <file>`) or leave the option out. |
 | `curl http://127.0.0.1:8642/health` fails | The Hermes gateway is not running or the API server is off: `hermes gateway status`, then section 1. |
-| Bridge warns "Hermes not reachable at ..." | `HERMES_BASE_URL` correct? From Docker, `127.0.0.1` is the container itself: use `host.docker.internal`. Is the API server enabled? Run the `curl` from section 1. |
-| Hermes returns 401 | `HERMES_API_KEY` must equal Hermes' `API_SERVER_KEY`. |
+| Bridge warns "Hermes not reachable at ..." | Is the gateway running? `hermes gateway status`. Started with `hermes gateway run` in a terminal, it must still run there (`hermes gateway restart` can stop it without starting it again). `HERMES_BASE_URL` correct? From Docker, `127.0.0.1` is the container itself: use `host.docker.internal`, or the Hermes container's name on a shared network with `API_SERVER_HOST=0.0.0.0` ([Hermes runs in Docker too](#hermes-runs-in-docker-too)). Is the API server enabled? Run the `curl` from section 1. |
+| Hermes returns 401 | `HERMES_API_KEY` must equal Hermes' `API_SERVER_KEY`. More than one `API_SERVER_KEY` line in Hermes' `.env` (`grep -c '^API_SERVER_KEY=' ~/.hermes/.env`)? The last one counts; delete the others and copy that one. |
+| Bridge warns "hermes-ui skill is NOT installed in Hermes" | Install the skill into Hermes' skills folder: `npx hermes-ui-plus-bridge setup` on the Hermes host, or by hand ([With Docker](#with-docker), [INSTALL.md](../hermes-skill/INSTALL.md)). No restart needed; start a new chat. "could not check" means Hermes could not list its skills (HTTP 500 on Hermes 0.21.5 to 0.22.2) and the bridge cannot see Hermes' skills folder: check with `hermes skills list`, or give the bridge read access (Docker: mount Hermes' data folder read-only and set `HERMES_HOME`, as `docker-compose.with-hermes.example.yml` does). |
 | App cannot connect | Is Tailscale on, on the phone? Does the `https://<your-host>.<tailnet>.ts.net` address open in the phone's browser? Does `BRIDGE_PUBLIC_URL` match it exactly? A wrong `Host` is refused with status 421. |
-| Pairing page answers 403 ("wrong or expired pairing code") or asks for a code | Remote pairing needs `BRIDGE_PAIRING=1`. Behind a proxy, requests are not "local" on purpose. Use the one-time code from the log. |
+| Pairing page answers 403 ("wrong or expired pairing code") or asks for a code | Remote pairing needs `BRIDGE_PAIRING=1`. Behind a proxy, requests are not "local" on purpose. Use the one-time code from the log: it works once, within 10 minutes of the bridge start. After that run `devices add` (or restart the bridge for a new page code). |
 | QR expired / "Invalid or expired pairing code" | Run `devices add`, reload the pairing page or restart with `--pair` for a new one. A pairing code works once and expires after one hour. |
 | Pairing page answers 503 "pairing needs a device store" | The bridge has no state directory: set `BRIDGE_STATE_DIR` (and do not set `BRIDGE_DEVICE_TOKENS=0`). |
 | Web app: "Refused to … Content Security Policy" in the browser console | Report it as a bug; meanwhile `BRIDGE_WEB_CSP=report-only`. |
-| Answers are plain text, no components | Is the skill installed and visible (`hermes skills list`)? Is the bridge sending its bootstrap message (it does by default)? Start a new conversation after installing the skill. |
+| Answers are plain text, no components | Is the skill installed and visible (`hermes skills list`)? The bridge's startup log has a line about it. Is the bridge sending its bootstrap message (it does by default)? Start a new conversation after installing the skill. Docker: the bridge image does not install the skill into Hermes ([With Docker](#with-docker)). |
 | Web app: network error in the browser console | CORS: add the web app's origin to `BRIDGE_CORS_ORIGINS`. |
 | No voice buttons | No speech provider key set on the bridge. |
 | Uploads rejected | File too large or type not allowed (`BRIDGE_UPLOAD_MAX_BYTES`, `BRIDGE_UPLOAD_ALLOWED_MIME`); 507 = upload folder full (`BRIDGE_UPLOAD_QUOTA_MB`); 429 = too many uploads at once. |

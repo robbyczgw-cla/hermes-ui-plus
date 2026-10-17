@@ -95,14 +95,31 @@ test('bin --strict with an unreachable Hermes: exit 1 with a reason', async () =
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('pairHint: BRIDGE_PAIRING=1 points to /bridge/pair?code=..., Docker to devices add via compose exec', async () => {
+test('pairHint: BRIDGE_PAIRING=1 points to /bridge/pair?code=..., the official image to devices add via compose exec', async () => {
   const { pairHint } = await import('../src/cli.mjs');
   const plain = pairHint({ port: 8790 });
   assert.match(plain, /restart with --pair/); assert.match(plain, /http:\/\/127\.0\.0\.1:8790\/bridge\/pair on this machine/);
-  const pairing = pairHint({ port: 8790, pairingEnabled: true, inContainer: true });
+  const pairing = pairHint({ port: 8790, pairingEnabled: true, inImage: true, inContainer: true });
   assert.match(pairing, /\/bridge\/pair\?code=/);
   assert.match(pairing, /docker compose exec bridge node bin\/hermes-ui-bridge\.mjs devices add "Phone"/);
+  assert.match(pairing, /10 minutes.*1 hour/); // both lifetimes, each named for what it is
   assert.doesNotMatch(pairing, /127\.0\.0\.1/);
-  const docker = pairHint({ port: 8790, inContainer: true });
+  const docker = pairHint({ port: 8790, inImage: true, inContainer: true });
   assert.match(docker, /docker compose exec/); assert.doesNotMatch(docker, /on this machine/);
+});
+
+// fresh-user test 0.1.1 (#8): npx inside some container (not the official image) got the compose hint
+test('pairHint: npx inside a container that is not the bridge image gets the npx command, never compose', async () => {
+  const { pairHint, inBridgeImage } = await import('../src/cli.mjs');
+  const h = pairHint({ port: 8790, inContainer: true, cli: 'npx hermes-ui-plus-bridge', envFile: '/home/u/bridge.env' });
+  assert.equal(h, 'Pair the app: run npx hermes-ui-plus-bridge devices add "Phone" --env-file /home/u/bridge.env (a one-time pair link, valid 1 hour)');
+  assert.doesNotMatch(pairHint({ port: 8790, pairingEnabled: true, inContainer: true }), /docker compose/);
+  assert.equal(inBridgeImage({ HUI_BRIDGE_IMAGE: '1' }), true);
+  assert.equal(inBridgeImage({}), false);
+  const dockerfile = readFileSync(new URL('../Dockerfile', import.meta.url), 'utf8');
+  assert.match(dockerfile, /^\s+HUI_BRIDGE_IMAGE=1 \\$/m, 'the image marks itself');
+  // healthcheck: unauthenticated liveness path, so the log has no 401 line every 30 s (#10)
+  const hc = dockerfile.split('HEALTHCHECK')[1];
+  assert.match(hc, /\/bridge\/live'/);
+  assert.doesNotMatch(hc, /voice\/config/);
 });

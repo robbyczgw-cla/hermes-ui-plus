@@ -44,39 +44,39 @@ button.sec{background:transparent;color:var(--h-accent);border:1px solid var(--h
 - Bounded chart containers (`height:220px`), no re-creating charts on each input (update data instead).
 - Animation: one loop, pause/reset available, off under `prefers-reduced-motion`.
 - Untrusted/strings from data: `textContent`, never `innerHTML` interpolation.
-- Never send a message on load/timer/input-change; only on explicit tap, label such buttons as actions ("Frage senden").
+- Never send a message on load/timer/input-change; only on explicit tap, label such buttons as actions ("Send question"). All visible text (labels, buttons, messages, aria labels) in the user's language.
 
 ## Template: calculator (only for a custom/visual tool the native `calc` node cannot express; otherwise use `calc`)
 ```html
 <style>/* base style */</style>
 <div class="w card">
-  <label for="a">Betrag (€)</label><input id="a" type="number" inputmode="decimal" value="10000" min="0">
-  <label for="r" style="margin-top:10px">Zins p. a. (%)</label><input id="r" type="number" inputmode="decimal" value="3.5" min="0" step="0.1">
-  <label for="y" style="margin-top:10px">Laufzeit (Jahre): <b id="yv">10</b></label><input id="y" type="range" min="1" max="30" value="10">
-  <p class="muted">Formel: A = K (1 + p)^n, jährliche Verzinsung, ohne Steuern.</p>
+  <label for="a">Amount (€)</label><input id="a" type="number" inputmode="decimal" value="10000" min="0">
+  <label for="r" style="margin-top:10px">Interest p.a. (%)</label><input id="r" type="number" inputmode="decimal" value="3.5" min="0" step="0.1">
+  <label for="y" style="margin-top:10px">Term (years): <b id="yv">10</b></label><input id="y" type="range" min="1" max="30" value="10">
+  <p class="muted">Formula: A = K (1 + p)^n, compounded yearly, before tax.</p>
   <div class="out" id="res" role="status">-</div>
-  <div class="row" style="margin-top:8px"><button type="button" id="reset" class="sec">Zurücksetzen</button><button type="button" id="ask">Ergebnis erklären</button></div>
+  <div class="row" style="margin-top:8px"><button type="button" id="reset" class="sec">Reset</button><button type="button" id="ask">Explain the result</button></div>
 </div>
 <script>
-const $=id=>document.getElementById(id), nf=new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'});
+const $=id=>document.getElementById(id), nf=new Intl.NumberFormat(undefined,{style:'currency',currency:'EUR'});
 const def={a:10000,r:3.5,y:10};
 function calc(){const K=$('a').valueAsNumber,p=$('r').valueAsNumber/100,n=+$('y').value;$('yv').textContent=n;
- if(!Number.isFinite(K)||!Number.isFinite(p)||K<0||p<0){$('res').textContent='Bitte gültige Werte eingeben.';return null}
+ if(!Number.isFinite(K)||!Number.isFinite(p)||K<0||p<0){$('res').textContent='Please enter valid values.';return null}
  const A=K*Math.pow(1+p,n);$('res').textContent=nf.format(A);return A}
 ['a','r','y'].forEach(i=>$(i).addEventListener('input',calc));
 $('reset').onclick=()=>{$('a').value=def.a;$('r').value=def.r;$('y').value=def.y;calc()};
-$('ask').onclick=()=>{const A=calc();if(A!==null&&window.hermes)window.hermes.send('Erkläre mir dieses Ergebnis: '+$('a').value+' € bei '+$('r').value+' % über '+$('y').value+' Jahre = '+nf.format(A))};
+$('ask').onclick=()=>{const A=calc();if(A!==null&&window.hermes)window.hermes.send('Explain this result: '+$('a').value+' € at '+$('r').value+' % over '+$('y').value+' years = '+nf.format(A))};
 calc();
 </script>
 ```
 
 ## Template: Chart.js (only when native `chart` cannot do it, e.g. mixed/scatter/interactive)
 ```html
-<div class="w card"><div style="position:relative;height:220px"><canvas id="c" role="img" aria-label="Verlauf der Werte"></canvas></div></div>
+<div class="w card"><div style="position:relative;height:220px"><canvas id="c" role="img" aria-label="Values over time"></canvas></div></div>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <script>
 const cs=getComputedStyle(document.documentElement),col=n=>cs.getPropertyValue(n).trim();
-new Chart(document.getElementById('c'),{type:'line',data:{labels:['Q1','Q2','Q3'],datasets:[{label:'Umsatz',data:[3,5,4],borderColor:col('--h-accent'),tension:.3}]},
+new Chart(document.getElementById('c'),{type:'line',data:{labels:['Q1','Q2','Q3'],datasets:[{label:'Revenue',data:[3,5,4],borderColor:col('--h-accent'),tension:.3}]},
  options:{maintainAspectRatio:false,plugins:{legend:{labels:{color:col('--h-text')}}},scales:{x:{ticks:{color:col('--h-muted')}},y:{ticks:{color:col('--h-muted')}}}}});
 </script>
 ```

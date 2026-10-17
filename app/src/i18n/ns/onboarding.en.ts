@@ -265,8 +265,8 @@ export const onboarding = {
     demoNote: 'Demo: no real replies. You can set up a real connection any time in Settings.',
   },
   starters: {
-    chart: { title: 'Show a chart', subtitle: 'Weather for the next 7 days', prompt: 'Show me the weather for the next 7 days as a chart.' },
-    compare: { title: 'Compare', subtitle: 'two smartphones in a table', prompt: 'Compare two current smartphones in a table: camera, battery, price.' },
+    chart: { title: 'Show a chart', subtitle: 'Weather in Berlin, next 7 days', prompt: 'Show me the weather in Berlin for the next 7 days as a chart.' },
+    compare: { title: 'Compare', subtitle: 'iPhone and Pixel in a table', prompt: 'Compare the current iPhone and Google Pixel base models in a table: camera, battery, price.' },
     calculator: { title: 'Build me a calculator', subtitle: 'for a loan payment', prompt: 'Build me a calculator for the monthly loan payment.' },
     capabilities: { title: 'What can you do?', subtitle: 'Tools and abilities', prompt: 'What can you do? Show me your most important tools.' },
   },

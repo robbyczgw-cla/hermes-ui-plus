@@ -560,7 +560,7 @@ export function createBridgeHandler(config, deps) {
     if (req.method === 'GET' && path === '/bridge/status') {
       return sendJson(res, 200, {
         ok: true,
-        router: router ? { kind: config.router.kind, model: router.backend?.model ?? 'heuristic-v1', timeoutMs: router.timeoutMs, cacheSize: router.cache?.size ?? 0 } : null,
+        router: router ? { kind: config.router.kind, mode: router.mode, model: router.backend?.model ?? 'heuristic-v1', timeoutMs: router.timeoutMs, cacheSize: router.cache?.size ?? 0 } : null,
         hint: config.hint.mode,
         bootstrap: Boolean(config.bootstrap),
         memorySessions: memory?.size ?? 0,

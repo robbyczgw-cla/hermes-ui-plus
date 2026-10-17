@@ -6,20 +6,24 @@
 //     BRIDGE_ROUTER_MODEL=openai/gpt-oss-20b node eval/run.mjs --backend heuristic,openai
 //   node eval/run.mjs --backend openai --models modelA,modelB   (same endpoint, several models)
 //   TYPESAFE_API_KEY=... node eval/run.mjs --backend jev
+//   NACE_API_KEY=... node eval/run.mjs --backend nace --models drex-v1.5,drex-v2.0   (default: NACE_MODEL or drex-v2.0)
 //   ANTHROPIC_API_KEY=... node eval/run.mjs --backend heuristic,anthropic
 //     default matrix: claude-haiku-5-5 low/adaptive, medium/adaptive, low/disabled (latency baseline)
 //     custom: --anthropic claude-haiku-5-5:low:adaptive,claude-sonnet-5-5:low:between_tools
-// Options: --cases <file[,file]> --sample <n> --concurrency <n> --budget <ms> --fastpath <conf|0> --json <out.json> --only <tag> --skip <tag> --verbose
+// Re-score a saved --json run offline (no API calls): --replay <run.json> (its model results replay per case id).
+// Every model backend also reports heuristic-first (ROUTER_BACKEND=heuristic,<model>) via the real router.
+// Options: --cases <file[,file]> --sample <n> --concurrency <n> --rpm <n> (pace request starts; hosted rate limits) --budget <ms> --fastpath <conf|0> --json <out.json> --only <tag> --skip <tag> --verbose
 // Never prints API keys. Prompts are printed only for misclassified cases (they are test data).
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { routingContext } from '../src/router/context.mjs';
+import { createRouter } from '../src/router/router.mjs';
 import { ROUTE_FORMATS, normalizeDecision } from '../src/router/taxonomy.mjs';
 import { classifyHeuristic } from '../src/router/backends/heuristic.mjs';
-import { createAnthropicBackend, createHeuristicBackend, createJevBackend, createOpenAIBackend } from '../src/router/backends/index.mjs';
+import { createAnthropicBackend, createHeuristicBackend, createJevBackend, createNaceBackend, createOpenAIBackend } from '../src/router/backends/index.mjs';
 
 function args(argv) {
-  const o = { backend: 'heuristic', cases: fileURLToPath(new URL('./cases.jsonl', import.meta.url)), concurrency: 4, budget: 2000, json: '', only: '', skip: '', models: '', sample: '', anthropic: 'claude-haiku-5-5:low:adaptive,claude-haiku-5-5:medium:adaptive,claude-haiku-5-5:low:disabled', verbose: false, timeout: 15000, fastpath: 0.85 };
+  const o = { backend: 'heuristic', cases: fileURLToPath(new URL('./cases.jsonl', import.meta.url)), concurrency: 4, budget: 2000, json: '', only: '', skip: '', models: '', sample: '', anthropic: 'claude-haiku-5-5:low:adaptive,claude-haiku-5-5:medium:adaptive,claude-haiku-5-5:low:disabled', verbose: false, timeout: 15000, fastpath: 0.85, rpm: 0, replay: '' };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     const key = a.replace(/^--/, '');
@@ -31,8 +35,12 @@ function args(argv) {
   o.budget = Number(o.budget);
   o.timeout = Number(o.timeout);
   o.fastpath = Number(o.fastpath);
+  o.rpm = Number(o.rpm);
   return o;
 }
+
+// USD per 1M input tokens (Jev and Drex bill input only; docs.typesafe.ai/models, drex.nace.ai/docs reference/pricing, 2026-10-16). Cost estimate only.
+const INPUT_PRICE_PER_M = { 'jev-latest': 0.042, 'drex-v1.0': 0.04, 'drex-v1.5': 0.05, 'drex-v2.0': 0.06, 'drex-latest': 0.06 };
 
 const pct = (n, d) => (d ? `${((100 * n) / d).toFixed(1)}%` : 'n/a');
 function quantile(xs, q) {
@@ -56,6 +64,14 @@ async function mapLimit(items, n, fn) {
 function buildBackends(o) {
   const env = process.env;
   const list = [];
+  if (o.replay) {
+    // Saved results keyed by case id; decide() is not used, evalBackend reads `replay` directly.
+    for (const r of JSON.parse(readFileSync(o.replay, 'utf8'))) {
+      if (r.backend === 'heuristic') list.push(createHeuristicBackend());
+      else list.push({ id: r.backend, model: r.model, replay: new Map(r.results.map((x) => [x.id, x])), decide: async () => { throw new Error('replay only'); } });
+    }
+    return list;
+  }
   for (const name of o.backend.split(',').map((s) => s.trim()).filter(Boolean)) {
     if (name === 'heuristic') list.push(createHeuristicBackend());
     else if (name === 'openai') {
@@ -74,35 +90,73 @@ function buildBackends(o) {
         list.push(createAnthropicBackend({ model, effort: /** @type {any} */ (effort), thinking: /** @type {any} */ (thinking) }));
       }
     } else if (name === 'jev') list.push(createJevBackend({ apiKey: env.TYPESAFE_API_KEY ?? '', model: env.JEV_MODEL }));
+    else if (name === 'nace') {
+      for (const model of (o.models || env.NACE_MODEL || 'drex-v2.0').split(',').map((s) => s.trim()).filter(Boolean)) {
+        list.push(createNaceBackend({ apiKey: env.NACE_API_KEY ?? '', model, baseUrl: env.NACE_BASE_URL || undefined }));
+      }
+    }
     else throw new Error(`unknown backend ${name}`);
   }
   return list;
 }
 
 async function evalBackend(backend, cases, o) {
+  // --rpm: space request starts evenly (e.g. Drex free tier: 120 RPM, 8 in flight -> --rpm 100 --concurrency 4).
+  let nextStart = 0;
+  const pace = async () => {
+    if (!o.rpm || backend.id === 'heuristic') return;
+    const now = Date.now();
+    const at = Math.max(now, nextStart);
+    nextStart = at + 60_000 / o.rpm;
+    if (at > now) await new Promise((ok) => setTimeout(ok, at - now));
+  };
   const results = await mapLimit(cases, backend.id === 'heuristic' ? 1 : o.concurrency, async (k) => {
     const turns = routingContext(k.messages);
+    await pace();
     const t0 = performance.now();
     let d = null;
     let error = '';
-    try {
-      const raw = await backend.decide(turns, { signal: AbortSignal.timeout(o.timeout) });
-      d = normalizeDecision(raw, { model: backend.model, ms: performance.now() - t0 });
-    } catch (err) {
-      error = String(/** @type {any} */ (err)?.message ?? err).slice(0, 120);
+    let inputTokens = 0;
+    let ms;
+    if (backend.replay) {
+      const x = backend.replay.get(k.id);
+      if (!x) throw new Error(`replay: no result for ${k.id}`);
+      if (x.got) d = normalizeDecision({ format: x.got, component: x.component, confidence: x.confidence ?? 0.5, reason: 'replay' }, { model: backend.model, ms: x.ms });
+      else error = x.error ?? 'replay: no decision';
+      ms = x.ms;
+    } else {
+      try {
+        const raw = await backend.decide(turns, { signal: AbortSignal.timeout(o.timeout) });
+        inputTokens = raw?.usage?.inputTokens ?? 0;
+        d = normalizeDecision(raw, { model: backend.model, ms: performance.now() - t0 });
+      } catch (err) {
+        error = String(/** @type {any} */ (err)?.message ?? err).slice(0, 120);
+      }
+      ms = performance.now() - t0;
     }
-    const ms = performance.now() - t0;
-    // What the bridge would actually emit: heuristic fallback on error or budget overrun.
     const overBudget = backend.id !== 'heuristic' && ms > o.budget;
-    // Bridge behaviour: heuristic fast path (conf >= fastpath), else model, else heuristic fallback.
+    // What the bridge would actually emit, through the real router: a stub replays this case's model answer (or its
+    // error / budget overrun). Model-first = fast path (heuristic conf >= --fastpath) else model; heuristic-first =
+    // ROUTER_BACKEND=heuristic,<model>. Both fall back to the heuristic on errors, as in the bridge.
     const h = classifyHeuristic(turns);
-    const fast = backend.id !== 'heuristic' && o.fastpath > 0 && h.confidence >= o.fastpath;
-    const effective = fast || !d || overBudget ? h : d;
-    const effMs = fast ? 0 : Math.min(ms, o.budget);
-    return { k, d, error, ms, overBudget, effective, effMs, fast };
+    let effective = h, effMs = 0, fast = false, hf = null, hfMs = 0, hfAsked = false;
+    if (backend.id !== 'heuristic') {
+      const replayed = async (mode) => {
+        let asked = false;
+        const stub = { id: backend.id, model: backend.model, decide: async () => { asked = true; if (!d || overBudget) throw new Error(error || 'over budget'); return d; } };
+        const out = await createRouter({ backend: stub, mode, fastPathMin: o.fastpath, cache: null, timeoutMs: o.budget }).route(turns);
+        return { out, asked, addedMs: asked ? Math.min(ms, o.budget) : 0 };
+      };
+      const mf = await replayed('model-first');
+      ({ out: effective, addedMs: effMs } = mf);
+      fast = !mf.asked;
+      ({ out: hf, asked: hfAsked, addedMs: hfMs } = await replayed('heuristic-first'));
+    }
+    return { k, d, error, ms, overBudget, effective, effMs, fast, inputTokens, hf, hfMs, hfAsked };
   });
 
   const n = results.length;
+  let hfLenient = 0;
   let strict = 0, lenient = 0, effLenient = 0, compTotal = 0, compOk = 0, falseVisual = 0, missedVisual = 0, errors = 0, over = 0;
   const confusion = Object.fromEntries(ROUTE_FORMATS.map((f) => [f, Object.fromEntries([...ROUTE_FORMATS, 'ERR'].map((g) => [g, 0]))]));
   const byTag = {};
@@ -117,6 +171,7 @@ async function evalBackend(backend, cases, o) {
     const len = ok.includes(pred);
     if (len) lenient++;
     if (ok.includes(r.effective.format)) effLenient++;
+    if (r.hf && ok.includes(r.hf.format)) hfLenient++;
     if (r.k.component && pred === r.k.expected) {
       compTotal++;
       if (r.d?.component === r.k.component) compOk++;
@@ -135,7 +190,13 @@ async function evalBackend(backend, cases, o) {
   const lat = results.map((r) => r.ms);
   const effLat = results.map((r) => r.effMs);
   const fastCount = results.filter((r) => r.fast).length;
+  const hfAskedCount = results.filter((r) => r.hfAsked).length;
+  const hfLat = results.map((r) => r.hfMs);
+  const inputTokens = results.reduce((a, r) => a + r.inputTokens, 0);
+  const price = INPUT_PRICE_PER_M[backend.label ?? backend.model];
   return {
+    hfLenient, hfAskedCount, hfP50: quantile(hfLat, 0.5), hfP95: quantile(hfLat, 0.95), hfMean: hfLat.reduce((a, b) => a + b, 0) / (n || 1),
+    inputTokens, costUsd: price === undefined ? undefined : (inputTokens * price) / 1e6,
     backend: backend.id, model: backend.label ?? backend.model, n,
     strict, lenient, effLenient, compTotal, compOk, falseVisual, missedVisual, errors, over,
     p50: quantile(lat, 0.5), p95: quantile(lat, 0.95), max: Math.max(...lat),
@@ -152,10 +213,12 @@ function printReport(r, o) {
   if (r.backend !== 'heuristic') {
     console.log(`Effective in bridge (fast path >= ${o.fastpath}: ${r.fastCount}, heuristic fallback on error / >${o.budget} ms): ${pct(r.effLenient, r.n)}   errors: ${r.errors}  over budget: ${r.over}`);
     console.log(`Effective routing latency added (ms): p50 ${r.effP50.toFixed(0)}  p95 ${r.effP95.toFixed(0)}`);
+    console.log(`Heuristic-first (heuristic,${r.backend}): ${pct(r.hfLenient, r.n)}   model asked ${r.hfAskedCount}/${r.n}   added ms p50 ${r.hfP50.toFixed(0)}  p95 ${r.hfP95.toFixed(0)}  mean ${r.hfMean.toFixed(0)}`);
   }
   console.log(`Component hint accuracy (when format right): ${r.compOk}/${r.compTotal} = ${pct(r.compOk, r.compTotal)}`);
   console.log(`Unwanted visual (expected text): ${r.falseVisual}   Missed visual (predicted text): ${r.missedVisual}`);
   console.log(`Latency ms: p50 ${r.p50.toFixed(1)}  p95 ${r.p95.toFixed(1)}  max ${r.max.toFixed(1)}`);
+  if (r.inputTokens) console.log(`Input tokens: ${r.inputTokens} (${(r.inputTokens / r.n).toFixed(0)}/call)${r.costUsd === undefined ? '' : `  cost ~$${r.costUsd.toFixed(5)} (~$${((1000 * r.costUsd) / r.n).toFixed(4)} per 1000 calls)`}`);
 
   const cols = [...ROUTE_FORMATS, 'ERR'].filter((g) => ROUTE_FORMATS.some((f) => r.confusion[f][g]));
   const abbr = (s) => s.slice(0, 5);
@@ -199,13 +262,13 @@ async function main() {
   }
   if (reports.length > 1) {
     console.log('\nSummary');
-    console.log(`${'backend/model'.padEnd(40)}${'strict'.padStart(8)}${'lenient'.padStart(9)}${'effect.'.padStart(9)}${'p50'.padStart(8)}${'p95'.padStart(8)}`);
+    console.log(`${'backend/model'.padEnd(40)}${'strict'.padStart(8)}${'lenient'.padStart(9)}${'effect.'.padStart(9)}${'h-first'.padStart(9)}${'p50'.padStart(8)}${'p95'.padStart(8)}`);
     for (const r of reports) {
-      console.log(`${`${r.backend}/${r.model}`.slice(0, 39).padEnd(40)}${pct(r.strict, r.n).padStart(8)}${pct(r.lenient, r.n).padStart(9)}${pct(r.effLenient, r.n).padStart(9)}${r.p50.toFixed(0).padStart(8)}${r.p95.toFixed(0).padStart(8)}`);
+      console.log(`${`${r.backend}/${r.model}`.slice(0, 39).padEnd(40)}${pct(r.strict, r.n).padStart(8)}${pct(r.lenient, r.n).padStart(9)}${pct(r.effLenient, r.n).padStart(9)}${(r.backend === 'heuristic' ? '-' : pct(r.hfLenient, r.n)).padStart(9)}${r.p50.toFixed(0).padStart(8)}${r.p95.toFixed(0).padStart(8)}`);
     }
   }
   if (o.json) {
-    writeFileSync(o.json, JSON.stringify(reports.map((r) => ({ ...r, misses: r.misses.map((m) => ({ id: m.k.id, expected: m.k.expected, got: m.d, error: m.error, ms: m.ms })), results: r.results.map((x) => ({ id: x.k.id, expected: x.k.expected, accept: x.k.accept, got: x.d?.format, component: x.d?.component, ms: Math.round(x.ms), fast: x.fast, error: x.error || undefined })) })), null, 2));
+    writeFileSync(o.json, JSON.stringify(reports.map((r) => ({ ...r, misses: r.misses.map((m) => ({ id: m.k.id, expected: m.k.expected, got: m.d, error: m.error, ms: m.ms })), results: r.results.map((x) => ({ id: x.k.id, expected: x.k.expected, accept: x.k.accept, got: x.d?.format, component: x.d?.component, confidence: x.d?.confidence, ms: Math.round(x.ms), fast: x.fast, error: x.error || undefined, hf: x.hf ? x.hf.format : undefined, hfAsked: x.hfAsked || undefined })) })), null, 2));
     console.log(`\nwrote ${o.json}`);
   }
 }

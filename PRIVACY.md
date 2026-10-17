@@ -34,7 +34,7 @@ By default the bridge only passes your messages to your Hermes and calls no othe
 
 | Extra | Provider | What is sent |
 |---|---|---|
-| Model router (`ROUTER_BACKEND`) | Anthropic (Claude) or Jev / TypeSafe, or an OpenAI-compatible endpoint you configure | the last few messages, shortened, to pick an answer format |
+| Model router (`ROUTER_BACKEND`) | Anthropic (Claude), Jev / TypeSafe, Drex / Nace.AI, or an OpenAI-compatible endpoint you configure | the last few messages, shortened, to pick an answer format |
 | Chat titles and follow-up suggestions (`BRIDGE_META=on`) | Anthropic (Claude) | the first exchange of a chat |
 | Image search | Serper or Brave | search terms |
 | Voice | Groq, OpenAI (speech-to-text); Deepgram, ElevenLabs, OpenAI (text-to-speech) | dictation audio, text to be read aloud |

@@ -37,7 +37,7 @@ export function loadConfig(env = process.env, o = {}) {
   const allowNoAuth = bool(env.BRIDGE_ALLOW_NO_AUTH, false);
   if (!env.BRIDGE_TOKEN && !allowNoAuth) throw new Error('BRIDGE_TOKEN is required (or BRIDGE_ALLOW_NO_AUTH=1 for local dev)');
 
-  // ROUTER_BACKEND: one backend or a fallback chain, e.g. "jev,claude". The heuristic is always
+  // ROUTER_BACKEND: one backend or a fallback chain, e.g. "jev,claude" or "nace,claude". The heuristic is always
   // the final fallback. Aliases: claude = anthropic. BRIDGE_ROUTER is accepted as a synonym.
   // Model routers are a direct-provider extra and only run when ROUTER_BACKEND names them: a provider key that merely
   // exists in the environment (e.g. ANTHROPIC_API_KEY exported in the user's shell) never turns one on.
@@ -45,9 +45,12 @@ export function loadConfig(env = process.env, o = {}) {
   if (!routerKind) routerKind = 'heuristic';
   const chain = routerKind.split(/[,>]/).filter(Boolean).map((k) => (k === 'claude' ? 'anthropic' : k));
   for (const k of chain) {
-    if (!['anthropic', 'openai', 'heuristic', 'jev', 'off'].includes(k)) throw new Error(`ROUTER_BACKEND entries must be jev|claude|openai|heuristic|off, got ${k}`);
+    if (!['anthropic', 'openai', 'heuristic', 'jev', 'nace', 'off'].includes(k)) throw new Error(`ROUTER_BACKEND entries must be jev|nace|claude|openai|heuristic|off, got ${k}`);
   }
-  if (chain.length > 1 && chain.some((k) => k === 'off' || k === 'heuristic')) throw new Error('ROUTER_BACKEND chain may only contain jev|claude|openai (heuristic is always the last fallback)');
+  // `heuristic` leading a chain = heuristic-first mode ("heuristic,jev"): the model is only asked when no heuristic
+  // rule fired or the language is not de/en/es. Anywhere else heuristic/off make no sense (heuristic is always last).
+  const heuristicFirst = chain.length > 1 && chain[0] === 'heuristic';
+  if (chain.length > 1 && chain.slice(heuristicFirst ? 1 : 0).some((k) => k === 'off' || k === 'heuristic')) throw new Error('ROUTER_BACKEND chain may only contain jev|nace|claude|openai, optionally led by heuristic (heuristic-first)');
   routerKind = chain.join(',');
   const effort = (env.ROUTER_EFFORT || env.BRIDGE_ROUTER_EFFORT || 'low').toLowerCase();
   if (!['low', 'medium', 'high'].includes(effort)) throw new Error('ROUTER_EFFORT must be low|medium|high');
@@ -103,6 +106,7 @@ export function loadConfig(env = process.env, o = {}) {
     router: {
       kind: routerKind,
       chain,
+      mode: /** @type {'model-first'|'heuristic-first'} */ (heuristicFirst ? 'heuristic-first' : 'model-first'),
       baseUrl: env.BRIDGE_ROUTER_BASE_URL || '',
       apiKey: env.BRIDGE_ROUTER_API_KEY || '',
       model: env.BRIDGE_ROUTER_MODEL || '',
@@ -118,6 +122,10 @@ export function loadConfig(env = process.env, o = {}) {
       fallback: /** @type {'heuristic'|'neutral'} */ (env.BRIDGE_ROUTER_FALLBACK === 'neutral' ? 'neutral' : 'heuristic'),
       jevApiKey: env.TYPESAFE_API_KEY || '',
       jevModel: env.JEV_MODEL || 'jev-latest',
+      jevBaseUrl: env.JEV_BASE_URL || '',
+      naceApiKey: env.NACE_API_KEY || '',
+      naceModel: env.NACE_MODEL || 'drex-v2.0',
+      naceBaseUrl: env.NACE_BASE_URL || '',
       cacheSize: num(env.BRIDGE_ROUTER_CACHE_SIZE, 2000),
       cacheTtlMs: num(env.BRIDGE_ROUTER_CACHE_TTL_MS, 3600_000),
       contextMaxChars: num(env.BRIDGE_CONTEXT_MAX_CHARS, 2000),

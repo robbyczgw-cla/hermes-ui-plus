@@ -93,7 +93,7 @@ export const chat = {
       checklist: {
         title: 'Einkaufsliste',
         subtitle: 'Zum Abhaken',
-        prompt: 'Ich koche heute Abend für vier Personen. Mach mir eine Einkaufsliste zum Abhaken.',
+        prompt: 'Ich koche heute Abend Lasagne für vier Personen. Mach mir eine Einkaufsliste zum Abhaken.',
       },
       agenda: {
         title: 'Wochenendplan',
@@ -103,7 +103,7 @@ export const chat = {
       compare: {
         title: 'Abwägen',
         subtitle: 'Bahn oder Flug?',
-        prompt: 'Hilf mir zu entscheiden: Bahn oder Flug von Hamburg nach München? Frag mich zuerst, was mir wichtig ist.',
+        prompt: 'Hilf mir zu entscheiden: Bahn oder Flug von Hamburg nach München? Wäge Preis, Reisezeit und CO₂ ab und empfiehl eins.',
       },
       chart: {
         title: 'Als Diagramm',

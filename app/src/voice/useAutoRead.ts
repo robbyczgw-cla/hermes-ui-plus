@@ -17,6 +17,7 @@ import type { LiveReader } from './streamRead';
 import type { VoiceConn } from './types';
 import { answerText } from '../hermes/progressNotes';
 import type { ToolEvent } from '../hermes/types';
+import { freshest, liveMessages } from '../hermes/liveMessages';
 
 /** Structural subset of hermes ChatMessage. */
 export type SpeakableMessage = { id: string; role: string; text: string; status: string; tools?: ToolEvent[] };
@@ -32,7 +33,15 @@ export function useAutoRead(messages: readonly SpeakableMessage[], conn: VoiceCo
     connRef.current = conn;
   });
   /** the answer being read while it streams */
-  const live = useRef<{ id: string; reader: LiveReader; speech: LiveSpeech | null } | null>(null);
+  const live = useRef<LiveRead | null>(null);
+  /** hand the newly stable sentences of the live-read answer `lm` to the speaker */
+  const feed = (cur: LiveRead, lm: SpeakableMessage) => {
+    // stopped / failed turn: what plays already finishes, the rest is not added
+    const pieces = lm.status === 'streaming' || lm.status === 'done' ? cur.reader.push(lm) : [];
+    const text = pieces.join('');
+    if (text && !cur.speech) cur.speech = speakLive({ id: lm.id, conn: connRef.current, t, locale }, text);
+    else if (text) cur.speech?.append(text);
+  };
 
   useEffect(() => {
     // streaming updates only look at the changed messages (statusTrack.ts)
@@ -47,11 +56,8 @@ export function useAutoRead(messages: readonly SpeakableMessage[], conn: VoiceCo
     const cur = live.current;
     const lm = cur ? (last?.id === cur.id ? last : messages.find((m) => m.id === cur.id)) : undefined;
     if (cur && lm && enabled) {
-      // stopped / failed turn: what plays already finishes, the rest is not added
-      const pieces = lm.status === 'streaming' || lm.status === 'done' ? cur.reader.push(lm) : [];
-      const text = pieces.join('');
-      if (text && !cur.speech) cur.speech = speakLive({ id: lm.id, conn: connRef.current, t, locale }, text);
-      else if (text) cur.speech?.append(text);
+      // the live store may be ahead of the committed list: the reader never gets an older text than it had
+      feed(cur, freshest(lm));
       if (lm.status !== 'streaming') {
         cur.speech?.end();
         live.current = null;
@@ -66,7 +72,19 @@ export function useAutoRead(messages: readonly SpeakableMessage[], conn: VoiceCo
     const text = toRead?.tools?.length ? answerText({ ...toRead, role: 'assistant', status: 'done', tools: toRead.tools }) : toRead?.text;
     if (enabled && toRead && text?.trim()) void speak({ id: toRead.id, text, conn: connRef.current, t, locale });
   }, [messages, enabled, t, locale]);
+
+  // between list commits the live-read answer streams on in the live store (hermes/liveMessages.ts): read those ticks
+  useEffect(() => {
+    const cur = live.current;
+    if (!cur || !enabled) return;
+    return liveMessages.subscribe(cur.id, () => {
+      const lm = liveMessages.get(cur.id);
+      if (lm && live.current === cur) feed(cur, lm);
+    });
+  }, [messages, enabled, t, locale]);
 }
+
+type LiveRead = { id: string; reader: LiveReader; speech: LiveSpeech | null };
 
 /** an answer first seen streaming with more text than this was joined mid-stream (chat opened): read at the end */
 const LIVE_JOIN_MAX = 400;

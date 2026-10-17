@@ -9,12 +9,13 @@ npm. Building details are in [BUILD.md](BUILD.md); the leak scanners in [LEAK-GU
 |---|---|---|
 | Git tag | `v<version>` (equals the app's `versionName`, e.g. `v0.1.0-alpha.1`) | release step 4 |
 | Android APK (arm64-v8a, release key) | `hermes-ui-plus-<version>.apk` + `hermes-ui-plus-<version>.apk.sha256` | `scripts/build-apk.sh release`, `scripts/package-apk.sh` |
+| Optional: universal APK (arm64-v8a + x86_64) | `hermes-ui-plus-<version>-universal.apk` + `.apk.sha256` | `release.sh --build --universal-apk` (step 5) |
 | Web app (PWA) bundle | `hermes-ui-plus-web-<version>.tar.gz` + `.tar.gz.sha256` | `scripts/build-web.sh`, `scripts/package-web.sh` |
 | Bridge | npm `hermes-ui-plus-bridge@<version>` with dist-tag **`latest`** | `npm publish` in `bridge/` |
 | Release notes | the version's section of [CHANGELOG.md](../CHANGELOG.md) | |
 
 The `.sha256` files are in `sha256sum -c` format (relative file name), so users verify with
-`sha256sum -c hermes-ui-plus-<version>.apk.sha256` next to the download. Upload **exactly one APK** per release:
+`sha256sum -c hermes-ui-plus-<version>.apk.sha256` next to the download. Upload **exactly one APK** per release (the optional universal APK of step 5 is the only exception):
 Obtainium picks the APK from the release assets.
 
 The maintainers cut releases with a script in their source repository that runs the steps below in this order (dry run by default, every publishing step behind its own flag). Everything it calls is in this repository, so a fork can follow the same steps by hand.
@@ -81,6 +82,23 @@ VERSION=<version> scripts/package-apk.sh   # -> dist/release/hermes-ui-plus-<ver
 match `HERMES_CERT_SHA256` (BUILD.md "Release signing"). `package-apk.sh` checks signer, app id and `versionName`
 again, refuses `-debugsigned` test builds, runs the release gate (`scripts/scan-artifact.sh`) and writes the checksum.
 The certificate fingerprint published in README.md must match.
+
+**Optional universal APK.** The arm64 APK does not start on x86_64 Android emulators or x86 ChromeOS devices, not even
+with their ARM translation (SoLoader looks for `lib/x86_64`; fresh-user test of 0.1.1). A second APK with both ABIs
+runs there. It costs one more full build (a full build takes about 8 to 9 minutes on the build host) and is larger
+(native libraries for both ABIs), so it is an extra asset, not the default APK:
+
+```
+HUI_BUILD_NUMBER=<build number of the arm64 APK> ABIS=arm64-v8a,x86_64 FLAVOR=hermes scripts/build-apk.sh release
+VERSION=<version> ASSET_SUFFIX=-universal APK=dist/latest-hermes-release-arm64-v8a+x86_64.apk scripts/package-apk.sh
+# -> dist/release/hermes-ui-plus-<version>-universal.apk + .sha256
+```
+
+`release.sh --build --universal-apk` runs both lines (same build number as the arm64 APK) and uploads the asset with
+`--github-release`. It is off by default because a release with two APKs makes Obtainium ask which one to install.
+Before the first release that carries it: tell Obtainium users in README.md to set the app's "Filter APKs by regular
+expression" to `^(?!.*-universal\.apk$).*\.apk$`, and name the universal APK in README.md's Android section instead of
+only pointing x86 users to the web app.
 
 ### 6. Web bundle
 

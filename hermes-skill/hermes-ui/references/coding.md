@@ -36,8 +36,8 @@ JSON form: `{type:"terminal", id?, title?, command?, cwd?, output?, exitCode?, d
 - `summary` = one line under the title ("Refactored the stream parser"); `agent` = display name for the "<agent> only" filter; `byAgent:false` for a file the agent did not touch (else leave out).
 - Text outside: 1-2 sentences with the gist; the node lists the files.
 
-{"type":"diff","title":"Null-Check ergänzt","files":[{"path":"src/user.ts","status":"modified","hunks":[{"oldStart":4,"newStart":4,"header":"function name","lines":[" function name(u: User) {","-  return u.name.trim();","+  return u?.name?.trim() ?? '';"," }"]}]}]}
-{"type":"diff","files":[{"path":"README.md","language":"md","before":"# Titel\nAlt\n","after":"# Titel\nNeu\n"}],"view":"unified"}
+{"type":"diff","title":"Added a null check","files":[{"path":"src/user.ts","status":"modified","hunks":[{"oldStart":4,"newStart":4,"header":"function name","lines":[" function name(u: User) {","-  return u.name.trim();","+  return u?.name?.trim() ?? '';"," }"]}]}]}
+{"type":"diff","files":[{"path":"README.md","language":"md","before":"# Title\nOld\n","after":"# Title\nNew\n"}],"view":"unified"}
 {"type":"terminal","title":"Tests","command":"npm test","cwd":"app","output":"\u001b[32m✓\u001b[0m parse ok\n\u001b[31m✗\u001b[0m merge fails\n1 failing","exitCode":1,"durationMs":4210}
 {"type":"terminal","command":"git status --short","output":" M src/a.ts\n?? notes.txt\n","exitCode":0}
-{"type":"changes","id":"turn-3","title":"Änderungen","summary":"Parser aufgeräumt","agent":"Pi","files":[{"path":"src/parse.ts","status":"modified","additions":2,"deletions":1,"patch":"@@ -1,2 +1,3 @@\n-const a = 1;\n+const a = 2;\n+const b = 3;\n export {};"},{"path":"src/old.ts","oldPath":"src/legacy.ts","status":"renamed"},{"path":"src/new.ts","status":"added","additions":12,"deletions":0}]}
+{"type":"changes","id":"turn-3","title":"Changes","summary":"Cleaned up the parser","agent":"Pi","files":[{"path":"src/parse.ts","status":"modified","additions":2,"deletions":1,"patch":"@@ -1,2 +1,3 @@\n-const a = 1;\n+const a = 2;\n+const b = 3;\n export {};"},{"path":"src/old.ts","oldPath":"src/legacy.ts","status":"renamed"},{"path":"src/new.ts","status":"added","additions":12,"deletions":0}]}

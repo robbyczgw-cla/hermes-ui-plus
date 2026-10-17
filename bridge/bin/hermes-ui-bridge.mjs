@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // `npx hermes-ui-plus-bridge setup` (wizard) or `npx hermes-ui-plus-bridge [--env-file .env] [--pair]` (bin alias: hermes-ui-bridge) - see ../README.md
 import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { nodeTooOld, nodeTooOldMessage } from '../src/node-version.mjs';
@@ -11,7 +11,7 @@ if (nodeTooOld(process.versions.node)) {
   process.stderr.write(nodeTooOldMessage(process.versions.node, process.execPath));
   process.exit(1);
 }
-const { HELP, parseArgs, prepareEnv, preflight, featureSummary, pairHint } = await import('../src/cli.mjs');
+const { HELP, parseArgs, prepareEnv, preflight, featureSummary, pairHint, inBridgeImage, recheckUntilReachable, checkMark } = await import('../src/cli.mjs');
 
 const here = dirname(fileURLToPath(import.meta.url));
 const out = (s = '') => process.stdout.write(`${s}\n`);
@@ -100,13 +100,22 @@ async function main() {
   if (tokenInfo?.created) out(`  generated a new BRIDGE_TOKEN, stored in ${tokenInfo.file} (mode 0600)`);
   else if (tokenInfo) out(`  using the BRIDGE_TOKEN stored in ${tokenInfo.file}`);
   if (opts.check) {
-    const results = await preflight(config);
-    for (const r of results) out(`  [${r.level === 'ok' ? 'ok' : r.level === 'warn' ? '!!' : 'XX'}] ${r.message}`);
+    const { hermesHome } = await import('../src/setup/detect.mjs');
+    const check = () => preflight(config, { hermesHome: hermesHome(env), hermesHomeExplicit: Boolean(env.HERMES_HOME) });
+    const results = await check();
+    for (const r of results) out(`  [${checkMark(r.level)}] ${r.message}`);
     const fatal = results.filter((r) => r.level === 'error' || (opts.strict && r.fatalWhenStrict));
     if (fatal.length) {
       err(fatal.some((r) => r.level === 'error') ? '  stopping: see the error above'
         : '  stopping (--strict: Hermes must be reachable at start; leave --strict out to start anyway and retry later)');
       process.exit(1);
+    }
+    // not reachable yet (Docker compose starts Hermes and the bridge together): report key and skill once it answers
+    if (results[0]?.fatalWhenStrict) {
+      recheckUntilReachable(check, (lines, ms) => {
+        out(`  startup checks, ${Math.round(ms / 1000)} s after start:`);
+        for (const r of lines) out(`  [${checkMark(r.level)}] ${r.message}`);
+      }, { intervalMs: Number(process.env.HUI_TEST_RECHECK_MS) || 5000 });
     }
   }
   out('  features:');
@@ -127,8 +136,12 @@ async function main() {
       err(`  pairing refused: ${e.message}`);
     }
   } else if (tokenInfo?.created) {
-    const { inContainer } = await import('../src/setup/wizard.mjs');
-    out(`\n  ${pairHint({ port: server.address().port, pairingEnabled: pairing.isEnabled(), inContainer: inContainer() })}`);
+    const { inContainer, cliName, BIN_PATH } = await import('../src/setup/wizard.mjs');
+    const { isNpxCachePath } = await import('../src/setup/service.mjs');
+    out(`\n  ${pairHint({
+      port: server.address().port, pairingEnabled: pairing.isEnabled(), inImage: inBridgeImage(env), inContainer: inContainer(),
+      cli: cliName(isNpxCachePath(BIN_PATH)), envFile: opts.envFiles.length === 1 ? resolve(opts.envFiles[0]) : '',
+    })}`);
   }
   installShutdownHandlers(ctx, stopServices);
 }

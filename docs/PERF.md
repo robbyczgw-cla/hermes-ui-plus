@@ -70,3 +70,45 @@ The older `scripts/perf/stream-ab.sh` (gfxinfo only, `scripts/perf/stream-mock.m
 - Allocation per answer is dominated by the per-network-read path (expo/fetch delivers every chunk as its own event),
   not by the text concatenation (Hermes does not copy the whole string per delta: delivering the deltas coalesced, an
   experiment that was not kept, left the allocation unchanged).
+
+## Streaming render path (live text store)
+
+A streaming tick that only grows the answer's text or reasoning does not touch the list state: `useHermesChat` puts
+the answer's newest state into `hermes/liveMessages.ts` (keyed by message id), and only the answer's live part
+(`LiveAnswer` in `chat/MessageItem.tsx`: tool timeline, interim notes, reasoning, waiting row, status line, segments,
+route skeleton) re-renders through `chat/useLiveMessage.ts`. ChatView, the message list and the answer frame
+re-render when the list is committed (`liveOnlyTick`): every change that is not text / reasoning (start, tools,
+approvals, status / route / connection notes, finish, error, stop), the first text and reasoning, every ``` fence (code
+and interactive blocks), a replaced text, and at least once per second (partial persistence, find, auto-read join).
+For the perf answer that is about 60 commits (45 checkpoints, 14 fences, the first text; replayed in node) instead
+of one per tick (~600 on the emulator).
+
+- The frame runs the text pipeline only for a finished answer and shares its incremental parser state with the live
+  part; the final render feeds only the last tail.
+- The subscription is a plain state update, not `useSyncExternalStore`. A `useSyncExternalStore` version was measured
+  first (series ab1): less JS CPU and allocation, but twice the long JS frames (real: 10 -> 21, blocked +68 %),
+  because those updates render at sync priority in a microtask inside the throttle's animation frame. A state update
+  from the frame callback renders at default priority in its own task, as the list commit did.
+- Auto-read while streaming reads the live ticks too (`voice/useAutoRead.ts`).
+
+A/B on the emulator (ab2, 3 alternating runs per build, median with range):
+
+| scenario | metric | before | after |
+|---|---|---|---|
+| real (13k chars, 46 s) | JS thread CPU | 10.1 s (10.0–10.5) | 9.2 s (8.8–9.3) |
+| | Hermes allocation | 216 MB (216–217) | 146 MB (146–148) |
+| | flush -> commit lag p50 | 9.6 ms (9.3–9.7) | 7.7 ms (7.5–7.8) |
+| | dropped JS frames | 107 (93–108) | 87 (86–89) |
+| history (answer in a 300-message chat) | JS thread CPU | 12.7 s (12.6–13.3) | 10.7 s (10.6–10.9) |
+| | Hermes allocation | 316 MB (314–324) | 173 MB (172–174) |
+| | flush -> commit lag p50 | 11.8 ms (11.6–12.3) | 8.9 ms (8.7–9.0) |
+| huge (39k chars, stress rate) | JS thread CPU | 7.5 s (7.5–7.6) | 7.3 s (7.3–7.4) |
+| | dropped JS frames | 140 (132–144) | 114 (108–123) |
+
+Long JS frames (>= 50 ms) and the scroll scenario stay within noise.
+
+Where the render time went (level 2, React Profiler sums per real-rate answer, 2 runs each; a Profiler also counts
+the nested updates below it): ChatView subtree 3.8 s -> 2.7 s (-29 %; 300-message chat 4.3 s -> 3.1 s), of which
+ChatView's own part ~0.6 s -> ~0.17 s and MessageList's own part ~0.78 s -> ~0.15 s; the Composer rendered 604 times
+per answer before, 76 after. The answer itself (live part + segments) stays at ~2.4 s: that is the text work every tick
+needs.

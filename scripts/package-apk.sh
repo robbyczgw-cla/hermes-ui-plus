@@ -7,6 +7,8 @@
 #   VERSION            release version [bridge/package.json "version"]; must equal the APK's versionName
 #   APK                the release APK [dist/latest-hermes-release.apk]
 #   OUT_DIR            where the asset goes [dist/release]
+#   ASSET_SUFFIX       optional name suffix, e.g. -universal -> hermes-ui-plus-<version>-universal.apk (release.sh
+#                      --universal-apk); lower-case letters and digits after one dash
 #   HERMES_CERT_SHA256 expected signer fingerprint (env or $HUI_PRIVATE_DIR/build.env). REQUIRED: a published APK
 #                      must carry the release certificate that README.md names.
 #   ANDROID_HOME       SDK with build-tools/36.0.0 (apksigner, aapt2) [/var/tmp/hiui-android-sdk, then ~/android/sdk]
@@ -18,6 +20,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APK="${APK:-$ROOT/dist/latest-hermes-release.apk}"
 OUT_DIR="${OUT_DIR:-$ROOT/dist/release}"
 die() { echo "package-apk: $*" >&2; exit 1; }
+ASSET_SUFFIX="${ASSET_SUFFIX:-}"
+[ -z "$ASSET_SUFFIX" ] || [[ "$ASSET_SUFFIX" =~ ^-[a-z0-9]+$ ]] || die "bad ASSET_SUFFIX '$ASSET_SUFFIX' (e.g. -universal)"
 
 [ -f "$APK" ] || die "$APK not found. Build it first: HERMES_KEYSTORE=… scripts/build-apk.sh release"
 APK_REAL="$(realpath "$APK")"
@@ -57,7 +61,7 @@ VCODE="$(sed -n "s/^package: .*versionCode='\([^']*\)'.*/\1/p" <<<"$BADGING")"
 release_gate "$APK_REAL" || die "release gate (scripts/scan-artifact.sh) failed for $APK_REAL; nothing packaged"
 
 mkdir -p "$OUT_DIR"
-NAME="$BRAND_ARTIFACT-$VERSION.apk"
+NAME="$BRAND_ARTIFACT-$VERSION$ASSET_SUFFIX.apk"
 cp "$APK_REAL" "$OUT_DIR/$NAME.tmp.$$"
 mv "$OUT_DIR/$NAME.tmp.$$" "$OUT_DIR/$NAME"
 ( cd "$OUT_DIR" && sha256sum "$NAME" > "$NAME.sha256" )

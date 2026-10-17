@@ -89,6 +89,9 @@ test('website + README: one component count (the protocol node types) and consis
   }
   assert.match(readme, /no remote push in 0\.1/i);
   assert.ok(site.includes('noremotepushin01'), 'website: Android has no remote push in 0.1');
+  // fresh-user test of 0.1.1: the arm64 APK crashed on an x86_64 emulator despite ARM translation; both say so
+  assert.match(readme, /does not start on x86 Android emulators or x86 ChromeOS/);
+  assert.ok(site.includes('doesnotstartonx86emulatorsorx86chromeos'), 'website: APK does not start on x86');
 });
 
 // One canonical "set up with your agent" prompt (docs/SETUP-WITH-AGENT.md): README and website carry it verbatim.

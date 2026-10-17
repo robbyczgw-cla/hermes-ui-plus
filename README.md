@@ -50,16 +50,27 @@ Rules:
 
 ### 1. Turn on the Hermes API server
 
-Once; skip if `grep API_SERVER ~/.hermes/.env` already shows both settings. Add two lines to `~/.hermes/.env`, then start the Hermes gateway, which serves the API:
+Once. The first two lines only add what is missing, so they are safe to run again (Hermes' own setup may already have written a key; a second `API_SERVER_KEY` line would silently replace it). Then start the Hermes gateway, which serves the API:
 
 ```bash
-printf 'API_SERVER_ENABLED=true\nAPI_SERVER_KEY=%s\n' "$(openssl rand -hex 32)" >> ~/.hermes/.env
+grep -qs '^API_SERVER_ENABLED=true' ~/.hermes/.env || echo 'API_SERVER_ENABLED=true' >> ~/.hermes/.env
+grep -qs '^API_SERVER_KEY=.' ~/.hermes/.env || echo "API_SERVER_KEY=$(openssl rand -hex 32)" >> ~/.hermes/.env
 hermes gateway install              # background service (systemd/launchd); in Docker or WSL: hermes gateway run
 hermes gateway status
 curl http://127.0.0.1:8642/health   # should answer {"status": "ok", ...}
 ```
 
-If the gateway was already running, restart it (`hermes gateway restart`).
+**Gateway already running?** It reads the settings only at start. As a service: `hermes gateway restart`. Started with `hermes gateway run` in a terminal: stop it with Ctrl+C and start it again. `hermes gateway restart` only manages the service; it can stop a gateway that runs in a terminal without starting it again, so check with `hermes gateway status`.
+
+**Hermes runs in Docker?** There `~/.hermes` belongs to the container's user, so edit the file through the container, and let the API server listen on the container network (`API_SERVER_HOST=0.0.0.0`; do not publish port 8642). Details and a compose file for Hermes and the bridge together: [Hermes runs in Docker too](docs/SELF-HOSTING.md#hermes-runs-in-docker-too).
+
+```bash
+docker exec <hermes-container> sh -c 'f=/opt/data/.env
+grep -q "^API_SERVER_ENABLED=true" $f || echo API_SERVER_ENABLED=true >> $f
+grep -q "^API_SERVER_HOST=0.0.0.0" $f || echo API_SERVER_HOST=0.0.0.0 >> $f
+grep -q "^API_SERVER_KEY=." $f || echo "API_SERVER_KEY=$(od -An -N32 -tx1 /dev/urandom | tr -d " \n")" >> $f'
+docker restart <hermes-container>
+```
 
 ### 2. Set up the bridge
 
@@ -137,7 +148,7 @@ A QR code or pair link carries a **one-time pairing code**, not a token: the app
 
 ### Install on Android
 
-The APK runs on **64-bit ARM (arm64-v8a) devices with Android 7.0 or newer**, which covers practically every current phone and tablet. There is no 32-bit or x86 build.
+The APK runs on **64-bit ARM (arm64-v8a) devices with Android 7.0 or newer**, which covers practically every current phone and tablet. There is no 32-bit or x86 build: the APK **does not start on x86 Android emulators or x86 ChromeOS devices**, not even with their ARM translation (it closes right away with "HUI+ keeps stopping"). Use the [web app](docs/WEB-APP.md) there.
 
 1. Download `hermes-ui-plus-<version>.apk` and `hermes-ui-plus-<version>.apk.sha256` from [GitHub Releases](https://github.com/robbyczgw-cla/hermes-ui-plus/releases).
 2. Verify the download: `sha256sum -c hermes-ui-plus-<version>.apk.sha256` in the download folder should print `OK`.
@@ -152,7 +163,7 @@ To build from source, see [docs/BUILD.md](docs/BUILD.md).
 
 The app is built against the Hermes Agent API server (v0.21 or newer) and tested with **Hermes v0.22.0**. Two known Hermes issues affect it; neither is caused by this app, and both have upstream fixes in review:
 
-- **`/skills` fails on unpatched Hermes 0.21.5 to 0.22.0.** `GET /v1/skills` answers HTTP 500 there (upstream issue #120831, fix in PR #124861). The app recognises that error, tells you it is a Hermes bug and shows the server's message under "Details"; the skills themselves still work in chats.
+- **`/skills` fails on unpatched Hermes 0.21.5 to 0.22.2.** `GET /v1/skills` answers HTTP 500 there (upstream issue #120831, fix in PR #124861). The app recognises that error, tells you it is a Hermes bug and shows the server's message under "Details"; the skills themselves still work in chats.
 - **Claude answers can arrive in one piece on unpatched Hermes.** With the Claude subscription plugin (a provider that Hermes runs as an external process), Hermes does not stream the answer: it sends the finished text in a single chunk at the end. Upstream PR #124566 lets such providers stream; the plugin has to opt in as well. Any API client sees this, including this app: the answer appears all at once instead of word by word. The app has no workaround for it. Providers that Hermes calls directly (not as an external process) are not affected.
 
 ## Known limitations (alpha)
@@ -164,7 +175,7 @@ The app is built against the Hermes Agent API server (v0.21 or newer) and tested
 - **Web Push works in the web app (PWA)**, including the iPhone/iPad home-screen app (iOS 16.4+). It needs the bridge with Web Push keys (the setup wizard offers them). The macOS app shows native notifications (also with approval buttons) while it is running; it does not use Web Push.
 - **Schnellfrage is experimental:** it needs the `hermes-ui-plus` Hermes plugin, which calls one internal Hermes function (`call_llm`) and may need an update after a Hermes release. Chats never depend on it. In a bot (Hermes profile) chat ⚡ is not offered: the plugin answers for the whole gateway, not per profile.
 - **Slash commands** are handled by the app. Hermes' API server does not interpret them, so an unknown command is sent as plain text.
-- **Hermes issues** (`/skills` on 0.21.5 to 0.22.0, Claude answers arriving in one piece): see [Hermes compatibility](#hermes-compatibility).
+- **Hermes issues** (`/skills` on 0.21.5 to 0.22.2, Claude answers arriving in one piece): see [Hermes compatibility](#hermes-compatibility).
 - **Approvals:** in Hermes "smart" approval mode Hermes auto-approves most commands, so approval cards appear only when Hermes really asks.
 - Plain `http://` works for the Android app. Over plain `http://` on the LAN the web app runs only in a browser tab: installing it, offline use and push need HTTPS (for example `tailscale serve`). `http://127.0.0.1` on the bridge machine itself counts as secure.
 

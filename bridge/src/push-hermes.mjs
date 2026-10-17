@@ -65,7 +65,7 @@ export function loadPushConfig(env) {
   let webpush = null;
   if (env.BRIDGE_PUSH_VAPID_PUBLIC_KEY) {
     const privateKey = env.BRIDGE_PUSH_VAPID_PRIVATE_KEY || readMaybe(env.BRIDGE_PUSH_VAPID_PRIVATE_KEY_FILE);
-    if (privateKey) webpush = { publicKey: env.BRIDGE_PUSH_VAPID_PUBLIC_KEY, privateKey, subject: env.BRIDGE_PUSH_VAPID_SUBJECT || 'mailto:admin@localhost' };
+    if (privateKey) webpush = { publicKey: env.BRIDGE_PUSH_VAPID_PUBLIC_KEY, privateKey, subject: vapidSubject(env) };
   }
   return {
     enabled: bool(env.BRIDGE_PUSH, true),
@@ -463,4 +463,12 @@ export function sessionKey(profile, sessionId) {
 
 function timingSafeEq(a, b) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+/** VAPID contact: BRIDGE_PUSH_VAPID_SUBJECT, else the bridge's own https address, else a placeholder (setup asks for one). */
+export function vapidSubject(env) {
+  const set = (env.BRIDGE_PUSH_VAPID_SUBJECT ?? '').trim();
+  if (set) return set;
+  const pub = (env.BRIDGE_PUBLIC_URL ?? '').trim().replace(/\/+$/, '');
+  return /^https:\/\/[^/\s]+/i.test(pub) ? pub : 'mailto:admin@localhost';
 }

@@ -286,13 +286,13 @@ export const onboarding = {
   starters: {
     chart: {
       title: 'Muéstrame un gráfico',
-      subtitle: 'Tiempo de los próximos 7 días',
-      prompt: 'Muéstrame el tiempo de los próximos 7 días en un gráfico.',
+      subtitle: 'Tiempo en Berlín, próximos 7 días',
+      prompt: 'Muéstrame el tiempo en Berlín de los próximos 7 días en un gráfico.',
     },
     compare: {
       title: 'Compara',
-      subtitle: 'dos smartphones en una tabla',
-      prompt: 'Compara dos smartphones actuales en una tabla: cámara, batería y precio.',
+      subtitle: 'iPhone y Pixel en una tabla',
+      prompt: 'Compara los modelos básicos actuales de iPhone y Google Pixel en una tabla: cámara, batería y precio.',
     },
     calculator: {
       title: 'Hazme una calculadora',

@@ -72,12 +72,20 @@ npm run bundle-skill                # copies the skill + bootstrap message into 
 cp docker-compose.example.yml docker-compose.yml
 printf 'HERMES_BASE_URL=http://host.docker.internal:8642\nHERMES_API_KEY=<key>\nBRIDGE_PUBLIC_URL=https://bridge.example.net\nBRIDGE_PAIRING=1\n' > .env
 docker compose up -d --build
-docker compose logs bridge          # shows the pairing page path /bridge/pair?code=XXXX-XXXX (10 minutes)
-docker compose exec bridge node bin/hermes-ui-bridge.mjs devices add "Phone"   # pair link + QR code
+docker compose logs bridge          # skill check + the pairing page path /bridge/pair?code=XXXX-XXXX (page code: 10 minutes)
+docker compose exec bridge node bin/hermes-ui-bridge.mjs devices add "Phone"   # pair link + QR code (1 hour)
 ```
 
+The image does not install the `hermes-ui` skill into Hermes: copy `hermes-skill/hermes-ui` into Hermes' skills folder
+as well (docs/SELF-HOSTING.md, "With Docker"), else answers stay plain text. The startup log checks it and warns when
+the skill is missing: over `GET /v1/skills`, or (Hermes 0.21.5 to 0.22.2 answer that with HTTP 500) in Hermes' skills
+folder when the bridge can read it (same machine, or `HERMES_HOME` pointing at Hermes' data folder mounted read-only).
+If Hermes is not up yet at start, the checks follow in the log as soon as it answers. Hermes itself in Docker: `docker-compose.with-hermes.example.yml`
+runs both on one network without publishing Hermes' port (docs/SELF-HOSTING.md, "Hermes runs in Docker too").
+
 There is no prebuilt image in 0.1: build it from a checkout as above. The image is `node:22-alpine`, runs as the
-unprivileged `node` user, keeps token and uploads in the volume `/var/lib/hermes-ui-bridge`, and has a healthcheck.
+unprivileged `node` user, keeps token and uploads in the volume `/var/lib/hermes-ui-bridge`, and has a healthcheck
+(`GET /bridge/live`: no token, answers "ok" while the process runs, independent of Hermes).
 For the web app, uncomment `BRIDGE_WEB_DIR: /web` and the `./web:/web:ro` volume in the compose file and unpack the
 web bundle into `./web` (`tar -xzf hermes-ui-plus-web-<version>.tar.gz -C web --strip-components=1`).
 The build fails with a clear message if `skill/` is missing. Without Node on the host, copy it by hand:
@@ -124,8 +132,9 @@ Scanning in-app accepts all three; the scheme only decides which installed app t
   reverse proxy that adds no forwarding headers (plain nginx `proxy_pass`, socat, `ssh -L`) keeps your public host
   name in `Host`, and a DNS-rebinding web page sends its own name, so neither gets the page without a code.
 * From another machine (or Docker): start with `BRIDGE_PAIRING=1`. The log prints a one-time code and the path
-  `/bridge/pair?code=XXXX-XXXX`. The code is valid for 10 minutes and works once. After 5 wrong codes pairing is
-  locked for 10 minutes. Without a valid code no pair code is ever shown.
+  `/bridge/pair?code=XXXX-XXXX`. That page code is valid for 10 minutes and works once; the pair link the page shows
+  works once within 1 hour, like every pair link. After 5 wrong codes pairing is locked for 10 minutes. Without a
+  valid code no pair code is ever shown.
 * With `BRIDGE_PUBLIC_URL` (or `BRIDGE_ALLOWED_HOSTS=name1,name2`) set, requests for any other host name are refused
   (421).
 * **Every QR carries its own one-time pair code, never a token.** Pairing needs a state directory (device list; the

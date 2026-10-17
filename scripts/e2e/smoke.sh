@@ -213,6 +213,10 @@ EMU_PID= MOCK_PID= WATCH_PID=
 teardown() {
   local rc=$?
   trap - EXIT INT TERM HUP
+  # the client side may be gone (ssh dropped, `timeout` on the caller): the first log line below would then SIGPIPE
+  # this shell in the middle of the teardown and leave the mock and the emulator running (seen 2026-10-16: the stale
+  # mock answered the next runs' pairing; scripts/e2e/mockport.test.mjs). Writes may fail, the teardown goes on.
+  trap '' PIPE
   set +e
   log "teardown"
   if [ -n "$EMU_PID" ]; then
@@ -238,6 +242,9 @@ trap 'exit 130' INT TERM HUP
 
 # ── mock ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 command -v node >/dev/null || { echo "node missing on this host" >&2; exit 2; }
+# shellcheck source=mockport.sh
+. "$HERE/mockport.sh"
+if why=$(mock_port_taken "$MOCK_PORT"); then echo "$why; refusing (stop it by its pid, or set E2E_MOCK_PORT)" >&2; exit 2; fi
 node "$HERE/mock.mjs" --port "$MOCK_PORT" > "$OUT/mock.log" 2>&1 9>&- &
 MOCK_PID=$!
 for _ in $(seq 1 50); do curl -fsS "http://127.0.0.1:$MOCK_PORT/__e2e/state" >/dev/null 2>&1 && break; sleep 0.2; done

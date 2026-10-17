@@ -59,11 +59,16 @@ test('preflight: reachable + valid key, bad key, unreachable', async () => {
   await new Promise((r) => mock.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${mock.address().port}`;
   const cfg = (key) => ({ upstream: { baseUrl: base, apiKey: key } });
-  assert.deepEqual((await preflight(cfg('good'))).map((r) => r.level), ['ok', 'ok']);
-  assert.equal((await preflight(cfg('bad'))).at(-1).level, 'error');
-  mock.close();
+  try {
+    // + the skill check: this mock has no /v1/skills (404) and HERMES_BASE_URL is loopback, but no Hermes home is given
+    assert.deepEqual((await preflight(cfg('good'))).map((r) => r.level), ['ok', 'ok', 'info']);
+    const bad = (await preflight(cfg('bad'))).at(-1);
+    assert.equal(bad.level, 'error');
+    assert.match(bad.message, /more than one API_SERVER_KEY line, the last one counts/);
+  } finally { mock.close(); }
   const dead = await preflight({ upstream: { baseUrl: 'http://127.0.0.1:1', apiKey: '' } }, { timeoutMs: 500 });
   assert.equal(dead[0].level, 'warn'); assert.equal(dead[0].fatalWhenStrict, true);
+  assert.match(dead[0].message, /hermes gateway status/); // fresh-user 0.1.1: a foreground gateway killed by `gateway restart`
 });
 
 test('featureSummary reports optional features', () => {
@@ -217,6 +222,7 @@ test('pairing: localhost gets QR page, svg and png with a one-time code (never a
   assert.equal(html.headers['cache-control'], 'no-store');
   assert.match(html.body.toString(), /<svg/);
   assert.match(html.body.toString(), /works once/);
+  assert.match(html.body.toString(), /Reload the page for another device/); // on the bridge machine a reload does issue a new code
   assert.ok(!html.body.toString().includes(bc.token));
   assert.match(p.payload(), /^hermesuiplus:\/\/pair\?u=https%3A%2F%2Fb\.example\.net&c=[A-Za-z0-9_-]{43}&n=Home$/);
   const svg = await call(p, fakeReq('/bridge/pair.svg', { remote: '127.0.0.1' }));
@@ -230,6 +236,11 @@ test('pairing: code is one-time, case/dash tolerant, wrong code 403', async () =
   assert.equal((await call(p, fakeReq('/bridge/pair?code=NOPE-NOPE'))).status, 403);
   const ok = await call(p, fakeReq('/bridge/pair?code=abcdefg2', { remote: '127.0.0.1', headers: { 'x-forwarded-for': '1.1.1.1' } }));
   assert.equal(ok.status, 200); assert.match(ok.body.toString(), /<svg/);
+  // fresh-user 0.1.1 (#10): one consistent sentence, no "reload the page" next to "the code is used up"
+  const text = ok.body.toString();
+  assert.match(text, /This page's code is used up\. For another device run <code>devices add "Phone"<\/code>/);
+  assert.doesNotMatch(text, /Reload the page/);
+  assert.match(text, /works once and expires in 1 hour/);
   assert.equal((await call(p, fakeReq('/bridge/pair?code=ABCD-EFG2'))).status, 403); // used up
 });
 test('pairing: code expires after 10 minutes', async () => {
