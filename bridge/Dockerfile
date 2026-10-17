@@ -3,7 +3,7 @@
 #   docker build -t hermes-ui-plus-bridge .
 # Without Node on the host: mkdir -p skill && cp -r ../hermes-skill/hermes-ui ../hermes-skill/bootstrap-system-message.txt skill/
 # (the state path /var/lib/hermes-ui-bridge keeps its pre-rename name so existing volumes keep working)
-FROM node:22-alpine
+FROM node:25-alpine
 # HUI_BRIDGE_IMAGE=1: this official image; the startup pair hint then says `docker compose exec bridge ...`
 ENV NODE_ENV=production \
     HUI_BRIDGE_IMAGE=1 \
