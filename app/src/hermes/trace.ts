@@ -160,6 +160,7 @@ export function compactTool(t: ToolEvent): ToolEvent {
         url: capString(l.url, 500) ?? '',
         ...(l.age ? { age: capString(l.age, 40) } : {}),
         ...(l.snippet ? { snippet: capString(l.snippet, 300) } : {}),
+        ...(l.failed ? { failed: capString(l.failed, 120) } : {}),
       }));
     }
     out.detail = d;

@@ -8,12 +8,16 @@ import type { ToolEvent } from '../hermes';
 import { formatDuration, toolEmoji } from './format';
 import { describeTool, toolViewText } from './hermesTools';
 import { Icon } from './icons';
+import { hasWebCard } from './webCard';
 import { a11yState } from '../ui/lib/a11yState';
 
 const NATIVE = Platform.OS !== 'web';
 
-/** Compact tool status chips above an assistant answer. Collapses into a summary once all tools are done. */
-export const ToolChips = memo(function ToolChips({ tools }: { tools: ToolEvent[] }) {
+/**
+ * Compact tool status chips above an assistant answer. Collapses into a summary once all tools are done. A finished
+ * web search / extract chip with a parsed result opens the web result card (`onOpenWeb`, WebResultCard.tsx).
+ */
+export const ToolChips = memo(function ToolChips({ tools, onOpenWeb }: { tools: ToolEvent[]; onOpenWeb?: (toolId: string) => void }) {
   const t = useTheme();
   const tr = useT();
   const running = tools.some((x) => x.status === 'running');
@@ -52,7 +56,7 @@ export const ToolChips = memo(function ToolChips({ tools }: { tools: ToolEvent[]
       {showList ? (
         <View style={[styles.list, !running && styles.listBelow]}>
           {tools.map((tool) => (
-            <Chip key={tool.id} tool={tool} />
+            <Chip key={tool.id} tool={tool} onOpen={onOpenWeb && tool.status !== 'running' && hasWebCard(tool) ? onOpenWeb : undefined} />
           ))}
         </View>
       ) : null}
@@ -60,7 +64,7 @@ export const ToolChips = memo(function ToolChips({ tools }: { tools: ToolEvent[]
   );
 });
 
-function Chip({ tool }: { tool: ToolEvent }) {
+function Chip({ tool, onOpen }: { tool: ToolEvent; onOpen?: (toolId: string) => void }) {
   const t = useTheme();
   const tr = useT();
   const { locale } = useLocale();
@@ -96,7 +100,8 @@ function Chip({ tool }: { tool: ToolEvent }) {
   const dur = tool.endedAt && tool.endedAt > tool.startedAt ? formatDuration(tool.endedAt - tool.startedAt, locale) : null;
   // web search chips: "Brave · 5 Treffer" once the stored result was parsed (hermesTools webView)
   const extra = view.kind === 'web' && view.sub ? view.sub : null;
-  return (
+  const a11y = `${toolViewText(view)}: ${running ? tr('chat.toolChips.state.running') : tool.status === 'error' ? tr('chat.toolChips.state.error') : cancelled ? tr('chat.toolTimeline.cancelled') : tr('chat.toolChips.state.done')}`;
+  const chip = (
     <Animated.View
       style={[
         styles.chip, { borderRadius: t.radii.pill },
@@ -106,7 +111,7 @@ function Chip({ tool }: { tool: ToolEvent }) {
           transform: [{ translateY: appear.interpolate({ inputRange: [0, 1], outputRange: [4, 0] }) }],
         },
       ]}
-      accessibilityLabel={`${toolViewText(view)}: ${running ? tr('chat.toolChips.state.running') : tool.status === 'error' ? tr('chat.toolChips.state.error') : cancelled ? tr('chat.toolTimeline.cancelled') : tr('chat.toolChips.state.done')}`}
+      accessibilityLabel={onOpen ? undefined : a11y}
     >
       {view.icon ? <Icon name={view.icon} size={14} color={color} /> : <Text style={t.typography.caption}>{toolEmoji(tool.name, tool.emoji)}</Text>}
       <Animated.Text style={[t.typography.caption, styles.chipText, { color, opacity: pulse }]} numberOfLines={1}>
@@ -118,8 +123,26 @@ function Chip({ tool }: { tool: ToolEvent }) {
       {tool.status === 'done' && !cancelled ? <Icon name="check" size={13} color={t.colors.success} strokeWidth={2.2} /> : null}
       {cancelled ? <Text style={[t.typography.micro, styles.dur, { color: t.colors.subtle }]}>{tr('chat.toolTimeline.cancelled')}</Text> : null}
       {tool.status === 'error' ? <Icon name="alert" size={13} color={t.colors.danger} /> : null}
-      {dur && !running ? <Text style={[t.typography.micro, styles.dur, { color: t.colors.subtle }]}>{dur}</Text> : null}
+      {dur && !running ? (
+        <Text style={[t.typography.micro, styles.dur, { color: t.colors.subtle }]} numberOfLines={1}>
+          {dur}
+        </Text>
+      ) : null}
+      {onOpen ? <Icon name="chevronRight" size={13} color={t.colors.subtle} /> : null}
     </Animated.View>
+  );
+  if (!onOpen) return chip;
+  return (
+    <Pressable
+      onPress={() => onOpen(tool.id)}
+      accessibilityRole="button"
+      accessibilityLabel={a11y}
+      accessibilityHint={tr('hermesTools.webCard.chipHint')}
+      hitSlop={4}
+      style={({ pressed }) => [styles.press, pressed && { opacity: 0.6 }]}
+    >
+      {chip}
+    </Pressable>
   );
 }
 
@@ -131,5 +154,6 @@ const styles = StyleSheet.create({
   listBelow: { marginTop: 6 },
   chip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, maxWidth: '100%' },
   chipText: { fontFamily: FONTS.sans, fontWeight: '500', flexShrink: 1 },
-  dur: { fontVariant: ['tabular-nums'] },
+  dur: { fontVariant: ['tabular-nums'], flexShrink: 0 },
+  press: { maxWidth: '100%' },
 });

@@ -16,6 +16,7 @@ import { PROMPTS, PROMPT_SCENARIO, type PromptKey } from './prompts.ts';
 import { pickScenario, scenarios } from './scenarios.ts';
 import { PATHS_ID, PRODUCTS_ID, QUIZ_ID, SHOPPING_ID, TRAVEL_CHOICE_ID, TRIP_CHOICE_ID } from './scenes-core.ts';
 import { INSTANT_TIMING, runDemoTurn, tokenize } from './transport.ts';
+import { findCitationList } from '../../chat/answers/citations.ts';
 
 const LANGS: DemoLang[] = ['de', 'en', 'es'];
 const LOCALE = { de: 'de-DE', en: 'en-US', es: 'es-ES' } as const;
@@ -166,6 +167,8 @@ test('every scenario replays through the real SSE parser and renders valid hui n
       assert.equal(msg.status, 'done', `${name} ${lang}`);
       assert.ok(msg.text.trim().length > 20, `${name} ${lang}: has an answer`);
       for (const n of nodes(msg)) seen.add(n.type);
+      // a cited answer's closing `[n]` list is shown as the sources block (chat/answers/citations.ts)
+      if (findCitationList(msg.text.replace(/(?:\n*```hui\n[\s\S]*?\n```[ \t]*)+\s*$/, ''))) seen.add('sources');
       for (const seg of parseMessage(msg.text)) if (seg.kind === 'html') assert.ok(seg.complete, `${name} ${lang}: html complete`);
     }
   }
@@ -207,7 +210,7 @@ test('offline and fictional: no photos, maps or web lookups, only example hosts,
     assert.doesNotMatch(out, BRANDS, `brand/private name in: ${out.match(BRANDS)?.[0]}`);
     assert.doesNotMatch(out, PRIVATE, `address in: ${out.match(PRIVATE)?.[0]}`);
     assert.doesNotMatch(out, OFFLINE, `online resource in: ${out.match(OFFLINE)?.[0]}`);
-    for (const url of out.match(/https?:\/\/[^\s"'<>)\]]+/g) ?? []) assert.match(new URL(url).hostname, /^(www\.)?example\.(com|org|net)$/, `only example hosts, got ${url}`);
+    for (const url of out.match(/https?:\/\/[^\s"'<>)\]]+/g) ?? []) assert.match(new URL(url).hostname, /^([a-z0-9-]+\.)?example\.(com|org|net)$/, `only example hosts, got ${url}`);
   }
 });
 
@@ -551,4 +554,32 @@ test('coding scenario: a ```diff fence, a ```terminal fence with its exit line a
   assert.match(String(nodes[0].patch), /^--- a\/src\/cart\/total\.ts/);
   assert.deepEqual([nodes[1].command, nodes[1].exitCode, nodes[1].durationMs], ['npm test', 0, 3900]);
   assert.equal((nodes[2].files as unknown[]).length, 3);
+});
+
+test('web research demo: WSP search + extract carry their results, the card and the cited sources work offline', async () => {
+  const { buildWebCard } = await import('../../chat/webCard.ts');
+  const { withCitationSources } = await import('../../chat/answers/citations.ts');
+  const { withRetrievedSources } = await import('../../chat/answers/webSources.ts');
+  for (const lang of LANGS) {
+    const { msg } = await replay(PROMPTS.webResearch[lang], { lang });
+    assert.deepEqual(msg.tools.map((t) => t.name), ['web_search_plus', 'web_extract_plus'], lang);
+    const [search, extract] = msg.tools;
+    assert.equal(search.detail?.web?.provider, 'brave', lang);
+    assert.equal(search.detail?.links?.length, 5, lang);
+    const card = buildWebCard(msg, search, tr(lang), LOCALE[lang])!;
+    assert.equal(card.rich, true, lang);
+    assert.deepEqual(card.hits.map((h) => h.cited), [1, 2, 3, undefined, undefined], lang);
+    assert.equal(card.facts.find((f) => f.key === 'provider')?.value.startsWith('Brave · '), true, lang);
+    const pages = buildWebCard(msg, extract, tr(lang), LOCALE[lang])!;
+    assert.equal(pages.mode, 'extract', lang);
+    assert.deepEqual(pages.hits.map((h) => h.cited), [1, 3], lang);
+    // the closing list becomes the sources block, joined with the search snippets, nothing marked "not retrieved"
+    const cited = withCitationSources(parseMessage(msg.text));
+    const joined = withRetrievedSources(cited.segments, msg.tools);
+    const src = joined.find((s) => s.kind === 'hui' && (s.node as { type?: string } | undefined)?.type === 'sources') as { node: { items: { snippet?: string; unverified?: true }[] } } | undefined;
+    assert.equal(src?.node.items.length, 3, lang);
+    assert.ok(src?.node.items.every((i) => i.snippet && !i.unverified), lang);
+    // fictional sources only
+    for (const h of card.hits) assert.match(h.domain, /(^|\.)example\.(org|com|net)$/, lang);
+  }
 });

@@ -37,7 +37,7 @@ ALWAYS = ('install', 'pair', 'logcat')
 GROUPS = {
     'core': ('version', 'bots_quick_hidden', 'stream_long', 'stop', 'bots_quick_visible', 'cold_start'),
     'net': ('drop_resume', 'drop_recover', 'airplane', 'force_stop', 'offline_retry', 'refused_retry', 'not_sent'),
-    'ui': ('checklist', 'share_image', 'table_font', 'dark'),
+    'ui': ('checklist', 'share_image', 'table_font', 'dark', 'demo_wsp_card'),
     'bg': ('background',),
     'share': ('share_unpaired', 'share_link', 'share_in_image', 'share_pdf', 'share_cancel', 'share_recreate', 'share_offline'),
 }
@@ -1147,6 +1147,137 @@ class Suite:
         os.makedirs(os.path.join(self.out, 'share'), exist_ok=True)
         return os.path.relpath(d.screenshot_png(os.path.join(self.out, 'share', f'{name}.png')), self.out)
 
+    def c_demo_wsp_card(self):
+        """offline demo, no Hermes: the web research sample answer → its "Web search" timeline row opens the web result
+        card (provider and routing, results with the answer's citation numbers), "Load web page" the pages-read card.
+        English and German, light and dark. App data is cleared afterwards (fresh install for the pairing check)."""
+        prompts = {'en': 'Research jet lag tips for a flight east, with sources.', 'de': 'Recherchiere Jetlag-Tipps mit Quellen'}  # adb input types ASCII only
+        rx = {
+            'en': dict(tech='desc:^Technical details$', close='desc:^Close$', panel='desc:^Tools and activity,', search='desc:^Web search,', pages='desc:^Load web page,', how='text:^How it searched$',
+                       read='text:^How it read the pages$', cited='text:cited in the answer$', sources='text:^3 sources$'),
+            'de': dict(tech='desc:^Technische Details$', close='desc:^Schlie(ß|ss)en$', panel='desc:^Werkzeuge und Ablauf,', search='desc:^Websuche,', pages='desc:^Webseite laden,', how='text:^So wurde gesucht$',
+                       read='text:^So wurde gelesen$', cited='text:in der Antwort zitiert$', sources='text:^3 Quellen$'),
+        }
+        shots, steps, trace = {}, [], []
+        t0, tag = time.time(), 'setup'
+
+        def mark(what):
+            trace.append(f'{time.time() - t0:.1f}s {tag} {what}')
+
+        w, h = d.screen_size()
+
+        def reveal(spec, what, tries=10, min_h=90):
+            """the node for spec once it is fully inside the visible list: clear of the header / demo banner on top and of the
+            composer at the bottom (a row cut off there has bounds, but a tap on its centre hits the banner). Scrolls the list
+            by a moderate swipe in the middle of the screen until it is. A node cut off at the list's edge is a sliver (the
+            panel and the rows are 100-200 px tall), so it must also be at least min_h high."""
+            for _ in range(tries):
+                hits = d.wait_stable(spec, 4)
+                n = d.find(spec, hits) if hits else None
+                banner = [x.b[3] for x in d.dump() if x.text == 'DEMO']
+                top, bottom = (max(banner) + 12 if banner else int(h * 0.16)), int(h * 0.85)
+                if n and n.b[1] >= top and n.b[3] <= bottom and n.h >= min_h:
+                    return n
+                # finger down shows earlier content (the node is above or not in the tree), finger up later content
+                down = not (n and n.b[3] > bottom and n.b[1] > top)
+                d.swipe(w // 2, int(h * (0.45 if down else 0.6)), w // 2, int(h * (0.6 if down else 0.45)), 600)
+                time.sleep(0.6)
+            raise Fail(f'{what} not found fully in view after {tries} scrolls (last {n and n.b})')
+
+        force_stop()
+        d.sh(f'pm clear {PKG}')
+        d.sh(f'pm grant {PKG} android.permission.POST_NOTIFICATIONS')
+        d.sh(f'cmd locale set-app-locales {PKG} --locales en-US')
+        try:
+            launch_any = d.sh(f'cmd package resolve-activity --brief -c android.intent.category.LAUNCHER {PKG}').strip().split('\n')[-1].strip()
+            d.sh(f'am start -n {launch_any}')
+            n = d.wait(S['look_around'], 30)
+            expect(n, 'first-start onboarding without "Try it first (demo)"')
+            d.tap_xy(n.cx, n.cy)
+            end = time.time() + 45
+            while time.time() < end and not d.find(S['input']):
+                ns = d.dump()
+                for key in ('consent', 'later', 'start_chat'):
+                    b = d.find(S[key], ns)
+                    if b and b.enabled:
+                        d.tap_xy(b.cx, b.cy)
+                        steps.append(key)
+                        time.sleep(1.0)
+                        break
+                else:
+                    time.sleep(0.7)
+            expect(d.find(S['input']), f'no composer after the demo onboarding (steps {steps})')
+            for lang, night in (('en', False), ('en', True), ('de', False), ('de', True)):
+                tag, L = f'{lang}-{"dark" if night else "light"}', rx[lang]
+                mark('start')
+                d.sh(f'cmd locale set-app-locales {PKG} --locales {"de-DE" if lang == "de" else "en-US"}')
+                d.sh(f'cmd uimode night {"yes" if night else "no"}')
+                force_stop()
+                launch()
+                new_chat()
+                send(prompts[lang])
+                time.sleep(2)
+                expect(d.wait(S['stop'], 60, gone=True), f'{tag}: the demo answer did not finish')
+                expect(d.wait(L['sources'], 20), f'{tag}: no sources block under the answer')
+                mark('answer done')
+                self.shot(f'wsp-{tag}-answer')
+                # the list ends at the answer's bottom: the tools panel sits above it, scroll up to it
+                panel = reveal(L['panel'], f'{tag}: tools panel')
+                mark(f'panel at {panel.b}')
+                d.tap_xy(panel.cx, panel.cy)
+                time.sleep(0.8)
+                row = reveal(L['search'], f'{tag}: web search row')
+                mark(f'search row at {row.b}')
+                d.tap_xy(row.cx, row.cy)
+                expect(d.wait(L['how'], 10), f'{tag}: the web result card did not open')
+                mark('card open')
+                expect(d.find(L['cited']), f'{tag}: no "cited in the answer" line on the card')
+                expect(d.find('desc:^(Provider|Anbieter): Brave · |text:^Brave · '), f'{tag}: provider line missing')
+                self.shot(f'wsp-{tag}-card-search')
+                # inside the sheet and well above the bottom edge: a swipe that starts low (or is fast) can be taken by the
+                # launcher as the home gesture and sends the app to the background
+                d.swipe(w // 2, int(h * 0.62), w // 2, int(h * 0.38), 700)
+                time.sleep(0.8)
+                expect(d.find(L['close']), f'{tag}: the card is gone after scrolling it (system gesture?)')
+                self.shot(f'wsp-{tag}-card-search-scrolled')
+                # the raw tool facts (tool name, call ID, input JSON) sit behind a closed "Technical details" disclosure
+                expect(not d.find('text:web_search_plus'), f'{tag}: raw tool details are shown without opening "Technical details"')
+                tech = None
+                for _ in range(4):
+                    tech = d.find(L['tech'])
+                    if tech and tech.b[3] < int(h * 0.88):
+                        break
+                    d.swipe(w // 2, int(h * 0.62), w // 2, int(h * 0.38), 700)
+                    time.sleep(0.6)
+                expect(tech, f'{tag}: no "Technical details" disclosure under the card')
+                d.tap_xy(tech.cx, tech.cy)
+                time.sleep(0.8)
+                expect(d.find('text:web_search_plus'), f'{tag}: "Technical details" did not show the tool facts')
+                self.shot(f'wsp-{tag}-card-technical')
+                d.sh('input keyevent 4')
+                expect(d.wait(L['how'], 8, gone=True) and d.find(S['input']), f'{tag}: Back did not close the card (or left the app)')
+                row = reveal(L['pages'], f'{tag}: pages row')
+                d.tap_xy(row.cx, row.cy)
+                expect(d.wait(L['read'], 10), f'{tag}: the pages-read card did not open')
+                self.shot(f'wsp-{tag}-card-pages')
+                shots[tag] = [f'shots/wsp-{tag}-{k}.png' for k in ('answer', 'card-search', 'card-search-scrolled', 'card-pages')]
+                d.sh('input keyevent 4')
+                time.sleep(0.8)
+        except Fail:
+            # the state at the moment of the failure, before the cleanup below throws the app away
+            os.makedirs(os.path.join(self.out, 'shots'), exist_ok=True)
+            self.shot(f'demo_wsp_card-fail-{tag}')
+            with open(os.path.join(self.out, 'shots', f'demo_wsp_card-fail-{tag}-ui.txt'), 'w') as f:
+                f.write('\n'.join(trace) + '\n\n' + '\n'.join(repr(n) for n in d.dump() if n.text or n.desc or n.click or n.rid))
+            raise
+        finally:
+            d.sh('cmd uimode night no')
+            force_stop()
+            d.sh(f'pm clear {PKG}')
+            d.sh(f'pm grant {PKG} android.permission.POST_NOTIFICATIONS')
+            d.sh(f'cmd locale set-app-locales {PKG} --locales en-US')
+        return dict(steps=steps, shots=shots, trace=trace)
+
     def c_share_unpaired(self):
         """first start: the share waits behind onboarding; after "look around" (demo only) the sheet explains pairing,
         "Connect" opens the flow, closing it brings the kept share back. App data is cleared afterwards."""
@@ -1521,6 +1652,7 @@ class Suite:
             self.prepare_device()
             r.meta['device'] = f'{d.sh("getprop ro.product.model").strip()} / Android {d.sh("getprop ro.build.version.release").strip()}'
             r.run('install', 'Clean install', self.c_install, on_fail=self.on_fail)
+            self.check('demo_wsp_card', 'Offline demo: web research answer → web result card + pages-read card (en/de, light/dark)', self.c_demo_wsp_card, needs=('install',))
             self.check('share_unpaired', 'Share before pairing: waits behind onboarding, then "connect first" sheet keeps it', self.c_share_unpaired, needs=('install',))
             r.run('pair', 'Pairing via deep link (one-time code) to the mock', self.c_pair, on_fail=self.on_fail, needs=('install',))
             self.t_paired = time.time()

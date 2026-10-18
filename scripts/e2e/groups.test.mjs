@@ -87,7 +87,7 @@ test('selection: names are validated, --group and --only are a union', opts, () 
   ].join('\n');
   const r = py(['-c', code]);
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /\['airplane', 'checklist', 'dark', 'share_image', 'table_font'\] group ui \+ only airplane/);
+  assert.match(r.stdout, /\['airplane', 'checklist', 'dark', 'demo_wsp_card', 'share_image', 'table_font'\] group ui \+ only airplane/);
   assert.match(r.stdout, /\(None, 'all'\) \(None, 'all'\) \(None, 'all'\)/);
 });
 

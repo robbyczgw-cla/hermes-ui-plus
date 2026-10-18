@@ -158,8 +158,9 @@ def tap(spec, timeout=15.0):
 
 
 def screen_size():
-    m = re.search(r'(\d+)x(\d+)', sh('wm size'))
-    return (int(m[1]), int(m[2])) if m else (1080, 2400)
+    # "Physical size" first, then "Override size" when `wm size WxH` is set (store screenshots): the override is what shows
+    ms = re.findall(r'(\d+)x(\d+)', sh('wm size'))
+    return (int(ms[-1][0]), int(ms[-1][1])) if ms else (1080, 2400)
 
 
 def swipe(x1, y1, x2, y2, ms=300):

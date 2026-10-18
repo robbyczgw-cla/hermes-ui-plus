@@ -103,3 +103,19 @@ test('404 without session_not_found = unsupported server; session_not_found = go
   assert.equal(await c.remove('x'), true); // already gone counts as deleted
   await assert.rejects(c.remove('y'), (e: unknown) => e instanceof HermesError && e.code === 'session_active_turn');
 });
+
+test('Hermes 0.22 lazy tool discovery: a single `tool_call` is the tool it wraps (name, arguments, parsed result)', async () => {
+  const { HERMES_LAZY_TOOL_ROWS } = await import('./webResults.fixtures.ts');
+  const { mapRemoteMessages } = await import('./sessionMapping.ts');
+  const rows = parseMessages({ data: HERMES_LAZY_TOOL_ROWS }, 'f').messages;
+  const call = rows.find((r) => r.id === '6')?.toolCalls?.[0];
+  assert.deepEqual(call, { id: 'toolu_test03', name: 'web_search_plus', arguments: { query: 'free threading guide', count: 3 } });
+  const [, answer] = mapRemoteMessages(rows);
+  assert.deepEqual(answer.tools.map((t) => t.name), ['tool_search', 'tool_describe', 'web_search_plus']);
+  const web = answer.tools[2];
+  assert.equal(web.detail?.web?.provider, 'keenable');
+  assert.equal(web.detail?.links?.length, 1);
+  // several wrapped calls or a malformed wrapper stay as they are
+  const many = parseMessages({ data: [{ id: 9, role: 'assistant', content: '', tool_calls: [{ id: 'm', function: { name: 'tool_call', arguments: '{"calls":[{"name":"a"},{"name":"b"}]}' } }] }] }, 'f');
+  assert.equal(many.messages[0].toolCalls?.[0].name, 'tool_call');
+});

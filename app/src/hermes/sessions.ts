@@ -134,6 +134,21 @@ function parseArgs(v: unknown): unknown {
   }
 }
 
+/**
+ * Hermes 0.22 lazy tool discovery: the model finds a plugin tool with `tool_search` / `tool_describe` and runs it through
+ * `tool_call` with `{calls: [{name, arguments}]}`; the result row carries the inner tool's name. One inner call is
+ * that tool (name + arguments), so chips, the web card and the source join see `web_search_plus`, not `tool_call`.
+ */
+export function unwrapToolCall(call: RemoteToolCall): RemoteToolCall {
+  if (call.name !== 'tool_call' || !isObj(call.arguments)) return call;
+  const calls = call.arguments.calls;
+  if (!Array.isArray(calls) || calls.length !== 1 || !isObj(calls[0])) return call;
+  const inner = calls[0];
+  const name = str(inner.name);
+  if (!name) return call;
+  return { id: call.id, name, arguments: typeof inner.arguments === 'string' ? parseArgs(inner.arguments) : (inner.arguments ?? {}) };
+}
+
 function parseToolCalls(v: unknown): RemoteToolCall[] | undefined {
   let list = v;
   if (typeof list === 'string') list = parseArgs(list);
@@ -144,7 +159,7 @@ function parseToolCalls(v: unknown): RemoteToolCall[] | undefined {
     const fn = isObj(tc.function) ? tc.function : {};
     const name = str(fn.name) ?? str(tc.name) ?? 'tool';
     const id = str(tc.id) ?? str(tc.call_id) ?? `call-${i}`;
-    out.push({ id, name, arguments: parseArgs(fn.arguments ?? tc.arguments) });
+    out.push(unwrapToolCall({ id, name, arguments: parseArgs(fn.arguments ?? tc.arguments) }));
   });
   return out.length ? out : undefined;
 }

@@ -36,7 +36,55 @@ export type ToolEvent = {
   textAt?: number;
 };
 
-export type ToolLink = { title: string; url: string; /** e.g. Claude web search `page_age` */ age?: string; /** search result snippet (untrusted, plain text) */ snippet?: string };
+export type ToolLink = {
+  title: string;
+  url: string;
+  /** e.g. Claude web search `page_age`, WSP `[published 2026-10-14]` */
+  age?: string;
+  /** search result snippet (untrusted, plain text) */
+  snippet?: string;
+  /** extract: the page could not be read (WSP `Error: …` line, clipped) */
+  failed?: string;
+};
+
+/**
+ * Parsed web search / extract result (hermes/webResults.ts), stored with the tool detail. Everything is optional:
+ * generic tools give a count at most, Web Search Plus (WSP) fills in routing, cache and research facts.
+ */
+export type ToolWebMeta = {
+  provider?: string;
+  count?: number;
+  cached?: boolean;
+  /** cache age in seconds (WSP header `cached 42s ago`, JSON `cache_status.age_seconds`) */
+  cacheAgeS?: number;
+  /** true = auto-routed, false = provider chosen explicitly; absent = unknown */
+  auto?: boolean;
+  /** routing confidence (`high` | `medium` | `low`) */
+  confidence?: string;
+  /** query type the router recognised (WSP intent: `news`, `docs`, `academic`, …) */
+  queryType?: string;
+  /** the query asked for recent results (WSP `recency query`) */
+  recency?: boolean;
+  /** requested freshness filter and the providers that applied it */
+  freshness?: { requested: string; appliedBy?: string[]; notApplied?: string[] };
+  /** research mode: pages read in full (header `pages=`, else counted from the source summaries) */
+  research?: { pages: number };
+  /** research mode: providers whose results were merged (header `providers=a,b,c`, WSP 5.1.2) */
+  providers?: string[];
+  /** providers that failed or came back empty before the serving one, in order (header `fallback_from=a,b`, WSP 5.1.2) */
+  fallbackFrom?: string[];
+  /** hit count the tool itself reported (header `results=N`); `count` follows it when present */
+  reportedCount?: number;
+  /** header `key=value` bits this app does not know: kept for forward compatibility, never shown */
+  extras?: Record<string, string>;
+  /** providers tried in order (WSP JSON `provider_attempts`) */
+  attempts?: { provider: string; outcome: string; ms?: number; results?: number }[];
+  /** time the tool itself reported */
+  elapsedMs?: number;
+  /** a failed call: the error line and the reason per provider */
+  error?: string;
+  providerErrors?: { provider: string; reason: string }[];
+};
 
 /** Extra per-tool details for the "Werkzeuge & Ablauf" panel. All optional. */
 export type ToolDetail = {
@@ -50,8 +98,8 @@ export type ToolDetail = {
   summary?: string;
   /** web search hits / fetched pages (tappable) */
   links?: ToolLink[];
-  /** parsed web search / extract result (hermes/webResults.ts): provider, hit count, cache hit – when known */
-  web?: { provider?: string; count?: number; cached?: boolean };
+  /** parsed web search / extract result (hermes/webResults.ts): provider, hit count, cache, routing – when known */
+  web?: ToolWebMeta;
   /** server error code of a failed tool result */
   errorCode?: string;
   /**

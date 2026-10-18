@@ -28,7 +28,7 @@ final class SmokeUITests: XCTestCase {
 
   /// system permission alerts (notifications, …) → allow, so the flow continues
   private func dismissAlerts() {
-    for title in ["Allow", "Erlauben", "OK"] {
+    for title in ["Allow", "Erlauben", "OK", "Open", "Öffnen"] {
       let b = springboard.alerts.buttons[title]
       if b.exists { b.tap(); note(true, "dismissed system alert (\(title))"); return }
     }
@@ -36,6 +36,11 @@ final class SmokeUITests: XCTestCase {
 
   private func element(containing text: String) -> XCUIElement {
     app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
+  }
+
+  /// first element whose label starts with `text` (the tools panel header and its rows carry the name first)
+  private func labelStarting(_ text: String) -> XCUIElement {
+    app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", text)).firstMatch
   }
 
   @discardableResult
@@ -54,11 +59,13 @@ final class SmokeUITests: XCTestCase {
     return true
   }
 
-  private func send(_ prompt: String, wait: TimeInterval) {
+  private func send(_ prompt: String, wait: TimeInterval, hideKeyboardFirst: Bool = false) {
     dismissAlerts()
     let input = app.textViews.firstMatch.exists ? app.textViews.firstMatch : app.textFields.firstMatch
     guard input.waitForExistence(timeout: 10) else { note(false, "composer input not found"); return }
     input.tap(); input.typeText(prompt)
+    // store run: an answer that covers the drag area (approval card) would leave the keyboard up
+    if hideKeyboardFirst { hideKeyboard() }
     // the composer's send button, not the keyboard's return key (German keyboards label it "Senden" too)
     sleep(1)
     let kb = app.keyboards.firstMatch
@@ -122,6 +129,217 @@ final class SmokeUITests: XCTestCase {
     tapButton("Chats")  // same label in de and en
     sleep(1)
     return tapButton(label)
+  }
+
+  /// fresh demo chat for the next store scene (header button, testID header-new-chat)
+  private func newChat() {
+    dismissAlerts()
+    let b = app.buttons["header-new-chat"]
+    if b.waitForExistence(timeout: 5) && b.isHittable { b.tap(); note(true, "new chat") } else { note(false, "new chat button not found") }
+    sleep(2)
+  }
+
+  /// scroll the answer back by about half a screen (long answers end below the fold)
+  private func scrollUp() {
+    let win = app.windows.firstMatch.frame
+    let top = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: win.midX, dy: win.minY + win.height * 0.35))
+    let bottom = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: win.midX, dy: win.minY + win.height * 0.75))
+    top.press(forDuration: 0.05, thenDragTo: bottom)
+    sleep(2)
+  }
+
+  /// store run: the keyboard must not cover a screenshot. Try the interactive drag from several heights (an approval
+  /// card or the quick-question screen covers the default start point)
+  private func ensureKeyboardHidden() {
+    hideKeyboard()
+    let win = app.windows.firstMatch.frame
+    for f in [0.55, 0.4, 0.25] where app.keyboards.firstMatch.exists {
+      // never start on the keyboard itself (that types letters into the composer)
+      guard win.minY + win.height * f < app.keyboards.firstMatch.frame.minY - 20 else { continue }
+      let start = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: win.midX, dy: win.minY + win.height * f))
+      let end = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: win.midX, dy: win.maxY - 4))
+      start.press(forDuration: 0.05, thenDragTo: end)
+      sleep(1)
+    }
+    note(!app.keyboards.firstMatch.exists, "keyboard hidden for the screenshot")
+  }
+
+  /// tap by coordinate: rows such as the "Tools & activity" summary report "not hittable" although they are visible
+  @discardableResult
+  private func tapRow(_ text: String) -> Bool {
+    let e = element(containing: text)
+    guard e.waitForExistence(timeout: 8), !e.frame.isEmpty else { note(false, "tap row: \(text) (not found)"); return false }
+    e.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+    note(true, "tap row: \(text)")
+    return true
+  }
+
+  /// scroll the answer towards newer content (drag up by about 40% of the window)
+  private func scrollDown(_ f: Double = 0.4) {
+    let win = app.windows.firstMatch.frame
+    let from = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: win.midX, dy: win.minY + win.height * 0.72))
+    let to = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: win.midX, dy: win.minY + win.height * (0.72 - f)))
+    from.press(forDuration: 0.05, thenDragTo: to)
+    sleep(1)
+  }
+
+  /// the "Share as image" sheet: a drag down from its upper part
+  private func closeShareSheet() {
+    let win = app.windows.firstMatch.frame
+    let from = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: win.midX, dy: win.minY + win.height * 0.2))
+    let to = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: win.midX, dy: win.maxY - 4))
+    from.press(forDuration: 0.05, thenDragTo: to)
+    sleep(2)
+    note(true, "share sheet closed by drag")
+  }
+
+  /// the "Changed files" review sheet: a drag would scroll the diffs, so tap the dimmed backdrop above the sheet
+  private func closeReviewSheet(_ title: String) {
+    let win = app.windows.firstMatch.frame
+    app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: win.midX, dy: win.minY + win.height * 0.04)).tap()
+    sleep(2)
+    note(!element(containing: title).exists, "review sheet closed (backdrop tap)")
+  }
+
+  /// pair with the store mock the way a user does: Connect → "I have a QR code or link" → paste the pair link (HUI_PAIR_LINK,
+  /// made by scripts/ios-sim-smoke.sh) → Use link, then the onboarding cards (check the connection, consent, "start an
+  /// empty chat") until the composer of an empty chat is there. (Opening the link from outside needs a system dialog.)
+  private func pairWithMock(_ de: Bool) {
+    guard let link = env["HUI_PAIR_LINK"], !link.isEmpty else { note(false, "HUI_PAIR_LINK missing"); return }
+    guard tapButton(de ? "Verbinden" : "Connect") else { return }
+    sleep(2)
+    guard tap("QR") else { return }
+    sleep(2)
+    let field = app.textFields.firstMatch.exists ? app.textFields.firstMatch : app.textViews.firstMatch
+    guard field.waitForExistence(timeout: 8) else { note(false, "link field not found"); return }
+    // typeText sometimes drops a character on a busy simulator ("hrmesuiplus://"): check the field, clear and retype
+    for attempt in 0..<4 {
+      field.tap()
+      let have = (field.value as? String) ?? ""
+      if have.count > 0 && have != link { field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: have.count + 5)) }
+      if (field.value as? String) != link { field.typeText(link) }
+      if (field.value as? String) == link { break }
+      note(false, "pair link typed wrong (attempt \(attempt + 1))")
+    }
+    field.typeText("\n")
+    note(true, "pair link entered")
+    sleep(3)
+    let labels = de ? ["Verbinden", "Verstanden & weiter", "Leeren Chat starten"] : ["Connect", "Got it, continue", "Start an empty chat"]
+    for i in 0..<14 {
+      dismissAlerts()
+      var tapped = false
+      if i < 5 { shot("pair-\(i)") }   // the walk is documented by frames: the only way to see what a failed run was looking at
+      for l in labels where button(l).exists && button(l).isHittable {
+        button(l).tap(); note(true, "pair step: \(l)"); tapped = true; sleep(3); break
+      }
+      if !tapped {
+        let input = app.textViews.firstMatch.exists ? app.textViews.firstMatch : app.textFields.firstMatch
+        if input.exists && input.isHittable && app.buttons["header-new-chat"].isHittable { break }
+        sleep(2)
+      }
+    }
+    note(app.buttons["header-new-chat"].exists && app.buttons["header-new-chat"].isHittable, "paired, chat open")
+  }
+
+  /// App Store screenshot drafts (scripts/ios-sim-smoke.sh with HUI_TEST=store): one fresh demo chat per scene of the
+  /// 0.1.3 store story (docs/STORE.md "Screenshots"; same scene names as scripts/e2e/store_shots.py). The app is paired
+  /// with the store mock (scripts/e2e/store-mock.mjs, no DEMO strip); all content is fictional. "Share to HUI+" is Android only (the iOS share extension is
+  /// off by default), so there is no such scene here.
+  func testStoreShots() throws {
+    continueAfterFailure = true
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let de = (env["HUI_LANG"] ?? "en") == "de"
+    app.launchArguments = de ? ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE"] : ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+    XCUIDevice.shared.orientation = .portrait
+    app.launch()
+    note(app.wait(for: .runningForeground, timeout: 20), "app launched (foreground)")
+    sleep(3); dismissAlerts()
+    waitFor("HUI+", 20)
+    shot("welcome")   // the offline-demo card of the welcome screen: the one frame that shows demo
+    pairWithMock(de)
+
+    // checklist: tick two items, then the answer's own "Share as image" sheet (live preview with the ticks)
+    send(de ? "Mach mir eine Einkaufsliste fürs Wochenende." : "Make me a shopping list for the weekend.", wait: 7)
+    tap(de ? "Tomaten" : "Tomatoes"); sleep(1)
+    tap(de ? "Basilikum" : "Basil"); sleep(2)
+    scrollDown(0.7); scrollDown(0.7); scrollDown(0.7)
+    shot("checklist-ticked")
+    if tapButton(de ? "Als Bild teilen" : "Share as image") {
+      sleep(7)
+      shot("share-image")
+      closeShareSheet()
+    }
+
+    // approval, sent in the checklist chat: in an empty chat the keyboard cannot be dragged away
+    send(de ? "Räum den Cache auf, mit Freigabe." : "Clean up the cache, with approval.", wait: 6, hideKeyboardFirst: true)
+    ensureKeyboardHidden()
+    shot("approval")
+
+    // choice cards
+    newChat()
+    send(de ? "Hilf mir, ein Ziel für einen Städtetrip zu wählen." : "Help me pick a destination for a city break.", wait: 8)
+    shot("choice-cards")
+
+    // products: pick two, the side-by-side table appears below the cards
+    newChat()
+    send(de ? "Vergleiche Kopfhörer mit Geräuschunterdrückung." : "Compare noise cancelling headphones.", wait: 9)
+    for _ in 0..<4 where !button(de ? "Vergleichen" : "Compare").isHittable { scrollUp() }
+    if tapButton(de ? "Vergleichen" : "Compare") {
+      sleep(2)
+      tap("Quiet One"); sleep(1)
+      tap("Calm 5"); sleep(2)
+      let marker = element(containing: de ? "Nur Unterschiede" : "Only differences")
+      let win = app.windows.firstMatch.frame
+      for _ in 0..<8 where !(marker.exists && marker.frame.minY > win.height * 0.12 && marker.frame.minY < win.height * 0.4) { scrollDown(0.3) }
+      shot("compare-table")
+    }
+
+    // a fresh process: after the compare selection XCUITest sometimes never sees the app idle again
+    app.terminate(); sleep(2); app.launch(); sleep(5); dismissAlerts()
+
+    // web search (Web Search Plus): the tools panel above the answer → "Web search" row opens the result card
+    // (how it searched, results with favicons and cited markers). The store mock stores the tool rows and serves the favicons.
+    newChat()
+    send(de ? "Recherchiere Jetlag-Tipps für einen Flug nach Osten, mit Quellen." : "Research jet lag tips for a flight east, with sources.", wait: 14)
+    scrollDown(0.7); scrollDown(0.7)
+    let panel = de ? "Werkzeuge und Ablauf" : "Tools and activity"
+    let win = app.windows.firstMatch.frame
+    for _ in 0..<8 {
+      let e = labelStarting(panel)
+      if e.exists && e.frame.minY > win.height * 0.15 && e.frame.minY < win.height * 0.8 { break }
+      scrollUp()
+    }
+    if labelStarting(panel).waitForExistence(timeout: 5) {
+      labelStarting(panel).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap(); note(true, "tap row: \(panel)")
+      sleep(2)
+      let row = labelStarting(de ? "Websuche," : "Web search,")
+      if row.waitForExistence(timeout: 8) {
+        row.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap(); note(true, "tap row: web search")
+        if waitFor(de ? "So wurde gesucht" : "How it searched", 10) {
+          sleep(3)   // favicons arrive through the bridge image proxy after the card is drawn
+          shot("web-card")
+          // the card's own close button (a drag inside it would scroll the results)
+          if !tapButton(de ? "Schließen" : "Close", 4) { closeShareSheet() }
+          sleep(1)
+        }
+      } else { note(false, "web search row not found") }
+    } else { note(false, "tools panel not found") }
+
+    // coding: the "Review" sheet with the diffs
+    newChat()
+    send(de ? "Behebe den Bug und zeig mir den Code-Diff." : "Fix the bug and show me the code diff.", wait: 13)
+    scrollDown(0.7); scrollDown(0.7)
+    shot("code-answer")
+    // "Prüfen" may come as an umlaut or as u + combining diaeresis, so match the label loosely
+    let reviewBtn = app.descendants(matching: .any).matching(NSPredicate(format: "label MATCHES %@", de ? ".*[Pp]r.{1,2}fen.*" : ".*Review.*")).firstMatch
+    if reviewBtn.waitForExistence(timeout: 8) {
+      reviewBtn.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap(); note(true, "tap: Review")
+      sleep(3)
+      shot("code-diff")   // last scene: the sheet stays open
+    }
+
+    note(app.state == .runningForeground, "app still running at the end (no crash)")
+    note(true, "run complete")
   }
 
   func testSmoke() throws {

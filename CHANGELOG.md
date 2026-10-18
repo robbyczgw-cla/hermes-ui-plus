@@ -2,6 +2,35 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com), and the project aims to follow [Semantic Versioning](https://semver.org).
 
+## 0.1.3 - 2026-10-18
+
+A result card for web searches done with Web Search Plus (WSP), and a handful of fixes around it.
+
+### Added
+
+- **Web result card:** in "Tools and activity" (and in the compact view) a tap on a web search or page-reading row opens a card that shows what the tool reported, and nothing it did not report. For a search: the query, "How it searched" (provider, whether it was chosen automatically or fixed, how sure the routing was, the kind of query, duration, cache age or "freshly fetched", freshness filter), and the results with favicon, domain, date, excerpt and the number under which the answer cites them. For research: pages read, results and duration. For page reading ("How it read the pages"): the pages and, for pages that failed, the reason. Without WSP (a plain `web_search`) the card shows the query and the results. A call whose output cannot be read keeps the old detail view. Titles and excerpts are shown as plain text, links open only as http(s), and the security notice WSP adds to its output stays hidden.
+- **Read from WSP 5.1.2:** the card uses the machine-readable header bits (`results`, `elapsed_ms`, `fallback_from`, and `providers` / `pages` for research), so the result count and duration are the tool's own, and a "Fallback chain" line (for example Serper, Brave, Exa) shows which providers failed before one delivered. Pages that were not tried (`Error: not tried: <reason>`, for example the limit of URLs per call) stay in the list with their reason. Output from WSP 5.0.x and 5.1.1 reads as before; unknown header bits are ignored. English, German and Spanish.
+- **The card is there while the answer is still being written:** when a web tool finishes, the app fetches the stored tool lines once (Hermes saves them about half a second after the step), so the row and the card appear while the model is still writing instead of after the turn.
+- **Better page excerpts:** read pages start with a title line or a "TL;DR"; the card now shows the first real paragraph, never text of the next page.
+- **Offline demo:** a new start chip, "Research jet lag tips for a flight east, with sources." (English, German, Spanish). The answer shows a WSP search with fallback, a page read, cited sources and both cards, with made-up results and no server.
+
+### Changed
+
+- **Technical details are collapsed:** under the web result card, the tool name, status, times, call ID and the input JSON sit behind a closed "Technical details" disclosure (German "Technische Details", Spanish "Detalles técnicos"), so the card reads as search information and sources. Other tools keep their detail sheet as before.
+- **Favicons in the card** load only through the bridge's image proxy or for hosts you allowed ("Always load"); otherwise a letter avatar, and nothing at all with images off. The proxy now also accepts the ICO format that most `favicon.ico` files use (takes effect once the bridge is updated).
+- **Hermes 0.22 "lazy tool discovery":** Hermes 0.22 stores plugin calls as `tool_call` with the real tool inside, so the row was named "tool_call" and the card had no query. The app now unwraps it; `tool_search` and `tool_describe` show as a quiet "Looked up a tool" row.
+
+### Fixed
+
+- **Quotation marks of the search query:** the tool row always wrapped the query in German marks. It now uses the language's own: „…“ in German, “…” in English, «…» in Spanish.
+- **Sources of an answer:** pages that failed to load (404, rate limit) no longer count as read, and two requests that differ only in a `?ref=` parameter are no longer merged into one page.
+
+### Development
+
+- Leak guard scans compressed files by content: `.gz` and `.br` are decompressed, `.zip` is checked entry by entry (`--path` mode).
+- The exported repository no longer enables Dependabot version updates (`.github/dependabot.yml` is not exported).
+- Smoke suite: the `demo_wsp_card` check covers the demo answer and both cards in English and German, light and dark, and scrolls up to the tools panel before it taps.
+
 ## 0.1.2 - 2026-10-17
 
 Smoother streaming, answers in the user's language, a router that understands more languages, and setup fixes from a

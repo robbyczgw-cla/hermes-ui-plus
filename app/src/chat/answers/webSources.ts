@@ -35,18 +35,24 @@ export function retrievedSources(tools: readonly ToolEvent[] | undefined): Retri
     web++;
     if (ev.detail?.cancelled) continue;
     if (!ev.detail?.web && !ev.detail?.links?.length && ev.status !== 'error') complete = false;
-    for (const l of ev.detail?.links ?? []) {
+    const links = ev.detail?.links ?? [];
+    for (const l of links) {
+      // a page the extract could not read (404, rate limit) was not retrieved
+      if (l.failed) continue;
       const k = canonicalUrl(l.url);
       if (!hits.has(k)) hits.set(k, { title: l.title, url: l.url, ...(l.snippet ? { snippet: l.snippet } : {}) });
     }
-    // pages the model asked an extract tool to read count as retrieved too
+    // pages the model asked an extract tool to read count as retrieved too, under the spelling it asked for (the
+    // result may show the provider's URL instead: `?ref=1` → the canonical page). WSP 5.1 answers one page per
+    // requested URL in request order, so with as many pages as URLs a failed slot keeps its URL out.
     const input = toolInput(ev);
-    const urls = Array.isArray(input?.urls) ? input.urls : typeof input?.url === 'string' ? [input.url] : [];
-    for (const u of urls) {
-      if (typeof u !== 'string' || !/^https?:\/\//i.test(u)) continue;
+    const urls = (Array.isArray(input?.urls) ? input.urls : typeof input?.url === 'string' ? [input.url] : []).filter((u): u is string => typeof u === 'string');
+    const paired = links.length === urls.length;
+    urls.forEach((u, i) => {
+      if (!/^https?:\/\//i.test(u) || (paired && links[i].failed)) return;
       const k = canonicalUrl(u);
       if (!hits.has(k)) hits.set(k, { title: u, url: u });
-    }
+    });
   }
   if (!web) return null;
   return { hits, complete: complete && hits.size > 0 };

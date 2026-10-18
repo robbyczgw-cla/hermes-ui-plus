@@ -52,7 +52,7 @@ import {
 import { answerApproval, fetchRunStatus, hermesSessions, stopBridgeTurn, streamChat, isHermesError } from './client';
 import type { HermesChatOptions } from './capabilities';
 import { mapRemoteMessages, needsDetails } from './sessionMapping';
-import { loadToolDetails } from './toolDetails';
+import { loadToolDetails, wantsLiveDetails } from './toolDetails';
 import { createCoalescedCheck } from './coalesce';
 import { isNotFoundError, isUnsupportedError } from './sessions';
 import { sessionsSupported, setSessionsSupported } from './support';
@@ -625,6 +625,8 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
                 const t0 = PERF ? perfNow() : 0;
                 updateLast((m) => applyEvent(m, e, now));
                 if (PERF) perfSpan('state.update', t0);
+                const last = messagesRef.current[messagesRef.current.length - 1];
+                if (optsRef.current.fetchToolDetails !== false && wantsLiveDetails(e, last)) loadLiveDetails(last.id, sid);
               },
             });
             break;
@@ -780,7 +782,7 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
   }, []);
 
   /** after a turn with tools: fill ToolEvent.detail (+ reasoning) from the stored session (toolDetails.ts) */
-  const loadDetails = async (messageId: string, sid: string) => {
+  const loadDetails = async (messageId: string, sid: string, delays?: number[]) => {
     const c = connRef.current;
     if (sessionsSupported(c) === false) return;
     const client = hermesSessions(c, 10000);
@@ -789,6 +791,7 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
     try {
       await loadToolDetails({
         messageId,
+        delays,
         signal: ctrl.signal,
         alive: () => mountedRef.current && sessionRef.current === sid,
         fetchRows: async () => {
@@ -814,6 +817,28 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
     } finally {
       detailJobs.current.delete(ctrl);
     }
+  };
+
+  /** mid-turn web tool details (wantsLiveDetails): one job at a time, a tool finishing meanwhile runs it once more */
+  const liveDetails = useRef({ busy: false, again: false });
+  const loadLiveDetails = (messageId: string, sid: string) => {
+    const s = liveDetails.current;
+    if (s.busy) {
+      s.again = true;
+      return;
+    }
+    s.busy = true;
+    void (async () => {
+      try {
+        do {
+          s.again = false;
+          await loadDetails(messageId, sid, [500, 1500]);
+        } while (s.again && runningRef.current && mountedRef.current && sessionRef.current === sid);
+      } finally {
+        s.busy = false;
+        s.again = false;
+      }
+    })();
   };
 
   /** cancel the send waiting for its uploads (stop, ×, newSession); returns its text */

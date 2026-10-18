@@ -251,5 +251,5 @@ Notes from the runs:
 - The chat list preview of a demo chat shows the placeholder text "[Component]" for interactive blocks
   ("Overview [Component] Trend …"), visible in the iPad sidebar. Intended (covered by `messages.test.ts`), but it
   reads oddly; a localised word ("chart", "table") would look better. Cosmetic, all platforms.
-- `expo-notifications` logs a keychain entitlement error in the unsigned simulator build (expected; signed builds
-  have the keychain access group).
+- `expo-notifications` may log a keychain entitlement error in simulator builds made before the entitlement section was
+  linked in (see docs/BUILD.md, `--simulator`); current simulator builds carry the keychain access group.

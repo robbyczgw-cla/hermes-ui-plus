@@ -2,6 +2,8 @@
  * Tool-call input helpers for the "Werkzeuge & Ablauf" timeline: domain of a URL and a one-line preview of a tool's
  * input. Pure.
  */
+import type { TFn } from '../i18n/core.ts';
+
 type Obj = Record<string, unknown>;
 
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -19,11 +21,11 @@ export function firstLine(s: string, max = 70): string {
   return t.length > max ? `${t.slice(0, max - 1)}…` : t;
 }
 
-/** One-line input preview for the timeline row ("„DAX heute“" / url / first code line / path). */
-export function inputSummary(input: unknown): string | undefined {
+/** One-line input preview for the timeline row (quoted query in the UI language's quotation marks / url / first code line / path). */
+export function inputSummary(input: unknown, t: TFn): string | undefined {
   if (!isObj(input)) return undefined;
   const q = str(input.query);
-  if (q) return `„${q}“`;
+  if (q) return t('chat.toolTimeline.queryQuoted', { query: q });
   const url = str(input.url);
   if (url) return url;
   const code = str(input.code);

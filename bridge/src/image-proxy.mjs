@@ -8,7 +8,7 @@
 //    second lookup, so DNS rebinding cannot swap it); IP literals are checked the same way;
 //  - at most 3 redirects, each target re-validated as above;
 //  - status 200 only, Content-Type image/* (never svg), the body is identified by its magic bytes (jpeg, png, webp,
-//    gif, avif) and served with that type; max 8 MB; connect timeout 5 s, total 15 s;
+//    gif, avif, ico for site favicons) and served with that type; max 8 MB; connect timeout 5 s, total 15 s;
 //  - no client headers are forwarded (no cookies, no referrer, no Authorization); a generic User-Agent is sent.
 // Results are kept in a small disk cache below the state directory (sha256(url) file names, LRU, size cap, TTL).
 // Logs carry only metadata (host, status, bytes, ms), never the path or query string. Docs: docs/BRIDGE.md.
@@ -134,10 +134,15 @@ export function sniffImageType(buf) {
       if (brand === 'avif' || brand === 'avis') return 'image/avif';
     }
   }
+  // ICO (site favicons): reserved 0, type 1 = icon, 1–64 images, the first entry's reserved byte 0
+  if (buf[0] === 0 && buf[1] === 0 && buf[2] === 1 && buf[3] === 0) {
+    const count = buf.readUInt16LE(4);
+    if (count >= 1 && count <= 64 && buf[9] === 0) return 'image/x-icon';
+  }
   return null;
 }
 
-const EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp', 'image/avif': 'avif' };
+const EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp', 'image/avif': 'avif', 'image/x-icon': 'ico' };
 const TYPE_OF_EXT = Object.fromEntries(Object.entries(EXT).map(([t, e]) => [e, t]));
 
 /* ───────────── fetch ───────────── */
@@ -196,7 +201,7 @@ export function createImageFetcher(cfg, o = {}) {
         path: `${url.pathname}${url.search}`,
         method: 'GET',
         // a fixed header set: nothing from the client (no cookies, referrer, auth), identity encoding only
-        headers: { 'user-agent': USER_AGENT, accept: 'image/avif,image/webp,image/png,image/jpeg,image/gif;q=0.8', 'accept-encoding': 'identity', connection: 'close' },
+        headers: { 'user-agent': USER_AGENT, accept: 'image/avif,image/webp,image/png,image/jpeg,image/gif;q=0.8,image/x-icon;q=0.5', 'accept-encoding': 'identity', connection: 'close' },
         lookup,
         agent: false,
         signal,

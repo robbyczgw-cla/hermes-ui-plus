@@ -25,6 +25,8 @@ const WEBP = Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(4), Buffer.from('W
 const GIF = Buffer.concat([Buffer.from('GIF89a'), Buffer.alloc(30)]);
 const AVIF = Buffer.concat([Buffer.from([0, 0, 0, 0x1c]), Buffer.from('ftypmif1'), Buffer.alloc(4), Buffer.from('mif1avifmiaf'), Buffer.alloc(20)]);
 const SVG = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+// ICONDIR (reserved 0, type 1, 1 image) + one ICONDIRENTRY (16x16, reserved 0, …)
+const ICO = Buffer.concat([Buffer.from([0, 0, 1, 0, 1, 0, 16, 16, 0, 0, 1, 0, 32, 0]), Buffer.alloc(30, 3)]);
 
 /* ───────────── fake upstream ───────────── */
 
@@ -171,6 +173,15 @@ test('sniffImageType: magic bytes decide; svg, html and truncated data are no im
   assert.equal(sniffImageType(WEBP), 'image/webp');
   assert.equal(sniffImageType(GIF), 'image/gif');
   assert.equal(sniffImageType(AVIF), 'image/avif');
+  assert.equal(sniffImageType(ICO), 'image/x-icon');
+  // a cursor file (type 2), no images or a non-zero reserved byte is no favicon
+  const cur = Buffer.from(ICO);
+  cur[2] = 2;
+  const none = Buffer.from(ICO);
+  none[4] = 0;
+  const reserved = Buffer.from(ICO);
+  reserved[9] = 7;
+  for (const b of [cur, none, reserved]) assert.equal(sniffImageType(b), null);
   for (const b of [SVG, Buffer.from('<html></html>'), Buffer.from([0x89, 0x50]), Buffer.alloc(0), Buffer.from('RIFF0000WAVEfmt '), null]) assert.equal(sniffImageType(b), null);
 });
 

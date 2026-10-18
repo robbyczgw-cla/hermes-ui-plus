@@ -51,6 +51,7 @@ import { BeforeAfter } from '../imageedit/BeforeAfter';
 import { resultImageUrl } from '../imageedit/core';
 import { useToast } from './Toast';
 import { ToolChips } from './ToolChips';
+import { WebResultSheet } from './WebResultCard';
 import { ContextDivider, MediaFiles, MemoryNotes, ReminderCards } from './HermesExtras';
 import { memoryNotes, shouldShowCompactionDivider } from './hermesTools';
 import { createMediaTagCache, extractMedia, extractMediaCached, type MediaTagCache } from './mediaTags';
@@ -308,6 +309,8 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
   const verbose = mode === 'verbose';
   const followupsRow = useMemo(() => (followups && followups.type === 'suggestions' ? ({ ...followups, layout: 'row' } as HuiNode) : followups), [followups]);
   const [sheetKey, setSheetKey] = useState<string | null>(null);
+  // compact tool details: a web chip opens its web result card
+  const [webToolId, setWebToolId] = useState<string | null>(null);
   const showReasoning = !!message.reasoning && !verbose;
   const uiPrefs = usePreferences().prefs;
   // "Als Bild teilen": the setting is on and the answer has text or cards to draw (not only an HTML widget)
@@ -485,7 +488,7 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
       accessible={false}
       focusable={false}
     >
-      {mode === 'compact' && message.tools.length ? <ToolChips tools={message.tools} /> : null}
+      {mode === 'compact' && message.tools.length ? <ToolChips tools={message.tools} onOpenWeb={streaming ? undefined : setWebToolId} /> : null}
       <LiveAnswer
         message={message}
         done={streaming ? null : answerText}
@@ -567,6 +570,7 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
         </>
       )}
       {verbose && sheetKey ? <ToolDetailSheet message={message} rowKey={sheetKey} onClose={() => setSheetKey(null)} /> : null}
+      {mode === 'compact' && webToolId ? <WebResultSheet message={message} toolId={webToolId} onClose={() => setWebToolId(null)} /> : null}
       {/* N5: no action row under an answer that is still being fetched (stream lost, recovery running) */}
       {!streaming && !recovering && message.status !== 'error' && (hasCopy || reportable) && !rowReady ? (
         <View style={styles.actionsRow}>

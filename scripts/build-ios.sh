@@ -329,9 +329,24 @@ rm -rf "$ARCH" "$EXP" "$PUB"
 if [ "$MODE" = simulator ]; then
   # Release configuration = JS bundle embedded (no Metro); arm64 simulator slice only; no signing at all.
   t "xcodebuild build ($SCHEME, Release, iphonesimulator, unsigned)"
+  # Keychain in the simulator: the simulator reads an app's entitlements from a __TEXT,__entitlements section of the
+  # binary (not from the code signature: a signature with entitlements makes simctl fail to launch the app). Without
+  # it expo-secure-store fails with "A required entitlement is not present" and the unsigned build cannot pair.
+  # Linked in here; simulator builds only, nothing of this reaches a device or store build.
+  SIM_ENT="$B/sim-keychain.entitlements"
+  cat > "$SIM_ENT" <<XENT
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>application-identifier</key><string>$BID</string>
+<key>keychain-access-groups</key><array><string>$BID</string></array>
+</dict></plist>
+XENT
   xcodebuild -workspace "ios/$WS" -scheme "$SCHEME" -configuration Release -sdk iphonesimulator \
     -destination 'generic/platform=iOS Simulator' -derivedDataPath "$DD" ARCHS=arm64 ONLY_ACTIVE_ARCH=YES \
-    CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO build > "$B/xcodebuild-sim.log" 2>&1 || true
+    CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO \
+    OTHER_LDFLAGS="\$(inherited) -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __entitlements -Xlinker $SIM_ENT" \
+    build > "$B/xcodebuild-sim.log" 2>&1 || true
   grep -E 'error:|\*\* BUILD' "$B/xcodebuild-sim.log" | sort -u | head -40 || true
   SAPP="$(ls -d "$DD"/Build/Products/Release-iphonesimulator/*.app 2>/dev/null | head -1 || true)"
   [ -n "$SAPP" ] || { echo "SIMULATOR BUILD FAILED, last lines of $REMOTE_DIR/xcodebuild-sim.log:"; tail -40 "$B/xcodebuild-sim.log"; exit 1; }

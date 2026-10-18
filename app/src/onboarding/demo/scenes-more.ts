@@ -2,7 +2,7 @@
 // hui protocol, fully offline (no photos or maps), fictional data, written in en/de/es.
 // Layout regression fixtures for the Android layout checks stay German-only (see `gameTable`, `longWords`).
 import { calculatorHtml, loanHtml } from './html.ts';
-import { DAYS, L, days, hui, isoDay, langOf, tool, xy, type DemoLang, type DemoScenario, type DemoStep } from './kit.ts';
+import { DAYS, L, days, hui, isoDay, langOf, tool, wsp, wspExtractText, wspSearchText, xy, type DemoHit, type DemoLang, type DemoScenario, type DemoStep } from './kit.ts';
 import { prompt } from './prompts.ts';
 import { chips } from './scenes-core.ts';
 
@@ -638,25 +638,58 @@ export const agenda: DemoScenario = {
   },
 };
 
+/**
+ * Web research with Web Search Plus: a routed search and two pages read, both with their (fictional) results, then a
+ * cited answer. Tapping the search in "Werkzeuge & Ablauf" (or a chip) opens the web result card: provider and
+ * routing, results, which ones the answer cites. Sources are example.* sites, content is generic sleep advice.
+ */
 export const webSuche: DemoScenario = {
   format: 'text',
-  steps: (ctx) => [
-    { reasoning: L(ctx, 'Jetlag nach einem Ostflug: Ich suche belastbare Tipps zu Licht, Schlaf und Melatonin und fasse sie kurz zusammen.', 'Jet lag after an eastbound flight: I look for reliable tips on light, sleep and melatonin and summarise them.', 'Jet lag tras un vuelo hacia el este: busco consejos fiables sobre luz, sueño y melatonina y los resumo.') },
-    { text: L(ctx, 'Ich recherchiere kurz.', 'A quick look.', 'Busco un momento.') },
-    tool.search(L(ctx, 'Jetlag Tipps Flug nach Osten', 'jet lag tips eastbound flight', 'jet lag consejos vuelo hacia el este'), 1300),
-    tool.browser('example.com/jet-lag', 1100),
-    tool.search(L(ctx, 'Tageslicht Melatonin innere Uhr', 'daylight melatonin body clock', 'luz natural melatonina reloj interno'), 1000),
-    { reasoning: L(ctx, ' Die Quellen sind sich einig: Licht ist der wichtigste Taktgeber.', ' The sources agree: light is the strongest clock setter.', ' Las fuentes coinciden: la luz es lo que más ajusta el reloj.') },
-    {
-      text:
-        L(
+  steps: (ctx) => {
+    const day = (n: number) => isoDay(ctx.now, -n);
+    const S = {
+      light: 'https://sleep.example.org/jet-lag/light',
+      shift: 'https://travel.example.com/guides/eastbound-sleep',
+      melatonin: 'https://health.example.net/melatonin-jet-lag',
+      myths: 'https://blog.example.net/jet-lag-myths',
+      naps: 'https://rest.example.org/naps-after-flights',
+    };
+    const query = L(ctx, 'Jetlag Tipps Flug nach Osten', 'jet lag tips eastbound flight', 'jet lag consejos vuelo hacia el este');
+    const hits: DemoHit[] = [
+      { title: L(ctx, 'Jetlag: Wie Licht die innere Uhr umstellt', 'Jet lag: how light resets your body clock', 'Jet lag: cómo la luz ajusta tu reloj interno'), url: S.light, date: day(12), snippet: L(ctx, 'Morgenlicht am Zielort verschiebt den Rhythmus nach vorn, Abendlicht nach hinten. Nach Osten zählt der Vormittag.', 'Morning light at the destination moves the rhythm earlier, evening light later. Flying east, the morning counts.', 'La luz de la mañana en el destino adelanta el ritmo; la de la tarde lo retrasa. Hacia el este, cuenta la mañana.') },
+      { title: L(ctx, 'Flüge nach Osten: den Schlaf schon vorher verschieben', 'Eastbound flights: shifting your sleep before you go', 'Vuelos hacia el este: adelantar el sueño antes de salir'), url: S.shift, date: day(40), snippet: L(ctx, 'Zwei bis drei Abende vor dem Abflug jeweils eine Stunde früher schlafen gehen erleichtert die ersten Tage.', 'Going to bed an hour earlier on the two or three evenings before departure makes the first days easier.', 'Acostarse una hora antes las dos o tres noches previas al vuelo facilita los primeros días.') },
+      { title: L(ctx, 'Melatonin bei Jetlag: was Studien zeigen', 'Melatonin and jet lag: what studies show', 'Melatonina y jet lag: qué muestran los estudios'), url: S.melatonin, date: day(90), snippet: L(ctx, 'Niedrige Dosen am Abend am Zielort können helfen; vorher ärztlich abklären, besonders mit anderen Medikamenten.', 'Low doses in the evening at the destination can help; check with a doctor first, especially with other medication.', 'Dosis bajas por la noche en el destino pueden ayudar; consúltalo antes con un médico, sobre todo si tomas otros medicamentos.') },
+      { title: L(ctx, 'Zehn Mythen über Jetlag', 'Ten myths about jet lag', 'Diez mitos sobre el jet lag'), url: S.myths, snippet: L(ctx, 'Nein, ein Glas Wein im Flugzeug hilft nicht beim Einschlafen am Ziel.', 'No, a glass of wine on the plane does not help you fall asleep at the destination.', 'No, una copa de vino en el avión no ayuda a dormir en el destino.') },
+      { title: L(ctx, 'Mittagsschlaf nach einem Langstreckenflug', 'Napping after a long flight', 'La siesta después de un vuelo largo'), url: S.naps, date: day(200), snippet: L(ctx, 'Kurz halten: 20 Minuten erfrischen, längere Pausen verschieben die erste Nacht.', 'Keep it short: 20 minutes refresh you, longer naps push back the first night.', 'Que sea corta: 20 minutos despejan, las siestas largas retrasan la primera noche.') },
+    ];
+    return [
+      { reasoning: L(ctx, 'Jetlag nach einem Ostflug: Ich suche belastbare Tipps zu Licht, Schlaf und Melatonin und lese die zwei wichtigsten Quellen genauer.', 'Jet lag after an eastbound flight: I look for reliable tips on light, sleep and melatonin and read the two key sources in full.', 'Jet lag tras un vuelo hacia el este: busco consejos fiables sobre luz, sueño y melatonina y leo a fondo las dos fuentes clave.') },
+      { text: L(ctx, 'Ich recherchiere kurz.', 'A quick look.', 'Busco un momento.') },
+      // WSP 5.1.2 header: result count, wall time and the provider that failed before Brave (fictional values)
+      wsp.search(query, wspSearchText(`Provider: brave | auto-routed | high confidence | intent_general | results=${hits.length} | elapsed_ms=1280 | fallback_from=serper`, hits), 1300),
+      wsp.extract(
+        [S.light, S.melatonin],
+        wspExtractText('keenable', [
+          { title: hits[0].title, url: S.light, text: hits[0].snippet },
+          { title: hits[2].title, url: S.melatonin, text: hits[2].snippet },
+        ]),
+        1100,
+      ),
+      { reasoning: L(ctx, ' Die Quellen sind sich einig: Licht ist der wichtigste Taktgeber.', ' The sources agree: light is the strongest clock setter.', ' Las fuentes coinciden: la luz es lo que más ajusta el reloj.') },
+      {
+        text: L(
           ctx,
-          '\n\n**So kommst du schneller in die neue Zeitzone:**\n\n1. **Schon vorher verschieben:** 2–3 Tage vor dem Flug jeden Abend eine Stunde früher ins Bett.\n2. **Morgens Tageslicht:** Am Ziel vormittags raus ins Helle – das stellt die innere Uhr am stärksten um.\n3. **Abends wenig Licht:** Bildschirme dimmen, kein grelles Licht vor dem Schlafen.\n4. **Kurzer Mittagsschlaf:** Höchstens 20 Minuten, sonst wird die erste Nacht schwer.\n\n',
-          '\n\n**How to settle into the new time zone faster:**\n\n1. **Shift early:** for 2–3 days before the flight, go to bed an hour earlier each evening.\n2. **Morning daylight:** at the destination get outside in the morning – that moves the body clock the most.\n3. **Dim evenings:** lower the screens, no bright light before sleep.\n4. **Short nap:** 20 minutes at most, or the first night gets hard.\n\n',
-          '\n\n**Cómo adaptarte antes a la nueva zona horaria:**\n\n1. **Adelántate:** 2–3 días antes del vuelo, acuéstate una hora antes cada noche.\n2. **Luz por la mañana:** al llegar sal por la mañana a la luz; es lo que más mueve el reloj interno.\n3. **Poca luz por la noche:** baja el brillo de las pantallas, nada de luz intensa antes de dormir.\n4. **Siesta corta:** 20 minutos como mucho, o la primera noche se complica.\n\n',
-        ) + hui({ type: 'sources', items: [{ title: L(ctx, 'Jetlag im Überblick', 'Jet lag overview', 'Jet lag: resumen'), url: 'https://example.com/jet-lag', siteName: 'example.com', snippet: L(ctx, 'Beispielquelle: Störung des Schlaf-Wach-Rhythmus nach schnellem Wechsel mehrerer Zeitzonen.', 'Sample source: disruption of the sleep-wake rhythm after quickly crossing time zones.', 'Fuente de ejemplo: alteración del ritmo sueño-vigilia tras cruzar zonas horarias.') }] }),
-    },
-  ],
+          '\n\n**So kommst du schneller in die neue Zeitzone:**\n\n1. **Schon vorher verschieben:** 2–3 Abende vor dem Flug jeweils eine Stunde früher ins Bett [2].\n2. **Morgens Tageslicht:** Am Ziel vormittags raus ins Helle, das stellt die innere Uhr am stärksten um [1].\n3. **Abends wenig Licht:** Bildschirme dimmen, kein grelles Licht vor dem Schlafen [1].\n4. **Melatonin nur nach Rücksprache:** Niedrig dosiert am Abend kann es helfen [3].\n\nQuellen:\n' +
+            `[1] ${S.light} - ${hits[0].title}\n[2] ${S.shift} - ${hits[1].title}\n[3] ${S.melatonin} - ${hits[2].title}\n`,
+          '\n\n**How to settle into the new time zone faster:**\n\n1. **Shift early:** for 2–3 evenings before the flight, go to bed an hour earlier [2].\n2. **Morning daylight:** at the destination get outside in the morning, that moves the body clock the most [1].\n3. **Dim evenings:** lower the screens, no bright light before sleep [1].\n4. **Melatonin only after asking a doctor:** a low dose in the evening can help [3].\n\nSources:\n' +
+            `[1] ${S.light} - ${hits[0].title}\n[2] ${S.shift} - ${hits[1].title}\n[3] ${S.melatonin} - ${hits[2].title}\n`,
+          '\n\n**Cómo adaptarte antes a la nueva zona horaria:**\n\n1. **Adelántate:** 2–3 noches antes del vuelo, acuéstate una hora antes [2].\n2. **Luz por la mañana:** al llegar sal por la mañana a la luz; es lo que más mueve el reloj interno [1].\n3. **Poca luz por la noche:** baja el brillo de las pantallas, nada de luz intensa antes de dormir [1].\n4. **Melatonina solo tras consultarlo:** una dosis baja por la noche puede ayudar [3].\n\nFuentes:\n' +
+            `[1] ${S.light} - ${hits[0].title}\n[2] ${S.shift} - ${hits[1].title}\n[3] ${S.melatonin} - ${hits[2].title}\n`,
+        ),
+      },
+      { text: '\n' + chips(ctx, 'travel', 'tripLisbon', 'tour') },
+    ];
+  },
 };
 
 export const blocks: DemoScenario = {

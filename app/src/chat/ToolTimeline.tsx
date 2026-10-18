@@ -6,7 +6,7 @@
  * - <ToolDetailSheet/>    bottom sheet with meta, links and pretty-printed raw input/output
  * Pure mapping lives in toolTimeline.ts.
  */
-import { memo, useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Animated, LayoutAnimation, Linking, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Text } from '../ui/primitives/Text';
 import type { ChatMessage } from '../hermes';
@@ -17,6 +17,7 @@ import { Button, SheetGrabber, SheetModal, useCopiedFlash, useTheme } from '../u
 import { useCopy } from './actions';
 import { Icon } from './icons';
 import { safeHref } from './markdown';
+import { WebResultCard, useWebCard } from './WebResultCard';
 import {
   buildTimeline,
   footerParts,
@@ -25,6 +26,7 @@ import {
   linkDomain,
   type Fmt,
   rowDetail,
+  detailLayout,
   timelineDone,
   timelineHeader,
   truncateText,
@@ -291,6 +293,25 @@ export function ToolDetailSheet({ message, rowKey, onClose }: { message: ChatMes
   const t = useTheme();
   const fmt = useFmt();
   const detail = useMemo(() => (rowKey ? rowDetail(message, rowKey, fmt) : null), [message, rowKey, fmt]);
+  // web search / extract with a parsed result: the web result card replaces the meta box and the plain link list
+  const webTool = rowKey?.startsWith('tool:') ? message.tools.find((x) => `tool:${x.id}` === rowKey) : undefined;
+  const card = useWebCard(message, webTool);
+  const layout = detail ? detailLayout(detail, !!card) : null;
+  type Part = NonNullable<ReturnType<typeof detailLayout>['technical']>;
+  const metaBox = (part: Part) =>
+    part.meta.length ? (
+      <View style={[styles.metaBox, { backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.control }]}>
+        {part.meta.map((m, i) => (
+          <View key={`${m.label}-${i}`} style={styles.metaRow}>
+            <Text style={[t.typography.caption, styles.metaLabel, { color: t.colors.muted }]}>{m.label}</Text>
+            <Text style={[t.typography.caption, styles.metaValue, { color: t.colors.text, fontFamily: t.fonts.mono }]} selectable numberOfLines={3}>
+              {m.value}
+            </Text>
+          </View>
+        ))}
+      </View>
+    ) : null;
+  const sectionList = (part: Part) => part.sections.map((s, i) => <Section key={`${s.title}-${i}`} section={s} />);
   return (
     <SheetModal
       visible={!!rowKey && !!detail}
@@ -322,27 +343,49 @@ export function ToolDetailSheet({ message, rowKey, onClose }: { message: ChatMes
             </Pressable>
           </View>
           <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetContent}>
-            {detail.meta.length ? (
-              <View style={[styles.metaBox, { backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.control }]}>
-                {detail.meta.map((m, i) => (
-                  <View key={`${m.label}-${i}`} style={styles.metaRow}>
-                    <Text style={[t.typography.caption, styles.metaLabel, { color: t.colors.muted }]}>{m.label}</Text>
-                    <Text style={[t.typography.caption, styles.metaValue, { color: t.colors.text, fontFamily: t.fonts.mono }]} selectable numberOfLines={3}>
-                      {m.value}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            ) : null}
+            {card ? <WebResultCard card={card} /> : null}
+            {layout ? metaBox(layout.inline) : null}
             {detail.note ? <Text style={[t.typography.caption, styles.note, { color: t.colors.muted }]}>{detail.note}</Text> : null}
-            {detail.links?.length ? <Links links={detail.links} /> : null}
-            {detail.sections.map((s, i) => (
-              <Section key={`${s.title}-${i}`} section={s} />
-            ))}
+            {detail.links?.length && !card ? <Links links={detail.links} /> : null}
+            {layout ? sectionList(layout.inline) : null}
+            {layout?.technical ? (
+              <TechnicalDetails>
+                {metaBox(layout.technical)}
+                {sectionList(layout.technical)}
+              </TechnicalDetails>
+            ) : null}
           </ScrollView>
         </>
       ) : null}
     </SheetModal>
+  );
+}
+
+/** Closed-by-default disclosure for the raw tool facts under a web result card; remembers nothing (state dies with the sheet). */
+function TechnicalDetails({ children }: { children: ReactNode }) {
+  const t = useTheme();
+  const { t: tr } = useFmt();
+  const [open, setOpen] = useState(false);
+  const toggle = () => {
+    if (NATIVE) LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setOpen((o) => !o);
+  };
+  return (
+    <View style={styles.technical}>
+      <Pressable
+        onPress={toggle}
+        accessibilityRole="button"
+        accessibilityLabel={tr('chat.toolTimeline.technical')}
+        accessibilityHint={tr('chat.toolTimeline.technicalA11y')}
+        {...a11yState({ expanded: open })}
+        hitSlop={6}
+        style={({ pressed }) => [styles.notesHead, pressed && { opacity: 0.6 }]}
+      >
+        <Text style={[t.typography.caption, styles.notesTitle, { color: t.colors.muted }]}>{tr('chat.toolTimeline.technical')}</Text>
+        <Icon name={open ? 'chevronDown' : 'chevronRight'} size={13} color={t.colors.muted} />
+      </Pressable>
+      {open ? <View style={styles.technicalBody}>{children}</View> : null}
+    </View>
   );
 }
 
@@ -465,6 +508,8 @@ const styles = StyleSheet.create({
   notes: { marginBottom: 8 },
   notesHead: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', minHeight: 28 },
   notesTitle: { fontWeight: '500' },
+  technical: { marginTop: 4 },
+  technicalBody: { gap: 10, marginTop: 6 },
   notesBody: { borderLeftWidth: 2, paddingLeft: 10, marginTop: 4, gap: 6 },
   footer: { alignSelf: 'flex-start', marginTop: 8, paddingVertical: 2 },
   footerText: { fontVariant: ['tabular-nums'] },

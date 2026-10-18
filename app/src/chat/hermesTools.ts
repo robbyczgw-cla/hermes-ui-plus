@@ -16,6 +16,7 @@ import type { ChatMessage, ToolEvent } from '../hermes/types.ts';
 import type { TFn, TKey } from '../i18n/core.ts';
 import { toolLabel, toolPreview } from './format.ts';
 import type { IconName } from './icons.tsx';
+import { providerName } from './webProviders.ts';
 
 export type HermesToolKind =
   | 'todo'
@@ -29,7 +30,8 @@ export type HermesToolKind =
   | 'terminal'
   | 'code'
   | 'file'
-  | 'image';
+  | 'image'
+  | 'discovery';
 
 type Entry = { kind: HermesToolKind; icon: IconName; title?: TKey };
 
@@ -77,6 +79,9 @@ const TOOLS: Record<string, Entry> = {
   vision_analyze: { kind: 'image', icon: 'image', title: 'hermesTools.tool.vision' },
   video_generate: { kind: 'image', icon: 'image', title: 'hermesTools.tool.video' },
   video_analyze: { kind: 'image', icon: 'image', title: 'hermesTools.tool.video' },
+  // Hermes 0.22 lazy tool discovery (the `tool_call` wrapper itself is unwrapped in hermes/sessions.ts)
+  tool_search: { kind: 'discovery', icon: 'tool', title: 'hermesTools.tool.discover' },
+  tool_describe: { kind: 'discovery', icon: 'tool', title: 'hermesTools.tool.discover' },
 };
 
 /** MCP tools are named `mcp__<server>__<tool>` (tools/mcp_tool_schema.py); the "web-search-plus" / "hound" servers are web search. */
@@ -318,8 +323,6 @@ export function describeTool(t: TFn, ev: Pick<ToolEvent, 'name' | 'label' | 'det
   }
 }
 
-const capFirst = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-
 /**
  * Web search / extract chip (generic `web_search`, WSP `web_search_plus` / `web_extract_plus`, MCP variants):
  * title (search, research mode, read page), the query or page as preview and "Brave · 5 Treffer · aus dem Cache"
@@ -342,7 +345,7 @@ function webView(t: TFn, ev: Pick<ToolEvent, 'name' | 'label' | 'detail'>, entry
   const w = ev.detail?.web;
   const provider = w?.provider ?? (str(input?.provider) && str(input?.provider) !== 'auto' ? str(input?.provider) : undefined);
   const parts: string[] = [];
-  if (provider) parts.push(capFirst(provider));
+  if (provider && provider !== 'research') parts.push(providerName(provider));
   if (typeof w?.count === 'number') parts.push(extract ? t('hermesTools.web.pages', { count: w.count }) : t('chat.toolTimeline.hits', { count: w.count }));
   if (w?.cached) parts.push(t('hermesTools.web.cached'));
   return { kind: 'web', icon: entry.icon, title, preview, ...(parts.length ? { sub: parts.join(' · ') } : {}) };

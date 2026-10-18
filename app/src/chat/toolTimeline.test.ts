@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   approvalChoiceLabel,
   buildTimeline,
+  detailLayout,
   cachePercent,
   footerParts,
   knownDuration,
@@ -79,6 +80,21 @@ function hermesTurn(): ChatMessage {
   for (const [e, t] of evs) m = applyEvent(m, e, t);
   return m;
 }
+
+test('timeline: search query is quoted with the quotation marks of the UI language', () => {
+  const m: ChatMessage = {
+    ...createAssistantMessage(1000),
+    status: 'done',
+    tools: [
+      { id: 'c1', name: 'Websuche', label: 'x', status: 'done', startedAt: 1100, endedAt: 1200, detail: { tool: 'web_search', input: { query: 'DAX heute' } } },
+    ],
+  };
+  const summaryIn = (lang: 'de' | 'en' | 'es', locale: string) =>
+    buildTimeline(m, makeT(lang, locale), 2000).find((r) => r.kind === 'tool')?.summary;
+  assert.equal(summaryIn('de', 'de-DE'), '„DAX heute“');
+  assert.equal(summaryIn('en', 'en-US'), '“DAX heute”');
+  assert.equal(summaryIn('es', 'es-ES'), '«DAX heute»');
+});
 
 test('hermes timeline: rows in time order with states, durations, summaries', () => {
   const m = hermesTurn();
@@ -226,4 +242,25 @@ test('server chat from another device: no "0 ms" in the footer, detail sheet or 
   // with tools the count stays, only the duration goes
   const withTool = { ...a, tools: [{ id: 'c1', name: 'web_search', status: 'done' as const, startedAt: 5000, endedAt: 5000 }] };
   assert.deepEqual(footerParts(withTool as typeof a, de), ['1 Werkzeug']);
+});
+
+test('detail sheet: with a web result card the raw tool facts and JSON are collapsed, other tools keep them inline', () => {
+  const detail = {
+    meta: [{ label: 'Tool', value: 'web_search_plus' }, { label: 'Status', value: 'done' }],
+    sections: [{ title: 'Input', body: '{"query":"x"}', mono: true }],
+  };
+  const web = detailLayout(detail, true);
+  assert.deepEqual(web.inline, { meta: [], sections: [] });
+  assert.deepEqual(web.technical, detail);
+  const other = detailLayout(detail, false);
+  assert.equal(other.technical, null);
+  assert.deepEqual(other.inline, detail);
+  // nothing technical to hide: no empty disclosure
+  assert.equal(detailLayout({ meta: [], sections: [] }, true).technical, null);
+});
+
+test('technical details label exists in de, en and es', () => {
+  assert.equal(de.t('chat.toolTimeline.technical'), 'Technische Details');
+  assert.equal(en.t('chat.toolTimeline.technical'), 'Technical details');
+  assert.equal(makeT('es', 'es-ES')('chat.toolTimeline.technical'), 'Detalles técnicos');
 });

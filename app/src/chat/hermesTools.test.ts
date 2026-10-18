@@ -19,7 +19,7 @@ import { applyEvent, createAssistantMessage } from '../hermes/chatState.ts';
 import type { ChatMessage, HermesEvent, ToolEvent } from '../hermes/types.ts';
 import { makeT } from '../i18n/core.ts';
 import { toolDetailFrom } from '../hermes/sessionMapping.ts';
-import { WSP_EXTRACT_TEXT, WSP_MCP_JSON, WSP_SEARCH_TEXT } from '../hermes/webResults.fixtures.ts';
+import { WSP_512_DOC_FALLBACK_CHAIN_TEXT, WSP_512_EMPTY_TEXT, WSP_512_FALLBACK_TEXT, WSP_CACHED_TEXT, WSP_EXTRACT_TEXT, WSP_EXTRACT_URLS, WSP_MCP_JSON, WSP_RESEARCH_TEXT } from '../hermes/webResults.fixtures.ts';
 
 const de = makeT('de', 'de-DE');
 const en = makeT('en', 'en-US');
@@ -219,18 +219,29 @@ test('timeline rows and detail sheet use the Hermes presentation', () => {
 
 // ---- WSP chips (docs/WSP-INTEGRATION.md): query, mode, provider, result count – generic tools keep working
 
+test('WSP 5.1.2 chips: the reported result count and the serving provider after a fallback', () => {
+  const chip = (text: string) => {
+    const call = { id: 'c5', name: 'web_search_plus', arguments: JSON.stringify({ query: 'q' }) };
+    const { detail } = toolDetailFrom(call as never, { role: 'tool', content: text, toolCallId: 'c5' } as never);
+    return describeTool(en, { name: 'web_search_plus', label: 'q', detail }).sub;
+  };
+  assert.equal(chip(WSP_512_FALLBACK_TEXT), 'Keenable · 3 results'); // live: searxng failed, keenable served
+  assert.equal(chip(WSP_512_DOC_FALLBACK_CHAIN_TEXT), 'Exa · 1 result');
+  assert.equal(chip(WSP_512_EMPTY_TEXT), 'Brave · 0 results');
+});
+
 test('WSP chips: web_search_plus with the stored result → query, provider, hits, cached', () => {
-  const call = { id: 'c1', name: 'web_search_plus', arguments: JSON.stringify({ query: 'python 3.14 free threading', count: 5 }) };
-  const { detail } = toolDetailFrom(call as never, { role: 'tool', content: WSP_SEARCH_TEXT, toolCallId: 'c1' } as never);
-  assert.equal(detail.links?.length, 3);
-  assert.deepEqual(detail.web, { count: 3, provider: 'brave', cached: true });
-  const v = describeTool(de, { name: 'web_search_plus', label: 'python 3.14 free threading', detail });
+  const call = { id: 'c1', name: 'web_search_plus', arguments: JSON.stringify({ query: 'free threading guide', count: 5 }) };
+  const { detail } = toolDetailFrom(call as never, { role: 'tool', content: WSP_CACHED_TEXT, toolCallId: 'c1' } as never);
+  assert.equal(detail.links?.length, 2);
+  assert.deepEqual(detail.web, { cached: true, cacheAgeS: 7, provider: 'keenable', count: 2 });
+  const v = describeTool(de, { name: 'web_search_plus', label: 'free threading guide', detail });
   assert.equal(v.title, 'Websuche');
   assert.equal(v.icon, 'search');
-  assert.equal(v.preview, 'python 3.14 free threading');
-  assert.equal(v.sub, 'Brave · 3 Treffer · aus dem Cache');
+  assert.equal(v.preview, 'free threading guide');
+  assert.equal(v.sub, 'Keenable · 2 Treffer · aus dem Cache');
   // live (no stored result yet): title + query label only
-  const live = describeTool(en, tool('web_search_plus', 'python 3.14'));
+  const live = describeTool(en, tool('web_search_plus', 'free threading'));
   assert.equal(live.title, 'Web search');
   assert.equal(live.sub, undefined);
 });
@@ -239,16 +250,23 @@ test('WSP chips: research mode, extract pages, MCP JSON variant, explicit provid
   const research = describeTool(de, withIO('web_search_plus', { query: 'Wärmepumpe Effizienz', mode: 'research', provider: 'exa' }));
   assert.equal(research.title, 'Recherche');
   assert.equal(research.sub, 'Exa');
-  const call = { id: 'c2', name: 'web_extract_plus', arguments: { urls: ['https://peps.example.org/pep-0779/', 'https://broken.example.net/page'] } };
+  // the research result's own `Provider: research` is no provider name
+  const rcall = { id: 'c4', name: 'web_search_plus', arguments: { query: 'q', mode: 'research' } };
+  const rdetail = toolDetailFrom(rcall as never, { role: 'tool', content: WSP_RESEARCH_TEXT, toolCallId: 'c4' } as never).detail;
+  assert.equal(describeTool(en, { name: 'web_search_plus', label: 'q', detail: rdetail }).sub, '3 results');
+  const call = { id: 'c2', name: 'web_extract_plus', arguments: { urls: WSP_EXTRACT_URLS } };
   const { detail } = toolDetailFrom(call as never, { role: 'tool', content: WSP_EXTRACT_TEXT, toolCallId: 'c2' } as never);
   const ex = describeTool(de, { name: 'web_extract_plus', label: 'x', detail });
   assert.equal(ex.title, 'Webseite laden');
-  assert.equal(ex.preview, 'peps.example.org +1');
-  assert.equal(ex.sub, 'Tavily · 2 Seiten');
+  assert.equal(ex.preview, 'example.org +3');
+  assert.equal(ex.sub, 'Keenable · 4 Seiten');
+  assert.equal(detail.links?.[3].failed, 'API error (HTTP 404)');
   const mcp = toolDetailFrom({ id: 'c3', name: 'mcp__web_search_plus__web_search', arguments: { query: 'q' } } as never, { role: 'tool', content: JSON.stringify(WSP_MCP_JSON), toolCallId: 'c3' } as never).detail;
-  assert.equal(describeTool(en, { name: 'mcp__web_search_plus__web_search', label: 'q', detail: mcp }).sub, 'Serper · 1 result · cached');
+  assert.equal(describeTool(en, { name: 'mcp__web_search_plus__web_search', label: 'q', detail: mcp }).sub, 'Keenable · 1 result');
   // a generic search tool without parseable output keeps the plain look
   const generic = describeTool(de, withIO('web_search', { query: 'wetter' }, 'irgendein Text'));
   assert.equal(generic.title, 'Websuche');
   assert.equal(generic.sub, undefined);
+  // lazy tool discovery helpers get a quiet title of their own
+  assert.equal(describeTool(en, tool('tool_search', 'x')).title, 'Looked up a tool');
 });

@@ -33,6 +33,7 @@ import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { brotliDecompressSync, gunzipSync } from 'node:zlib';
 
 const ALLOW_MARKER = 'leak-guard:allow';
 const MAX_FILE_BYTES = 256 * 1024 * 1024;
@@ -608,6 +609,28 @@ const USAGE = `usage: leak-guard.mjs (--staged | --tree [--ref REV] | --path DIR
        [--show] [--json] [--quiet] [--generic-only] [--require-denylist] [--denylist FILE] [--expect-hermes]
 Private terms come from $HUI_PRIVATE_DIR/leak-denylist.txt (not in the repo). See docs/LEAK-GUARD.md.`;
 
+// Compressed files (--path mode): the compressed bytes are noise in which a short denylist term can appear by chance,
+// and they hide what really ships. Scan what they contain instead: .gz / .br decompressed, .zip entry by entry. A file
+// that does not decompress is scanned raw, so nothing is skipped.
+const MAX_INFLATE = 512 * 1024 * 1024;
+const zipGlob = (name) => name.replace(/[\\[\]*?]/g, (c) => `\\${c}`); // unzip treats member names as patterns
+function fileEntries(full, rel) {
+  const raw = { path: rel, read: () => readFileSync(full) };
+  const inflate = (fn, tag) => ({
+    path: `${rel}!${tag}`,
+    read: () => { const buf = readFileSync(full); try { return fn(buf, { maxOutputLength: MAX_INFLATE }); } catch { return buf; } },
+  });
+  if (/\.gz$/i.test(full)) return [inflate(gunzipSync, 'gunzip')];
+  if (/\.br$/i.test(full)) return [inflate(brotliDecompressSync, 'brotli')];
+  if (/\.zip$/i.test(full)) {
+    let names;
+    try { names = execFileSync('unzip', ['-Z1', full], { maxBuffer: 64 * 1024 * 1024 }).toString('utf8').split('\n').filter((n) => n && !n.endsWith('/')); }
+    catch { return [raw]; }
+    return names.map((n) => ({ path: `${rel}!${n}`, read: () => execFileSync('unzip', ['-p', full, zipGlob(n)], { maxBuffer: MAX_INFLATE }) }));
+  }
+  return [raw];
+}
+
 /** Collect {path, read()} entries for the selected mode. Throws on environment errors. */
 function collect(args) {
   const entries = [];
@@ -618,14 +641,14 @@ function collect(args) {
         const full = join(dir, d.name);
         if (d.isSymbolicLink()) continue;
         if (d.isDirectory()) walk(full, root);
-        else if (d.isFile()) entries.push({ path: relative(root, full) || d.name, read: () => readFileSync(full) });
+        else if (d.isFile()) entries.push(...fileEntries(full, relative(root, full) || d.name));
       }
     };
     for (const p of args.paths) {
       const root = resolve(p);
       if (!existsSync(root)) throw new Error(`--path ${p}: does not exist`);
       if (lstatSync(root).isDirectory()) walk(root, root);
-      else entries.push({ path: p, read: () => readFileSync(root) });
+      else entries.push(...fileEntries(root, p));
     }
     return { entries, errors, root: process.cwd() };
   }

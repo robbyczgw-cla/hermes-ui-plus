@@ -468,6 +468,7 @@ scripts/ios-sim-smoke.sh           # UI smoke test of that build (fresh install,
                                    # ⌘K/N/B are web-only) -> dist/ios-sim-smoke/<ts>/{NN-*.png,results.txt,app-errors.log,crashes.txt}
                                    # SIM_DEVICE="iPad Pro 13-inch (M5)" / "iPad Air 11-inch (M4)", HUI_LANG=de,
                                    # HUI_APPEARANCE=dark|light (reboots the simulator; status bar 9:41 for store drafts)
+                                   # HUI_TEST=store: store screenshots paired with scripts/e2e/store-mock.mjs (HUI_STORE_MOCK, ssh -R to the Mac)
 MODE=appstore scripts/build-ios.sh   # App Store / TestFlight .ipa -> dist/appstore/ (+ upload with ASC_* set), docs/IOS.md
 MODE=appstore DRY_RUN=1 scripts/build-ios.sh   # only check inputs and print build number / upload plan
 # source selection (device + simulator): default = clean worktree of HEAD
@@ -475,6 +476,11 @@ BUILD_REF=<commit> scripts/build-ios.sh …                       # another comm
 scripts/build-ios.sh --working-tree …                           # current app/ files incl. uncommitted (label <sha>-dirty)
 WORKING_PATHS="app/app.json app/plugins/x.js" scripts/build-ios.sh --working-tree …   # BUILD_REF + only these paths
 ```
+The simulator build links a `__TEXT,__entitlements` section (keychain access group = bundle id): the simulator reads an
+app's entitlements from the binary, so the unsigned build can store the device token in the keychain (pairing works;
+without it expo-secure-store fails with "A required entitlement is not present"). Do not code-sign the .app with
+`--entitlements` instead: `simctl launch` then fails with "did not return a process handle". The section is only linked
+for `--simulator`.
 The smoke test generates a throw-away Xcode project (`scripts/ios-sim/`: placeholder host app + `SmokeUITests.swift`,
 made with the `xcodeproj` gem that CocoaPods brings) that drives the installed app by bundle id, so the app has no test
 target. It needs no unlocked screen (simulators run headless). Screenshots are demo content only; still look at them

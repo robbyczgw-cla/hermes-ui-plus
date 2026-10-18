@@ -11,6 +11,7 @@
 export { imageResolver, resolveImage } from './instance';
 export { useResolvedImage, useResolvedImages } from './useResolvedImage';
 export { useItemImage } from './useItemImage';
+export { useFaviconSource } from './useFavicon';
 export type { ItemImageState } from './useItemImage';
 export { productImageQuery, placeImageQuery } from './itemImage';
 export type { ItemImageResult } from './itemImage';

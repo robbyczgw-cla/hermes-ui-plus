@@ -4,6 +4,7 @@
 // demo exercises the production parsing + rendering path. No network. Pure (timers injectable), tested.
 import { createSseParser } from '../../hermes/sse.ts';
 import { mapFrame } from '../../hermes/events.ts';
+import { toolDetailFrom } from '../../hermes/sessionMapping.ts';
 import type { ApprovalChoice, HermesEvent } from '../../hermes/types';
 import { L, pickScenario, type DemoLang, type DemoStep } from './scenarios.ts';
 
@@ -155,6 +156,12 @@ export async function runDemoTurn(p: DemoTurnParams): Promise<DemoTurnResult> {
         write(frame({ tool: step.tool.name, emoji: step.tool.emoji, label: step.tool.label, toolCallId: callId, status: 'running' }, 'hermes.tool.progress'));
         await wait(step.tool.ms);
         write(frame({ tool: step.tool.name, toolCallId: callId, status: 'completed' }, 'hermes.tool.progress'));
+        const result = step.tool.result;
+        if (result) {
+          // what Hermes stores for the call (arguments + raw result), as the post-turn session fetch would add it
+          const { detail } = toolDetailFrom({ id: callId, name: step.tool.name, arguments: result.args }, { id: callId, role: 'tool', content: result.output, toolCallId: callId });
+          p.onEvent({ type: 'tool', callId, name: step.tool.name, status: 'done', detail });
+        }
       } else if ('status' in step) {
         write(frame(step.status, 'hermes.status'));
       } else if ('wait' in step) {

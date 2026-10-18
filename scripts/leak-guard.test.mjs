@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { crc32 } from 'node:zlib';
+import { brotliCompressSync, crc32, gzipSync } from 'node:zlib';
 
 import { dmgSignatureRange, hermesStrings, isBinary, isHermesBytecode, isSignaturePath, isTestPath, loadAllowList, machoSignatureRanges, makeScanner, mask, parseDenylist } from './leak-guard.mjs';
 
@@ -658,4 +658,20 @@ test('scan-artifact.sh: APK/AAB/IPA bundles go through the Hermes decoder; AAB/I
   const textBundle = go(art('app.apk', { 'assets/index.android.bundle': Buffer.from('var a = 1;\n') }), cleanDeny);
   assert.equal(textBundle.code, 1, textBundle.all);
   assert.match(textBundle.all, /not Hermes bytecode/);
+});
+
+test('CLI --path: .gz / .br are scanned decompressed, .zip entry by entry; a broken archive is scanned raw', () => {
+  const d = tmp();
+  writeFileSync(join(d, 'bundle.js.gz'), gzipSync(Buffer.from('const host = "zorblax";\n')));
+  writeFileSync(join(d, 'bundle.js.br'), brotliCompressSync(Buffer.from('nothing to see\n')));
+  const zdir = tmp();
+  writeFileSync(join(zdir, 'inner.txt'), 'zorblax lives here\n');
+  execFileSync('python3', ['-c', 'import sys, zipfile; zipfile.ZipFile(sys.argv[1], "w", zipfile.ZIP_DEFLATED).write(sys.argv[2], "inner.txt")', join(d, 'app.zip'), join(zdir, 'inner.txt')]);
+  writeFileSync(join(d, 'broken.gz'), 'not gzip at all: zorblax\n');
+  const r = run(['--path', d], { env: { HUI_PRIVATE_DIR: privateDir() } });
+  assert.equal(r.code, 1);
+  assert.match(r.err, /bundle\.js\.gz!gunzip/, 'finding inside the decompressed .gz');
+  assert.match(r.err, /app\.zip!inner\.txt/, 'finding inside the zip entry');
+  assert.match(r.err, /broken\.gz!gunzip/, 'a file that does not decompress is still scanned (raw)');
+  assert.doesNotMatch(r.err, /bundle\.js\.br/, 'clean brotli content has no finding');
 });

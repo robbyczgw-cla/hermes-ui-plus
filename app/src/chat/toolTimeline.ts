@@ -12,6 +12,7 @@ import { toolEmoji } from './format.ts';
 import { describeTool, hasOwnSummary, isCompactedStatus, parseTodos, toolIconName } from './hermesTools.ts';
 import type { IconName } from './icons.tsx';
 import { modelLabel } from './models.ts';
+import { withoutSecurityNotice } from '../hermes/webResults.ts';
 
 // ------------------------------------------------------------------ formatting
 
@@ -168,7 +169,7 @@ export function smartApproved(output: unknown): boolean {
 
 function toolRow(msg: ChatMessage, ev: ToolEvent, now: number, streaming: boolean, t: TFn): TimelineRow {
   const d = ev.detail;
-  const claudeInput = d?.input !== undefined ? inputSummary(d.input) : undefined;
+  const claudeInput = d?.input !== undefined ? inputSummary(d.input, t) : undefined;
   const view = describeTool(t, ev);
   // Hermes tools with their own summary (todo progress, subagent goal, query …) win over the generic argument line
   const summary = (hasOwnSummary(view.kind) && view.preview ? view.preview : (claudeInput ?? view.preview)) ?? undefined;
@@ -397,6 +398,16 @@ export type RowDetail = {
   sections: DetailSection[];
 };
 
+/**
+ * Detail sheet of a tool row: with a web result card the raw tool facts (name, status, times, call ID) and the input /
+ * output JSON sit behind a closed "Technical details" disclosure so the card reads as search info + sources; every
+ * other tool keeps them inline. `note` and `links` are not technical and stay where they were.
+ */
+export function detailLayout(detail: Pick<RowDetail, 'meta' | 'sections'>, hasWebCard: boolean): { inline: Pick<RowDetail, 'meta' | 'sections'>; technical: Pick<RowDetail, 'meta' | 'sections'> | null } {
+  if (!hasWebCard || (!detail.meta.length && !detail.sections.length)) return { inline: detail, technical: null };
+  return { inline: { meta: [], sections: [] }, technical: { meta: detail.meta, sections: detail.sections } };
+}
+
 const at = (msg: ChatMessage, time: number, locale: string) => `+${formatElapsed(time - msg.createdAt, locale)}`;
 const STATE_LABEL: Record<string, TKey> = {
   running: 'chat.toolTimeline.state.running',
@@ -443,7 +454,8 @@ function toolDetail(msg: ChatMessage, ev: ToolEvent, { t, locale }: Fmt): RowDet
     if (out.output) sections.push({ title: t('chat.detail.output'), body: out.output, mono: true });
     if (typeof out.error === 'string' && out.error) sections.push({ title: t('chat.detail.error'), body: out.error, mono: true });
   } else if (!d?.links?.length || !Array.isArray(out)) {
-    sections.push(json(t('chat.detail.result'), d?.output));
+    // a web tool's text result: WSP's security notice line stays hidden here too
+    sections.push(json(t('chat.detail.result'), d?.web ? withoutSecurityNotice(d.output) : d?.output));
   }
   if (ev.raw?.length) sections.push(json(d ? t('chat.detail.rawData') : `${t('chat.detail.rawData')} (hermes.tool.progress)`, ev.raw));
   const view = describeTool(t, ev);

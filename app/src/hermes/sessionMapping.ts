@@ -12,7 +12,7 @@ import type { Attachment } from '../attachments/types';
 import type { ChatMessage, ToolEvent, ToolDetail, TraceStep } from './types';
 import type { RemoteMessage, RemoteToolCall } from './sessions';
 import { DETAIL_MAX_BYTES, LINKS_MAX, capPayload, sanitize } from './trace.ts';
-import { parseWebToolOutput } from './webResults.ts';
+import { parseWebToolOutput, webMetaOf } from './webResults.ts';
 import { splitTurnExtras, stripTurnExtras, type TurnExtras } from './turnOverride.ts';
 import { applyEvent } from './chatState.ts';
 
@@ -120,9 +120,15 @@ export function toolDetailFrom(call: RemoteToolCall, result: RemoteMessage | und
     const web = parseWebToolOutput(out, call.name);
     if (web) {
       if (web.results.length) {
-        detail.links = web.results.slice(0, LINKS_MAX).map((h) => ({ title: h.title, url: h.url, ...(h.published ? { age: h.published } : {}), ...(h.snippet ? { snippet: h.snippet } : {}) }));
+        detail.links = web.results.slice(0, LINKS_MAX).map((h) => ({
+          title: h.title,
+          url: h.url,
+          ...(h.published ? { age: h.published } : {}),
+          ...(h.snippet ? { snippet: h.snippet } : {}),
+          ...(h.failed ? { failed: h.failed } : {}),
+        }));
       }
-      detail.web = { count: web.results.length, ...(web.provider ? { provider: web.provider } : {}), ...(web.cached ? { cached: true } : {}) };
+      detail.web = webMetaOf(web);
     }
   }
   return { detail, failed };
@@ -407,6 +413,8 @@ export function mergeAssistantDetails(local: ChatMessage, remote: ChatMessage, a
     const next: ToolEvent = { ...t, detail: { ...r.detail, ...stripUndefined(t.detail ?? {}) } };
     if (r.status === 'error' && t.status === 'done') next.status = 'error';
     if (!t.label || t.label === t.name) next.label = r.label;
+    // lazy tool discovery: the live event may be the `tool_call` wrapper, the stored row names the tool it ran
+    if (t.name === 'tool_call' && r.name !== t.name) next.name = r.name;
     return next;
   });
   if (appendMissing) {

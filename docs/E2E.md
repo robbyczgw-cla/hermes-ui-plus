@@ -41,7 +41,7 @@ check registered in `Suite.run()` is in no group.
 |---|---|---|
 | `core` | `version`, `bots_quick_hidden`, `stream_long`, `stop`, `bots_quick_visible`, `cold_start` | basic chat: the long stream, Stop, the model picker's bots/quick state, version label, start time |
 | `net` | `drop_resume`, `drop_recover`, `airplane`, `force_stop`, `offline_retry`, `refused_retry`, `not_sent` | every connection loss and retry path (the slow, fault-injecting checks) |
-| `ui` | `checklist`, `share_image`, `table_font`, `dark` | rendered blocks and system appearance |
+| `ui` | `checklist`, `share_image`, `table_font`, `dark`, `demo_wsp_card` | rendered blocks, system appearance, the web result card (offline demo) |
 | `bg` | `background` | notifications and the keep-alive while the app is in the background |
 | `share` | `share_unpaired`, `share_link`, `share_in_image`, `share_pdf`, `share_cancel`, `share_recreate`, `share_offline` | "Share to HUI+" (docs/SHARE-TARGET.md): intake, sheet, targets, offline; `share_unpaired` runs before pairing |
 
@@ -90,6 +90,7 @@ iOS/macOS builds and the Android build), "busy" also covers `xcodebuild`, the em
 | id | check | how it is verified |
 |---|---|---|
 | `install` | clean install (uninstall first) | `adb install`, no stored chats, versionCode/versionName read |
+| `demo_wsp_card` | offline demo (fresh install, "Try it first (demo)"): the web research sample in English and German, light and dark | the answer shows 3 sources; the "Web search" timeline row opens the web result card ("How it searched", Brave provider line, "… cited in the answer"), Back closes it; "Load web page" opens the pages-read card; then `pm clear` for the pairing check (screenshots `shots/wsp-*.png`) |
 | `share_unpaired` | a link is shared on the very first start (before pairing) | no sheet over the onboarding; after "Just take a look around" (demo only) the "Connect to Hermes first" sheet shows the link; *Connect* hides it, closing the flow brings it back; Cancel; then `pm clear` for the pairing check (screenshots `share/unpaired-*.png`) |
 | `pair` | pairing via `hermesuiplus://pair?u=…&c=<one-time code>` | onboarding steps tapped through; the mock saw exactly one `/bridge/pair/redeem`; header shows Hermes, not demo |
 | `share_link` | app in the background, `am start -a SEND -t text/plain` with a link | sheet shows the link; *Summarize* chip checked; Send → the stored message is exactly `Summarize this briefly.` + the link, answered once (screenshots `share/link-*.png`) |

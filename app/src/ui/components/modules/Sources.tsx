@@ -9,16 +9,16 @@ import { Icon } from '../../primitives/Icon';
 import { Skeleton } from '../../primitives/Skeleton';
 import { asObjects, asOptString, asString } from '../../lib/format';
 import type { HuiSources } from '../../types';
-import { domainOf, faviconUrl, hashString, isHttpUrl } from './a/misc.ts';
+import { domainOf, hashString, isHttpUrl } from './a/misc.ts';
 import { useS } from './useS';
 import { SourcesSkeleton } from '../../skeletons';
-import { useImageGate } from '../../../images';
+import { useFaviconSource } from '../../../images';
 import { useAnswerUiPrefs } from '../../lib/answerPrefs';
 
 const COLLAPSED = 3;
 
 /**
- * `sources` – compact source cards: favicon (from the site itself only for trusted hosts or "Immer laden", else a letter avatar), title,
+ * `sources` – compact source cards: favicon (images/favicon.ts: bridge proxy, trusted hosts or "Immer laden", else a letter avatar), title,
  * domain / site name, snippet. Tap opens the URL (http/https only). Snippets are shown as plain
  * text, never as instructions or markup.
  */
@@ -130,18 +130,17 @@ function SourceNumber({ n }: { n: number }) {
   );
 }
 
-/** Favicon of a source (trust policy: site icon only for trusted hosts / "Immer laden", else a letter avatar). */
-export function Favicon({ t, url, domain }: { t: Theme; url: string; domain: string }) {
+/**
+ * Favicon of a source under the image privacy settings (images/favicon.ts): through the bridge image proxy when it has
+ * one, directly only for trusted hosts or "Immer laden", else a letter avatar.
+ */
+export function Favicon({ t, url, domain, size = 28 }: { t: Theme; url: string; domain: string; size?: number }) {
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  const icon = url ? faviconUrl(url) : undefined;
-  // H1: a favicon request tells the (model-chosen) host that this chat cited it → only trusted hosts or "Immer laden";
-  // everything else keeps the letter avatar (no tap prompt for a 18 px icon)
-  const gate = useImageGate(icon);
-  const src = gate.allowed ? icon : undefined;
+  const src = useFaviconSource(url);
   const color = t.colors.chart[parseInt(hashString(domain), 36) % t.colors.chart.length];
   return (
-    <View style={{ width: 28, height: 28, borderRadius: t.radii.inline, backgroundColor: t.colors.surfaceAlt, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+    <View style={{ width: size, height: size, borderRadius: t.radii.inline, backgroundColor: t.colors.surfaceAlt, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
       {!loaded ? (
         <HText variant="caption" weight="700" style={{ color }}>
           {(domain[0] ?? '?').toUpperCase()}
@@ -149,8 +148,8 @@ export function Favicon({ t, url, domain }: { t: Theme; url: string; domain: str
       ) : null}
       {src && !failed ? (
         <Image
-          source={{ uri: src }}
-          style={{ position: 'absolute', width: 18, height: 18 }}
+          source={src}
+          style={{ position: 'absolute', width: Math.round(size * 0.64), height: Math.round(size * 0.64) }}
           contentFit="contain"
           cachePolicy="disk"
           onLoad={() => setLoaded(true)}

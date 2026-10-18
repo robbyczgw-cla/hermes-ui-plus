@@ -19,6 +19,10 @@
 #     --group g,g     run check groups (core net ui bg share, or all; the table lives in suite.py, `suite.py --list-groups`);
 #                     combines with --only (union). Default without --group/--only: all checks. The report says "subset"
 #     --debug         keep UI dumps of intermediate states (OUT/debug/)
+#     --store-shots L Google Play screenshot drafts instead of the checks (scripts/e2e/store_shots.py): paired against the
+#                     store mock (scripts/e2e/store-mock.mjs, reached on this host as 127.0.0.1:18792 through an ssh -R
+#                     tunnel, E2E_STORE_MOCK_PORT), languages L (e.g. en,de), light + dark, 1080x1920; PNGs in the report dir
+#     --store-only S  with --store-shots: only these scenes (e.g. web-card), --store-modes M: light, dark or light,dark
 #     --live FILE     extra stage: 2-3 harmless turns against a real bridge, FILE holds the pair link (never printed);
 #                     $E2E_LIVE_LINK_FILE works too. E2E_LIVE_EXTRA=bots,quick adds live bot and ⚡ checks (docs/E2E.md)
 #
@@ -43,7 +47,7 @@ usage() {
   python3 "$HERE/suite.py" --list-groups >&2 || true
   exit 2
 }
-APK_ON_HOST= HOST=${E2E_HOST:-} HOST_FLAG=0 OUT= WAIT_MIN=0 ONLY= GROUP= LIVE_FILE=${E2E_LIVE_LINK_FILE:-} LOCAL=0 APK= LIVE_STDIN=0
+APK_ON_HOST= HOST=${E2E_HOST:-} HOST_FLAG=0 OUT= WAIT_MIN=0 ONLY= GROUP= STORE_SHOTS= STORE_ONLY= STORE_MODES=light,dark LIVE_FILE=${E2E_LIVE_LINK_FILE:-} LOCAL=0 APK= LIVE_STDIN=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --host) HOST=$2; HOST_FLAG=1; shift 2 ;;
@@ -52,6 +56,9 @@ while [ $# -gt 0 ]; do
     --wait) WAIT_MIN=$2; shift 2 ;;
     --only) ONLY=$2; shift 2 ;;
     --group) GROUP=$2; shift 2 ;;
+    --store-shots) STORE_SHOTS=$2; shift 2 ;;
+    --store-only) STORE_ONLY=$2; shift 2 ;;
+    --store-modes) STORE_MODES=$2; shift 2 ;;
     --live) LIVE_FILE=$2; shift 2 ;;
     --debug) export E2E_DEBUG=1; shift ;;
     --local) LOCAL=1; HOST=; shift ;;          # internal: we are on the emulator host
@@ -109,6 +116,8 @@ if [ -n "$HOST" ] && [ "$LOCAL" = 0 ]; then
   args=(--local --out "$RDIR/out" --wait "$WAIT_MIN")
   [ -n "$ONLY" ] && args+=(--only "$ONLY")
   [ -n "$GROUP" ] && args+=(--group "$GROUP")
+  [ -n "$STORE_SHOTS" ] && args+=(--store-shots "$STORE_SHOTS" --store-modes "$STORE_MODES")
+  [ -n "$STORE_ONLY" ] && args+=(--store-only "$STORE_ONLY")
   [ -n "${E2E_DEBUG:-}" ] && args+=(--debug)
   # E2E_DRY_RUN=1: print what would run on the host and stop (used by scripts/e2e/groups.test.mjs)
   [ -n "${E2E_DRY_RUN:-}" ] && { echo "dry-run remote args: ${args[*]}"; exit 0; }
@@ -302,6 +311,10 @@ log "booted in $(( $(date +%s) - T_BOOT )) s"
 
 # ── suite ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 export E2E_MOCK_PORT=$MOCK_PORT E2E_BOOT_S=$(( $(date +%s) - T_BOOT ))
+if [ -n "$STORE_SHOTS" ]; then
+  python3 "$HERE/store_shots.py" --apk "$APK" --out "$OUT" --langs "$STORE_SHOTS" --modes "$STORE_MODES" ${STORE_ONLY:+--only "$STORE_ONLY"} < /dev/null
+  exit $?
+fi
 suite_args=(--apk "$APK" --out "$OUT")
 [ -n "$ONLY" ] && suite_args+=(--only "$ONLY")
 [ -n "$GROUP" ] && suite_args+=(--group "$GROUP")

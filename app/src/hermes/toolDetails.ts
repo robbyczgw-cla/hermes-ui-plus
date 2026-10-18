@@ -6,9 +6,22 @@
  * rechecked after EVERY await, so a retired hook never applies its late result to its own (stale) message list
  * and never persists it over a newer transcript. Pure (no React) for node:test.
  */
+import { hermesToolKind } from '../chat/hermesTools.ts';
 import { enrichTurn } from './sessionMapping.ts';
 import type { RemoteMessage } from './sessions.ts';
-import type { ChatMessage } from './types.ts';
+import type { ChatMessage, HermesEvent } from './types.ts';
+
+/**
+ * Mid-turn: a web tool just finished and its result is not here yet. Hermes (0.22) stores each tool row as soon as the
+ * tool returns, so one fetch now fills the web card while the model is still writing (the live `completed` frame
+ * carries no result). Other tools wait for the end of the turn.
+ */
+export function wantsLiveDetails(ev: HermesEvent, msg: ChatMessage | undefined): boolean {
+  if (ev.type !== 'tool' || ev.status === 'running' || hermesToolKind(ev.name) !== 'web') return false;
+  if (!msg || msg.role !== 'assistant') return false;
+  const t = msg.tools.find((x) => x.id === ev.callId);
+  return !!t && t.detail?.output === undefined;
+}
 
 export type ToolDetailJob = {
   messageId: string;

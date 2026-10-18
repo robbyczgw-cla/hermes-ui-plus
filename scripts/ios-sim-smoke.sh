@@ -10,6 +10,8 @@
 # Usage: scripts/ios-sim-smoke.sh
 # Env:   SIM_DEVICE [device of the last --simulator build, else "iPhone 18 Pro"]  HUI_LANG [en] (en|de)
 #        HUI_APPEARANCE [unchanged] (light|dark: set before the run; reboots the simulator, it stays in that mode)
+#        HUI_TEST [smoke] (smoke: the smoke walk above; store: App Store screenshot drafts, one demo chat per scene of
+#        the store story, docs/STORE.md "Screenshots")
 #        REMOTE_DIR [/Users/Shared/hermes-ui-build]  MAC_HOST [build.env]
 # Output: dist/ios-sim-smoke/<timestamp>/{NN-<step>.png, results.txt, app-errors.log, crashes.txt, xcodebuild-test.log}
 #         Screenshots may show nothing private (demo mode), but check before copying them into docs/.
@@ -36,8 +38,17 @@ rsync -a "$ROOT/scripts/ios-sim/" "$MAC_HOST:$REMOTE_DIR/smoke/"
 # one heavy job at a time on the Mac (scripts/lib/maclock.sh, shared with the builds and the Android lane)
 "${SSH[@]}" "mkdir -p hui-lane" && rsync -a "$ROOT/scripts/lib/maclock.sh" "$MAC_HOST:hui-lane/maclock.sh"
 
+case "${HUI_TEST:-smoke}" in smoke) TEST_METHOD=testSmoke ;; store) TEST_METHOD=testStoreShots ;; *) echo "HUI_TEST must be smoke or store" >&2; exit 2 ;; esac
 case "${HUI_APPEARANCE:-}" in ''|light|dark) ;; *) echo "HUI_APPEARANCE must be light or dark" >&2; exit 2 ;; esac
-printf -v REMOTE_ENV '%q=%q ' REMOTE_DIR "$REMOTE_DIR" SIM_DEVICE "${SIM_DEVICE:-}" HUI_LANG "${HUI_LANG:-en}" HUI_APPEARANCE "${HUI_APPEARANCE:-}" HUI_MAC_LOCK_WAIT "${HUI_MAC_LOCK_WAIT:-2700}"
+# store run: a one-time pair link of the store mock (scripts/e2e/store-mock.mjs, reached through an ssh -R tunnel on the Mac too)
+HUI_PAIR_LINK=
+if [ "${HUI_TEST:-smoke}" = store ]; then
+  STORE_MOCK="${HUI_STORE_MOCK:-http://127.0.0.1:18792}"
+  curl -fsS -X POST -d "{\"lang\":\"${HUI_LANG:-en}\"}" "$STORE_MOCK/__store/config" >/dev/null || { echo "store mock not reachable at $STORE_MOCK (node scripts/e2e/store-mock.mjs + ssh -R tunnel to the Mac)" >&2; exit 2; }
+  code="$(curl -fsS -X POST -d '{}' "$STORE_MOCK/__store/pair-code" | sed -n 's/.*"code":"\([^"]*\)".*/\1/p')"
+  HUI_PAIR_LINK="hermesuiplus://pair?u=http%3A%2F%2F127.0.0.1%3A${STORE_MOCK##*:}%2Fv1&c=$code&n=Hermes"
+fi
+printf -v REMOTE_ENV '%q=%q ' REMOTE_DIR "$REMOTE_DIR" SIM_DEVICE "${SIM_DEVICE:-}" HUI_LANG "${HUI_LANG:-en}" HUI_APPEARANCE "${HUI_APPEARANCE:-}" HUI_MAC_LOCK_WAIT "${HUI_MAC_LOCK_WAIT:-2700}" TEST_METHOD "$TEST_METHOD" HUI_PAIR_LINK "$HUI_PAIR_LINK"
 remote_rc=0
 "${SSH[@]}" "${REMOTE_ENV}bash -s" <<'REMOTE' || remote_rc=$?
 set -euo pipefail
@@ -63,12 +74,23 @@ fi
 echo "app $BID ($EXE) on simulator $UDID, language $HUI_LANG"
 if [ -n "$HUI_APPEARANCE" ]; then
   # the iOS 27 simulator applies a changed appearance to apps only after a reboot
+  xcrun simctl boot "$UDID" 2>/dev/null || true   # `simctl ui` needs a booted device
+  xcrun simctl bootstatus "$UDID" -b >/dev/null
   xcrun simctl ui "$UDID" appearance "$HUI_APPEARANCE"
   xcrun simctl shutdown "$UDID" 2>/dev/null || true
   xcrun simctl boot "$UDID"
   echo "appearance: $HUI_APPEARANCE"
 fi
 xcrun simctl bootstatus "$UDID" -b >/dev/null
+# system language/region follow HUI_LANG, so the iPad status bar date is in the language of the screenshots (the
+# simulator takes the host's region at boot; written after boot and SpringBoard restarted, a plist edit before boot is lost)
+case "$HUI_LANG" in de) SYS_LOC=de_DE ;; es) SYS_LOC=es_ES ;; *) SYS_LOC=en_US ;; esac
+if [ "$(xcrun simctl spawn "$UDID" defaults read -g AppleLocale 2>/dev/null)" != "$SYS_LOC" ]; then
+  xcrun simctl spawn "$UDID" defaults write -g AppleLanguages -array "$HUI_LANG"
+  xcrun simctl spawn "$UDID" defaults write -g AppleLocale -string "$SYS_LOC"
+  xcrun simctl spawn "$UDID" launchctl stop com.apple.SpringBoard 2>/dev/null || true
+  sleep 15
+fi
 # store-style screenshots: clean status bar (9:41, full battery/signal); cleared at the end
 trap 'rm -rf "$S/DD" "$S/Smoke.xcodeproj"; maclock_release; xcrun simctl status_bar "$UDID" clear 2>/dev/null || true' EXIT
 xcrun simctl status_bar "$UDID" override --time 9:41 --dataNetwork wifi --wifiMode active --wifiBars 3 \
@@ -78,8 +100,9 @@ xcrun simctl uninstall "$UDID" "$BID" 2>/dev/null || true
 xcrun simctl install "$UDID" "$APP"
 ruby "$S/make-smoke-project.rb" "$S"
 START="$(date '+%Y-%m-%d %H:%M:%S')"; touch "$S/.start"
-TEST_RUNNER_HUI_BUNDLE_ID="$BID" TEST_RUNNER_HUI_SHOT_DIR="$SH" TEST_RUNNER_HUI_LANG="$HUI_LANG" \
+TEST_RUNNER_HUI_BUNDLE_ID="$BID" TEST_RUNNER_HUI_SHOT_DIR="$SH" TEST_RUNNER_HUI_LANG="$HUI_LANG" TEST_RUNNER_HUI_PAIR_LINK="${HUI_PAIR_LINK:-}" \
   xcodebuild test -project "$S/Smoke.xcodeproj" -scheme SmokeUITests -destination "id=$UDID" \
+  -only-testing:"SmokeUITests/SmokeUITests/$TEST_METHOD" \
   -derivedDataPath "$S/DD" COMPILER_INDEX_STORE_ENABLE=NO > "$SH/xcodebuild-test.log" 2>&1 && test_rc=0 || test_rc=$?
 echo "$test_rc" > "$SH/xcodebuild-status"   # diagnostics below must not hide the test result
 grep -E '\*\* TEST|error:|Test Case .*(passed|failed)' "$SH/xcodebuild-test.log" | sort -u | head -20 || true
