@@ -10,9 +10,18 @@ export const CHANNEL_QUIET = 'agent-messages-quiet';
 export const PREVIEW_MAX = 140;
 
 const STRINGS = {
-  de: { generic: 'Neue Nachricht', more: '(+{n} weitere)', test: 'Test-Benachrichtigung: Push funktioniert.', approvalTitle: 'Hermes wartet auf deine Freigabe', approvalGeneric: 'Ein Befehl wartet auf deine Entscheidung.' },
-  en: { generic: 'New message', more: '(+{n} more)', test: 'Test notification: push works.', approvalTitle: 'Hermes is waiting for your approval', approvalGeneric: 'A command is waiting for your decision.' },
-  es: { generic: 'Nuevo mensaje', more: '(+{n} más)', test: 'Notificación de prueba: el push funciona.', approvalTitle: 'Hermes espera tu aprobación', approvalGeneric: 'Un comando espera tu decisión.' },
+  de: {
+    generic: 'Neue Nachricht', more: '(+{n} weitere)', test: 'Test-Benachrichtigung: Push funktioniert.', approvalTitle: 'Hermes wartet auf deine Freigabe', approvalTitleBot: '{name} wartet auf deine Freigabe', approvalGeneric: 'Ein Befehl wartet auf deine Entscheidung.',
+    routineTitle: 'Ergebnis einer Routine', routineGeneric: 'Ein neues Ergebnis liegt im Posteingang.', routineFailed: 'Eine Routine ist fehlgeschlagen.',
+  },
+  en: {
+    generic: 'New message', more: '(+{n} more)', test: 'Test notification: push works.', approvalTitle: 'Hermes is waiting for your approval', approvalTitleBot: '{name} is waiting for your approval', approvalGeneric: 'A command is waiting for your decision.',
+    routineTitle: 'Routine result', routineGeneric: 'A new result is in your inbox.', routineFailed: 'A routine failed.',
+  },
+  es: {
+    generic: 'Nuevo mensaje', more: '(+{n} más)', test: 'Notificación de prueba: el push funciona.', approvalTitle: 'Hermes espera tu aprobación', approvalTitleBot: '{name} espera tu aprobación', approvalGeneric: 'Un comando espera tu decisión.',
+    routineTitle: 'Resultado de una rutina', routineGeneric: 'Hay un resultado nuevo en tu bandeja.', routineFailed: 'Una rutina ha fallado.',
+  },
 };
 export const strings = (locale) => STRINGS[locale] ?? STRINGS.de;
 
@@ -60,21 +69,27 @@ export const collapseKeyFor = (threadKey) => 'hui' + crypto.createHash('sha256')
 /**
  * Per-device notification (platform neutral; senders map it).
  * @param {any} reg registration
- * @param {{title: string, text?: string, data: object, previewDefault?: boolean, count?: number, threadKey: string}} ev
+ * @param {{title: string, text?: string, data: object, previewDefault?: boolean, count?: number, threadKey: string,
+ *   kind?: 'message'|'approval'|'routine', status?: string, botName?: string}} ev  routine: status ok|failed|blocked of the run;
+ *   approval: botName = the asking bot (a non-default Hermes profile), named in the title
  */
 export function buildNotification(reg, ev, nowMs = Date.now()) {
   const L = strings(reg.locale);
   const previewOn = reg.preview === 'on' || (reg.preview !== 'off' && ev.previewDefault !== false);
   // kind 'approval' (Hermes waits for a decision): fixed localized title, command only when previews are on
   const approval = ev.kind === 'approval';
+  // kind 'routine' (a scheduled run finished): localized title/body; previews on: routine title + its summary
+  const routine = ev.kind === 'routine';
+  const routineFailed = routine && (ev.status === 'failed' || ev.status === 'blocked');
   let body = previewOn ? (approval ? commandPreview(ev.text) : previewText(ev.text)) : '';
-  if (!body) body = approval ? L.approvalGeneric : L.generic;
-  if (!approval && ev.count && ev.count > 1) body = `${body} ${L.more.replace('{n}', String(ev.count - 1))}`;
+  if (!body) body = approval ? L.approvalGeneric : routine ? (routineFailed ? L.routineFailed : L.routineGeneric) : L.generic;
+  if (!approval && !routine && ev.count && ev.count > 1) body = `${body} ${L.more.replace('{n}', String(ev.count - 1))}`;
   const quiet = inQuietHours(reg.quiet, reg.tz, nowMs);
   const collapseKey = collapseKeyFor(ev.threadKey);
-  const data = { v: 1, kind: approval ? 'approval' : 'message', profileId: reg.profileId, ...stringify(ev.data) };
+  const data = { v: 1, kind: approval ? 'approval' : routine ? 'routine' : 'message', profileId: reg.profileId, ...stringify(ev.data) };
+  const routineTitle = previewOn && String(ev.title ?? '').trim() ? String(ev.title).trim().slice(0, 80) : L.routineTitle;
   return {
-    title: approval ? L.approvalTitle : String(ev.title || 'Hermes').slice(0, 80),
+    title: approval ? (ev.botName ? L.approvalTitleBot.replace('{name}', String(ev.botName).slice(0, 40)) : L.approvalTitle) : routine ? routineTitle : String(ev.title || 'Hermes').slice(0, 80),
     body,
     data,
     quiet,

@@ -180,7 +180,8 @@ test('id validation: allowed charset and max length pass', async () => {
 test('method restrictions -> 405 with Allow, nothing upstream', async () => {
   seen = [];
   const cases = [
-    ['POST', '/api/sessions', 'GET'], ['PUT', '/api/sessions', 'GET'], ['DELETE', '/api/sessions', 'GET'],
+    // POST /api/sessions: only the bot's "Bot Chat" (test/bot-chat.test.mjs); '{}' is refused there with 403
+    ['PUT', '/api/sessions', 'GET'], ['DELETE', '/api/sessions', 'GET'],
     ['POST', '/api/sessions/a', 'GET, PATCH, DELETE'], ['PUT', '/api/sessions/a', 'GET, PATCH, DELETE'],
     ['PATCH', '/api/sessions/a/messages', 'GET'], ['DELETE', '/api/sessions/a/messages', 'GET'],
     ['POST', '/api/model/options', 'GET'], ['PATCH', '/api/model/options', 'GET'],

@@ -7,6 +7,7 @@ import { PROMPT_VERSION } from './prompt.mjs';
 import { neutralDecision, normalizeDecision } from './taxonomy.mjs';
 import { LruCache } from './lru.mjs';
 import { reformatDecision } from './reformat.mjs';
+import { liveCardDecision } from './live.mjs';
 import { silentLogger } from './log.mjs';
 import { isForeignToHeuristic } from './lang.mjs';
 
@@ -54,12 +55,20 @@ export function createRouter(opts = {}) {
 
   /**
    * @param {{role: string, content: string}[]} turns routing context (≤4 turns)
-   * @param {{signal?: AbortSignal, reqId?: string}} [o]
+   * @param {{signal?: AbortSignal, reqId?: string, liveCards?: {id: string, type: string, focused?: boolean, patches?: number}[]}} [o]
    * @returns {Promise<RouteDecision & {cached?: boolean, fallback?: string}>}
    */
   async function route(turns, o = {}) {
     const started = now();
     if (!turns.length) return neutralDecision(HEURISTIC_MODEL, 0, 'no user message');
+    // "Hermes fragen" / an edit request on a live card: format by card type + card=<id>, decided before the cache
+    // (the same text routes differently with and without open cards), no model call
+    const lf = liveCardDecision(turns, o.liveCards);
+    if (lf) {
+      const d = { ...normalizeDecision(lf, { model: HEURISTIC_MODEL, ms: now() - started }), card: lf.card, ...(lf.full ? { full: true } : {}) };
+      log.info('route', { reqId: o.reqId, format: d.format, confidence: d.confidence, model: d.model, ms: d.ms, cached: false, live: true });
+      return d;
+    }
     // App "Umformen" chips (`[reformat:<kind>] …`) force the format: no cache, no model call.
     const rf = reformatDecision(turns);
     if (rf) {

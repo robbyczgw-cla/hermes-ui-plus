@@ -33,6 +33,7 @@ export const hermesTools = {
     generic: 'Gedächtnis',
     chip: 'gemerkt',
     chipA11y: 'Hermes hat sich etwas gemerkt',
+    openHint: 'Öffnet das Gedächtnis',
   },
   sessionSearch: 'In früheren Chats gesucht',
   web: {
@@ -133,5 +134,15 @@ export const hermesTools = {
     deleteMessage: 'Bitte lösche die Erinnerung {name}.',
     today: 'heute {time}',
     tomorrow: 'morgen {time}',
+    deliver: {
+      none: 'Hermes stellt sie keinem Kanal zu.',
+      botChatHere: 'Sie kommt hier im Chat an.',
+      botChatIn: 'Sie kommt als Nachricht im Chat „{name}“ an.',
+      all: 'Hermes schickt sie an alle verbundenen Kanäle.',
+      targets: 'Hermes schickt sie an {targets}.',
+    },
+    device: 'Auch auf diesem Gerät erinnern',
+    deviceMove: 'Gerät-Erinnerung verschieben',
+    deviceSet: 'Dieses Gerät erinnert dich auch: {when}',
   },
 };

@@ -197,9 +197,10 @@ function checkV4(n, p) {
       if (n.compare) chk((n.products || []).length >= 2, p + '.compare', 'compare needs >= 2 products');
       itemIds(n.products, p + '.products');
       (n.products || []).forEach((o, i) => { const q = `${p}.products[${i}]`;
-        keys(o, ['id','name','brand','imageQuery','image','price','currency','priceNote','rating','reviews','badge','verdict','scores','specs','pros','cons','offers','url'], q);
+        keys(o, ['id','name','brand','imageQuery','image','price','currency','priceNote','rating','reviews','badge','verdict','scores','specs','pros','cons','offers','url','target'], q);
         reqStr(o, 'name', 200, q); optStr(o, 'brand', 80, q); optRating(o, q);
         if (o.price !== undefined) chk(is(o.price, 'number') && o.price >= 0, q + '.price', 'number >= 0 (JSON number)');
+        if (o.target !== undefined) chk(is(o.target, 'number') && o.target >= 0, q + '.target', 'number >= 0 (JSON number)');
         optStr(o, 'currency', 8, q); optStr(o, 'priceNote', 100, q); optStr(o, 'badge', 40, q); optStr(o, 'verdict', 160, q);
         if (o.scores !== undefined) { chk(isArr(o.scores) && o.scores.length >= 1 && o.scores.length <= 5, q + '.scores', '1-5 scores'); (isArr(o.scores) ? o.scores : []).forEach((sc, j) => { const qq = `${q}.scores[${j}]`; keys(sc, ['label','value'], qq); reqStr(sc, 'label', 40, qq); chk(is(sc.value, 'number') && sc.value >= 0 && sc.value <= 10, qq + '.value', 'number 0-10'); }); } optUrl(o, 'url', q); optUrl(o, 'image', q);
         if (o.imageQuery !== undefined) imgQuery(o.imageQuery, q + '.imageQuery');
@@ -701,8 +702,10 @@ function validateFile(f, quiet = false) {
   const skillDir = resolve(here, '../hermes-ui');
   const skillMd = readFileSync(join(skillDir, 'SKILL.md'), 'utf8');
   // Our own budget, not a Hermes limit: SKILL.md is read via skill_view on every app turn (~1 token per 4 chars),
-  // so every line costs on each turn. Detail belongs in references/.
-  chk(skillMd.length <= 9000, 'SKILL.md', `over our per-turn budget (${skillMd.length} > 9000 chars; read via skill_view on every app turn); move detail into references/`);
+  // so every line costs on each turn. Detail belongs in references/. 11000 since 0.1.4: short field lists of the
+  // most-used nodes moved into the core, because weaker default models often write blocks without loading a reference
+  // and then use their own field names (items/places/main), which the app used to drop.
+  chk(skillMd.length <= 11000, 'SKILL.md', `over our per-turn budget (${skillMd.length} > 11000 chars; read via skill_view on every app turn); move detail into references/`);
   const refFiles = readdirSync(join(skillDir, 'references')).filter(n => n.endsWith('.md'));
   const refNames = new Set(refFiles.map(n => n.replace(/\.md$/, '')));
   const tableRefs = new Set();

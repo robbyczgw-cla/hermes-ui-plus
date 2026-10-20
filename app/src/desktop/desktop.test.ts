@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { dedupeKey, parseDesktopEvent, sameCommandWithin } from './events.ts';
+import { lastAnswerText } from './lastAnswer.ts';
 import { desktopKeyFor, neighbourChat } from './keys.ts';
 import { menuChats, sidebarOrder } from './order.ts';
 import { ingestAllowed, lockDue, shouldAttachPaste, staysLocked } from './policy.ts';
@@ -111,4 +112,18 @@ test('ingestAllowed: files never reach the composer through the lock', () => {
   assert.equal(ingestAllowed(3, { locked: true, epoch: 4 }), false);
   // ... even when it was unlocked again in the meantime
   assert.equal(ingestAllowed(3, { locked: false, epoch: 4 }), false);
+});
+
+test('PC-07 "Letzte Antwort kopieren": raw tool-call markup is copied as the notice line, never the call JSON', () => {
+  const notice = 'Tool call not available here: nothing was run.';
+  const pc07 =
+    'Ich richte die Erinnerung jetzt ein und prüfe, ob sie wirklich angelegt ist.\n' +
+    '<tool_call>{"name":"cronjob_manage","arguments":{"action":"create","schedule":"in 15h"}}</tool_call>';
+  const a = (id: string, text: string) => ({ id, role: 'assistant' as const, text, tools: [], status: 'done' as const, createdAt: 1 });
+  const copied = lastAnswerText([{ ...a('u', 'Erinnere mich'), role: 'user' }, a('a', pc07)], false, notice) ?? '';
+  assert.doesNotMatch(copied, /cronjob_manage|\{"name"|tool_call/);
+  assert.equal(copied, `Ich richte die Erinnerung jetzt ein und prüfe, ob sie wirklich angelegt ist.\n\n_${notice}_`);
+  assert.equal(lastAnswerText([a('a', pc07)], true, notice), copied, 'notes inline: same');
+  // without markup: unchanged
+  assert.equal(lastAnswerText([a('a', 'Fertig: **a < b**.')], false, notice), 'Fertig: **a < b**.');
 });

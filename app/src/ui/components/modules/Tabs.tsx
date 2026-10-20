@@ -9,12 +9,20 @@ import type { HuiTabs } from '../../types';
 import { useChildRenderer } from './a/shared';
 import { useS } from './useS';
 import { TabsSkeleton } from '../../skeletons';
+import { LiveNode, useLiveHandOver } from '../../../live/ui/LiveNode';
 
 /**
  * `tabs` – segmented tab bar (real tab semantics: role tablist/tab + selected state) and the
  * active tab's children. While streaming only the last tab's last child can still be partial.
  */
 export function Tabs({ node }: { node: Partial<HuiTabs> }) {
+  // a live trip (`"live":true`, day tabs of agendas) in a chat that folds live cards: receipt / inline card / snapshot
+  const live = useLiveHandOver(node);
+  if (live) return <LiveNode node={node} {...live} type="trip" />;
+  return <PlainTabs node={node} />;
+}
+
+function PlainTabs({ node }: { node: Partial<HuiTabs> }) {
   const S = useS();
   const t = useTheme();
   const { streaming } = useHui();
@@ -36,7 +44,7 @@ export function Tabs({ node }: { node: Partial<HuiTabs> }) {
     <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.control, padding: 3, gap: 3, ...(fits ? {} : { alignSelf: 'flex-start' }) }}>
       {tabs.map((tb, i) => {
         const on = i === idx;
-        const label = asString(tb.label) || `${i + 1}`;
+        const label = asString(tb.label) || (typeof tb.day === 'number' ? S.tabs.day(tb.day) : `${i + 1}`);
         return (
           <PressableScale
             key={i}

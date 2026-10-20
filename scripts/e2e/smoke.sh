@@ -9,14 +9,15 @@
 #                     H = mac: the build Mac ($MAC_HOST from the environment or $HUI_PRIVATE_DIR/build.env; arm64 emulator,
 #                     needs an arm64-v8a APK, e.g. from scripts/build-apk.sh --host mac). HUI_ANDROID_LANE=mac does the same
 #                     when no --host is given.
-#     --apk-on-host P with --host: the APK is already on the host (path relative to ~, e.g. hui-lane/src/dist/x.apk, as left by
-#                     build-apk.sh --host) and so are the scripts (~/hui-lane/src/scripts/e2e, same commit): nothing is uploaded,
-#                     only the report is fetched. For slow links to the host.
+#     --apk-on-host P with --host: the APK is already on the host (path relative to ~, e.g. hui-lane/runs/<run>/dist/x.apk, as
+#                     left by build-apk.sh --host) and so are the scripts of the same run (~/hui-lane/runs/<run>/scripts/e2e, same
+#                     commit; nobody else writes there): nothing is uploaded, only the report is fetched. For slow links to the host.
+#                     The run is marked busy meanwhile, so a sync of another agent never prunes it.
 #     --out DIR       report directory (default /tmp/hui-e2e-<timestamp>)
 #     --wait MIN      if another smoke run holds the host's lock or the host is busy (emulator/qemu or Gradle running),
 #                     wait for up to MIN minutes instead of refusing at once
 #     --only a,b      run only these checks (ids from suite.py; setup, pairing and the logcat check always run)
-#     --group g,g     run check groups (core net ui bg share, or all; the table lives in suite.py, `suite.py --list-groups`);
+#     --group g,g     run check groups (core net ui bg share cards routines reminders bots, or all; the table lives in suite.py, `suite.py --list-groups`);
 #                     combines with --only (union). Default without --group/--only: all checks. The report says "subset"
 #     --debug         keep UI dumps of intermediate states (OUT/debug/)
 #     --store-shots L Google Play screenshot drafts instead of the checks (scripts/e2e/store_shots.py): paired against the
@@ -112,7 +113,7 @@ OUT=${OUT:-/tmp/hui-e2e-$(date +%Y%m%d-%H%M%S)}
 # ── remote mode: copy a minimal bundle to the host, run there, fetch the report ─────────────────────────────────────
 if [ -n "$HOST" ] && [ "$LOCAL" = 0 ]; then
   ROOT=$(cd "$HERE/../.." && pwd)
-  RDIR=/tmp/hui-e2e-run-$(id -un)-$$
+  RDIR=/tmp/hui-e2e-run-$(id -un)-$$-$RANDOM
   args=(--local --out "$RDIR/out" --wait "$WAIT_MIN")
   [ -n "$ONLY" ] && args+=(--only "$ONLY")
   [ -n "$GROUP" ] && args+=(--group "$GROUP")
@@ -124,8 +125,10 @@ if [ -n "$HOST" ] && [ "$LOCAL" = 0 ]; then
   if [ -n "$APK_ON_HOST" ]; then
     # APK and scripts are already on the host (same commit, left by build-apk.sh --host): nothing to upload
     echo "== using the APK and scripts on $HOST (~/$APK_ON_HOST), only the report comes back"
-    ssh "$HOST" "mkdir -p $RDIR/out"
-    RSCRIPTS='$HOME/'"${APK_ON_HOST%%/src/*}/src/scripts/e2e"
+    RUN_ON_HOST=${APK_ON_HOST%/dist/*}   # the run (or checkout) the APK was built in: its scripts are the APK's commit
+    BUSY=; case "$RUN_ON_HOST" in */runs/*) BUSY="; touch \$HOME/$RUN_ON_HOST/.lane-busy" ;; esac
+    ssh "$HOST" "mkdir -p $RDIR/out$BUSY"
+    RSCRIPTS='$HOME/'"$RUN_ON_HOST/scripts/e2e"
     RAPK='$HOME/'"$APK_ON_HOST"
   else
     echo "== bundle -> $HOST:$RDIR"
@@ -153,7 +156,7 @@ if [ -n "$HOST" ] && [ "$LOCAL" = 0 ]; then
   fi
   mkdir -p "$OUT"
   rsync -a "$HOST:$RDIR/out/" "$OUT/" || echo "!! could not fetch the report from $HOST:$RDIR/out" >&2
-  ssh "$HOST" "rm -rf $RDIR" || true
+  ssh "$HOST" "rm -rf $RDIR${BUSY:+; rm -f \$HOME/$RUN_ON_HOST/.lane-busy}" || true
   echo "== report: $OUT/report.md (exit $rc)"
   exit "$rc"
 fi
@@ -163,8 +166,17 @@ mkdir -p "$OUT"
 LIVE_LINK=
 if [ "$LIVE_STDIN" = 1 ]; then IFS= read -r LIVE_LINK || true; elif [ -n "$LIVE_FILE" ]; then IFS= read -r LIVE_LINK < "$LIVE_FILE" || true; fi
 SDK=${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}
-for d in "$SDK" "$HOME/android" /opt/android-sdk /var/tmp/hiui-android-sdk; do [ -n "$d" ] && [ -x "$d/emulator/emulator" ] && SDK=$d && break; done
-[ -x "$SDK/emulator/emulator" ] || { echo "Android SDK with emulator not found (set ANDROID_SDK_ROOT)" >&2; exit 2; }
+# the build Mac keeps its SDK in /Users/Shared (scripts/lib/android-store.sh: a reboot empties /var/tmp there)
+for d in "$SDK" "$HOME/android" /opt/android-sdk /Users/Shared/hiui-android-sdk /var/tmp/hiui-android-sdk; do [ -n "$d" ] && [ -x "$d/emulator/emulator" ] && SDK=$d && break; done
+if [ ! -x "$SDK/emulator/emulator" ]; then
+  echo "Android SDK with emulator not found (set ANDROID_SDK_ROOT). Install it once (user space, docs/BUILD.md \"Second Android lane\"):" >&2
+  if [ "$OS" = Darwin ]; then
+    echo '  sdkmanager --sdk_root=/Users/Shared/hiui-android-sdk "platform-tools" "emulator" "system-images;android-35;google_apis;arm64-v8a"' >&2
+  else
+    echo '  sdkmanager --sdk_root=<sdk> "platform-tools" "emulator" "system-images;android-35;google_apis;x86_64"' >&2
+  fi
+  exit 2
+fi
 export ANDROID_SDK_ROOT=$SDK PATH="$SDK/platform-tools:$PATH"
 AVD=${E2E_AVD:-HermesUIPlusQA}
 EMU_PORT=${E2E_EMU_PORT:-5584}                       # own console port + own adb server port: never touches other adb users

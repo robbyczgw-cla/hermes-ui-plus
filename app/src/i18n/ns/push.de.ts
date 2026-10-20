@@ -44,6 +44,7 @@ export const push = {
     open: 'Öffnen',
     dismiss: 'Schließen',
     notifyTitle: 'Hermes wartet auf deine Freigabe',
+    notifyTitleBot: '{name} wartet auf deine Freigabe',
     notifyBody: 'Ein Befehl wartet auf deine Entscheidung.',
   },
   newMessage: 'Neue Nachricht',

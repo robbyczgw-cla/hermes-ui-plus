@@ -69,3 +69,13 @@ test('gaps and overall verdict', () => {
   assert.equal(scenarioPassed(bad), false);
   assert.equal(scenarioPassed(evaluateChecks(raw({}))), true);
 });
+
+test('fixtureVerdict: nothing, an empty box or a stuck skeleton fail; text or a loaded image pass', async () => {
+  const { fixtureVerdict } = await import('./checks.mjs');
+  assert.equal(fixtureVerdict(null).pass, false);
+  assert.deepEqual(fixtureVerdict({ height: 0, texts: [], images: 0, skeletons: 0 }).reasons, ['no height (renders nothing)']);
+  assert.deepEqual(fixtureVerdict({ height: 120, texts: [], images: 0, skeletons: 0 }).reasons, ['no visible text or image (empty box)']);
+  assert.deepEqual(fixtureVerdict({ height: 120, texts: [], images: 0, skeletons: 2 }).reasons, ['only a skeleton (never settled)']);
+  assert.equal(fixtureVerdict({ height: 40, texts: ['Image search is not set up.'], images: 0, skeletons: 0 }).pass, true);
+  assert.equal(fixtureVerdict({ height: 300, texts: [], images: 2, skeletons: 0 }).pass, true);
+});

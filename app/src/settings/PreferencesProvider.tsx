@@ -8,6 +8,7 @@ import { setImageLoadPolicy } from '../images/policy';
 import { setUnknownImagePolicy } from '../images/trust';
 import { setAnswerUiPrefs } from '../ui/lib/answerPrefs';
 import { setImageSearchMode, setOwnImageConfig } from '../images/web';
+import { setRoutinesEnabled } from '../routines/enabled';
 import { loadImageKey } from './storage';
 import { HuiThemeProvider, setHapticsEnabled } from '../ui';
 import { useDesktopChrome } from '../desktop/chrome';
@@ -91,6 +92,7 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
   useEffect(() => setImageLoadPolicy(prefs.imageLoading), [prefs.imageLoading]);
   useEffect(() => setUnknownImagePolicy(prefs.unknownImages), [prefs.unknownImages]);
   useEffect(() => setImageSearchMode(prefs.imageSearch), [prefs.imageSearch]);
+  useEffect(() => setRoutinesEnabled(prefs.routines), [prefs.routines]);
   // "Antworten" switches the ui/ layer needs (summary card, sources numbering, stats count-up)
   const answerSummary = prefs['answers.summary'];
   const answerFootnotes = prefs['answers.footnotes'];

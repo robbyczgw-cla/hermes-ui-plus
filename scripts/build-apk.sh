@@ -25,7 +25,8 @@
 #
 # Remote lane: scripts/build-apk.sh --host mac|<ssh host> [debug|release]  (or HUI_BUILD_HOST / HUI_ANDROID_LANE=mac)
 #   gets the exact commit to the Mac through git (a bundle of the missing commits, scripts/lib/lane-sync.sh), builds there
-#   (HUI_SKIP_RELEASE_GATE=1); the APK STAYS on the Mac (~/hui-lane/src/dist/<name>-<variant>-<sha>-mac[-debugsigned].apk).
+#   (HUI_SKIP_RELEASE_GATE=1) in a run directory of its own; the APK STAYS on the Mac
+#   (~/hui-lane/runs/<run id>/dist/<name>-<variant>-<sha>-mac[-debugsigned].apk) and must name the synced commit.
 #   --fetch copies it back and runs flavor guard + release gate (private denylist) HERE before it lands in dist/;
 #   --smoke runs the E2E suite on the Mac against it and brings back only the report. The Mac never sees the private
 #   overlay (hermes flavor only). The link to the Mac can be slow, hence no bulk transfers by default.
@@ -35,12 +36,15 @@
 #
 # Env overrides (defaults in brackets):
 #   ANDROID_HOME [~/android/sdk]   JAVA_HOME [~/android/jdk-17]   BUILD_DIR [~/builds/hermes-ui(-<flavor>)]
+#                       hermes flavor: SDK, Gradle cache and BUILD_DIR under HUI_ANDROID_STORE [/var/tmp, macOS /Users/Shared]
+#                       (scripts/lib/android-store.sh; the Mac moves an SDK left in /var/tmp there once)
 #   MEM_MAX [8G]  MEM_HIGH [7G]  CPU_QUOTA [600%]  MIN_AVAIL_GB [10]
 #   GRADLE_WORKERS [2]  GRADLE_XMX [3g]  KOTLIN_XMX [1g]  NINJA_JOBS [3]  ABIS [arm64-v8a]
 #                       ABIS=x86_64 builds for the local emulator; any non-default ABIS gets an
 #                       ABI suffix (dist/hermes-ui-<variant>-<sha>-x86_64.apk, dist/latest-<variant>-x86_64.apk)
 #                       so the phone APK / latest-<variant>.apk are never overwritten
 #   HUI_BUILD_SHA      commit label for the file name (default: git; set by the remote lane, the Mac copy has no .git)
+#   HUI_LANE_STAMP     remote lane: the stamp of the run's sync; the copy of app/ must carry it (scripts/lib/lane-stamp.sh)
 #   HUI_APK_TAG        suffix after the ABI suffix of the output name (remote lane: -mac)
 #   HUI_SKIP_RELEASE_GATE=1  hermes: skip the scan-artifact gate here (the remote lane runs it on the fetched APK)
 #   HUI_MAC_LOCK_WAIT [2700]  macOS: seconds to wait for the Mac's heavy-job lock; MIN_FREE_DISK_GB [6] macOS: refuse below
@@ -71,6 +75,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$ROOT/scripts/lib/apk-guards.sh"
 # shellcheck source=lib/apkfast.sh
 . "$ROOT/scripts/lib/apkfast.sh"
+# shellcheck source=lib/android-store.sh
+. "$ROOT/scripts/lib/android-store.sh"
+# shellcheck source=lib/lane-stamp.sh
+. "$ROOT/scripts/lib/lane-stamp.sh"
 HOST_OS="$(uname -s)"
 # macOS' case-insensitive APFS: the APK holds res/ files that differ only in case (res/-k.xml vs res/-K.xml), and unzip
 # would stop at an overwrite prompt. -o overwrites, so the scan copy here lacks one of each pair; the remote lane
@@ -86,10 +94,12 @@ if [ "${FLAVOR:-hermes}" = personal ]; then
 else
   # public builds: SDK/NDK + Gradle caches at neutral paths – their absolute paths end up in the .so files
   # (lambda names, __FILE__), and $HOME would leak the local user name (scripts/flavor-guard.mjs refuses that).
-  # One-time setup: rsync -a --exclude emulator --exclude system-images ~/android/sdk/ /var/tmp/hiui-android-sdk/
-  #                 rsync -a --exclude daemon ~/.gradle/ /var/tmp/hiui-gradle/
-  export ANDROID_HOME="${ANDROID_HOME:-/var/tmp/hiui-android-sdk}"
-  export GRADLE_USER_HOME="${GRADLE_USER_HOME:-/var/tmp/hiui-gradle}"
+  # Linux /var/tmp/hiui-*, macOS /Users/Shared/hiui-* (a reboot empties the Mac's /var/tmp), scripts/lib/android-store.sh.
+  # One-time setup (Linux): rsync -a --exclude emulator --exclude system-images ~/android/sdk/ /var/tmp/hiui-android-sdk/
+  #                         rsync -a --exclude daemon ~/.gradle/ /var/tmp/hiui-gradle/
+  android_store_init
+  export ANDROID_HOME="${ANDROID_HOME:-$STORE_SDK}"
+  export GRADLE_USER_HOME="${GRADLE_USER_HOME:-$STORE_GRADLE}"
 fi
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
 if [ "$HOST_OS" = Darwin ]; then
@@ -104,10 +114,10 @@ export JAVA_HOME="${JAVA_HOME:-$HOME/android/jdk-17}"
 if [ "${FLAVOR:-hermes}" = personal ]; then
   BUILD_DIR="${BUILD_DIR:-$HOME/builds/hermes-ui}"
 else
-  # macOS: /var is a symlink to /private/var. @expo/fingerprint (the JS fast path's cache key) strips the project root from the
-  # absolute paths of its autolinking output only when they agree, so the physical path keeps the key independent of the directory
-  # (build dir here, fast dir in build-apk-fast.sh).
-  BUILD_DIR="${BUILD_DIR:-$([ "$(uname -s)" = Darwin ] && echo /private || true)/var/tmp/hiui-build-hermes}"
+  # macOS: a physical path (android_store_init resolves it; /var is a symlink to /private/var). @expo/fingerprint (the JS fast
+  # path's cache key) strips the project root from the absolute paths of its autolinking output only when they agree, so the
+  # physical path keeps the key independent of the directory (build dir here, fast dir in build-apk-fast.sh).
+  BUILD_DIR="${BUILD_DIR:-$STORE_BUILD}"
   export CFLAGS="${CFLAGS:-} -ffile-prefix-map=$HOME=/src -ffile-prefix-map=$BUILD_DIR=/src/app"
   export CXXFLAGS="${CXXFLAGS:-} -ffile-prefix-map=$HOME=/src -ffile-prefix-map=$BUILD_DIR=/src/app"
 fi
@@ -293,6 +303,8 @@ if [ "$HOST_OS" = Darwin ]; then
   . "$ROOT/scripts/lib/maclock.sh"
   maclock_acquire android-build "${HUI_MAC_LOCK_WAIT:-2700}" || exit 3
   trap 'maclock_release' EXIT
+  # under the lock: no other Android build / emulator uses the SDK while it moves
+  [ "$FLAVOR" = personal ] || android_store_migrate
 else
   exec 9>"$HOME/builds/.hermes-build.lock"
   flock -n 9 || { echo "another build is running (lock $HOME/builds/.hermes-build.lock)"; exit 1; }
@@ -317,7 +329,7 @@ echo "Build number: $HUI_BUILD_NUMBER (source $HUI_BUILD_SOURCE)"
 
 step "Preflight"
 [ -x "$JAVA_HOME/bin/java" ] || { echo "JDK not found at $JAVA_HOME (see docs/BUILD.md)"; exit 1; }
-[ -d "$ANDROID_HOME/platforms/android-36" ] || { echo "Android SDK missing at $ANDROID_HOME (see docs/BUILD.md)"; exit 1; }
+android_sdk_require build "$ANDROID_HOME" || exit 1
 "$JAVA_HOME/bin/java" -version 2>&1 | head -1
 node -v
 AVAIL_KB="$(host_avail_kb)"
@@ -360,6 +372,9 @@ rsync -a --delete \
   --exclude /refs/ --exclude /dist/ --exclude '*.keystore' --exclude '*.jks' --exclude .env --exclude '.env.*' \
   "$ROOT/app/" "$BUILD_DIR/app/"
 rm -f "$BUILD_DIR/latest-$VARIANT.apk" "$BUILD_DIR/latest-$VARIANT.aab" "$BUILD_DIR/fast-key"
+# remote lane: the copy must be this run's sync; the APK then names the commit of the copy (Settings -> About, checked by the caller)
+lane_stamp_check "$BUILD_DIR/app" || exit 1
+[ -z "$LANE_STAMP_SOURCE" ] || HUI_BUILD_SOURCE="$LANE_STAMP_SOURCE"
 
 # macOS: no systemd, no cgroup. The build runs as a child of this shell; a watchdog sums the RSS of its process tree every
 # 5 s, writes [mem] / [therm] lines (pmset -g therm: CPU_Speed_Limit < 100 = thermal throttling) and kills the tree by

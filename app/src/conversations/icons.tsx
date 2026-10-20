@@ -1,6 +1,6 @@
 import Svg, { Circle, Path } from 'react-native-svg';
 
-export type ConvIconName = 'search' | 'pin' | 'trash' | 'edit' | 'more' | 'chat' | 'settings' | 'select' | 'sidebar' | 'archive' | 'chevronDown' | 'chevronRight';
+export type ConvIconName = 'search' | 'pin' | 'trash' | 'edit' | 'more' | 'chat' | 'settings' | 'select' | 'sidebar' | 'archive' | 'chevronDown' | 'chevronRight' | 'routines' | 'library';
 
 /** Small stroke icons missing from ui/Icon (same 24 grid / 1.75 stroke geometry). */
 export function ConvIcon({ name, size = 18, color, strokeWidth = 1.75 }: { name: ConvIconName; size?: number; color: string; strokeWidth?: number }) {
@@ -65,6 +65,19 @@ export function ConvIcon({ name, size = 18, color, strokeWidth = 1.75 }: { name:
       break;
     case 'chevronRight':
       body = <Path d="M9.5 6l6 6-6 6" {...p} />;
+      break;
+    case 'routines':
+      // a clock face with a return arrow: something that comes back on a schedule
+      body = (
+        <>
+          <Path d="M20 12a8 8 0 1 1-2.35-5.65" {...p} />
+          <Path d="M18 3.5v3.2h-3.2M12 8v4.2l2.6 1.6" {...p} />
+        </>
+      );
+      break;
+    case 'library':
+      // the book of Settings → Skills & memory (chat/icons.tsx `book`)
+      body = <Path d="M5 5.5A1.5 1.5 0 0 1 6.5 4h12v13.5h-12A1.5 1.5 0 0 0 5 19V5.5zM5 19a1.5 1.5 0 0 0 1.5 1.5h12v-3" {...p} />;
       break;
     case 'chat':
       body = <Path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v9a1.5 1.5 0 0 1-1.5 1.5H10l-4.5 4v-4h0A1.5 1.5 0 0 1 4 14.5z" {...p} />;

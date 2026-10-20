@@ -7,6 +7,7 @@ import { acquireDevice, devicePlatform, pushFetch } from './device';
 import { pushServerKind, registrationBody, type PushPlatform, type PushProfile, type PushProfileSettings } from './model';
 import { getPushSettings, setPushSettings } from './settingsStore';
 import { completeRegistration, isCurrentRegistrationGen, nextRegistrationGen } from './registrationGuard';
+import { routinesEnabled } from '../routines/enabled';
 
 export type PushStatus =
   | { kind: 'unsupported' } // profile/server cannot push
@@ -59,7 +60,7 @@ export async function syncRegistration(p: PushProfile, t: TFn, locale: string): 
   const s = getPushSettings(p.id);
   if (!s.enabled || !isCurrentRegistrationGen(p.id, gen)) return s.enabled ? { kind: 'registered', platform } : { kind: 'off' };
   try {
-    const r = await registerDevice(pushFetch, p, dev.device, registrationBody(p, s, { locale, tz: tz() }));
+    const r = await registerDevice(pushFetch, p, dev.device, registrationBody(p, s, { locale, tz: tz(), serverSources: cfg.sources, routines: routinesEnabled() }));
     const outcome = await completeRegistration({
       profileId: p.id,
       gen,

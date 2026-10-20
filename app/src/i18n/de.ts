@@ -18,9 +18,14 @@ import { compliance as complianceNS } from './ns/compliance.de.ts';
 import { menus as menusNS } from './ns/menus.de.ts';
 import { desktop as desktopNS } from './ns/desktop.de.ts';
 import { bots as botsNS } from './ns/bots.de.ts';
+import { botCreate as botCreateNS } from './ns/botCreate.de.ts';
 import { quick as quickNS } from './ns/quick.de.ts';
 import { support as supportNS } from './ns/support.de.ts';
 import { share as shareNS } from './ns/share.de.ts';
+import { live as liveNS } from './ns/live.de.ts';
+import { routines as routinesNS } from './ns/routines.de.ts';
+import { library as libraryNS } from './ns/library.de.ts';
+import { whatsNew as whatsNewNS } from './ns/whatsNew.de.ts';
 
 // German dictionary = source of truth for keys. en.ts must satisfy `typeof de`.
 // Plural syntax inside values: {count, plural, one {# Minute} other {# Minuten}}  (see README).
@@ -45,9 +50,14 @@ export const de = {
   menus: menusNS,
   desktop: desktopNS,
   bots: botsNS,
+  botCreate: botCreateNS,
   quick: quickNS,
   support: supportNS,
   share: shareNS,
+  live: liveNS,
+  routines: routinesNS,
+  library: libraryNS,
+  whatsNew: whatsNewNS,
   actions: {
     send: 'Senden',
     cancel: 'Abbrechen',

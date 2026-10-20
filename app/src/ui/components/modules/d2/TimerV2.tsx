@@ -4,7 +4,7 @@
  * ±1 min, pause/reset, sound/vibration toggle. State = absolute timestamps in useNodeState (survives
  * restarts); a local notification is scheduled on start and cancelled on pause/reset (useClocks).
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { View } from 'react-native';
 import { useTheme, type Theme } from '../../../theme';
 import { scaleFont } from '../../../themes';
@@ -13,7 +13,7 @@ import { HText, PressableScale, Surface } from '../../../primitives/basics';
 import { Button } from '../../../primitives/Button';
 import { Icon } from '../../../primitives/Icon';
 import { haptic } from '../../../primitives/haptics';
-import { useNodeState } from '../../../../nodestate';
+import { useNodeScope, useNodeState } from '../../../../nodestate';
 import { useLocale, useT } from '../../../../i18n';
 import type { HuiTimer } from '../../../types';
 import { TimerSkeleton } from '../../../skeletons';
@@ -23,8 +23,10 @@ import { ClockRing, D2Icon, DoneAlert, IconBtn, SoundToggle } from './parts';
 import { ADJUST_STEP_MS, countdown, elapsedMs, formatCountdown, formatElapsed, progress, remainingMs, splitDuration, stopwatch, type Clock } from './timerEngine.ts';
 import { normalizeTimer, timerIsEmpty, timerSubtitle, type TimerItem, type TimerSpec } from './timerModel.ts';
 import { sanitizeClocks, useClocks, type ClockControls, type ClockMap } from './useClocks';
+import { isGeneratedTimerId, notifyTimers, predecessorOf, registerTimer, subscribeTimers, timersVersion } from './timerLink.ts';
 
-type TimerState = { clocks: ClockMap; sound?: boolean; auto?: boolean; since?: number };
+/** took: this timer already took over from an earlier one (timerLink); replaced: a newer timer took over from this one */
+type TimerState = { clocks: ClockMap; sound?: boolean; auto?: boolean; since?: number; took?: boolean; replaced?: boolean };
 const INITIAL: TimerState = { clocks: {} };
 const STATE_VERSION = 2; // v1 stored {autostarted}
 
@@ -70,6 +72,54 @@ export function Timer({ node }: { node: Partial<HuiTimer> }) {
     else ctl.start(MAIN, spec.kind === 'stopwatch' ? stopwatch() : countdown(spec.seconds ?? 0));
   }, [ready, streaming, st.auto, spec, ctl, setSt]);
 
+  // follow-up timers in the same chat (timerLink.ts): single countdowns only
+  const scope = useNodeScope();
+  const linkable = !!scope && spec.kind === 'countdown' && !streaming;
+  const rawId = typeof node.id === 'string' ? node.id : '';
+  const explicitId = rawId && !isGeneratedTimerId(rawId) ? rawId : undefined;
+  const rawLabel = typeof node.label === 'string' ? node.label : '';
+  const live = useRef({ clocks, ctl });
+  live.current = { clocks, ctl };
+  const [seq, setSeq] = useState<number | undefined>(undefined);
+  useEffect(() => {
+    if (!linkable || !scope) return;
+    const r = registerTimer({
+      conversationId: scope.conversationId,
+      messageId: scope.messageId,
+      createdAt: scope.createdAt,
+      explicitId,
+      label: rawLabel,
+      active: () => {
+        const c = live.current.clocks[MAIN];
+        return c && c.mode === 'countdown' && (c.status === 'running' || c.status === 'paused') ? remainingMs(c, Date.now()) : null;
+      },
+      replace: () => {
+        live.current.ctl.reset(MAIN);
+        setSt((s) => ({ ...s, replaced: true }));
+      },
+    });
+    setSeq(r.seq);
+    return r.unregister;
+  }, [linkable, scope, explicitId, rawLabel, setSt]);
+  const mainStatus = clocks[MAIN]?.status;
+  useEffect(() => notifyTimers(), [mainStatus]);
+  const linkVersion = useSyncExternalStore(subscribeTimers, timersVersion, timersVersion);
+  const pred = useMemo(
+    () => (linkable && scope && seq !== undefined ? predecessorOf({ conversationId: scope.conversationId, messageId: scope.messageId, createdAt: scope.createdAt, explicitId, label: rawLabel, seq }) : null),
+    [linkable, scope, seq, explicitId, rawLabel, linkVersion], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const ownIdle = !clocks[MAIN] || clocks[MAIN].status === 'idle';
+  const takeOver = useCallback(() => {
+    if (!pred || spec.kind !== 'countdown') return;
+    setSt((s) => ({ ...s, took: true, replaced: false }));
+    pred.timer.replace();
+    ctl.start(MAIN, countdown(spec.seconds ?? 0));
+  }, [pred, spec, setSt, ctl]);
+  // the model changed a timer it showed before (same id): the new one replaces the running one, once
+  useEffect(() => {
+    if (ready && pred?.sameId && !st.took && ownIdle && spec.kind === 'countdown' && spec.seconds) takeOver();
+  }, [ready, pred, st.took, ownIdle, spec, takeOver]);
+
   if (timerIsEmpty(spec) && streaming) return <TimerSkeleton />;
 
   const toggleSound = () => setSt((s) => ({ ...s, sound: !(s.sound !== false) }));
@@ -77,7 +127,7 @@ export function Timer({ node }: { node: Partial<HuiTimer> }) {
 
   if (spec.kind === 'multi') return <MultiTimer spec={spec} {...common} />;
   if (spec.kind === 'until') return <UntilTimer spec={spec} since={st.since} {...common} />;
-  return <SingleTimer spec={spec} {...common} />;
+  return <SingleTimer spec={spec} {...common} replaced={!!st.replaced && ownIdle} onTakeOver={pred && !pred.sameId && ownIdle ? takeOver : undefined} />;
 }
 
 type CommonProps = { t: Theme; ctl: ClockControls; clocks: ClockMap; sound: boolean; toggleSound: () => void; streaming: boolean; alert: string | null; dismiss: () => void };
@@ -108,7 +158,7 @@ function Header({ t, icon, title, subtitle, sound, toggleSound, right }: { t: Th
 
 /* ───────────── single countdown / stopwatch ───────────── */
 
-function SingleTimer({ spec, t, ctl, clocks, sound, toggleSound, streaming, alert, dismiss }: CommonProps & { spec: Extract<TimerSpec, { kind: 'countdown' | 'stopwatch' }> }) {
+function SingleTimer({ spec, t, ctl, clocks, sound, toggleSound, streaming, alert, dismiss, replaced, onTakeOver }: CommonProps & { spec: Extract<TimerSpec, { kind: 'countdown' | 'stopwatch' }>; replaced?: boolean; onTakeOver?: () => void }) {
   const tr = useT();
   const isWatch = spec.kind === 'stopwatch';
   const seconds = spec.kind === 'countdown' ? spec.seconds ?? 0 : 0;
@@ -175,6 +225,18 @@ function SingleTimer({ spec, t, ctl, clocks, sound, toggleSound, streaming, aler
         <View style={{ alignItems: 'center', marginTop: -t.spacing.s }}>
           <Button label={tr('ui.timer.reset')} variant="tertiary" icon="reset" onPress={() => ctl.reset(MAIN)} />
         </View>
+      ) : null}
+      {onTakeOver ? (
+        <View style={{ alignItems: 'center', gap: t.spacing.xs }}>
+          <HText variant="caption" color="muted" align="center">
+            {tr('ui.timer.otherRunning')}
+          </HText>
+          <Button label={tr('ui.timer.startInstead')} variant="secondary" onPress={onTakeOver} />
+        </View>
+      ) : replaced ? (
+        <HText variant="caption" color="muted" align="center">
+          {tr('ui.timer.replaced')}
+        </HText>
       ) : null}
       {alert ? <DoneAlert text={alert} onDismiss={dismiss} t={t} /> : running && !isWatch ? (
         <HText variant="micro" color="subtle" align="center">

@@ -27,6 +27,7 @@ import { CardImage } from './modules/d1/parts';
 import { D1Icon } from './modules/d1/icons';
 import { productKind } from './modules/d1/d1Model.ts';
 import { useCaptureMode } from '../lib/capture';
+import { LiveNode, useLivePatchHandOver } from '../../live/ui/LiveNode';
 
 export type NodeProps<T> = { node: Partial<T> };
 
@@ -58,6 +59,13 @@ export function TextBlock({ node }: NodeProps<HuiText>) {
 const TONE_ICON: Record<string, IconName> = { info: 'info', success: 'checkCircle', warning: 'alert', danger: 'alertOctagon' };
 
 export function Callout({ node }: NodeProps<HuiCallout>) {
+  // a Hermes patch of a live card of this chat (`livePatch`): its receipt; elsewhere the plain callout below
+  const live = useLivePatchHandOver(node.livePatch);
+  if (live && node.livePatch) return <LiveNode node={{ id: node.livePatch.card }} {...live} />;
+  return <PlainCallout node={node} />;
+}
+
+function PlainCallout({ node }: NodeProps<HuiCallout>) {
   const t = useTheme();
   const { streaming } = useHui();
   const tone = (['info', 'success', 'warning', 'danger'] as const).includes(node.tone as never) ? node.tone! : 'info';
@@ -518,10 +526,10 @@ function safeJson(v: unknown): string {
 }
 
 /** Neutral card for unknown node types (or garbage) – shows the JSON, never crashes. */
-export function Fallback({ node, reason, renderError, empty }: { node: unknown; reason?: string; renderError?: boolean; empty?: boolean }) {
+export function Fallback({ node, reason, renderError, empty, collapsed }: { node: unknown; reason?: string; renderError?: boolean; empty?: boolean; /** JSON only on tap (empty nodes: nothing to read there) */ collapsed?: boolean }) {
   const tr = useT();
   const t = useTheme();
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(!collapsed);
   const type = node && typeof node === 'object' && 'type' in node ? asString((node as { type: unknown }).type) : '';
   const json = safeJson(node);
   return (

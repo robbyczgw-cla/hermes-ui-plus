@@ -34,6 +34,7 @@ export const hermesTools = {
     generic: 'Memory',
     chip: 'remembered',
     chipA11y: 'Hermes remembered something',
+    openHint: 'Opens memory',
   },
   sessionSearch: 'Searched earlier chats',
   web: {
@@ -134,5 +135,15 @@ export const hermesTools = {
     deleteMessage: 'Please delete the reminder {name}.',
     today: 'today {time}',
     tomorrow: 'tomorrow {time}',
+    deliver: {
+      none: "Hermes won't post it to any channel.",
+      botChatHere: 'It arrives here in this chat.',
+      botChatIn: 'It arrives as a message in the chat "{name}".',
+      all: 'Hermes sends it to every connected channel.',
+      targets: 'Hermes sends it to {targets}.',
+    },
+    device: 'Also remind me on this device',
+    deviceMove: 'Move the device reminder',
+    deviceSet: 'This device reminds you too: {when}',
   },
 } satisfies typeof de;

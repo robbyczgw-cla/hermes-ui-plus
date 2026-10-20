@@ -1,6 +1,6 @@
 // UI smoke test of the installed HUI+ (Hermes UI+) simulator build (scripts/ios-sim-smoke.sh). Drives the app by bundle id
 // (XCUIApplication(bundleIdentifier:)), so the app itself needs no test target. Fresh install expected (onboarding).
-// Env (via TEST_RUNNER_*): HUI_BUNDLE_ID, HUI_SHOT_DIR (screenshots + results.txt), HUI_LANG (en|de, default en).
+// Env (via TEST_RUNNER_*): HUI_BUNDLE_ID, HUI_SHOT_DIR (screenshots + results.txt), HUI_LANG (en|de|es, default en).
 // Soft checks: every step is recorded as OK/FAIL in results.txt and the run continues, so all screenshots exist.
 import XCTest
 
@@ -21,8 +21,23 @@ final class SmokeUITests: XCTestCase {
 
   private func shot(_ name: String) {
     shotNo += 1
-    let file = String(format: "%02d-%@.png", shotNo, name)
-    try? XCUIScreen.main.screenshot().pngRepresentation.write(to: dir.appendingPathComponent(file))
+    // smoke review shots: JPEG q45, at most 1080 px wide; the store drafts (HUI_LOSSLESS=1) are deliverables and stay PNG
+    let lossless = env["HUI_LOSSLESS"] == "1"
+    let file = String(format: "%02d-%@.%@", shotNo, name, lossless ? "png" : "jpg")
+    let shot = XCUIScreen.main.screenshot()
+    var data = shot.pngRepresentation
+    if !lossless {
+      var img = shot.image
+      if img.size.width * img.scale > 1080 {
+        let f = 1080 / (img.size.width * img.scale)
+        let fmt = UIGraphicsImageRendererFormat(); fmt.scale = 1
+        img = UIGraphicsImageRenderer(size: CGSize(width: 1080, height: img.size.height * img.scale * f), format: fmt).image { _ in
+          img.draw(in: CGRect(x: 0, y: 0, width: 1080, height: img.size.height * img.scale * f))
+        }
+      }
+      data = img.jpegData(compressionQuality: 0.45) ?? data
+    }
+    try? data.write(to: dir.appendingPathComponent(file))
     note(true, "screenshot \(file)")
   }
 
@@ -70,7 +85,7 @@ final class SmokeUITests: XCTestCase {
     sleep(1)
     let kb = app.keyboards.firstMatch
     let kbFrame = kb.exists ? kb.frame : .null
-    let cands = app.buttons.matching(NSPredicate(format: "label == %@ OR label == %@", "Send", "Senden")).allElementsBoundByIndex
+    let cands = app.buttons.matching(NSPredicate(format: "label IN %@", ["Send", "Senden", "Enviar"])).allElementsBoundByIndex
       .filter { $0.exists && !$0.frame.isEmpty && !kbFrame.contains(CGPoint(x: $0.frame.midX, y: $0.frame.midY)) }
     if let b = cands.first(where: { $0.isHittable }) ?? cands.first {
       // iPad with a hardware keyboard: the shortcut bar can make the button report "not hittable"
@@ -204,9 +219,11 @@ final class SmokeUITests: XCTestCase {
   /// pair with the store mock the way a user does: Connect → "I have a QR code or link" → paste the pair link (HUI_PAIR_LINK,
   /// made by scripts/ios-sim-smoke.sh) → Use link, then the onboarding cards (check the connection, consent, "start an
   /// empty chat") until the composer of an empty chat is there. (Opening the link from outside needs a system dialog.)
-  private func pairWithMock(_ de: Bool) {
+  private func tr(_ lang: String, _ en: String, _ de: String, _ es: String) -> String { lang == "de" ? de : lang == "es" ? es : en }
+
+  private func pairWithMock(_ lang: String) {
     guard let link = env["HUI_PAIR_LINK"], !link.isEmpty else { note(false, "HUI_PAIR_LINK missing"); return }
-    guard tapButton(de ? "Verbinden" : "Connect") else { return }
+    guard tapButton(tr(lang, "Connect", "Verbinden", "Conectar")) else { return }
     sleep(2)
     guard tap("QR") else { return }
     sleep(2)
@@ -224,7 +241,7 @@ final class SmokeUITests: XCTestCase {
     field.typeText("\n")
     note(true, "pair link entered")
     sleep(3)
-    let labels = de ? ["Verbinden", "Verstanden & weiter", "Leeren Chat starten"] : ["Connect", "Got it, continue", "Start an empty chat"]
+    let labels = lang == "de" ? ["Verbinden", "Verstanden & weiter", "Leeren Chat starten"] : lang == "es" ? ["Conectar", "Entendido, continuar", "Empezar un chat vacío"] : ["Connect", "Got it, continue", "Start an empty chat"]
     for i in 0..<14 {
       dismissAlerts()
       var tapped = false
@@ -248,47 +265,51 @@ final class SmokeUITests: XCTestCase {
   func testStoreShots() throws {
     continueAfterFailure = true
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    let de = (env["HUI_LANG"] ?? "en") == "de"
-    app.launchArguments = de ? ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE"] : ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+    let lang = env["HUI_LANG"] ?? "en"
+    let locale = ["de": "de_DE", "es": "es_ES"][lang] ?? "en_US"
+    app.launchArguments = ["-AppleLanguages", "(\(lang))", "-AppleLocale", locale]
     XCUIDevice.shared.orientation = .portrait
     app.launch()
     note(app.wait(for: .runningForeground, timeout: 20), "app launched (foreground)")
     sleep(3); dismissAlerts()
     waitFor("HUI+", 20)
     shot("welcome")   // the offline-demo card of the welcome screen: the one frame that shows demo
-    pairWithMock(de)
+    pairWithMock(lang)
 
+    // HUI_STORE_ONLY=web-search: only the web card scene (re-shoot of one picture); empty = the whole story
+    let only = env["HUI_STORE_ONLY"] ?? ""
+    if only.isEmpty {
     // checklist: tick two items, then the answer's own "Share as image" sheet (live preview with the ticks)
-    send(de ? "Mach mir eine Einkaufsliste fürs Wochenende." : "Make me a shopping list for the weekend.", wait: 7)
-    tap(de ? "Tomaten" : "Tomatoes"); sleep(1)
-    tap(de ? "Basilikum" : "Basil"); sleep(2)
+    send(tr(lang, "Make me a shopping list for the weekend.", "Mach mir eine Einkaufsliste fürs Wochenende.", "Hazme una lista de la compra."), wait: 7)
+    tap(tr(lang, "Tomatoes", "Tomaten", "Tomates")); sleep(1)
+    tap(tr(lang, "Basil", "Basilikum", "Albahaca")); sleep(2)
     scrollDown(0.7); scrollDown(0.7); scrollDown(0.7)
     shot("checklist-ticked")
-    if tapButton(de ? "Als Bild teilen" : "Share as image") {
+    if tapButton(tr(lang, "Share as image", "Als Bild teilen", "Compartir como imagen")) {
       sleep(7)
       shot("share-image")
       closeShareSheet()
     }
 
     // approval, sent in the checklist chat: in an empty chat the keyboard cannot be dragged away
-    send(de ? "Räum den Cache auf, mit Freigabe." : "Clean up the cache, with approval.", wait: 6, hideKeyboardFirst: true)
+    send(tr(lang, "Clean up the cache, with approval.", "Räum den Cache auf, mit Freigabe.", "Borra los archivos temporales, pero solo con mi permiso."), wait: 6, hideKeyboardFirst: true)
     ensureKeyboardHidden()
     shot("approval")
 
     // choice cards
     newChat()
-    send(de ? "Hilf mir, ein Ziel für einen Städtetrip zu wählen." : "Help me pick a destination for a city break.", wait: 8)
+    send(tr(lang, "Help me pick a destination for a city break.", "Hilf mir, ein Ziel für einen Städtetrip zu wählen.", "Quiero elegir destino para una escapada."), wait: 8)
     shot("choice-cards")
 
     // products: pick two, the side-by-side table appears below the cards
     newChat()
-    send(de ? "Vergleiche Kopfhörer mit Geräuschunterdrückung." : "Compare noise cancelling headphones.", wait: 9)
-    for _ in 0..<4 where !button(de ? "Vergleichen" : "Compare").isHittable { scrollUp() }
-    if tapButton(de ? "Vergleichen" : "Compare") {
+    send(tr(lang, "Compare noise cancelling headphones.", "Vergleiche Kopfhörer mit Geräuschunterdrückung.", "Compara los mejores auriculares."), wait: 9)
+    for _ in 0..<4 where !button(tr(lang, "Compare", "Vergleichen", "Comparar")).isHittable { scrollUp() }
+    if tapButton(tr(lang, "Compare", "Vergleichen", "Comparar")) {
       sleep(2)
       tap("Quiet One"); sleep(1)
       tap("Calm 5"); sleep(2)
-      let marker = element(containing: de ? "Nur Unterschiede" : "Only differences")
+      let marker = element(containing: tr(lang, "Only differences", "Nur Unterschiede", "Solo diferencias"))
       let win = app.windows.firstMatch.frame
       for _ in 0..<8 where !(marker.exists && marker.frame.minY > win.height * 0.12 && marker.frame.minY < win.height * 0.4) { scrollDown(0.3) }
       shot("compare-table")
@@ -297,12 +318,14 @@ final class SmokeUITests: XCTestCase {
     // a fresh process: after the compare selection XCUITest sometimes never sees the app idle again
     app.terminate(); sleep(2); app.launch(); sleep(5); dismissAlerts()
 
+    }
+
     // web search (Web Search Plus): the tools panel above the answer → "Web search" row opens the result card
     // (how it searched, results with favicons and cited markers). The store mock stores the tool rows and serves the favicons.
     newChat()
-    send(de ? "Recherchiere Jetlag-Tipps für einen Flug nach Osten, mit Quellen." : "Research jet lag tips for a flight east, with sources.", wait: 14)
+    send(tr(lang, "Research jet lag tips for a flight east, with sources.", "Recherchiere Jetlag-Tipps für einen Flug nach Osten, mit Quellen.", "Busca consejos para el jet lag en un vuelo al este, con fuentes."), wait: 14)
     scrollDown(0.7); scrollDown(0.7)
-    let panel = de ? "Werkzeuge und Ablauf" : "Tools and activity"
+    let panel = tr(lang, "Tools and activity", "Werkzeuge und Ablauf", "Herramientas y actividad")
     let win = app.windows.firstMatch.frame
     for _ in 0..<8 {
       let e = labelStarting(panel)
@@ -312,30 +335,33 @@ final class SmokeUITests: XCTestCase {
     if labelStarting(panel).waitForExistence(timeout: 5) {
       labelStarting(panel).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap(); note(true, "tap row: \(panel)")
       sleep(2)
-      let row = labelStarting(de ? "Websuche," : "Web search,")
+      let row = labelStarting(tr(lang, "Web search,", "Websuche,", "Búsqueda web,"))
       if row.waitForExistence(timeout: 8) {
         row.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap(); note(true, "tap row: web search")
-        if waitFor(de ? "So wurde gesucht" : "How it searched", 10) {
+        if waitFor(tr(lang, "How it searched", "So wurde gesucht", "Cómo buscó"), 10) {
           sleep(3)   // favicons arrive through the bridge image proxy after the card is drawn
           shot("web-card")
           // the card's own close button (a drag inside it would scroll the results)
-          if !tapButton(de ? "Schließen" : "Close", 4) { closeShareSheet() }
+          if !tapButton(tr(lang, "Close", "Schließen", "Cerrar"), 4) { closeShareSheet() }
           sleep(1)
         }
       } else { note(false, "web search row not found") }
     } else { note(false, "tools panel not found") }
 
+    if only.isEmpty {
     // coding: the "Review" sheet with the diffs
     newChat()
-    send(de ? "Behebe den Bug und zeig mir den Code-Diff." : "Fix the bug and show me the code diff.", wait: 13)
+    send(tr(lang, "Fix the bug and show me the code diff.", "Behebe den Bug und zeig mir den Code-Diff.", "Arregla el bug y dame el diff."), wait: 13)
     scrollDown(0.7); scrollDown(0.7)
     shot("code-answer")
     // "Prüfen" may come as an umlaut or as u + combining diaeresis, so match the label loosely
-    let reviewBtn = app.descendants(matching: .any).matching(NSPredicate(format: "label MATCHES %@", de ? ".*[Pp]r.{1,2}fen.*" : ".*Review.*")).firstMatch
+    let reviewBtn = app.descendants(matching: .any).matching(NSPredicate(format: "label MATCHES %@", lang == "de" ? ".*[Pp]r.{1,2}fen.*" : lang == "es" ? ".*Revisar.*" : ".*Review.*")).firstMatch
     if reviewBtn.waitForExistence(timeout: 8) {
       reviewBtn.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap(); note(true, "tap: Review")
       sleep(3)
       shot("code-diff")   // last scene: the sheet stays open
+    }
+
     }
 
     note(app.state == .runningForeground, "app still running at the end (no crash)")

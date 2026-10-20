@@ -73,6 +73,14 @@ scan error (exit 2), never clean. `--expect-hermes` (set by `scan-artifact.sh` w
 additionally fails when a bundle is not Hermes bytecode; an AAB or IPA without a bundle fails the gate. Tests use a real
 bytecode fixture (`scripts/fixtures/hermes/`, compiled with the hermesc from `app/node_modules`; a second test
 recompiles it with the installed hermesc to catch layout changes on Hermes upgrades) and synthetic pre-v98 layouts.
+**gitleaks and Hermes bytecode.** gitleaks must not read the raw bytecode: the glued string storage turns unrelated
+neighbouring strings (`LONG_TOKEN_LEAD_MS` + `Samstag 18:00` + `IFrame` + `1280x720` ...) into one long run that trips
+`generic-api-key` (false positive seen in the 0.2 integration APKs). `scan-artifact.sh` therefore runs gitleaks on a copy
+of the artifact in which each Hermes bytecode file is replaced by its decoded strings, one escaped string per line
+(`scripts/hermes-strings-dump.mjs`, built on `hermesStrings`). Every string is still scanned by every gitleaks rule, so a
+real key inside the bundle is found (test: a runtime-built `sk_test_...` key among the same neighbours fails the gate).
+Everything else is copied unchanged and a bytecode file that does not decode fails the gate. We chose this over a path
+plus regex allow-list because an allow-list would also hide real findings in the bundle; no `.gitleaks.toml` change.
 `scan-artifact.sh` always uses the repository's `.leak-guard-allow`, whatever directory it is called from. Compressed media skips the e-mail check (random bytes look like addresses).
 For structurally valid MP4 A/V files with recognized compressed codecs, isolated four-byte ASCII runs inside
 `mdat` are treated as compression noise. Metadata, longer readable payloads and UTF-16 strings still scan.

@@ -62,6 +62,11 @@ export type Preferences = {
    * on this device (conversations/chatScope.ts)
    */
   chatScope: ChatScopePref;
+  /**
+   * "Routinen" (this device, default ON): off hides every Routines surface (screen, "Über <Name>" part, result inbox,
+   * Routine pushes, demo routines; routines/enabled.ts). Reminders from the chat are not affected.
+   */
+  routines: boolean;
   // Medien
   imageLoading: ImageLoadingPref;
   /** images on hosts the app does not trust (model-written URLs): ask first (default, review H1) or always load */
@@ -133,6 +138,7 @@ export const DEFAULT_PREFERENCES: Readonly<Preferences> = Object.freeze({
   toolDetails: 'verbose',
   confirmLargeAttachments: true,
   chatScope: 'all',
+  routines: true,
   imageLoading: 'always',
   unknownImages: 'bridge',
   imageSearch: 'bridge',
@@ -156,7 +162,7 @@ export type PrefSection = 'appearance' | 'chat' | 'media' | 'controls' | 'answer
 
 export const SECTION_KEYS: Record<PrefSection, readonly (keyof Preferences)[]> = {
   appearance: ['themeMode', 'themeFamily', 'accent', 'fontSize', 'density', 'chatWidth', 'bubbleStyle', 'waitingAnimations'],
-  chat: ['showTimestamps', 'sendOnEnter', 'autoScroll', 'showFollowups', 'showStarters', 'autoTitles', 'toolDetails', 'confirmLargeAttachments', 'chatScope'],
+  chat: ['showTimestamps', 'sendOnEnter', 'autoScroll', 'showFollowups', 'showStarters', 'autoTitles', 'toolDetails', 'confirmLargeAttachments', 'chatScope', 'routines'],
   media: ['imageLoading', 'unknownImages', 'imageSearch', 'imageProvider', 'codeWrap'],
   controls: ['haptics', 'reduceMotion', 'finishInBackground', 'notifyWhenDone'],
   answers: ANSWER_PREF_KEYS,
@@ -186,6 +192,7 @@ const VALIDATORS: { [K in keyof Preferences]: (v: unknown) => v is Preferences[K
   toolDetails: oneOf(['off', 'compact', 'verbose'] as const),
   confirmLargeAttachments: isBool,
   chatScope: oneOf(['all', 'device'] as const),
+  routines: isBool,
   imageLoading: oneOf(['always', 'wifi', 'never'] as const),
   unknownImages: oneOf(UNKNOWN_IMAGE_POLICIES),
   imageSearch: oneOf(IMAGE_SEARCH_MODES),

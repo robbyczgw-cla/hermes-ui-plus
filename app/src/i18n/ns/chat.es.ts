@@ -71,7 +71,7 @@ export const chat = {
     },
     demo: {
       badge: 'DEMO',
-      text: 'Sin servidor · respuestas de ejemplo',
+      text: 'Sin servidor · ejemplos',
       connect: 'Conectar Hermes',
     },
   },
@@ -191,6 +191,8 @@ export const chat = {
   message: {
     copied: 'Mensaje copiado',
     answerCopied: 'Respuesta copiada',
+    /** an answer's raw tool-call markup (chat/toolMarkup.ts): nothing ran */
+    toolMarkupHidden: 'Llamada a herramienta no disponible aquí: no se ejecutó nada.',
     longPressCopy: 'Mantén pulsado para copiar',
     extraContext: 'Contexto de un chat anterior enviado',
     extraNote: 'Nota enviada',
@@ -221,6 +223,7 @@ export const chat = {
       tls: 'Falló la conexión segura (certificado/TLS) – comprueba la dirección y el certificado del servidor.',
       offline: 'Sin conexión a internet – comprueba la red y vuelve a intentarlo.',
       unreachable: 'Servidor no accesible – comprueba la conexión (p. ej. Tailscale).',
+      plain: 'Ahora no hay conexión. Comprueba tu conexión a internet y luego toca «Reintentar».',
     },
     showDetails: 'Detalles',
     hideDetails: 'Ocultar detalles',
@@ -340,6 +343,10 @@ export const chat = {
     router: 'Router de UI',
     status: 'Estado',
     contextCompacted: 'Contexto comprimido',
+    session: {
+      busy: 'Hermes está terminando otra ejecución en este chat; tu mensaje empieza justo después …',
+      free: 'Listo, cargando la conversación …',
+    },
     fallbackModel: 'Modelo de respaldo',
     fallbackReason: 'Cambio en el servidor tras un rechazo',
     continuation: 'Continuación',

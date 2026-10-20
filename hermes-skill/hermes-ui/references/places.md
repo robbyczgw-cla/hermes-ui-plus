@@ -15,6 +15,8 @@ Photos: ALWAYS `imageQuery` on every item (name + city, "Café Zeitlos Ulm"; the
 {id?, title?, markers:[{lat, lng, title, description?, number?, imageQuery?}] (<=30), route?, animate?, basis?, source?}
 {"type":"map","id":"rome","title":"Rome, 2 days","basis":"estimate","route":true,"animate":true,"markers":[{"number":1,"lat":41.8902,"lng":12.4922,"title":"Colosseum","description":"Morning, book tickets ahead","imageQuery":"Colosseum"},{"number":2,"lat":41.8925,"lng":12.4853,"title":"Roman Forum"},{"number":3,"lat":41.9009,"lng":12.4833,"title":"Trevi Fountain","description":"Evening, fewer crowds"}]}
 `route` only draws the visiting order (the app labels it as orientation only); never state distances or driving times unless a tool returned them.
+Coordinates only from a tool (maps, geocoding, search result). None: leave `lat`/`lng` out of every marker; the app then shows the places as cards with a route button (maps search by name). Never guess coordinates: a wrong pin misleads more than a list.
+A multi-day trip the user keeps planning with you (only if a system line says `Features: live-cards`): live trip plan, reference live.
 
 ## weather (ONLY with tool data)
 {location, unit?:"C"|"F", current?:{temp, condition, feelsLike?, wind?, humidity?, precip?}, hourly?:[{time, temp, condition, precip?}] (<=24), daily?:[{date, min, max, condition, precip?}] (<=10), source, basis:"sourced"}  condition: clear sunny partly cloudy overcast fog drizzle rain showers thunder snow sleet wind clear-night partly-night

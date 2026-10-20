@@ -6,6 +6,7 @@ import { BlockTitle, FadeIn, InlineText, Surface } from './primitives/basics';
 import { SkeletonLines } from './primitives/Skeleton';
 import { NodeSkeleton } from './skeletons';
 import { guessNodeType } from '../protocol/streamPlaceholder.ts';
+import { emptyNodeLabel, isEmptyNode } from '../protocol/emptyNode.ts';
 import { asArray, asOptString, isObject } from './lib/format';
 import { Callout, Compare, Fallback, List, Progress, Stats, Steps, TextBlock, Timeline } from './components/content';
 import { Table } from './components/Table';
@@ -14,7 +15,9 @@ import { Buttons, CodeBlock, ImageBlock, Suggestions } from './components/media'
 import { Form } from './components/Form';
 import { ImageGallery } from './components/ImageGallery';
 import { Thumb } from './components/imageParts';
+import { UnknownNode } from './components/UnknownNode';
 import type { HuiCard, HuiStack } from './types';
+import { useT } from '../i18n';
 import { registryA } from './components/modules/registryA';
 import { registryB } from './components/modules/registryB';
 import { registryC1 } from './components/modules/registryC1';
@@ -27,6 +30,7 @@ import { registryE1 } from './components/modules/registryE1';
 import { registryE2 } from './components/modules/registryE2';
 import { registryPolish } from './components/registryPolish';
 import { ChildRendererContext, type ChildRenderer } from './components/modules/a/shared';
+import { LiveUnappliedNote } from '../live/ui/LiveNotes';
 
 /** Module renderers (registries have disjoint keys; merge order: polish, d3, d2, d1, c3 … a). Built-in types above take precedence. */
 /** Module renderers (registries have disjoint keys; a duplicate key is won by the LAST spread, i.e. a < b < c < d < polish is NOT the case – the order below is polish, d3..d1, c3..a). Built-in types above take precedence. */
@@ -72,6 +76,7 @@ export function HuiView({ node, onAction, streaming = false, animateIn = true, r
   const body = (
     <NodeBoundary node={node}>
       <RenderNode node={node} />
+      {streaming ? null : <LiveUnappliedNote node={node} />}
     </NodeBoundary>
   );
   return (
@@ -109,6 +114,9 @@ const RenderNode = memo(function RenderNode({ node }: { node: unknown }): ReactN
     return streaming ? <StreamingPlaceholder type={isObject(node) ? node.type : undefined} /> : <Fallback node={node} empty={node == null} />;
   }
   const n = node as never;
+  // a complete node without any of its data (`{"type":"table"}`, a poll without options …) would render nothing or an
+  // empty box: one quiet line instead, the raw JSON on tap (protocol/emptyNode.ts)
+  if (!streaming && isEmptyNode(node)) return <EmptyNode node={node} />;
   switch (node.type) {
     case 'card':
       return <Card node={n} />;
@@ -151,11 +159,18 @@ const RenderNode = memo(function RenderNode({ node }: { node: unknown }): ReactN
         const Mod = MODULES[node.type];
         return <Mod node={n} />;
       }
-      // while streaming the `type` string itself may still be incomplete ("cha" → "chart")
-      return streaming ? <StreamingPlaceholder type={node.type} /> : <Fallback node={node} />;
+      // while streaming the `type` string itself may still be incomplete ("cha" → "chart"); complete but unknown:
+      // its content readably, the JSON only on demand
+      return streaming ? <StreamingPlaceholder type={node.type} /> : <UnknownNode node={node} />;
     }
   }
 });
+
+function EmptyNode({ node }: { node: Record<string, unknown> }) {
+  const tr = useT();
+  const label = emptyNodeLabel(node);
+  return <Fallback node={node} collapsed reason={label ? `${label}: ${tr('ui.content.noData')}` : tr('ui.content.emptyNode')} />;
+}
 
 function Card({ node }: { node: Partial<HuiCard> }) {
   const t = useTheme();

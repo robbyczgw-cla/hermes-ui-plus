@@ -23,7 +23,10 @@ Per `POST /v1/chat/completions`:
    The app continues sessions with `X-Hermes-Session-Id` and sends only the new message, so the bridge
    keeps a small in-memory context per session id (last 4 turns, LRU 500 sessions, TTL 24 h) filled
    from the streamed answer (side-channel SSE parser; the byte stream itself is not modified).
-3. Router (`src/router/router.mjs`): **reformat override** first (`src/router/reformat.mjs`, SPEC-modules-v4
+3. Router (`src/router/router.mjs`): live-card trailers (`[hui:live]{…}[/hui:live]` at the end of a user message, the
+   app's own card edits, `src/router/live.mjs`) are cut from the routing context first; a message about one live card
+   ("Hermes fragen", `"focus":true` in the trailer) is decided at once: `checklist`, confidence 0.95, `card=<id>` in the
+   hint, no cache/model call. Then the **reformat override** (`src/router/reformat.mjs`, SPEC-modules-v4
    A1: a latest user message starting with `[reformat:<kind>]` forces the format, confidence 0.95, reason
    `reformat`, no cache/model call: table → `table`; list → `checklist`/todo only if the previous answer was
    a to-do list, else `text`; shorter/longer/simpler/expert → `text`; translate:<lang> → `translation` if the
@@ -37,7 +40,7 @@ Per `POST /v1/chat/completions`:
    the client already sent the marker; right after it the constant **skill core** (`hermes-ui/SKILL.md`
    without front matter, `src/skillInline.mjs`, docs/BRIDGE.md "Skill core inline"); the **hint** goes after all
    leading system messages:
-   `UI-ROUTER-HINT: format=<f> [component=<c>] confidence=<0.6|0.9>`.
+   `UI-ROUTER-HINT: format=<f> [component=<c>] [card=<id>] confidence=<0.6|0.9>`.
    No hint for low confidence (< 0.5; text < 0.75) and none for header-less multi-turn clients.
 5. Upstream request (Node `http`, keep-alive, `accept-encoding: identity`). When Hermes answers
    with the SSE head, the bridge writes the head (upstream status + headers, plus
@@ -865,6 +868,79 @@ GET /api/sessions/{id}/messages            POST /api/sessions/{id}/fork         
 - Query string forwarded verbatim; PATCH body max 64 KB (else 413); upstream status and body piped back, hop-by-hop headers stripped; 30 s upstream timeout -> 504, unreachable -> 502. Bodies are not logged.
 - CORS preflight now also advertises `PATCH`. Tests: `test/sessions-proxy.test.mjs`.
 - Hermes profiles: `/p/<profile>/<path>` gets exactly the same allow-list as `<path>` and is forwarded with the prefix (profile name `[a-z0-9][a-z0-9_-]{0,63}`, literal in the raw path, known per `BRIDGE_PROFILES`; unknown → 404 after the token check). Bridge routes (`/bridge/*`) have no profile form. Tests: `test/profiles.test.mjs`.
+
+## Hermes routines (cron jobs)
+
+`src/jobs.mjs`, routed in `src/bridge.mjs` before the `/api/` allow-list (after the token and profile checks). Read plus three controls for Hermes' cron jobs (Hermes v0.22 `/api/jobs`); not a pass-through.
+
+Nothing here runs without the owner: no bot offers routines until it is enabled (`BRIDGE_ROUTINES_BOTS` or `routines enable <bot>`), the inbox reconciler polls enabled bots only, and a paired device may only view. The app shows routines unless its user turns them off in Settings → Chat → Routines (per device, on by default); a device with them off asks neither `/api/jobs` nor `/bridge/routines/*` and leaves `routines` out of its push scope and inbox stream, so it gets no routine pushes.
+
+```
+GET  /api/jobs                       -> {jobs:[job…], hui:{routines, rights}}   (upstream always ?include_disabled=true)
+GET  /api/jobs/{id}                  -> {job, hui:{routines, rights}}
+POST /api/jobs/{id}/pause | /resume  -> {job, hui:{routines, rights}}           body: empty or {}
+POST /api/jobs/{id}/run              -> {job, hui:{routines, rights}}           body: empty, {} or {"resume_paused": true|false}
+```
+
+- `{id}`: `[a-f0-9]{12}`, no percent-encoding; anything else under `/api/jobs` -> 404. `POST /api/jobs` (create), `PATCH`/`DELETE /api/jobs/{id}` and other wrong methods -> 405 + `Allow`, never forwarded. The client query is ignored.
+- Rights per request and bot, see "Routines rights" below: list / get need `read`, pause / resume / run need `manage` (else 403 `routines_read_only`), a device with `none` gets 403 `routines_forbidden`, a bot that is not enabled (or `BRIDGE_ROUTINES=off`) 404 `routines_off` on every `/api/jobs` path. `hui.rights` is the effective right (`manage` | `read`); `hui.routines` stays for slice-1 apps (`control` iff `manage`, else `read`).
+- POST bodies: max 1 KiB (413), anything but the shapes above (a one-run `prompt`, unknown fields, non-JSON) -> 400 `unsupported_field`. Upstream always gets `{}`.
+- Run guard: Hermes' run re-enables a paused job and fails terminal ones, so the bridge first GETs the job: unknown -> 404 `job_not_found`, `state` completed/error -> 409 `job_terminal`, paused (`enabled:false` or `state:paused`) without `resume_paused:true` -> 409 `job_paused`.
+- Limits: one mutation in flight per (profile, job) (else 409 `job_busy`); after a successful run the same job cannot run again for 30 s (429 `run_cooldown` + `Retry-After`). Upstream timeout `BRIDGE_UPSTREAM_TIMEOUT_MS` -> 504, answers over 4 MiB -> 502 `upstream_too_large`, non-JSON -> 502 `upstream_invalid`.
+- Projection (everything else is dropped): `id, name, prompt, skills, schedule{kind, expr, minutes, run_at, display}, schedule_display, repeat{times, completed}, enabled, state, paused_at, paused_reason, created_at, next_run_at, last_run_at, last_status, last_error, last_delivery_error, failure_streak, model, provider, no_agent`, `deliver_kind` (each delivery target cut to its platform before the first `:`, e.g. `telegram,local`; never chat ids), `origin_platform`, `latest_execution{status, source, claimed_at, started_at, finished_at}`. Strings are capped, mistyped fields dropped. Never: `deliver`, `origin` chat ids, `base_url`, `script`, `monitor_*`, `workdir`, `context_from`, `manual_run_prompt`, pids.
+- Upstream errors: 404 on the list -> 404 `routines_unsupported` (Hermes without cron routes), 404 on a job -> 404 `job_not_found`, 501 -> 501 `routines_unsupported`, 400/409 -> same status `upstream_rejected`, 401/403 -> 502 `upstream_auth`, 5xx -> 502 `upstream_error`; messages are Hermes' (already redacted) `error` text, max 300 chars. Envelope `{error:{message, type, code}}`.
+- Profiles: `/p/<profile>/api/jobs…` works the same and reaches that profile's cron store. Logs carry ids and status only. Tests: `test/jobs.test.mjs`.
+
+### Routines rights
+
+`src/routines-rights.mjs`. The effective right of a request for a bot (`default` = the unprefixed profile) is `manage`, `read` or `none`:
+
+1. `BRIDGE_ROUTINES=control|read|off` (default `control`) is the server-wide ceiling: `off` = none everywhere, `read` = at most read.
+2. The owner enables bots: `BRIDGE_ROUTINES_BOTS` (comma list of bot names, `*` = every bot the bridge serves, `default` = the unprefixed profile) or `routines.bots` in `<state-dir>/devices.json`. Either one enables a bot (a `false` in the file does not override the env list). Not enabled = none, every routines endpoint of that bot answers 404 `routines_off`.
+3. Credential: `BRIDGE_TOKEN` and open mode (`BRIDGE_ALLOW_NO_AUTH`) are the owner (`manage`). A paired device gets its per-bot override from `devices.json` (`manage` | `read` | `none`), else `read`: a device never manages routines without an explicit grant.
+4. Effective right = min(ceiling, credential right) on enabled bots.
+
+Storage: `devices.json` (same file, lock and atomic write as the device tokens): top level `routines: {bots: {"<bot>": true|false}}`, per device `routines: {"<bot>": "manage"|"read"|"none"}`. Unknown values are dropped when the file is read, both parts survive every device write. Without a state dir there is no device registry: only `BRIDGE_ROUTINES_BOTS` and the admin token apply (devices do not exist then).
+
+Admin endpoints (`BRIDGE_TOKEN` only, device tokens 403 `admin_required`):
+
+```
+GET /bridge/routines/rights  -> {mode, envBots:[...], bots:{"<bot>": bool}, defaultRight:"read",
+                                 devices:[{id, label, status, routines:{"<bot>": right}}]}      (never hashes)
+PUT /bridge/routines/rights  {bots?: {"<bot>": bool}, devices?: {"<id>": {"<bot>": "manage"|"read"|"none"|null}}}
+                             -> like GET                     (null removes an override; body <= 8 KiB)
+```
+
+Errors: unknown fields 400 `unsupported_field`, bad bot name 400 `invalid_bot`, bad right 400 `invalid_right`, unknown device 400 `unknown_device` (nothing is written), no state dir 409 `state_dir_required`, registry locked by another writer 503 `busy`. CLI on the state dir (picked up by a running bridge within 2 s): `hermes-ui-plus-bridge routines status | enable <bot> | disable <bot> | grant <device-id> <bot> manage|read|none|default`. Tests: `test/routines-rights.test.mjs`.
+
+### Routines result inbox
+
+`src/routines-inbox.mjs`. A reconciler, independent of push registrations and open app streams, polls every enabled bot (the default profile plus at most 8 others) every `BRIDGE_ROUTINES_POLL_MS`:
+
+1. `GET <prefix>/api/jobs?include_disabled=true` (Hermes key, 20 s timeout, answers over 4 MiB refused).
+2. A run finished when `last_run_at` differs from the stored checkpoint and `latest_execution` is absent or not `claimed`/`running`. The first poll of a bot is its baseline: the newest run of each job within the retention window becomes a read entry (no push, max 20). A job that appears later is imported unread only when its last run is newer than the baseline.
+3. Per finished run (max 20 per bot and poll, the rest next time): the newest `cron_<jobId>_*` session from `GET <prefix>/api/sessions?source=cron&limit=50` that no other entry of this job uses and that started at most 120 s after `last_run_at`; its final visible assistant text from `GET …/messages?order=latest&limit=30`. No session or no text: an entry without session, with the job's `last_error`.
+4. Status: `ok` (or `silent` for a silence marker; stored read, never pushed), `error` -> `failed`, `blocked_config` -> `blocked`, `delivery_failed` -> `ok` + `deliveryFailed: true`.
+5. The entry is written (atomic, 0600) before any push or live event. Id `ri_` + 20 hex of sha256(`<bot>\0<jobId>\0<last_run_at>`), so repeated polls and restarts never duplicate it. A failed Hermes call keeps the checkpoint (retried next poll). Logs carry ids, counts and status only.
+
+Store `<state-dir>/routines-inbox.json`: `{v:1, bots:{"<bot>":{baselineAt, jobs:{"<jobId>":"<last_run_at>"}}}, items:[entry…]}`; without a state dir memory only (`inbox.durable:false`). Entry: `id, hermesProfile, jobId, title, runAt, finishedAt, status, deliveryFailed?, summary (plain, <= 240), text (<= 16 KiB, cut at a character boundary), truncated, error? (<= 500), sessionId|null, hasRich, readAt, createdAt`. Retention: older than `BRIDGE_ROUTINES_INBOX_DAYS` go; over `BRIDGE_ROUTINES_INBOX_MAX` entries or 4 MiB the oldest read entries go first, then the oldest. Checkpoints of deleted jobs are dropped. A disabled bot keeps its entries (not served while disabled) but loses its checkpoints: enabling it again starts with a new baseline instead of a burst of pushes.
+
+Endpoints (Bearer like every bridge route, rights per request; `hermesProfile` is `default` or an allowed profile: missing 400 `missing_profile`, unknown 404 `unknown_profile`; bodies <= 1 KiB, unknown fields 400 `unsupported_field`):
+
+```
+GET   /bridge/routines/capabilities?hermesProfile=x  -> {version:1, hermesProfile, available, rights, mode,
+        inbox:{available, durable, retentionDays, maxItems}, push:{available},
+        features:{crud:false, preservePausedRun:false, runLedger:false, timezone:false}, reasons:[...]}
+GET   /bridge/routines/inbox?hermesProfile=x&filter=all|unread&limit=1..100(50)&before=<entry id>
+        -> {items:[summary], unreadCount, nextCursor}            newest first (finishedAt, then id)
+GET   /bridge/routines/inbox/<id>?hermesProfile=x   -> {item: summary + {text, truncated, error?}}   (404 item_not_found)
+PATCH /bridge/routines/inbox/<id>   {hermesProfile, read: bool}   -> {item: summary, unreadCount}
+POST  /bridge/routines/inbox/read-all   {hermesProfile}            -> {updated, unreadCount}
+```
+
+Summary = entry without `text` / `error`, with `read: bool` instead of `readAt`. Capabilities always answer 200 to an authenticated caller; `reasons`: `routines_off`, `bot_not_enabled`, `read_only_server`, `read_only_device`, `device_forbidden`, `inbox_memory_only`. Read state is shared by all devices.
+
+Push for results (ok / failed / blocked, never silent or imported-read entries): a live event `hui.routine` `{id, hermesProfile, jobId, status, source:"routines"}` (no content) to inbox streams opened with `sources=…,routines` whose credential may read the bot, and a push straight through the notifier (a live stream on one device does not suppress another device's push) to registrations with `routines` in `scope.sources` and at least read on the bot: `kind: "routine"`, one collapse thread per routine, previews per `BRIDGE_PUSH_PREVIEW` (off: "Routine result" / "A new result is in your inbox.", localized de/en/es), quiet hours as for messages; data `{v:1, kind:"routine", src:"hermes", profileId, hermesProfile? (absent = default), jobId, itemId}`. `GET /bridge/push/config` lists `sources` (`api_server, cron, telegram, cli, routines`) so apps only ask for `routines` where the bridge knows it. For bots the inbox covers, the session watcher no longer pushes cron sessions to registrations that also asked for `routines` (cron-only registrations and live `cron` stream events stay as they are). Tests: `test/routines-inbox.test.mjs`.
 
 ## Meta (titles & follow-ups)
 

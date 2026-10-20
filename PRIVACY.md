@@ -43,6 +43,8 @@ The bridge prints which of these are active when it starts. Their privacy polici
 
 The bridge's logs contain routing metadata, not message content, at the default log level. You control the retention of uploaded files on your bridge (7 days by default).
 
+Routines: for each bot on which you turn routines on, the bridge keeps a copy of every finished run's result (routine name, time, status, the final answer up to 16 KB, any error text) in its state directory (`routines-inbox.json`, readable only by the bridge's user). Entries are deleted after 30 days, and the file holds at most 300 entries; the operator can lower or raise both limits. The copy stays on your server and goes nowhere else. A push about a new result carries no result text unless previews are on.
+
 ## Push notifications
 
 Push is optional and off until you enable it.

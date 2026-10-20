@@ -1,4 +1,4 @@
-// First-run onboarding (classic, personal flavor; the official build renders GuidedFlow): Welcome → choose connection → (scan QR | manual form) → AI data consent → skill hint → done.
+// First-run onboarding (classic, personal flavor; the official build renders GuidedFlow): Welcome → choose connection → (scan QR | manual form) → AI data consent → skill hint (Hermes only) → done.
 // The consent step (compliance/, Apple 5.1.2(i)) is skipped for the demo and when the current version is accepted.
 // Component, not a route: the integrator renders it (e.g. instead of the chat while the gate says so).
 // It never touches storage itself except through the callbacks → easy to embed / test.
@@ -10,7 +10,7 @@ import { ConnectionForm, type ConnectedInput } from './ConnectionForm';
 import { Done } from './Done';
 import { GuidedFlow } from './GuidedFlow';
 import { onboardingVariant } from './guidedSteps';
-import { buildHermesProfile, type OnboardingPath } from './model';
+import { afterConnectStep, buildHermesProfile, type OnboardingPath } from './model';
 import { parsePairLink, type PairData } from './pairLink';
 import { ScanPair } from './ScanPair';
 import { newLinkHistory, onboardingBack } from './backNav';
@@ -147,9 +147,9 @@ function ClassicFlow({ existingProfiles = [], onSaveConnection, onFinish, initia
     // (E2E round 5, N1: Back on the privacy step showed the connect screen again, whose Connect burned the spent code)
     const next = () => {
       if (finishAfterSave) onFinish({ path: profile.bridge ? 'bridge' : 'direct', profile });
-      else setHistory(['skill']);
+      else setHistory([afterConnectStep(profile)]); // the skill hint only for Hermes (model.ts)
     };
-    // before the first message can go out: the AI data-sharing consent (once per text version)
+    // before the first message can go out: the AI data-sharing consent (once per text version, for every connection)
     if (await isAiConsentCurrent().catch(() => false)) next();
     else {
       setAfterConsent({ run: next });
@@ -193,6 +193,7 @@ function ClassicFlow({ existingProfiles = [], onSaveConnection, onFinish, initia
       // no back: the connection is saved already
       return (
         <ConsentStep
+          profile={saved}
           onAccept={() => {
             void acceptAiConsent();
             afterConsent?.run();

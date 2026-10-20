@@ -82,7 +82,7 @@ export function isAppConversation(c: ConversationMeta): boolean {
 export function foreignToPrune(items: readonly ConversationMeta[], profileId: string, f: SyncFilter = {}): string[] {
   return items
     .filter((c) => {
-      if (c.profileKind !== 'hermes' || c.profileId !== profileId) return false;
+      if (c.profileKind !== 'hermes' || c.profileId !== profileId || c.botChat) return false; // a bot's thread is not a listed chat
       const src = foreignSource(c);
       return src !== null && !sessionAllowed(src, c.hermesSessionId, f);
     })
@@ -284,7 +284,7 @@ export function mergeRemoteSessions(items: ConversationMeta[], input: MergeInput
   if (complete.size) {
     for (let i = next.length - 1; i >= 0; i--) {
       const c = next[i];
-      if (c.origin !== 'remote' || !c.remote || !c.hermesSessionId || c.id === input.activeId) continue;
+      if (c.origin !== 'remote' || !c.remote || !c.hermesSessionId || c.id === input.activeId || c.botChat) continue;
       if (c.profileId !== input.profile.id || !sameBot(c) || !complete.has(c.remote.source) || seen.has(c.hermesSessionId)) continue;
       // continued in this app since → keep the local copy
       if (c.remote.loadedAt && c.updatedAt > (c.remote.lastActive ?? 0) + 1000) continue;

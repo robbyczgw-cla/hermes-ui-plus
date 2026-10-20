@@ -4,7 +4,7 @@
  * The last route lives in this module (it survives a recreation, not a process restart) and is restored once when the
  * root layout mounts again. Only top-level screens that are safe to reopen are restored. Pure → tested.
  */
-export const RESTORABLE_ROUTES: readonly string[] = ['/settings', '/gallery'];
+export const RESTORABLE_ROUTES: readonly string[] = ['/settings', '/routines', '/gallery'];
 
 let last: string | null = null;
 

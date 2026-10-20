@@ -33,3 +33,4 @@ test('personal flavor keeps its wording', () => {
   assert.equal(shareWordmark('personal'), 'Hermes');
   assert.deepEqual(Object.keys(brandVars('personal')).sort(), ['app', 'appShort', 'bridge', 'scheme']);
 });
+

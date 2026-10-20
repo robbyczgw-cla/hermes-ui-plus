@@ -13,7 +13,7 @@ export { useResolvedImage, useResolvedImages } from './useResolvedImage';
 export { useItemImage } from './useItemImage';
 export { useFaviconSource } from './useFavicon';
 export type { ItemImageState } from './useItemImage';
-export { productImageQuery, placeImageQuery } from './itemImage';
+export { productImageQuery, placeImageQuery, placeModelQuery, sharedPlaceCity } from './itemImage';
 export type { ItemImageResult } from './itemImage';
 export type { ImageSource, ResolvedImageState, ResolvedImageStatus } from './useResolvedImage';
 export type { ResolvedImage, ImageAttribution } from './types';

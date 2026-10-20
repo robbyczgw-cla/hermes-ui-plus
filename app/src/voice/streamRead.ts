@@ -12,7 +12,10 @@
  * hermes/progressNotes.ts): text before a tool call is a note, so a section (text since the last tool call)
  * is only started once it has `minChars` of stable text or a finished paragraph; held text of a section that a
  * tool call ends is dropped. Once a section started, every further stable piece is handed out as it arrives.
+ * It reads the text the answer shows: raw tool-call markup is replaced by the notice line (chat/toolMarkup.ts, streaming
+ * rules: an open block is held, the shown text only grows), so no piece ever holds a call's JSON.
  */
+import { hideToolMarkup } from '../chat/toolMarkup.ts';
 import { lastSentenceEnd } from './chunking.ts';
 
 const FENCE_OPEN_RE = /^ {0,3}(`{3,}|~{3,})/;
@@ -106,7 +109,7 @@ export type LiveReader = {
   readonly started: boolean;
 };
 
-/** text length at the start of the latest tool call (the current section starts there) */
+/** text length at the start of the latest tool call (the current section starts there), in `m.text` */
 function sectionStart(m: LiveAnswer): number {
   let cut = 0;
   for (const t of m.tools ?? []) {
@@ -116,8 +119,10 @@ function sectionStart(m: LiveAnswer): number {
   return cut;
 }
 
-export function createLiveReader(opts: { minChars?: number } = {}): LiveReader {
+/** `notice`: the line that replaces raw tool-call markup (the answer's own notice, chat.message.toolMarkupHidden) */
+export function createLiveReader(opts: { minChars?: number; notice?: string } = {}): LiveReader {
   const minChars = opts.minChars ?? 100;
+  const notice = opts.notice ?? '';
   const reader = createStreamReader();
   let section = 0;
   let sectionStarted = false;
@@ -131,16 +136,21 @@ export function createLiveReader(opts: { minChars?: number } = {}): LiveReader {
       return started;
     },
     push(m: LiveAnswer): string[] {
+      const done = m.status !== 'streaming';
+      // the shown text: raw tool-call markup hidden (append-only while streaming, so the offsets below stay valid)
+      const hide = (s: string, streaming: boolean) => hideToolMarkup(s, { streaming, notice });
+      const text = hide(m.text, !done);
       // the reader assumes an append-only text; a replaced answer (recovery, reformat) ends live reading
       const c = reader.consumed;
       const k = Math.max(0, c - 64); // spot check of the text already handed out (cheap per tick)
-      if (broken || m.text.length < prev.length || m.text.slice(k, c) !== prev.slice(k, c)) {
+      if (broken || text.length < prev.length || text.slice(k, c) !== prev.slice(k, c)) {
         broken = true;
         return [];
       }
-      prev = m.text;
-      const done = m.status !== 'streaming';
-      const cut = sectionStart(m);
+      prev = text;
+      // tool offsets count raw text: mapped into the shown text when markup was hidden
+      const rawCut = sectionStart(m);
+      const cut = text === m.text || !rawCut ? rawCut : hide(m.text.slice(0, rawCut), true).length;
       if (cut > section) {
         // a tool call ended the section: what was held is an interim note → never read
         section = cut;
@@ -148,7 +158,7 @@ export function createLiveReader(opts: { minChars?: number } = {}): LiveReader {
         held = '';
         reader.skipTo(cut);
       }
-      const pieces = reader.push(m.text, done);
+      const pieces = reader.push(text, done);
       if (sectionStarted) return pieces;
       held += pieces.join('');
       if (done) {

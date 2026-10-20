@@ -369,7 +369,7 @@ def main():
                     log(f'!! {name}-{it} failed: {e}')
                     r.save('fail-ui.txt', '\n'.join(repr(n) for n in d.dump() if n.text or n.desc or n.click))
                     try:
-                        d.screenshot_png(os.path.join(r.dir, 'fail.png'))
+                        d.screenshot_jpg(os.path.join(r.dir, 'fail.jpg'))
                     except Exception:
                         pass
                     r.results.append(dict(build=name, it=it, scen='error', error=str(e)))

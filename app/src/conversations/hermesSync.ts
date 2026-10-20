@@ -334,7 +334,8 @@ export function useHermesSessionSync(profiles: SyncProfile[], options: SessionSy
       sourceLabel: (meta) => (meta.remote ? sourceLabel(meta.remote.source, tr) : undefined),
       async rename(meta, title) {
         const p = profileFor(meta);
-        if (!p || !meta.hermesSessionId) return;
+        // a bot's Bot Chat keeps its title on Hermes (Hermes Desktop finds the thread by it, bots/core.ts)
+        if (!p || !meta.hermesSessionId || meta.botChat) return;
         try {
           await hermesSessions(withBot(p, meta.hermesProfile)).rename(meta.hermesSessionId, title);
         } catch (e) {
@@ -344,7 +345,7 @@ export function useHermesSessionSync(profiles: SyncProfile[], options: SessionSy
           throw Object.assign(new Error(sessionErrorText(e)), typeof code === 'string' ? { code } : {});
         }
       },
-      canDeleteRemote: (meta) => !!profileFor(meta) && isAppConversation(meta),
+      canDeleteRemote: (meta) => !!profileFor(meta) && isAppConversation(meta) && !meta.botChat,
       async deleteRemote(meta) {
         const p = profileFor(meta);
         if (!p || !meta.hermesSessionId) throw new Error(tr('conversations.sync.notSynced'));

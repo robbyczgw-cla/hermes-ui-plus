@@ -251,6 +251,9 @@
 {"id":"pr07","messages":[{"role":"user","content":"Vergleiche iPhone 17 und Pixel 11."}],"expected":"products","component":"compare","tags":["de","v4","products","compare"]}
 {"id":"pr10","messages":[{"role":"user","content":"Gba trimui hammer vs pocket mini v2 vs Odin 2 mini vs 35xx SP vs 28xx vs konkr advance vs rg rotate tiefer Vergleich extrem"}],"expected":"products","component":"compare","tags":["de","v4","products","compare"]}
 {"id":"pr11","messages":[{"role":"user","content":"Sony XM6 vs Bose QC"}],"expected":"products","component":"compare","tags":["en","v4","products","compare"]}
+{"id":"pr14","messages":[{"role":"user","content":"Trim ui hammer vs RG 3gxx plus speziell für GBA Emulation"}],"expected":"products","component":"compare","tags":["de","v4","products","compare","dictation"]}
+{"id":"pr15","messages":[{"role":"user","content":"RG 35 XX Plus vs Miyoo Mini"}],"expected":"products","component":"compare","tags":["de","v4","products","compare","dictation"]}
+{"id":"pr16","messages":[{"role":"user","content":"RGB vs RGBW LED Streifen"}],"expected":"compare","tags":["de","v4","products","counterexample"]}
 {"id":"pr12","messages":[{"role":"user","content":"Kubernetes vs Nomad"}],"expected":"compare","tags":["en","v4","products","counterexample"]}
 {"id":"pr13","messages":[{"role":"user","content":"Miete vs Kauf"}],"expected":"compare","tags":["de","v4","products","counterexample"]}
 {"id":"pr08","messages":[{"role":"user","content":"Ich will ein Haus kaufen. Wie finanziere ich das am besten?"}],"expected":"text","accept":["calc"],"tags":["de","v4","products","counterexample"]}

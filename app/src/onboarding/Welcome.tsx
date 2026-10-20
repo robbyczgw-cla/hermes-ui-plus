@@ -12,6 +12,7 @@ const POINTS = [
 export function Welcome({ onStart, onDemo }: { onStart: () => void; onDemo: () => void }) {
   const t = useTheme();
   const tr = useT();
+  const overlay = null;
   return (
     <OnbScreen
       footer={
@@ -27,15 +28,15 @@ export function Welcome({ onStart, onDemo }: { onStart: () => void; onDemo: () =
         <View style={[styles.logo, { backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.card }]}>
           <OnbIcon name="sparkle" size={30} color={t.colors.text} />
         </View>
-        <View style={[styles.badge, { borderColor: t.colors.border, borderRadius: t.radii.inline }]}>
-          <HText variant="micro" color="muted" align="center">
-            {tr('onboarding.welcome.badge')}
-          </HText>
-        </View>
+        {overlay ? null : (
+          <View style={[styles.badge, { borderColor: t.colors.border, borderRadius: t.radii.inline }]}>
+            <HText variant="micro" color="muted" align="center">
+              {tr('onboarding.welcome.badge')}
+            </HText>
+          </View>
+        )}
         <HeroText align="center">{tr('onboarding.welcome.title')}</HeroText>
-        <HText variant="body" color="muted" align="center">
-          {tr('onboarding.welcome.lead')}
-        </HText>
+        <HText variant="body" color="muted" align="center">{tr('onboarding.welcome.lead')}</HText>
       </FadeIn>
       <View style={{ gap: t.spacing.l, marginTop: t.spacing.xxl }}>
         {POINTS.map((p, i) => (
@@ -45,9 +46,7 @@ export function Welcome({ onStart, onDemo }: { onStart: () => void; onDemo: () =
             </View>
             <View style={{ flex: 1, gap: 2 }}>
               <HText variant="bodyStrong">{tr(`onboarding.welcome.${p.id}.title`)}</HText>
-              <HText variant="callout" color="muted">
-                {tr(`onboarding.welcome.${p.id}.text`)}
-              </HText>
+              <HText variant="callout" color="muted">{tr(`onboarding.welcome.${p.id}.text`)}</HText>
             </View>
           </FadeIn>
         ))}

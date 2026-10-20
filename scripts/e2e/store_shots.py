@@ -78,7 +78,10 @@ class Shots:
         d.hide_keyboard()
         time.sleep(0.6)
         self.n += 1
-        d.screenshot_png(os.path.join(self.out, f'{self.n:02d}-{name}.png'))
+        if name.startswith('debug'):  # review only, not a store deliverable: JPEG
+            d.screenshot_jpg(os.path.join(self.out, f'{self.n:02d}-{name}.jpg'))
+        else:
+            d.screenshot_png(os.path.join(self.out, f'{self.n:02d}-{name}.png'))
         log(True, f'shot {self.n:02d}-{name}')
 
 

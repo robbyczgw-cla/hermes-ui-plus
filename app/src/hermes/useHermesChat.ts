@@ -62,6 +62,8 @@ import { applyRemoteAnswer, createRecovery, isRecoverable, markInterrupted, need
 import { adoptReplay, canReattach, covers, failedReattach, MAX_REATTACHES, REATTACH_SWAP_MS, replayBase, resumedStreaming, withoutResumable, type ReattachOutcome } from './reattach';
 import { approvalMayHaveArrived, keyedHermesError, type StreamChatResult } from './stream';
 import { branchSeedText, withContextSeed, withTurnNote, type TurnOverride } from './turnOverride';
+import { withLiveTrailer } from '../live/trailer';
+import { hasBatches, withLiveOnLastUser, type LiveOutgoing } from '../live/outgoing';
 import { createThrottle, streamIntervalFor } from './throttle';
 import { liveMessages, liveOnlyTick } from './liveMessages';
 import { PERF, perfDelta, perfFlush, perfMark, perfNow, perfSpan, perfTurnEnd, perfTurnStart } from '../perf/probe';
@@ -143,6 +145,13 @@ export type UseHermesChatOptions = {
    */
   branchSeed?: number;
   onBranchSeedUsed?: () => void;
+  /** this chat renders live cards (Hermes with the session API): sends the capability line. Read at send time */
+  liveCards?: boolean;
+  /**
+   * live-card edits waiting on this device (live/LiveProvider): called when a turn's request is built; the batches go
+   * along as a `[hui:live]` trailer, `onAccepted` runs once Hermes took the turn (only then are they cleared).
+   */
+  liveOutgoing?: (text: string) => LiveOutgoing | null;
 };
 
 /** Bubble actions of a user message that waits for its uploads (`sendPending`). */
@@ -567,7 +576,9 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
       // branched chat: the copied turns go along as context until Hermes accepted a turn of the new session
       const seedN = optsRef.current.branchSeed ?? 0;
       const seed = seedN > 0 ? branchSeedText(messagesRef.current.slice(0, Math.min(seedN, messagesRef.current.length - 2))) : '';
-      const sendText = withTurnNote(withContextSeed(seed, text), override?.note);
+      // live-card edits of this device ride at the end (live/trailer.ts); rebuilt on every send/retry of this turn
+      const live = optsRef.current.liveOutgoing?.(text) ?? null;
+      const sendText = withLiveTrailer(withTurnNote(withContextSeed(seed, text), override?.note), live?.batches, live?.types);
       const turnConn = override?.model ? { ...connRef.current, model: override.model } : connRef.current;
       // Idempotency-Key of this send (also for the automatic 429/503 retry below: the bridge only keeps a turn Hermes took)
       const idempotencyKey = sendKey ?? newSendKey();
@@ -599,6 +610,8 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
               modelOptions: optsRef.current.modelOptions,
               followups: optsRef.current.followups,
               idempotencyKey,
+              liveCards: optsRef.current.liveCards,
+              liveHeader: live?.header || undefined,
               wake,
               onConnection: (state) => {
                 if (current()) markConnection(state);
@@ -607,6 +620,12 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
                 perfMark('headers');
                 accepted = true;
                 if (seed) optsRef.current.onBranchSeedUsed?.();
+                // Hermes has the edits now: the user message carries them (fold, "mitgeschickt" line), pending clears
+                if (hasBatches(live) && current()) {
+                  messagesRef.current = withLiveOnLastUser(messagesRef.current, live.batches);
+                  live.onAccepted();
+                  throttle.call();
+                }
                 // the bridge recorded the turn: a stream lost for longer (or an app restart) re-attaches live later
                 if (resumable && current()) updateLast((m) => (m.role === 'assistant' ? { ...m, resumable: true } : m));
                 // the server has the turn: a normal sent message from now on (a kill now recovers its answer)

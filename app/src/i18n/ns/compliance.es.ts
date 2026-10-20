@@ -4,7 +4,7 @@ import type { compliance as de } from './compliance.de.ts';
 export const compliance = {
   consent: {
     title: 'A dónde van tus mensajes',
-    body: 'Tus mensajes y archivos adjuntos se envían a tu servidor Hermes y, desde allí, a los proveedores de IA configurados en Hermes (p. ej. OpenAI, Anthropic, xAI). {appShort} guarda tus chats, ajustes y claves solo en este dispositivo y no recopila nada por sí misma.',
+    body: 'Tus mensajes y archivos adjuntos se envían a tu servidor Hermes y, desde allí, a los proveedores de IA configurados en Hermes (p. ej. OpenAI, Anthropic, xAI). Hermes también guarda las conversaciones en tu servidor para que el agente pueda continuarlas y recordar cosas. {appShort} guarda su copia de tus chats, además de ajustes y claves, en este dispositivo y no recopila nada por sí misma.',
     providers: 'Voz: el dictado y la lectura en voz alta usan los servicios de voz del bridge o el proveedor cuya clave API introdujiste tú; el audio o el texto van entonces directamente allí. La voz del dispositivo y el reconocimiento local se ejecutan en tu dispositivo; según el sistema, el reconocimiento de voz del sistema operativo puede usar su propio servicio en línea. Las búsquedas de imágenes van al proveedor de búsqueda configurado.',
     accept: 'Entendido, continuar',
     later: 'Más tarde',

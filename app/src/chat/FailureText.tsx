@@ -2,7 +2,7 @@
 // "Details" toggle (hermes/networkFailure.ts). Under open details: "Report a problem" (support/), which only gets
 // the error's category + code (support/report.ts), never its text.
 import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, useWindowDimensions } from 'react-native';
+import { Platform, Pressable, StyleSheet, useWindowDimensions } from 'react-native';
 import { Text } from '../ui/primitives/Text';
 import type { ChatMessage } from '../hermes';
 import { useT } from '../i18n';
@@ -22,7 +22,10 @@ export function FailureText({ message, override }: { message: Pick<ChatMessage, 
   const toast = useToast();
   // 4 lines at text scale 1; more at large text so the advice part of the message is not cut
   const maxLines = scaledLineLimit(4, t.fontScale * (useWindowDimensions().fontScale || 1));
-  const shown = override ? { text: override } : presentMessageError(message, tr);
+  // a browser that knows it is offline: say so instead of guessing at the server (web only; native has no cheap flag)
+  const offline = Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.onLine === false;
+  const simple = false;
+  const shown = override ? { text: override } : presentMessageError(message, tr, { plain: simple, offline });
   const { error, errorText, createdAt } = message;
   useEffect(() => noteLastError(errorCodeOf({ error, errorText }), createdAt), [error, errorText, createdAt]);
   return (

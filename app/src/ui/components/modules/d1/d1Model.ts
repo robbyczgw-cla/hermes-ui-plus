@@ -396,6 +396,8 @@ export type ProductItem = {
   cons: string[];
   offers: Offer[];
   url?: string;
+  /** the user's target price (watchlist) */
+  target?: number;
 };
 
 export type ProductsModel = {
@@ -461,6 +463,7 @@ function productOf(p: Rec, i: number, used: Set<string>): ProductItem | null {
     cons: strs(p.cons, 8),
     offers,
     url: cleanUrl(str(p.url)) ?? undefined,
+    target: typeof p.target === 'number' && Number.isFinite(p.target) && p.target >= 0 ? p.target : undefined,
   };
 }
 
@@ -501,6 +504,11 @@ export function displayPrice(p: ProductItem): { price: number; from: boolean } |
   return c && c.price !== undefined ? { price: c.price, from: p.offers.filter((o) => o.price !== undefined).length > 1 } : null;
 }
 
+/** "Wunschpreis 450 €": the user's target price of a watchlist product, or undefined. */
+export function targetText(p: Pick<ProductItem, 'target' | 'currency'>, tr: TFn, lang: NumLang): string | undefined {
+  return p.target !== undefined ? tr('ui.products.target', { price: formatPrice(p.target, p.currency, lang) }) : undefined;
+}
+
 export function productA11y(p: ProductItem, tr: TFn, lang: NumLang, rank?: number): string {
   const dp = displayPrice(p);
   const price = dp ? (dp.from ? tr('ui.products.from', { price: formatPrice(dp.price, p.currency, lang) }) : formatPrice(dp.price, p.currency, lang)) : undefined;
@@ -509,6 +517,7 @@ export function productA11y(p: ProductItem, tr: TFn, lang: NumLang, rank?: numbe
     rank !== undefined ? tr('ui.products.rankA11y', { n: rank, name }) : name,
     p.badge,
     price && p.priceNote ? `${price}, ${p.priceNote}` : price ?? p.priceNote,
+    targetText(p, tr, lang),
     ratingA11y(p.rating, p.reviews, tr, lang),
     p.verdict,
     p.scores.map((s) => tr('ui.products.scoreA11y', { label: s.label, value: formatScore(s.value, lang) })).join(', ') || undefined,

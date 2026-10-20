@@ -1,6 +1,6 @@
 // Ephemeral presentation hint appended as a system message for ONE turn.
 // Format agreed with the hermes-ui skill (hermes-skill/hermes-ui/SKILL.md):
-//   UI-ROUTER-HINT: format=<f> [component=<c>] confidence=<0-1> [data=live] [- <reason>]
+//   UI-ROUTER-HINT: format=<f> [component=<c>] [card=<id> [full]] confidence=<0-1> [data=live] [- <reason>]
 // Hermes appends all request system messages to the END of its cached system prompt
 // (ephemeral_system_prompt, never persisted). Any change of these bytes between turns
 // invalidates the provider prompt cache for the conversation history that follows, so the
@@ -15,7 +15,7 @@ export function bucketConfidence(c) {
 }
 
 /**
- * @param {{format: string, component?: string, confidence: number, reason?: string}} d
+ * @param {{format: string, component?: string, card?: string, full?: boolean, confidence: number, reason?: string}} d
  * @param {{minConfidence?: number, textMinConfidence?: number, includeReason?: boolean}} [o]
  * @returns {string|null} null => do not inject anything for this decision.
  */
@@ -25,6 +25,9 @@ export function buildHint(d, o = {}) {
   if (d.format === 'text' ? d.confidence < textMin : d.confidence < min) return null;
   let line = `UI-ROUTER-HINT: format=${d.format}`;
   if (d.component) line += ` component=${d.component}`;
+  // a live card the user asked about (router/live.mjs); only on those turns (prompt cache)
+  // `full`: the card has had many patches in a row, Hermes should send a full version next
+  if (d.card && /^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$/.test(d.card)) line += ` card=${d.card}${d.full ? ' full' : ''}`;
   line += ` confidence=${bucketConfidence(d.confidence)}`;
   // deterministic per format (prompt cache): models otherwise answer product/place questions from memory
   if (LIVE_DATA_FORMATS.has(d.format)) line += ' data=live';

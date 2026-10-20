@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# Shared checks: app typecheck (tsc), app unit tests, scripts' tests and the local bridge security corpus.
-# Usage: scripts/check.sh tsc | tsc-test | test [node --test args...] | leak | scripts | bridge-security | all
-#                         | quick [--base REF]
+# Shared checks: app typecheck (tsc), app unit tests, scripts' tests, the bridge suite, the push module,
+# and the Hermes plugin.
+# Usage: scripts/check.sh tsc | tsc-test | test [node --test args...] | leak | scripts | bridge | bridge-security | all
+#                         | quick [--base REF] | all --host HOST [--worktree|--committed]
+#   all --host  the full gate on another Linux machine over ssh (scripts/lib/check-remote.sh): ships the committed tree
+#            of HEAD, runs `check.sh all` there with cached Node and node_modules, streams the output, returns its exit code
 #   leak     scripts/leak-guard.test.mjs        scripts  every scripts/*.test.mjs + scripts/e2e/*.test.mjs (guards, web-finalize, sw, build libs, E2E mock)
 #   quick    inner loop, NOT a merge gate: only what the change since merge-base(HEAD, main or REF) can affect, working
 #            tree and untracked files included. scripts/lib/related-tests.mjs maps changed files to related tests (import
@@ -103,14 +106,66 @@ quick() {
   [ $lockout = 1 ] && exit 75
   exit $fail
 }
+# the bridge's own suite (bridge/package.json "test"); it needs bridge/node_modules, so say so instead of a module error
+BRIDGE_TESTS='cd ../bridge && if [ ! -d node_modules ]; then echo "check.sh: bridge/node_modules missing: run npm ci in bridge/" >&2; exit 1; fi && npm test --silent'
+# all: every step runs (a failing step does not hide the later ones; a lock timeout stops the run), output streamed and
+# kept per step for the closing summary line: "check: tsc ok, ..., app tests 1234 pass/0 fail, ... - all green in 6m2s".
+a_step() { # a_step NAME KIND CMD...: KIND tsc (counts "error TS"), node (node --test pass/fail), py (unittest)
+  local name=$1 kind=$2 out rc p f; shift 2
+  out=$(mktemp)
+  set +e; run "$@" 2>&1 | tee "$out"; rc=${PIPESTATUS[0]}; set -e
+  case $kind in
+    tsc)  if [ $rc = 0 ]; then p=ok; else p="FAILED ($(grep -c 'error TS' "$out" || true) errors)"; fi ;;
+    node) p=$(sed -nE 's/^(# |ℹ )pass ([0-9]+)$/\2/p' "$out" | awk '{s+=$1} END {print s+0}')
+          f=$(sed -nE 's/^(# |ℹ )fail ([0-9]+)$/\2/p' "$out" | awk '{s+=$1} END {print s+0}')
+          p="$p pass/$f fail$([ $rc = 0 ] || echo ' FAILED')" ;;
+    py)   p=$(sed -nE 's/^Ran ([0-9]+) tests?.*/\1/p' "$out" | tail -1)
+          p="${p:-0} ran$(sed -nE 's/^FAILED \((.*)\)$/, \1/p' "$out" | tail -1)$([ $rc = 0 ] || echo ' FAILED')" ;;
+  esac
+  rm -f "$out"
+  [ $rc = 75 ] && p="lock timeout"
+  A_SUM+=("$name $p")
+  if [ $rc != 0 ]; then A_FAILED+=("$name"); [ $rc = 75 ] && A_LOCKOUT=1; fi
+  return 0
+}
+all() {
+  local s sum=""
+  SECONDS=0   # not $EPOCHREALTIME: macOS bash 3.2 runs this mode too
+  if [ $# -gt 0 ]; then
+    case " $* " in *" --host "*|*" --host="*) exec bash ../scripts/lib/check-remote.sh "$@" ;; esac
+    echo "usage: $0 all [--host HOST [--worktree|--committed]]" >&2; exit 2
+  fi
+  A_SUM=() A_FAILED=() A_LOCKOUT=0
+  a_step tsc tsc npx tsc --noEmit
+  [ $A_LOCKOUT = 1 ] || a_step tsc-test tsc npx tsc --noEmit -p tsconfig.test.json
+  [ $A_LOCKOUT = 1 ] || a_step 'app tests' node npm test --silent
+  # the scripts' tests drive the Linux build host's tools (flock, systemd-run, the lane and instance scripts); on a
+  # Mac (heavy checks moved to the build Mac) they run separately on the Linux host: scripts/check.sh scripts
+  if [ $A_LOCKOUT = 1 ]; then :
+  elif [ "$(uname -s)" = Linux ]; then a_step scripts node node --test ../scripts/*.test.mjs ../scripts/e2e/*.test.mjs
+  else echo "check.sh all: scripts' tests skipped on $(uname -s); run 'scripts/check.sh scripts' on the Linux host" >&2
+       A_SUM+=("scripts skipped"); fi
+  # the whole bridge suite (router, routes, jobs, push, … and the security corpus), not only security-*: router
+  # regressions surfaced only in the public export's bridge run before
+  [ $A_LOCKOUT = 1 ] || a_step bridge node bash -c "$BRIDGE_TESTS"
+  # the shared push module has its own suite
+  [ $A_LOCKOUT = 1 ] || a_step push node bash -c 'cd ../push && npm test --silent'
+  # the Hermes plugin's tests also run the skill example validator (SKILL.md budget, examples vs the app schema)
+  [ $A_LOCKOUT = 1 ] || a_step hermes-plugin py bash -c 'cd ../hermes-plugin && python3 -m unittest discover -s tests -q'
+  for s in "${A_SUM[@]}"; do sum+="${sum:+, }$s"; done
+  echo "check: $sum - $([ ${#A_FAILED[@]} = 0 ] && echo 'all green' || echo "FAILED: ${A_FAILED[*]}") in $((SECONDS / 60))m$((SECONDS % 60))s"
+  [ $A_LOCKOUT = 1 ] && exit 75
+  [ ${#A_FAILED[@]} = 0 ] || exit 1
+}
 case "${1:-all}" in
   tsc)      run npx tsc --noEmit ;;
   tsc-test) run npx tsc --noEmit -p tsconfig.test.json ;;
   test)     shift; if [ $# -gt 0 ]; then run node --test "$@"; else run npm test --silent; fi ;;
   leak)     run node --test ../scripts/leak-guard.test.mjs ;;
   scripts)  run node --test ../scripts/*.test.mjs ../scripts/e2e/*.test.mjs ;;
+  bridge)   run bash -c "$BRIDGE_TESTS" ;;
   bridge-security) run node --test ../bridge/test/security-*.test.mjs ;;
-  all)      run npx tsc --noEmit; run npx tsc --noEmit -p tsconfig.test.json; run npm test --silent; run node --test ../scripts/*.test.mjs ../scripts/e2e/*.test.mjs; run node --test ../bridge/test/security-*.test.mjs ;;
+  all)      shift $(($# > 0)); all "$@" ;;
   quick)    shift; quick "$@" ;;
-  *) echo "usage: $0 tsc|tsc-test|test [files]|leak|scripts|bridge-security|all|quick [--base REF]" >&2; exit 2 ;;
+  *) echo "usage: $0 tsc|tsc-test|test [files]|leak|scripts|bridge|bridge-security|all [--host HOST]|quick [--base REF]" >&2; exit 2 ;;
 esac

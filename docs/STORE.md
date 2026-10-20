@@ -104,8 +104,10 @@ doing so."*
     needs one more tap.
   - The **demo profile** never asks, because nothing leaves the device.
 - **Versioning:** `AsyncStorage` key `hui.aiConsent` = `{version, at}`. `AI_CONSENT_VERSION` in
-  `app/src/compliance/consent.ts`. `consent.test.ts` fingerprints the de/en/es consent texts and fails when they change
-  without a version bump. A bump asks everyone again.
+  `app/src/compliance/consent.ts`. One acceptance covers every connection. `consent.test.ts` fingerprints the de/en/es
+  consent texts and fails when they change, so every wording change is a decision: a version bump asks everyone again;
+  keeping the version (new fingerprint only) shows the new text to people who have not accepted yet. 0.2 corrected the
+  wording and kept version 2, so nobody is asked again.
 
 ## 3. Store questionnaires (drafts)
 

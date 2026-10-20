@@ -251,16 +251,34 @@ is >= 80 (`scripts/lib/lane-choose.sh`, thresholds `HUI_LANE_*`). `auto` without
 `--smoke` it stays on the Mac. **`build-apk-fast.sh` has `auto` as its default** (it only builds test APKs): an idle Mac runs the
 whole fast build there on its own base APK (registered by its full builds; JS swap in about 25 s on the Mac, 33 s with the sync) and
 falls back to a full Mac build when no base fits; otherwise it runs on this host with this host's bases. `HUI_ANDROID_LANE=local` opts out.
-On macOS the build and fast dirs use the physical path `/private/var/tmp/...`: `@expo/fingerprint` (the fast path's cache key) only
-strips the project root from its autolinking paths when they agree, so through the `/var` symlink the key depended on the directory.
+On macOS the build and fast dirs live in `/Users/Shared` (see **Disk** below) and are used by their physical path (`pwd -P`):
+`@expo/fingerprint` (the fast path's cache key) only strips the project root from its autolinking paths when they agree, so through
+the `/var` symlink of the old `/var/tmp` location the key depended on the directory.
 
 **Minimal traffic** (the link from the orchestrating machine to the Mac may be a ~0.7 MB/s relay):
-- *Sources:* the Mac fetches the exact commit itself, from Forgejo over the LAN first, then from the private GitHub origin
+- *Sources:* the Mac fetches the exact commit itself, from Forgejo over the LAN first, then from the private GitHub mirror
   (`~/hui-lane/git-sources.d/NN-name.url`, read-only deploy key generated on the Mac, `scripts/lane-setup-git.sh` sets it
   up once), and only as the last resort receives a `git bundle` of the missing commits (`scripts/lib/lane-sync.sh`). Uncommitted
   changes go over as a small rsync overlay (the label gets `-dirty`).
-- *Artifacts:* the APK stays on the Mac (`~/hui-lane/src/dist/…-mac[-debugsigned].apk`), the suite runs there, only
+- *Artifacts:* the APK stays on the Mac (`~/hui-lane/runs/<run id>/dist/…-mac[-debugsigned].apk`), the suite runs there, only
   `report.md` + evidence come back. `--fetch` copies the APK back and runs flavor guard + release gate (private denylist) here.
+
+**One run directory per build.** Several agents use the Mac at once. With the old shared checkout `~/hui-lane/src`, agent B's
+sync replaced A's sources while A's build waited for the lock: A's APK, named after A's commit, held B's code, and a smoke ran
+B's `suite.py`. Now every `--host` call (`scripts/lib/lane-sync.sh`) archives its commit into `~/hui-lane/runs/<run id>/`
+(`<date>-<sha7>-<pid>-<random>`, created with a plain `mkdir`, so never shared) and builds, fetches and smoke-tests from there
+only (`smoke.sh --apk-on-host` takes the scripts of the APK's own run). Proof that it worked:
+- the sync writes a stamp `<full sha> <run id>` into the run (`.lane-stamp`, `app/.lane-stamp`) and hands the same text to the
+  build as `HUI_LANE_STAMP`; `build-apk.sh` / `build-apk-fast.sh` check it on their copy of `app/`, under the build lock, right
+  after the copy (`scripts/lib/lane-stamp.sh`, "LANE SOURCE MISMATCH" stops the build);
+- the APK's `buildSource` (`assets/app.config`, Settings -> About) is taken from that stamp, and the caller checks it on the Mac
+  after the build (and again on a fetched APK): a different commit or an APK outside the run is "LANE COMMIT MISMATCH", the
+  APK is neither fetched nor smoke-tested.
+After the build (+ fetch / smoke) the run's `app/` is dropped and the run marked done; `scripts/` and the APK stay for a later
+`smoke.sh --apk-on-host`. Every sync prunes first: done runs beyond the newest `HUI_LANE_KEEP_RUNS` (6) or older than
+`HUI_LANE_KEEP_HOURS` (24), runs that never finished after `HUI_LANE_RUN_TTL_HOURS` (6), and all done runs when less than
+`HUI_LANE_MIN_FREE_GB` (10) are free. A run in progress, or one a smoke run marked `.lane-busy`, is never pruned. The old
+`~/hui-lane/src` is no longer used (scripts of older branches still sync there) and can be deleted when no such build runs.
 - Between the Mac and the Linux emulator host copy directly over the LAN, never through the orchestrating machine.
 
 **One heavy job at a time.** `scripts/lib/maclock.sh` is a `mkdir` lock at `/tmp/hui-mac-heavy.lock` on the Mac (no `flock`
@@ -271,10 +289,22 @@ and Gradle and the emulator never run together. `HUI_MAC_LOCK_WAIT` (default 270
 in-process, 3 workers, 4 ninja jobs) and kills it by pid above the cap or when < `HUI_MAC_MIN_AVAIL_MB` (1024) remain. The
 emulator gets 3 GB RAM and an 8 GB tree cap (`E2E_EMU_MAX_MB`; the tree measures about 6 GB RSS with `-gpu host`). `pmset -g
 therm` and swap are sampled into the build log / `OUT/host.log`.
-**Disk:** SDK/NDK/emulator/image (about 8 GB) in `/var/tmp/hiui-android-sdk`, Gradle in `/var/tmp/hiui-gradle`, build tree
-in `/var/tmp/hiui-build-hermes`, npm cache `~/hui-lane/npm-cache`; the build refuses below `MIN_FREE_DISK_GB` (6).
+**Disk:** SDK/NDK/emulator/image (about 8 GB) in `/Users/Shared/hiui-android-sdk`, Gradle in `/Users/Shared/hiui-gradle`, build
+and fast trees in `/Users/Shared/hiui-build-hermes` / `hiui-fast-hermes`, npm cache `~/hui-lane/npm-cache`, base APKs in
+`~/builds/apk-bases`; the build refuses below `MIN_FREE_DISK_GB` (6). `/Users/Shared` because a reboot of the Mac emptied
+`/var/tmp` (SDK, Gradle cache and node_modules were gone and every lane build failed), and the paths must stay outside `$HOME`:
+they end up in the `.so` files, and a home path carries the user name (`scripts/lib/android-store.sh`, `HUI_ANDROID_STORE`
+overrides the parent dir). Migration: the first build with these scripts moves an SDK / Gradle cache still in `/var/tmp` to
+`/Users/Shared` under the Mac lock (same volume: a rename, nothing is downloaded again) and leaves a symlink at the old path for
+builds from older branches. So that they keep working after a reboot empties `/var/tmp` again, the build also installs (once,
+idempotent) `~/hui-lane/compat-links.sh`, which only creates missing symlinks `/var/tmp/hiui-{android-sdk,gradle}` ->
+`/Users/Shared/...` and never deletes anything, and runs it from the user's crontab (`@reboot` and every 10 min, marker
+`# hui-compat-links`: cron needs no GUI login, the repeat covers a cleanup of `/var/tmp` after `@reboot`) and from the LaunchAgent
+`~/Library/LaunchAgents/xyz.hermesui.lane-compat-links.plist` (GUI logins). Every Mac build runs it as well. To remove it: delete
+the two crontab lines, the plist and `~/hui-lane/.compat-installed`. A missing SDK stops the build with the install command; the lane
+choice (`auto`) skips the Mac then ("the Android SDK is missing on the Mac").
 **Toolchain (user space, no sudo):** Homebrew `openjdk@17` + `android-commandlinetools`, Node 22, then
-`sdkmanager --sdk_root=/var/tmp/hiui-android-sdk "cmdline-tools;latest" "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;27.1.12297006" "cmake;3.22.1" "emulator" "system-images;android-35;google_apis;arm64-v8a"`.
+`sdkmanager --sdk_root=/Users/Shared/hiui-android-sdk "cmdline-tools;latest" "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;27.1.12297006" "cmake;3.22.1" "emulator" "system-images;android-35;google_apis;arm64-v8a"`.
 NDK, CMake and build-tools are universal binaries: no Rosetta. `smoke.sh` creates the AVD `HermesUIPlusQA` (pixel_6,
 API 35 google_apis arm64-v8a, 3 GB data) on first use.
 
@@ -285,7 +315,7 @@ API 35 google_apis arm64-v8a, 3 GB data) on first use.
 
 1. Waits for a quiet host (build lock, `/tmp/hui-check.lock`, `/tmp/hui-e2e.lock`, no emulator, no Gradle daemon, nothing in
    `huiheavy.slice`); after `HUI_NIGHTLY_WAIT_MIN` (60) minutes it skips the night with a note, no alert.
-2. Fetches the newest commit of `main` (read-only, shallow) from the private origin, the second remote as fallback, into
+2. Fetches the newest commit of `main` (read-only, shallow) from the private origin (Forgejo), the GitHub mirror as fallback, into
    `~/builds/nightly/src` (not the developer checkout).
 3. Builds the x86_64 hermes test APK with `build-apk-fast.sh` (`HUI_FAST_ONLY=1`), then with `build-apk.sh` (pinned to the
    base's build number so versionCode and app.config can match), both with `MIN_AVAIL_GB=8 MEM_MAX=7G MEM_HIGH=6G`. Without a
@@ -465,7 +495,7 @@ scripts/build-ios.sh            # -> dist/share/ios/{hermes-ui.ipa,manifest.plis
 scripts/build-ios.sh --simulator   # unsigned Release build for the iOS Simulator (JS embedded, no Metro), nothing published:
                                    # dist/hermes-ui-ios-sim-<sha>.zip; installed + launched on SIM_DEVICE [iPhone 18 Pro]
 scripts/ios-sim-smoke.sh           # UI smoke test of that build (fresh install, onboarding -> demo chat -> settings, iPad: landscape;
-                                   # ⌘K/N/B are web-only) -> dist/ios-sim-smoke/<ts>/{NN-*.png,results.txt,app-errors.log,crashes.txt}
+                                   # ⌘K/N/B are web-only) -> dist/ios-sim-smoke/<ts>/{NN-*.jpg (store drafts: .png),results.txt,app-errors.log,crashes.txt}
                                    # SIM_DEVICE="iPad Pro 13-inch (M5)" / "iPad Air 11-inch (M4)", HUI_LANG=de,
                                    # HUI_APPEARANCE=dark|light (reboots the simulator; status bar 9:41 for store drafts)
                                    # HUI_TEST=store: store screenshots paired with scripts/e2e/store-mock.mjs (HUI_STORE_MOCK, ssh -R to the Mac)

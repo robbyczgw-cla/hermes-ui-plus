@@ -6,11 +6,14 @@ import { withDeadline } from '../net/deadline.ts';
 import type { FetchLike } from '../hermes/stream.ts';
 import { createSseParser } from '../hermes/sse.ts';
 import { parseApprovalNotice, parseApprovalResolved, type ApprovalNotice, type ApprovalResolved } from './approvalInbox.ts';
+import { parseRoutineEventData, type RoutineEvent } from '../routines/events.ts';
 import { pushBaseUrl, parseInboxEvent, type InboxEvent, type PushPlatform, type PushProfile } from './model.ts';
 
 export type PushServerConfig = {
   platforms: { webpush: { vapidPublicKey: string } | null; fcm: boolean; apns: boolean };
   inbox: boolean;
+  /** sources the bridge accepts in a device scope / stream filter (bridges since routines slice 2; absent = older) */
+  sources?: string[];
 };
 
 export class PushApiError extends Error {
@@ -57,6 +60,7 @@ export async function fetchPushConfig(fetchImpl: FetchLike, p: PushProfile): Pro
   try {
     const j = (await call(fetchImpl, p, 'GET', 'config', undefined, 8000)) as Partial<PushServerConfig> | null;
     if (!j || typeof j !== 'object' || !j.platforms) return null;
+    const sources = Array.isArray(j.sources) ? j.sources.filter((x): x is string => typeof x === 'string' && /^[a-z0-9_-]{1,40}$/.test(x)).slice(0, 20) : undefined;
     return {
       platforms: {
         webpush: j.platforms.webpush && typeof j.platforms.webpush.vapidPublicKey === 'string' ? { vapidPublicKey: j.platforms.webpush.vapidPublicKey } : null,
@@ -64,6 +68,7 @@ export async function fetchPushConfig(fetchImpl: FetchLike, p: PushProfile): Pro
         apns: j.platforms.apns === true,
       },
       inbox: j.inbox !== false,
+      ...(sources ? { sources } : {}),
     };
   } catch (e) {
     if (e instanceof PushApiError && (e.status === 404 || e.status === 405)) return null;
@@ -98,7 +103,15 @@ export async function readInbox(
   fetchImpl: FetchLike,
   url: string,
   apiKey: string,
-  o: { signal: AbortSignal; onEvent(ev: InboxEvent): void; onReady?(): void; onApproval?(a: ApprovalNotice): void; onApprovalResolved?(r: ApprovalResolved): void },
+  o: {
+    signal: AbortSignal;
+    onEvent(ev: InboxEvent): void;
+    onReady?(): void;
+    onApproval?(a: ApprovalNotice): void;
+    onApprovalResolved?(r: ApprovalResolved): void;
+    /** `hui.routine`: a Routine result was stored (ids only) */
+    onRoutine?(r: Omit<RoutineEvent, 'profileId'>): void;
+  },
 ): Promise<'ended' | 'aborted'> {
   const ctrl = new AbortController();
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
@@ -120,6 +133,9 @@ export async function readInbox(
         } else if (f.event === 'hui.approval_resolved') {
           const r = parseApprovalResolved(f.data);
           if (r) o.onApprovalResolved?.(r);
+        } else if (f.event === 'hui.routine') {
+          const r = parseRoutineEventData(f.data);
+          if (r) o.onRoutine?.(r);
         }
       }
     };

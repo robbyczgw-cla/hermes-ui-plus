@@ -369,7 +369,10 @@ test('map: 30 marker cap, invalid center dropped, strings Infinity', () => {
   const r = n({ type: 'map', center: { lat: 100, lng: 0 }, markers: big(100, (i) => ({ lat: i % 90, lng: i, title: `m${i}` })) }) as A;
   assert.equal(r.markers.length, 30);
   assert.equal(r.center, undefined);
-  assert.deepEqual((n({ type: 'map', markers: [{ lat: 'Infinity', lng: '1e999', title: 'x' }] }) as A).markers, []);
+  // named entries without usable coordinates: a places list instead of an empty map (real-user journeys F04)
+  const noCoords = n({ type: 'map', markers: [{ lat: 'Infinity', lng: '1e999', title: 'x' }] }) as A;
+  assert.deepEqual([noCoords.type, noCoords.places.map((p: A) => p.name)], ['places', ['x']]);
+  assert.deepEqual((n({ type: 'map', markers: [{ lat: 'Infinity', lng: '1e999' }] }) as A).markers, []);
   assert.deepEqual((n({ type: 'map' }) as A).markers, []);
 });
 

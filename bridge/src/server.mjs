@@ -14,6 +14,8 @@ import { createPairing } from './pair.mjs'; // QR pairing (docs/ROUTER.md, "Inst
 import { createImages } from './images.mjs'; // web image search (docs/ROUTER.md, "Image search")
 import { createImageProxy } from './image-proxy.mjs'; // GET /bridge/img?u=: images Hermes' tools returned (docs/BRIDGE.md, "Image proxy")
 import { createMeta } from './meta.mjs'; // titles & follow-ups (docs/ROUTER.md, "Meta (titles & follow-ups)")
+import { createBotsManage } from './bots-manage.mjs'; // create / edit bots via the plugin, bots.manage right (docs/BOTS-SERVER.md)
+import { createLibrary } from './library.mjs'; // skills & memory library via the same plugin (docs/SKILLS-MEMORY.md)
 import { createQuick } from './quick.mjs'; // quick answers via the optional Hermes plugin (docs/HERMES-PLUGIN.md)
 import { createHermesPush } from './push-hermes.mjs'; // push + live inbox (docs/SELF-HOSTING.md "Push notifications")
 import { createAuth } from './auth.mjs'; // BRIDGE_TOKEN (admin) + per-device tokens
@@ -22,6 +24,8 @@ import { createDeviceAdmin } from './device-admin.mjs';
 import { checkRequestPath } from './paths.mjs';
 import { createStatic, isLandingRequest, serveLanding } from './static.mjs'; // optional web app: BRIDGE_WEB_DIR (src/static.mjs)
 import { createProfiles } from './profiles.mjs'; // Hermes profiles under /p/<name>/ (BRIDGE_PROFILES)
+import { createRoutinesAdmin, createRoutinesRights } from './routines-rights.mjs'; // routines rights per device + bot
+import { createRoutinesInbox } from './routines-inbox.mjs'; // routines result inbox + /bridge/routines/* (docs/ROUTER.md)
 
 /** Unauthenticated liveness path (`GET /bridge/live` → 200 "ok"): says only that the bridge process answers. */
 export const LIVE_PATH = '/bridge/live';
@@ -63,7 +67,16 @@ export function createServer(env = process.env, o = {}) {
   // --- Hermes profiles ("bots"): `/p/<name>/…` allow-list, GET /bridge/profiles, push watcher per profile
   const profiles = o.profiles ?? createProfiles(env);
   const push = createHermesPush(config, { env, logger, fetch: o.fetch, senders: o.pushSenders, now: o.now, profiles });
-  const bridgeHandler = createBridgeHandler(config, { router, logger, turns: push.turns, approvals: push.approvals, profiles });
+  // --- routines (Hermes cron jobs): rights per credential + bot (src/routines-rights.mjs), enforced on /api/jobs* and
+  // /bridge/routines/*; result inbox + reconciler (src/routines-inbox.mjs, own auth, started in startServices)
+  const routinesRights = createRoutinesRights({ mode: config.routines, bots: config.routinesBots, devices, profiles });
+  const routinesAdmin = createRoutinesAdmin({ auth: config.auth, rights: routinesRights, devices, corsOrigins: config.corsOrigins });
+  const routines = createRoutinesInbox(config, {
+    stateDir: env.BRIDGE_STATE_DIR || String(env.STATE_DIRECTORY ?? '').split(':')[0] || '',
+    logger, fetch: o.fetch, now: o.now, rights: routinesRights, push, profiles,
+  });
+  push.setRoutines({ covers: routines.covers, rightOfCredential: routinesRights.rightOfCredential });
+  const bridgeHandler = createBridgeHandler(config, { router, logger, turns: push.turns, approvals: push.approvals, profiles, routinesRights });
   // --- uploads hook-in: POST /bridge/uploads is handled by src/uploads.mjs (own auth check, streamed
   // to disk, not subject to BRIDGE_MAX_BODY_BYTES); every other request goes to the bridge unchanged.
   const uploads = createUploads(config, { env, logger });
@@ -75,6 +88,12 @@ export function createServer(env = process.env, o = {}) {
   // --- quick hook-in: POST /bridge/quick[/v1/chat/completions], GET /bridge/quick/config (src/quick.mjs, own auth
   // check; 404 feature_off unless the hermes-ui-plus plugin answers on BRIDGE_HERMES_PLUGIN_URL).
   const quick = createQuick(config, { env, logger, fetch: o.quickFetch, now: o.now });
+  // --- library hook-in: GET /bridge/library/{config,skills,skills/content,memory} (src/library.mjs, own auth check; BRIDGE_LIBRARY=off).
+  const library = createLibrary(config, { env, logger, fetch: o.libraryFetch ?? o.quickFetch, now: o.now, profiles });
+  // --- bots hook-in: GET/POST /bridge/bots, GET/PATCH /bridge/bots/<name>, GET/PUT /bridge/bots/rights (src/bots-manage.mjs,
+  // own auth; creating needs the owner's switch, the device grant and the plugin). Also feeds the plugin's bot list into
+  // `profiles` before GET /bridge/profiles and before a `/p/<name>/` the bridge does not know yet.
+  const bots = createBotsManage(config, { env, devices, profiles, fetch: o.botsFetch ?? o.libraryFetch ?? o.quickFetch, logger, now: o.now });
   // --- pairing hook-in: GET /bridge/pair[.svg|.png] (src/pair.mjs; loopback or one-time page code with BRIDGE_PAIRING=1)
   // and POST /bridge/pair/redeem (one-time pair code → device token, unauthenticated, rate limited).
   const pairing = createPairing(config, { env, logger, devices, now: o.now });
@@ -125,14 +144,19 @@ export function createServer(env = process.env, o = {}) {
     if (pairing.matches(req)) return pairing.handle(req, res).catch((e) => { logger.error('pairing failed', { err: e.message }); if (!res.headersSent) res.writeHead(500); res.end(); });
     if (meta.matches(req)) return meta.handle(req, res);
     if (quick.matches(req)) return void quick.handle(req, res).catch((e) => { logger.error('quick failed', { err: e.name }); if (!res.headersSent) res.writeHead(500); res.end(); });
+    if (library.matches(req)) return void library.handle(req, res).catch((e) => { logger.error('library failed', { err: e.name }); if (!res.headersSent) res.writeHead(500); res.end(); });
+    if (bots.matches(req)) return void bots.handle(req, res).catch((e) => { logger.error('bots failed', { err: String(e?.message ?? e).slice(0, 120) }); if (!res.headersSent) res.writeHead(500); res.end(); });
     if (uploads.matches(req)) return uploads.handle(req, res);
     if (media.matches(req)) return void media.handle(req, res).catch(() => { if (!res.headersSent) res.writeHead(500); res.end(); });
     if (imageProxy.matches(req)) return void imageProxy.handle(req, res).catch((e) => { logger.error('image proxy failed', { err: String(e?.message ?? e).slice(0, 120) }); if (!res.headersSent) res.writeHead(500); res.end(); });
     if (images.matches(req)) return images.handle(req, res);
     if (voice.matches(req)) return voice.handle(req, res);
     if (push.matches(req)) return void push.handle(req, res).catch((e) => { logger.error('push failed', { err: e.message }); if (!res.headersSent) res.writeHead(500); res.end(); });
+    if (routinesAdmin.matches(req)) return void routinesAdmin.handle(req, res).catch((e) => { logger.error('routines rights failed', { err: String(e?.message ?? e).slice(0, 120) }); if (!res.headersSent) res.writeHead(500); res.end(); });
+    if (routines.matches(req)) return void routines.handle(req, res).catch((e) => { logger.error('routines failed', { err: String(e?.message ?? e).slice(0, 120) }); if (!res.headersSent) res.writeHead(500); res.end(); });
     if (web.matches(req)) return web.handle(req, res);
     if (!web.enabled && isLandingRequest(req)) return serveLanding(req, res); // fixed status page, no state, no secrets
+    if (bots.wantsList(req)) return void bots.refresh().then(() => bridgeHandler(req, res));
     return bridgeHandler(req, res);
   });
   server.timeout = 0; // no socket inactivity timeout: SSE answers can be silent for minutes (tool calls)
@@ -147,6 +171,7 @@ export function createServer(env = process.env, o = {}) {
   let closing;
   const close = () => closing ??= (async () => {
     push.stop();
+    routines.stop();
     // Check turns after incoming requests close: an accepted request can start a detached turn during drain.
     const drained = new Promise((resolve) => server.close(resolve)).then(() => bridgeHandler.whenIdle());
     let timer;
@@ -161,24 +186,26 @@ export function createServer(env = process.env, o = {}) {
       })]);
     } finally { clearTimeout(timer); devices?.close(); }
   })();
-  return { server, close, config, logger, router, uploads, media, voice, meta, quick, pairing, images, imageProxy, push, devices, web, profiles };
+  return { server, close, config, logger, router, uploads, media, voice, meta, quick, library, bots, pairing, images, imageProxy, push, devices, web, profiles, routines, routinesRights };
 }
 
 /**
  * Background services of a created server, shared by this entrypoint and bin/hermes-ui-bridge.mjs (Astra F13: the
- * CLI used to skip the push watcher): uploads retention + Hermes session watcher. The returned stop() also ends
+ * CLI used to skip the push watcher): uploads retention + Hermes session watcher + routines inbox reconciler. The returned stop() also ends
  * open inbox streams (push.stop) so server.close() is not held open by them.
  * @param {ReturnType<typeof createServer>} ctx
  */
 export function startServices(ctx) {
   const stopCleanup = ctx.uploads.startCleanup(); // uploads retention: at startup and every 24 h
   ctx.push.start(); // Hermes session watcher (only polls while devices are registered or the app is connected)
+  ctx.routines.start(); // routines inbox reconciler (enabled bots only, BRIDGE_ROUTINES_POLL_MS)
   let stopped = false;
   return () => {
     if (stopped) return;
     stopped = true;
     stopCleanup();
     ctx.push.stop();
+    ctx.routines.stop();
   };
 }
 
@@ -190,7 +217,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     logger.info('listening', {
       host: config.host, port: config.port, upstream: new URL(config.upstream.baseUrl).host,
       router: config.router.kind, routerModel: config.router.model || undefined, timeoutMs: config.router.timeoutMs,
-      hint: config.hint.mode, bootstrap: Boolean(config.bootstrap), skillInline: Boolean(config.skillInline), auth: config.token ? 'token' : 'none',
+      hint: config.hint.mode, bootstrap: Boolean(config.bootstrap), skillInline: Boolean(config.skillInline), imageSearch: config.caps.image_search, auth: config.token ? 'token' : 'none',
       profiles: ctx.profiles.mode,
     });
   });

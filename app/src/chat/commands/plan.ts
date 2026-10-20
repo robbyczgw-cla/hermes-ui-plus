@@ -40,13 +40,15 @@ export type Availability = { visible: false } | { visible: true; enabled: true }
 
 export type ReasonKey = 'notRunning' | 'running' | 'noApproval' | 'noSession' | 'empty' | 'nothingToRetry';
 
-const HERMES_ONLY: ReadonlySet<CommandId> = new Set(['approve', 'deny', 'search', 'skills', 'branch', 'usage', 'status']);
+const HERMES_ONLY: ReadonlySet<CommandId> = new Set(['approve', 'deny', 'search', 'skills', 'memory', 'branch', 'usage', 'status']);
+/** Hermes-only commands the offline demo also has (Skills & memory has demo data) */
+const DEMO_TOO: ReadonlySet<CommandId> = new Set(['skills', 'memory']);
 const SESSION_API: ReadonlySet<CommandId> = new Set(['branch', 'usage', 'status']);
 
 export function availability(id: CommandId, ctx: CommandContext): Availability {
   if (ctx.noPalette) return { visible: false };
   const hermes = ctx.kind === 'hermes';
-  if (HERMES_ONLY.has(id) && !hermes) return { visible: false };
+  if (HERMES_ONLY.has(id) && !hermes && !(ctx.kind === 'demo' && DEMO_TOO.has(id))) return { visible: false };
   if (SESSION_API.has(id) && ctx.sessionsApi === false) return { visible: false };
   if (id === 'reasoning' && !ctx.options?.reasoning) return { visible: false };
   if (id === 'fast' && !ctx.options?.fast) return { visible: false };
@@ -136,7 +138,8 @@ export type CommandPlan =
   | { type: 'deny' }
   /** a BUILT prompt for the model (never the raw slash text), shown with a label */
   | { type: 'sendText'; text: string; label: 'search' | 'raw' }
-  | { type: 'skills' }
+  /** the Skills & memory screen of this chat's bot */
+  | { type: 'library'; tab: 'skills' | 'memory' }
   | { type: 'branch' }
   | { type: 'usage' }
   | { type: 'status' }
@@ -191,7 +194,9 @@ export function planCommand(def: CommandDef, arg: string, ctx: CommandContext, e
     case 'search':
       return text ? { type: 'sendText', text: env.searchPrompt(text), label: 'search' } : { type: 'fill', text: '/search ' };
     case 'skills':
-      return { type: 'skills' };
+      return { type: 'library', tab: 'skills' };
+    case 'memory':
+      return { type: 'library', tab: 'memory' };
     case 'branch':
       return { type: 'branch' };
     case 'usage':

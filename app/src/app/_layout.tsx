@@ -23,6 +23,7 @@ import { AppearanceProvider } from '../settings/Appearance';
 import { ConnectionProvider } from '../settings/ConnectionProvider';
 import { UpdateHost } from '../support/UpdateHost';
 import { useTheme } from '../ui';
+import { whatsNewForLaunch } from '../whatsnew/storage';
 import { installWebA11y, setFocusColor } from '../ui/lib/webA11y';
 
 /** header + web document title (browser tab); build-time override for the PWA, see brand.ts / scripts/build-web.sh */
@@ -35,6 +36,11 @@ export default function RootLayout() {
   // web: the React app has mounted -> drop the inline boot splash from public/index.html (#boot)
   useEffect(() => {
     if (Platform.OS === 'web') document.getElementById('boot')?.remove();
+  }, []);
+  // "New in this version": decide at app start, before a first-run onboarding can set its flag (a fresh install that is
+  // set up now must not count as an update); the chat view only reads the decision
+  useEffect(() => {
+    void whatsNewForLaunch();
   }, []);
   return (
     <AppearanceProvider>
@@ -107,6 +113,8 @@ function ThemedRoot() {
                       >
                         <Stack.Screen name="index" options={{ title: APP_NAME, ...(vibrancy ? { contentStyle: { backgroundColor: 'transparent' } } : null) }} />
                         <Stack.Screen name="settings" options={{ presentation: 'modal', title: APP_NAME }} />
+                        <Stack.Screen name="routines" options={{ presentation: 'modal', title: APP_NAME }} />
+                        <Stack.Screen name="skills" options={{ presentation: 'modal', title: APP_NAME }} />
                         <Stack.Screen
                           name="gallery"
                           options={{ headerShown: true, title: tr('settings.about.gallery'), headerShadowVisible: false, ...headerInset }}

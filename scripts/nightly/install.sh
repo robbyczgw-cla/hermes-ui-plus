@@ -22,7 +22,10 @@ fi
 command -v systemctl >/dev/null && systemctl --user show-environment >/dev/null 2>&1 || { echo "systemd --user not usable here"; exit 1; }
 for t in node python3 flock git rsync unzip; do command -v "$t" >/dev/null || { echo "$t missing"; exit 1; }; done
 
-primary="$(git -C "$ROOT" remote get-url origin)"; fallback="$(git -C "$ROOT" remote get-url forgejo 2>/dev/null || true)"
+primary="$(git -C "$ROOT" remote get-url origin)"
+# fallback: the GitHub mirror when origin is Forgejo, else the forgejo remote (older checkouts with GitHub as origin)
+fallback="$(git -C "$ROOT" remote get-url github 2>/dev/null || git -C "$ROOT" remote get-url forgejo 2>/dev/null || true)"
+[ "$fallback" = "$primary" ] && fallback=""
 for u in "$primary" "$fallback"; do
   case "$u" in *://*@*) echo "a remote URL carries credentials; use a credential helper instead"; exit 1 ;; esac
 done

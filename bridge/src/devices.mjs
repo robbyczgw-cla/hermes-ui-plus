@@ -37,6 +37,38 @@ export const PAIR_CODE_RE = /^[A-Za-z0-9_-]{43,128}$/;
 const sha = (s) => createHash('sha256').update(String(s), 'utf8').digest();
 const hex = (s) => sha(s).toString('hex');
 const cleanLabel = (s) => String(s ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 60) || 'device';
+/** Routines rights (src/routines-rights.mjs): bot names are `default` or a Hermes profile name (profiles.mjs). */
+export const ROUTINE_RIGHTS = /** @type {const} */ (['manage', 'read', 'none']);
+const BOT_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const MAX_ROUTINE_BOTS = 100;
+const plainObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
+
+/** Per-device routines overrides {"<bot>": "manage"|"read"|"none"}; unknown bots / values dropped. null when empty. */
+export function parseDeviceRoutines(v) {
+  if (!plainObj(v)) return null;
+  /** @type {Record<string, string>} */
+  const out = {};
+  for (const [bot, right] of Object.entries(v).slice(0, MAX_ROUTINE_BOTS)) {
+    if (BOT_RE.test(bot) && ROUTINE_RIGHTS.includes(right)) out[bot] = right;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+/** Top-level bots policy (src/bots-manage.mjs): {create: true|false} once the owner switched it, else {}. */
+export function parseBotsPolicy(doc) {
+  return plainObj(doc?.bots) && typeof doc.bots.create === 'boolean' ? { create: doc.bots.create } : {};
+}
+
+/** Top-level routines policy {bots: {"<bot>": true|false}}; unknown values dropped. */
+export function parseRoutinesPolicy(doc) {
+  const bots = plainObj(doc?.routines) && plainObj(doc.routines.bots) ? doc.routines.bots : {};
+  /** @type {Record<string, boolean>} */
+  const out = {};
+  for (const [bot, on] of Object.entries(bots).slice(0, MAX_ROUTINE_BOTS)) {
+    if (BOT_RE.test(bot) && typeof on === 'boolean') out[bot] = on;
+  }
+  return { bots: out };
+}
 
 export function newDeviceToken() {
   return 'hbd_' + randomBytes(32).toString('base64url');
@@ -58,6 +90,7 @@ export function parseDevices(doc) {
     const codeSha256 = HEX64.test(String(d.codeSha256)) ? d.codeSha256 : null;
     if (!sha256 && !codeSha256) continue; // neither a token nor a pending code: nothing to authenticate
     seen.add(d.id);
+    const routines = parseDeviceRoutines(d.routines);
     out.push({
       id: d.id,
       label: cleanLabel(d.label),
@@ -68,6 +101,8 @@ export function parseDevices(doc) {
       activatedAt: Number(d.activatedAt) || null,
       lastUsedAt: Number(d.lastUsedAt) || null,
       revokedAt: Number(d.revokedAt) || null,
+      ...(routines ? { routines } : {}),
+      ...(d.botsManage === true ? { botsManage: true } : {}),
     });
   }
   return out;
@@ -152,6 +187,8 @@ export function createDeviceStore({ dir, now = Date.now, logger, lockWaitMs = LO
   const file = path.join(dir, DEVICES_FILE);
   const lockFile = file + LOCK_SUFFIX;
   let devices = [];
+  let policy = { bots: {} }; // top-level `routines` of the file (src/routines-rights.mjs), preserved on every write
+  let botsPolicy = /** @type {{create?: boolean}} */ ({}); // top-level `bots` (src/bots-manage.mjs), preserved too
   let hashes = new Map(); // id -> Buffer (devices with a token only)
   // file signature of the last read/write: mtime alone misses a second write within the same coarse mtime tick (a CLI
   // revoke right after the bridge's own write); atomic writes rename a new file into place, so the inode changes too
@@ -175,13 +212,16 @@ export function createDeviceStore({ dir, now = Date.now, logger, lockWaitMs = LO
     try {
       st = fs.statSync(file);
     } catch {
-      if (sig !== 'none') setDevices([]);
+      if (sig !== 'none') { setDevices([]); policy = { bots: {} }; botsPolicy = {}; }
       sig = 'none';
       return devices;
     }
     if (fileSig(st) !== sig) {
       try {
-        setDevices(parseDevices(JSON.parse(fs.readFileSync(file, 'utf8'))));
+        const doc = JSON.parse(fs.readFileSync(file, 'utf8'));
+        setDevices(parseDevices(doc));
+        policy = parseRoutinesPolicy(doc);
+        botsPolicy = parseBotsPolicy(doc);
       } catch (e) {
         // a broken file must not lock everybody out with stale data silently: log, keep the last good list
         logger?.warn?.('devices: cannot read devices.json, keeping the previous list', { err: String(e?.message ?? e).slice(0, 120) });
@@ -197,17 +237,18 @@ export function createDeviceStore({ dir, now = Date.now, logger, lockWaitMs = LO
     try {
       raw = fs.readFileSync(file, 'utf8');
     } catch (e) {
-      if (e?.code === 'ENOENT') return [];
+      if (e?.code === 'ENOENT') return { list: [], routines: { bots: {} }, bots: {} };
       throw e;
     }
     try {
-      return parseDevices(JSON.parse(raw));
+      const doc = JSON.parse(raw);
+      return { list: parseDevices(doc), routines: parseRoutinesPolicy(doc), bots: parseBotsPolicy(doc) };
     } catch {
       throw new Error(`${file} is not valid JSON; fix or remove it`);
     }
   }
 
-  function save(list, commit) {
+  function save(list, commit, routines, bots = botsPolicy) {
     // CLI run as root against a service's state dir (systemd DynamicUser): hand the file to the dir's owner,
     // otherwise the running bridge can no longer read it and silently keeps a stale device list.
     const chownToDirOwner = (tmp) => {
@@ -219,8 +260,11 @@ export function createDeviceStore({ dir, now = Date.now, logger, lockWaitMs = LO
         /* best effort */
       }
     };
-    writeFileAtomicSync(file, `${JSON.stringify({ v: 1, devices: list }, null, 2)}\n`, { mode: 0o600, beforeRename: chownToDirOwner, commit });
+    const doc = { v: 1, ...(Object.keys(routines.bots).length ? { routines } : {}), ...(Object.keys(bots).length ? { bots } : {}), devices: list };
+    writeFileAtomicSync(file, `${JSON.stringify(doc, null, 2)}\n`, { mode: 0o600, beforeRename: chownToDirOwner, commit });
     setDevices(list);
+    policy = routines;
+    botsPolicy = bots;
     try {
       sig = fileSig(fs.statSync(file));
     } catch {
@@ -230,18 +274,20 @@ export function createDeviceStore({ dir, now = Date.now, logger, lockWaitMs = LO
   }
 
   /**
-   * Exclusive read-modify-write. `fn(list, t)` returns {list?, result}: `list` (when set) is written.
+   * Exclusive read-modify-write. `fn(list, t, routines, bots)` returns {list?, routines?, bots?, result}: the parts
+   * that are set are written; the rest is written back as read (the routines and bots policies survive every device
+   * write and the other way round).
    * @template R
-   * @param {(list: ReturnType<typeof parseDevices>, t: number) => {list?: any[]|null, result: R}} fn
+   * @param {(list: ReturnType<typeof parseDevices>, t: number, routines: ReturnType<typeof parseRoutinesPolicy>, bots: ReturnType<typeof parseBotsPolicy>) => {list?: any[]|null, routines?: ReturnType<typeof parseRoutinesPolicy>, bots?: ReturnType<typeof parseBotsPolicy>, result: R}} fn
    * @returns {R}
    */
   function mutate(fn) {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     return withFileLock(lockFile, (commit) => {
       const current = readFresh();
-      const out = fn(current, now());
-      if (out.list) save(out.list, commit);
-      else setDevices(current);
+      const out = fn(current.list, now(), current.routines, current.bots);
+      if (out.list || out.routines || out.bots) save(out.list ?? current.list, commit, out.routines ?? current.routines, out.bots ?? current.bots);
+      else { setDevices(current.list); policy = current.routines; botsPolicy = current.bots; }
       return out.result;
     }, { waitMs: lockWaitMs });
   }
@@ -375,6 +421,89 @@ export function createDeviceStore({ dir, now = Date.now, logger, lockWaitMs = LO
         lastUsedAt: dirtyUse.get(d.id) ?? d.lastUsedAt,
         status: status(d, t),
       }));
+    },
+    /** Routines policy of the file: {bots: {"<bot>": bool}} (cached view, re-read like the device list). */
+    routinesPolicy() {
+      load();
+      return { bots: { ...policy.bots } };
+    },
+    /** Per-bot routines override of a device ({} = none; absent bot = default right). */
+    deviceRoutines(id) {
+      return { ...(load().find((x) => x.id === id)?.routines ?? {}) };
+    },
+    /** Admin view for the routines rights (never hashes, tokens or codes). */
+    routinesView() {
+      const t = now();
+      const list = load(true);
+      return {
+        bots: { ...policy.bots },
+        devices: list.map((d) => ({ id: d.id, label: d.label, status: status(d, t), routines: { ...(d.routines ?? {}) } })),
+      };
+    },
+    /**
+     * Change the routines policy in one locked write. bots: {"<bot>": bool}; devices: {"<id>": {"<bot>": right|null}}
+     * (null removes the override). Callers validate names and values; an unknown device id throws (code unknown_device)
+     * and nothing is written.
+     * @param {{bots?: Record<string, boolean>, devices?: Record<string, Record<string, string|null>>}} change
+     */
+    setRoutines(change) {
+      return mutate((list, _t, routines) => {
+        for (const id of Object.keys(change.devices ?? {})) {
+          if (!list.some((d) => d.id === id)) throw Object.assign(new Error(`unknown device ${id}`), { code: 'unknown_device', id });
+        }
+        const bots = { ...routines.bots, ...(change.bots ?? {}) };
+        const next = list.map((d) => {
+          const c = change.devices?.[d.id];
+          if (!c) return d;
+          const r = { ...(d.routines ?? {}) };
+          for (const [bot, right] of Object.entries(c)) {
+            if (right === null) delete r[bot];
+            else r[bot] = right;
+          }
+          const clean = parseDeviceRoutines(r);
+          const { routines: _old, ...rest } = d;
+          return clean ? { ...rest, routines: clean } : rest;
+        });
+        return { list: next, routines: parseRoutinesPolicy({ routines: { bots } }), result: undefined };
+      });
+    },
+    /** Bots policy of the file: {create?: boolean} (cached view). */
+    botsPolicy() {
+      load();
+      return { ...botsPolicy };
+    },
+    /** May this device create and edit bots (`bots grant`)? */
+    deviceBotsManage(id) {
+      return load().find((x) => x.id === id)?.botsManage === true;
+    },
+    /** Admin view for the bots rights (never hashes, tokens or codes). */
+    botsView() {
+      const t = now();
+      const list = load(true);
+      return {
+        policy: { ...botsPolicy },
+        devices: list.map((d) => ({ id: d.id, label: d.label, status: status(d, t), manage: d.botsManage === true })),
+      };
+    },
+    /**
+     * Change the bots policy in one locked write. create: owner switch (null = back to the env default);
+     * devices: {"<id>": true|false}. An unknown device id throws (code unknown_device) and nothing is written.
+     * @param {{create?: boolean|null, devices?: Record<string, boolean>}} change
+     */
+    setBots(change) {
+      return mutate((list, _t, _routines, bots) => {
+        for (const id of Object.keys(change.devices ?? {})) {
+          if (!list.some((d) => d.id === id)) throw Object.assign(new Error(`unknown device ${id}`), { code: 'unknown_device', id });
+        }
+        const next = list.map((d) => {
+          const on = change.devices?.[d.id];
+          if (on === undefined) return d;
+          const { botsManage: _old, ...rest } = d;
+          return on ? { ...rest, botsManage: true } : rest;
+        });
+        const policy = change.create === undefined ? bots : change.create === null ? {} : { create: change.create };
+        return { list: next, bots: policy, result: undefined };
+      });
     },
     flush: flushUse,
     close() { clearTimeout(retryUse); },

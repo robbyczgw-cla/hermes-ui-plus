@@ -44,6 +44,6 @@ buttons
 
 suggestions (tap = sent as user message)
 {"type":"suggestions","items":["Show as a chart","Last 12 months","Export"]}
-Web images: `source:"web"` for what Wikipedia lacks (games, current products, movies, cars, apps); precise multi-word query, always a caption, never a URL.
+Web images: `source:"web"` for what Wikipedia lacks (games, current products, movies, cars, apps); precise multi-word query, always a caption, never a made-up URL. Not with a `[hermes-ui-caps] image_search=off` line: then `{url, caption}` items with image URLs your extract tool returned (products reference, "Photos without web image search"), or text links.
 {"type":"gallery","items":[{"query":"Octopath Traveler screenshot","source":"web","caption":"Part 1: HD-2D style"},{"query":"Octopath Traveler 2 screenshot","source":"web","caption":"Part 2: bigger scenery"}]}
 {"type":"image","query":"Pixel 10 Pro back","source":"web","caption":"Back with the camera bar"}

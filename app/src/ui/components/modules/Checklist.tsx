@@ -40,6 +40,10 @@ import { UndoBar, useModuleId, useNodeStateReady, useSend } from './a/shared';
 import { useS } from './useS';
 import { ChecklistSkeleton } from '../../skeletons';
 import { useCaptureMode } from '../../lib/capture';
+import { useLive } from '../../../live/LiveProvider';
+import { LiveNode, useLiveHandOver } from '../../../live/ui/LiveNode';
+import { LiveAdoptLink } from '../../../live/ui/LiveAdoptLink';
+import { titleFromId } from '../../../live/adopt.ts';
 
 let idSeq = 0;
 const newItemId = () => `u${Date.now().toString(36)}${(idSeq++).toString(36)}`;
@@ -51,6 +55,14 @@ const newItemId = () => `u${Date.now().toString(36)}${(idSeq++).toString(36)}`;
  * (`[checklist:<id>] erledigt: … · offen: …`). Live-updates from `add_to_list` via nodestate + listBus.
  */
 export function Checklist({ node }: { node: Partial<HuiChecklist> }) {
+  // live card (`"live":true`) in a chat that folds live cards (live/LiveProvider): receipt / inline card / snapshot;
+  // elsewhere (other backends, no session API, older chats) the plain checklist below
+  const hand = useLiveHandOver(node);
+  if (hand) return <LiveNode node={node} mark={hand.mark} streaming={hand.streaming} />;
+  return <PlainChecklist node={node} />;
+}
+
+function PlainChecklist({ node }: { node: Partial<HuiChecklist> }) {
   const S = useS();
   const t = useTheme();
   const { streaming } = useHui();
@@ -304,6 +316,7 @@ export function Checklist({ node }: { node: Partial<HuiChecklist> }) {
             </HText>
           </View>
         ) : null}
+        {interactive && state.items.length && !capture && scope ? <LiveAdoptLink source={`${scope.messageId}:${id}`} nodeId={id} title={state.title ?? asOptString(node.title) ?? titleFromId(id) ?? title} kind={kind} groupBy={node.groupBy} items={state.items} /> : null}
         {interactive && state.items.length ? (
           <Button
             label={state.sentAt ? S.checklist.sent : S.checklist.sendToHermes}
@@ -320,7 +333,7 @@ export function Checklist({ node }: { node: Partial<HuiChecklist> }) {
   );
 }
 
-function ProgressLine({ t, ratio }: { t: Theme; ratio: number }) {
+export function ProgressLine({ t, ratio }: { t: Theme; ratio: number }) {
   const reduced = useReducedMotion();
   const p = useSharedValue(ratio);
   useEffect(() => {
@@ -440,7 +453,7 @@ function IconButtonTrash({ t, label, onPress }: { t: Theme; label: string; onPre
   );
 }
 
-function CheckCircle({ t, on }: { t: Theme; on: boolean }) {
+export function CheckCircle({ t, on }: { t: Theme; on: boolean }) {
   const reduced = useReducedMotion();
   const s = useSharedValue(1);
   const first = useRef(true);
@@ -473,7 +486,7 @@ function CheckCircle({ t, on }: { t: Theme; on: boolean }) {
   );
 }
 
-function AddField({ t, kind, onAdd }: { t: Theme; kind: ReturnType<typeof asKind>; onAdd: (text: string) => boolean }) {
+export function AddField({ t, kind, onAdd }: { t: Theme; kind: ReturnType<typeof asKind>; onAdd: (text: string) => boolean }) {
   const S = useS();
   const [text, setText] = useState('');
   const [focus, setFocus] = useState(false);

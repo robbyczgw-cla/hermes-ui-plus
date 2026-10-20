@@ -43,6 +43,9 @@ import { Icon, type IconName } from './icons';
 import { isLocalMessage } from './localMessages';
 import { Markdown } from './Markdown';
 import { ReplyChip } from './ReplyChip';
+import { LiveSentLine } from '../live/ui/LiveSentLine';
+import { LiveQuietLine } from '../live/ui/LiveNotes';
+import { mayHaveTaskList, splitTaskListsCached } from './taskLists';
 import { TurnExtrasChips } from './TurnExtrasChip';
 import { ReformattedMarker, TransformBar } from './TransformBar';
 import { parseReplyMessage, replyCopyText } from './replyMessage';
@@ -71,6 +74,7 @@ import { withCitationSources } from './answers/citations';
 import { withRetrievedSources } from './answers/webSources';
 import { dedupeTranslations } from './answers/dedupe';
 import { splitProgressNotes, type ProgressNote } from '../hermes/progressNotes';
+import { hideToolMarkup } from './toolMarkup';
 import { ShareImageSheet } from './answers/ShareImageSheet';
 import { planShare } from './answers/shareModel';
 import { ReportSheet } from '../compliance/ReportSheet';
@@ -83,6 +87,8 @@ import { HandOffButton, QuickMetaLine } from '../quick/QuickMeta';
 import { shortModel } from '../quick/core';
 import type { TFn, TKey } from '../i18n';
 import { a11yState } from '../ui/lib/a11yState';
+import { cronDelivery } from '../bots/core';
+import { CronDeliveryMarker } from '../bots/CronDeliveryMarker';
 
 /**
  * HuiAction handler of the chat shell. `messageId` = the assistant message holding the node (the `ask`
@@ -100,6 +106,8 @@ export const UserMessage = memo(function UserMessage({ message }: { message: Cha
   // protocol replies (`[choice:…] …`, `[form:…] {…}`, ask lines): the stored text stays the machine string,
   // the user sees the free text (if any) + a short localized "↩ …" chip per reply
   const reply = useMemo(() => parseReplyMessage(message.text, tr), [message.text, tr]);
+  // a job's delivery into a Bot Chat (`[Cronjob "…" output …]`, bots/core.ts): a marker + its output, not a bubble
+  const cron = useMemo(() => cronDelivery(message.text), [message.text]);
   const bubbleText = reply ? reply.head : message.text;
   const copyText = reply ? replyCopyText(reply) : message.text;
   const hasText = !!bubbleText.trim();
@@ -116,6 +124,7 @@ export const UserMessage = memo(function UserMessage({ message }: { message: Cha
       if (e.nativeEvent.actionName === 'longpress') doCopy();
     },
   };
+  if (cron) return <CronDeliveryMarker delivery={cron} at={message.createdAt} />;
   return (
     <View style={styles.userRow}>
       {message.sendPending ? (
@@ -151,6 +160,7 @@ export const UserMessage = memo(function UserMessage({ message }: { message: Cha
           ))
         : null}
       {message.turnExtras ? <TurnExtrasChips extras={message.turnExtras} /> : null}
+      {message.live ? <LiveSentLine batches={message.live} /> : null}
       {message.sendQueued ? <QueuedActions message={message} /> : null}
       {prefs.showTimestamps ? <Timestamp at={message.createdAt} /> : null}
     </View>
@@ -518,6 +528,7 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
       {!streaming && media.refs.length ? <MediaFiles refs={media.refs} conn={mediaConn} /> : null}
       {notes.length ? <MemoryNotes notes={notes} /> : null}
       {reminders.length ? <ReminderCards reminders={reminders} /> : null}
+      {message.status === 'done' ? <LiveQuietLine messageId={message.id} /> : null}
       {message.truncated ? (
         <Text style={[t.typography.caption, styles.stopped, { color: t.colors.subtle }]}>{tr('chat.message.truncated')}</Text>
       ) : null}
@@ -631,7 +642,9 @@ function useAnswerText(m: ChatMessage | null, notesInline: boolean, st: AnswerTe
   const message = m ?? NO_TEXT_MESSAGE;
   const streaming = message.status === 'streaming';
   const split = notesInline || !m ? null : splitProgressNotes(message);
-  const shownText = split ? split.answer : message.text;
+  // raw `<tool_call>…</tool_call>` text of a model whose call nothing ran: one quiet line instead (toolMarkup.ts)
+  const notice = useT()('chat.message.toolMarkupHidden');
+  const shownText = hideToolMarkup(split ? split.answer : message.text, { streaming, notice });
   // same notes → same array (memoized timeline rows / disclosure don't re-render per streamed token)
   const notesKey = split?.notes.length ? split.notes.map((n) => `${n.toolId}\u0000${n.at}\u0000${n.text}`).join('\u0001') : '';
   const progressNotes = useMemo(() => (split?.notes.length ? split.notes : NO_NOTES), [notesKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -829,13 +842,25 @@ const SegmentView = memo(function SegmentView({
 }) {
   const gap = first ? undefined : styles.segGap;
   switch (seg.kind) {
-    case 'markdown':
+    case 'markdown': {
       if (!seg.text.trim()) return null;
+      // a finished answer's GFM task list ("- [ ] Milch") is the app's interactive checklist (chat/taskLists.ts)
+      const parts = !live && mayHaveTaskList(seg.text) ? splitTaskListsCached(seg.text) : null;
+      if (parts && parts.some((p) => p.kind === 'tasks')) {
+        return (
+          <View style={[gap, styles.taskParts]}>
+            {parts.map((p, i) =>
+              p.kind === 'md' ? <Markdown key={`md-${i}`} text={p.text} collapse={collapse} /> : <HuiView key={p.key} node={p.node} onAction={onAction} animateIn={false} />,
+            )}
+          </View>
+        );
+      }
       return (
         <View style={gap}>
           <Markdown text={seg.text} streaming={live} collapse={collapse} run={segmentAppendRun(seg)} />
         </View>
       );
+    }
     case 'hui':
       return (
         <View style={gap}>
@@ -851,7 +876,8 @@ const SegmentView = memo(function SegmentView({
   }
 });
 
-function HuiSegment({ seg, onAction, route }: { seg: Extract<Segment, { kind: 'hui' }>; onAction: ActionHandler; route: string | null }) {
+/** One ```hui segment as the chat shows it (also used by the render sweep, ui/RenderSweep.tsx). */
+export function HuiSegment({ seg, onAction, route }: { seg: Extract<Segment, { kind: 'hui' }>; onAction: ActionHandler; route: string | null }) {
   const t = useTheme();
   const tr = useT();
   // a block that starts streaming takes over from the route skeleton in place: no fade (it would
@@ -948,6 +974,7 @@ function Reasoning({ text, live }: { text: string; live: boolean }) {
 }
 
 const styles = StyleSheet.create({
+  taskParts: { gap: 12 },
   userRow: { flexDirection: 'column', alignItems: 'flex-end', gap: 6, paddingLeft: 56 },
   pendingWrap: { alignSelf: 'flex-end', alignItems: 'flex-end', maxWidth: '100%' },
   pendingRow: { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end' },

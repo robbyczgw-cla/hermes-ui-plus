@@ -53,6 +53,20 @@ export function hermesInboxSources(p: Pick<PushProfile, 'showForeignChats' | 'sh
   return inboxSources(pushFilterOf(p));
 }
 
+/** Source of Routine results (bridge routines inbox: `hui.routine` stream events, `kind: 'routine'` pushes). */
+export const ROUTINES_SOURCE = 'routines';
+
+/**
+ * Sources for the inbox stream and the device scope: the Hermes session sources plus `routines`, but only when the
+ * bridge lists it in `GET /bridge/push/config` `sources` (an older bridge rejects an unknown source with 400, which
+ * would break the whole registration) and Routines are on on this device (Settings → Chat → "Routinen"; off = the
+ * bridge neither pushes nor streams Routine results to this device).
+ */
+export function streamSources(p: Pick<PushProfile, 'showForeignChats' | 'showCronReports'>, serverSources?: readonly string[] | null, routines = true): string[] {
+  const base = hermesInboxSources(p);
+  return routines && serverSources?.includes(ROUTINES_SOURCE) && !base.includes(ROUTINES_SOURCE) ? [...base, ROUTINES_SOURCE] : base;
+}
+
 /**
  * Hermes inbox event allowed for this profile? Default: only the app's own sessions (api_server + `hui-` id);
  * cron reports only with "Cron-Berichte anzeigen". Anything else creates no chat and no notification.
@@ -116,7 +130,7 @@ export function normalizeTime(s: string): string | null {
 export function registrationBody(
   p: PushProfile,
   s: PushProfileSettings,
-  o: { locale: string; tz?: string; label?: string },
+  o: { locale: string; tz?: string; label?: string; serverSources?: readonly string[] | null; routines?: boolean },
 ): Record<string, unknown> {
   const kind = pushServerKind(p);
   return {
@@ -127,7 +141,8 @@ export function registrationBody(
     locale: ['de', 'en', 'es'].includes(o.locale) ? o.locale : 'de',
     label: o.label,
     // bridge: which Hermes sources notify (api_server; + cron with "Cron-Berichte anzeigen"); adapter: all of the token's agents (data.agent picks the chat)
-    scope: kind === 'bridge' ? { sources: hermesInboxSources(p) } : {},
+    // (+ `routines` when the bridge offers it and Routines are on here: Routine results)
+    scope: kind === 'bridge' ? { sources: streamSources(p, o.serverSources, o.routines ?? true) } : {},
   };
 }
 
@@ -142,12 +157,19 @@ export type PushTarget = {
   agent?: string;
   source?: string;
   messageId?: string;
-  /** `approval`: Hermes waits for a decision (bridge push "Hermes wartet auf deine Freigabe"); runId = completion id */
-  kind?: 'approval';
+  /**
+   * `approval`: Hermes waits for a decision (bridge push "Hermes wartet auf deine Freigabe"); runId = completion id.
+   * `routine`: a Routine result is in the inbox (bridge routines inbox); itemId = inbox entry, jobId = the Routine.
+   */
+  kind?: 'approval' | 'routine';
   runId?: string;
   requestId?: string;
+  itemId?: string;
+  jobId?: string;
   /** hermes: Hermes profile ("bot") of the session (bridge `hermesProfile`; undefined = default) */
   hermesProfile?: string;
+  /** hermes: the session is that bot's "Bot Chat" (bots/): a tap opens the bot's thread */
+  botChat?: boolean;
 };
 
 /**
@@ -181,8 +203,32 @@ export function parseTarget(raw: unknown): PushTarget | null {
     messageId: str(o.messageId),
     ...(str(o.conversationId) ? { conversationId: str(o.conversationId) } : {}),
     ...(botOf(str(o.hermesProfile)) ? { hermesProfile: botOf(str(o.hermesProfile)) } : {}),
+    ...(o.botChat === true || o.botChat === '1' ? { botChat: true } : {}),
     ...(o.kind === 'approval' ? { kind: 'approval' as const, runId: str(o.runId), requestId: str(o.requestId) } : {}),
+    ...(o.kind === 'routine' && src === 'hermes' && ROUTINE_ITEM_RE.test(str(o.itemId) ?? '')
+      ? { kind: 'routine' as const, itemId: str(o.itemId), ...(str(o.jobId) ? { jobId: str(o.jobId)!.slice(0, 64) } : {}) }
+      : {}),
   };
+}
+
+const ROUTINE_ITEM_RE = /^ri_[a-f0-9]{8,64}$/;
+
+/**
+ * A Routine result push while Routines are off on this device (Settings → Chat → "Routinen"): not shown in the
+ * foreground. The device scope already leaves `routines` out; this covers a push that was on its way when the switch
+ * changed (or a bridge that has not seen the new scope yet).
+ */
+export function hiddenRoutinePush(raw: unknown, routines: boolean): boolean {
+  return !routines && parseTarget(raw)?.kind === 'routine';
+}
+
+/** Where a `kind: 'routine'` tap goes: the Routines screen of that bot, inbox tab, the result open. */
+export function routineTargetRoute(t: Pick<PushTarget, 'hermesProfile' | 'itemId'>): { pathname: '/routines'; params: Record<string, string> } {
+  const params: Record<string, string> = { tab: 'inbox' };
+  const bot = botOf(t.hermesProfile);
+  if (bot) params.bot = bot;
+  if (t.itemId && ROUTINE_ITEM_RE.test(t.itemId)) params.item = t.itemId;
+  return { pathname: '/routines', params };
 }
 
 /** One live inbox event (`event: hui.message`) as sent by the bridge / adapter. */
@@ -198,6 +244,8 @@ export type InboxEvent = {
   agent?: string;
   /** hermes: Hermes profile ("bot") of the session (undefined = default) */
   hermesProfile?: string;
+  /** hermes: the session is that bot's "Bot Chat" (bots/): a job delivery or an answer the app did not stream */
+  botChat?: boolean;
 };
 
 export function parseInboxEvent(data: string): InboxEvent | null {
@@ -213,6 +261,7 @@ export function parseInboxEvent(data: string): InboxEvent | null {
       source: typeof o.source === 'string' ? o.source : undefined,
       agent: typeof o.agent === 'string' ? o.agent : undefined,
       ...(typeof o.hermesProfile === 'string' && botOf(o.hermesProfile) ? { hermesProfile: botOf(o.hermesProfile) } : {}),
+      ...(o.botChat === true ? { botChat: true } : {}),
     };
   } catch {
     return null;

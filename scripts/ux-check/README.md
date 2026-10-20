@@ -21,6 +21,22 @@ Requirements: a Chromium via playwright-core (resolved like the demo-video recor
 `PLAYWRIGHT_CORE`, a local install, or the npx cache) and enough free RAM for the web build when
 `dist/web` has to be produced.
 
+## Render sweep: every node type with missing data
+
+```bash
+node scripts/ux-check/render-sweep.mjs [--only=gallery,image] [--lang=en|de|es] [--theme=light|dark] \
+  [--shots=gallery,image] [--unknown-images=always]
+```
+
+Opens `/gallery?fixtures=render` in the built bundle: every fixture of `app/src/ui/renderFixtures.ts` (each node type
+bare, with empty lists and with unknown fields, plus the image cases that failed in the wild: a query-only web gallery
+without image search, a partially failing gallery, broken URLs) rendered like a complete ```` ```hui ```` block in the
+chat. After the image lookups gave up (about 9.5 s) every fixture must show visible text or a loaded image; nothing,
+an empty box or a shimmer that never settled fails. Network outside the bundle is aborted (no image search, no
+Wikipedia), except the sweep's own test photo (`upload.wikimedia.org/render-sweep/photo-ok.jpg`, a generated JPEG)
+and `photo-404.jpg`. `--shots` saves JPEG screenshots of the matching fixtures into `dist/render-sweep/`
+(`report-<lang>.json` there too). Pre-release step, see docs/RELEASING.md.
+
 ## Share-as-image sample shots
 
 ```bash

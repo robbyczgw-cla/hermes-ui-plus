@@ -192,6 +192,7 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>(function Composer
     }
     d.release?.();
     if (d.text) setText((cur) => (cur.trim() ? `${cur.trimEnd()}\n\n${d.text}` : d.text));
+    if (d.fillOnly) return;
     if (own) toast(tr('share.composer.kept'));
     else setShareSend({ text: d.text, fileIds });
   };

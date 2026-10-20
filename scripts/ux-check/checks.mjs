@@ -75,3 +75,15 @@ export function evaluateChecks(raw, { expectSuggestions = false } = {}) {
 export function scenarioPassed(checks) {
   return Object.values(checks).every((c) => c.pass);
 }
+
+/**
+ * Render sweep (render-sweep.mjs): does one fixture show anything? `facts` = what collectFixture saw inside the
+ * fixture's box: its height, visible text snippets, loaded images (≥ 24 px) and shimmering skeletons. Nothing visible,
+ * or only a skeleton that never settled, fails (the "empty gap" a user saw instead of a gallery).
+ */
+export function fixtureVerdict(facts) {
+  const reasons = [];
+  if (!facts || !(facts.height >= 8)) reasons.push('no height (renders nothing)');
+  else if (!facts.texts?.length && !(facts.images > 0)) reasons.push(facts.skeletons > 0 ? 'only a skeleton (never settled)' : 'no visible text or image (empty box)');
+  return { pass: reasons.length === 0, reasons };
+}

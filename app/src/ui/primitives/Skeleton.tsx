@@ -39,6 +39,8 @@ export function Skeleton({ width = '100%', height = 12, radius, style }: Skeleto
 
   return (
     <View
+      // the render sweep (scripts/ux-check/render-sweep.mjs) tells a stuck shimmer from content by this id
+      testID="hui-skeleton"
       onLayout={(e) => setW(e.nativeEvent.layout.width)}
       style={[
         { width: width ?? undefined, height: height ?? undefined, borderRadius: radius ?? Math.min(t.radii.inline, (height ?? 24) / 2), backgroundColor: t.colors.skeleton, overflow: 'hidden' },

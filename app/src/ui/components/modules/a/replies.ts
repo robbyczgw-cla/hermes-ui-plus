@@ -24,10 +24,19 @@ export function choiceReply(id: string, question: string | undefined, labels: re
   return `${tag('choice', id)} ${q ? `${q} ` : ''}→ ${parts.join(', ')}`;
 }
 
-/** `[checklist:<id>] erledigt: a, b · offen: c` (empty side → "–"). */
+/**
+ * `[checklist:<id>] erledigt: a, b · offen: c` (empty side → "–"). An item with a comma of its own ("Parmesan,
+ * gerieben") would read as two: then both lists are joined with "; " (chat/replyMessage.ts counts by the same rule).
+ */
 export function checklistReply(id: string, done: readonly string[], open: readonly string[]): string {
-  const list = (xs: readonly string[]) => (xs.length ? xs.map(oneLine).join(', ') : '–');
+  const sep = listSeparator([...done, ...open]);
+  const list = (xs: readonly string[]) => (xs.length ? xs.map(oneLine).join(sep) : '–');
   return `${tag('checklist', id)} erledigt: ${list(done)} · offen: ${list(open)}`;
+}
+
+/** ", " unless an item has a list-like comma itself ("Parmesan, gerieben"; not a decimal "0,25 kg"), then "; " */
+export function listSeparator(items: readonly string[]): string {
+  return items.some((x) => /,\s/.test(x)) ? '; ' : ', ';
 }
 
 /** `[quiz:<id>] 4/5 richtig` */

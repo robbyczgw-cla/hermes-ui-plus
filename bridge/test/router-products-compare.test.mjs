@@ -60,6 +60,48 @@ test('concepts, plans, services and places stay compare (or text), never product
   assert.equal(f('Miete vs Kauf').format, 'compare');
 });
 
+// Phone dictation splits brand names and mishears model digits: the owner's "Trim ui hammer vs RG 3gxx plus" meant
+// TrimUI Brick Hammer vs Anbernic RG35XX Plus and must get product cards, not generic compare columns.
+const DICTATED_HANDHELDS = [
+  'Trim ui hammer vs RG 3gxx plus speziell für GBA Emulation',
+  'Trim ui hammer vs RG 3gxx plus',
+  'RG 3gxx plus vs trim ui brick',
+  'TrimUI Brick Hammer vs Anbernic RG35XX Plus',
+  'RG 35 XX Plus vs Miyoo Mini',
+  'Retroid Pocket 5 vs RG 406H',
+  'Aya neo Pocket vs Mi yoo Flip',
+];
+const RG_AND_VS_NEAR_MISSES = [
+  'Bayern vs Dortmund',
+  'Python vs JavaScript',
+  'RGB vs RGBW LED Streifen',
+  'RGB vs HSV Farbraum',
+  'RG Veda vs Tsubasa',
+  'RG 1 vs RG 2',
+  'Was ist der Unterschied zwischen RG und GmbH?',
+  'trim UI vs full UI',
+  'Trim UI labels vs truncate them with ellipsis',
+  'Trim und Hammer vs Säge',
+  'AX vs XX Chromosomen',
+];
+
+test('dictated handheld names (split brands, misheard RG models) → products compare', () => {
+  for (const t of DICTATED_HANDHELDS) {
+    assert.equal(looksLikeProductComparison(t), true, t);
+    const d = f(t);
+    assert.equal(d.format, 'products', t);
+    assert.equal(d.component, 'compare', t);
+    assert.ok(d.confidence >= 0.5, `${t}: hint is injected`);
+  }
+});
+
+test('near misses around RG / trim UI / "vs" keep their generic compare route', () => {
+  for (const t of RG_AND_VS_NEAR_MISSES) {
+    assert.equal(looksLikeProductComparison(t), false, t);
+    assert.equal(f(t).format, 'compare', t);
+  }
+});
+
 test('product names without a comparison and code questions are not product comparisons', () => {
   for (const t of ['Wie viel Akku hat das iPhone 17?', 'Mein Pixel 11 lädt nicht mehr', 'Write a Swift function that detects an iPhone 17 vs iPad']) {
     assert.equal(looksLikeProductComparison(t), false, t);

@@ -38,6 +38,10 @@ export type CalcOutputDefN = {
   decimals?: number;
   unit?: string;
   emphasis: boolean;
+  /** what the model wrote, when `expr` is a rewrite of it (shown in the formula disclosure) */
+  source?: string;
+  /** text output: `expr` yields an index into these strings */
+  texts?: string[];
 };
 
 export type CalcChartDefN = {
@@ -106,18 +110,299 @@ function readInput(o: unknown): CalcInputDef | null {
   };
 }
 
+/* ───────────── source rewrite (JS-isms models write) ─────────────
+ *
+ * Models often write JavaScript instead of the calc grammar: `x.toFixed(1)`, `Math.round(x)`,
+ * `Number(x)`, `===`, spreadsheet names (`IF(`, `MAX(`), and a top-level ternary or `if(…)` that picks a text
+ * (`a > b ? '✓ Zug' : '✓ Auto'`, `IF(a > b, "→ Zug", "→ Auto")`).
+ * These are rewritten at the SOURCE level into plain engine syntax before the engine sees them.
+ * Nothing here evaluates anything: the result is still a string that the safe engine parses, so
+ * property access and strings stay impossible (an unknown `.foo` or a leftover quote is still an
+ * engine error). Anything that cannot be rewritten safely is left as it is.
+ */
+
+/** Placeholder for characters inside a string literal in the mask (never an operator/identifier char). */
+const STR = '\u0001';
+const IDCH = /[\p{L}\p{N}_]/u;
+
+/** Same length as `src`, every char of a '…' / "…" literal replaced by STR. Null: unterminated string or backtick. */
+function maskStrings(src: string): string | null {
+  let out = '';
+  let q: string | null = null;
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    if (q) {
+      out += STR;
+      if (c === '\\' && i + 1 < src.length) {
+        out += STR;
+        i++;
+      } else if (c === q) q = null;
+      continue;
+    }
+    if (c === '`') return null; // template literal: code inside `${…}`, never rewritten
+    if (c === "'" || c === '"') {
+      q = c;
+      out += STR;
+      continue;
+    }
+    out += c;
+  }
+  return q ? null : out;
+}
+
+/** Index of the `)` matching the `(` at `open` (in the mask), or -1. */
+function closeParen(mask: string, open: number, end = mask.length): number {
+  let d = 0;
+  for (let i = open; i < end; i++) {
+    if (mask[i] === '(') d++;
+    else if (mask[i] === ')' && --d === 0) return i;
+  }
+  return -1;
+}
+
+/** [start, end) of `mask` without surrounding whitespace and fully wrapping parentheses. */
+function core(mask: string, start = 0, end = mask.length): [number, number] {
+  for (;;) {
+    while (start < end && /\s/.test(mask[start])) start++;
+    while (end > start && /\s/.test(mask[end - 1])) end--;
+    if (mask[start] === '(' && closeParen(mask, start, end) === end - 1) {
+      start++;
+      end--;
+    } else return [start, end];
+  }
+}
+
+const isIdAt = (s: string, i: number) => i >= 0 && i < s.length && IDCH.test(s[i]);
+
+const MATH_FNS: Record<string, string> = {
+  round: 'round', floor: 'floor', ceil: 'ceil', abs: 'abs', sqrt: 'sqrt', pow: 'pow',
+  min: 'min', max: 'max', exp: 'exp', log: 'ln', log10: 'log',
+};
+const MATH_CONSTS: Record<string, string> = { PI: 'pi', E: 'e' };
+const WRAPPERS = ['Number', 'parseFloat'];
+/** spreadsheet spelling of the engine's functions (`IF(`, `MAX(`, `ROUND(`, `POWER(`) → engine name */
+const SHEET_FNS: Record<string, string> = {
+  IF: 'if', MIN: 'min', MAX: 'max', ROUND: 'round', FLOOR: 'floor', CEIL: 'ceil', CEILING: 'ceil', ABS: 'abs',
+  SQRT: 'sqrt', POW: 'pow', POWER: 'pow', LOG: 'log', LOG10: 'log', LN: 'ln', EXP: 'exp', CLAMP: 'clamp',
+};
+
+/** One rewrite step on the first applicable spot at/after `from`; null when nothing (more) applies. */
+type Step = { src: string; next: number; whole?: number } | null;
+
+function stepSimple(src: string, mask: string): Step {
+  for (let i = 0; i < mask.length; i++) {
+    // === / !==
+    if (mask.startsWith('===', i) || mask.startsWith('!==', i)) return { src: src.slice(0, i + 1) + '=' + src.slice(i + 3), next: 0 };
+    if (isIdAt(mask, i - 1) || mask[i - 1] === '.') continue;
+    // Math.round( → round(  ·  Math.PI → pi
+    if (mask.startsWith('Math.', i)) {
+      const m = /^Math\.([A-Za-z0-9]+)/.exec(mask.slice(i));
+      if (!m) continue;
+      const after = mask.slice(i + m[0].length).trimStart();
+      const fn = MATH_FNS[m[1]];
+      const k = MATH_CONSTS[m[1]];
+      if (fn && after.startsWith('(')) return { src: src.slice(0, i) + fn + src.slice(i + m[0].length), next: 0 };
+      if (k && !after.startsWith('(') && !isIdAt(mask, i + m[0].length)) return { src: src.slice(0, i) + k + src.slice(i + m[0].length), next: 0 };
+      continue;
+    }
+    // IF( / MAX( … → if( / max(  (never an input name: those are not followed by a parenthesis)
+    const sheet = /^([A-Z][A-Z0-9]*)\s*\(/.exec(mask.slice(i));
+    if (sheet && SHEET_FNS[sheet[1]]) return { src: src.slice(0, i) + SHEET_FNS[sheet[1]] + src.slice(i + sheet[1].length), next: 0 };
+    // Number(x) / parseFloat(x) → (x)
+    for (const w of WRAPPERS) {
+      if (mask.startsWith(w, i) && !isIdAt(mask, i + w.length)) {
+        let j = i + w.length;
+        while (/\s/.test(mask[j] ?? '')) j++;
+        if (mask[j] === '(') return { src: src.slice(0, i) + src.slice(j), next: 0 };
+      }
+    }
+  }
+  return null;
+}
+
+/** `X.toLocaleString(…)` → `X`, `X.toFixed(n)` → `round(X, n)`. */
+function stepMethod(src: string, mask: string, from: number, method: 'toFixed' | 'toLocaleString'): Step {
+  const re = new RegExp(`\\.\\s*(${method})\\s*\\(`, 'g');
+  re.lastIndex = from;
+  const m = re.exec(mask);
+  if (!m) return null;
+  const dot = m.index;
+  const open = dot + m[0].length - 1;
+  const close = closeParen(mask, open);
+  if (close < 0) return null;
+  const next = dot + 1;
+  if (m[1] === 'toLocaleString') return { src: src.slice(0, dot) + src.slice(close + 1), next: 0 };
+  const arg = src.slice(open + 1, close).trim();
+  if (!/^\d{0,2}$/.test(arg)) return { src, next };
+  // operand before the dot: (…), name(…), identifier or number
+  let s = dot;
+  if (mask[s - 1] === ')') {
+    let d = 0;
+    for (s = dot - 1; s >= 0; s--) {
+      if (mask[s] === ')') d++;
+      else if (mask[s] === '(' && --d === 0) break;
+    }
+    if (s < 0) return { src, next };
+    while (isIdAt(mask, s - 1)) s--;
+  } else {
+    while (s > 0 && (isIdAt(mask, s - 1) || mask[s - 1] === '.')) s--;
+  }
+  if (s === dot) return { src, next };
+  const n = arg === '' ? 0 : Number(arg);
+  const out = src.slice(0, s) + `round(${src.slice(s, dot)}, ${n})` + src.slice(close + 1);
+  const [a, b] = core(mask);
+  return { src: out, next: 0, whole: s === a && close + 1 === b ? n : undefined };
+}
+
+type TextNode = { lit: string } | { cond: string; then: TextNode; else: TextNode };
+
+/** `if(c, a, b)` spanning exactly [a, b): the three top-level argument ranges, else null. */
+function ifCallArgs(mask: string, a: number, b: number): [number, number][] | null {
+  const m = /^if\s*\(/.exec(mask.slice(a, b));
+  if (!m || isIdAt(mask, a - 1)) return null;
+  const open = a + m[0].length - 1;
+  if (closeParen(mask, open, b) !== b - 1) return null;
+  const args: [number, number][] = [];
+  let d = 0;
+  let from = open + 1;
+  for (let i = open + 1; i < b - 1; i++) {
+    const c = mask[i];
+    if (c === '(') d++;
+    else if (c === ')') d--;
+    else if (c === ',' && d === 0) {
+      args.push([from, i]);
+      from = i + 1;
+    }
+  }
+  args.push([from, b - 1]);
+  return args.length === 3 ? args : null;
+}
+
+/**
+ * A string literal, `cond ? T : T` or `if(cond, T, T)` (spreadsheet `IF`, real-user round 3) with a numeric `cond`
+ * and text branches; null otherwise.
+ */
+function readTextExpr(src: string, mask: string, start: number, end: number): TextNode | null {
+  const [a, b] = core(mask, start, end);
+  if (b - a >= 2 && (src[a] === "'" || src[a] === '"') && src[b - 1] === src[a] && mask.slice(a, b).split('').every((c) => c === STR)) {
+    // one single literal (not 'a' + 'b'): its closing quote is the last char
+    const body = src.slice(a + 1, b - 1);
+    let i = 0;
+    for (; i < body.length; i++) if (body[i] === '\\') i++; else if (body[i] === src[a]) break;
+    if (i < body.length) return null;
+    return { lit: body.replace(/\\(.)/g, '$1') };
+  }
+  const call = ifCallArgs(mask, a, b);
+  if (call) {
+    const [c, t, e] = call;
+    const cond = src.slice(c[0], c[1]).trim();
+    if (!cond || mask.slice(c[0], c[1]).includes(STR)) return null;
+    const then = readTextExpr(src, mask, t[0], t[1]);
+    const els = then && readTextExpr(src, mask, e[0], e[1]);
+    return then && els ? { cond, then, else: els } : null;
+  }
+  let d = 0;
+  let q = -1;
+  for (let i = a; i < b; i++) {
+    const c = mask[i];
+    if (c === '(') d++;
+    else if (c === ')') d--;
+    else if (c === '?' && d === 0) {
+      q = i;
+      break;
+    }
+  }
+  if (q < 0) return null;
+  let nest = 0;
+  let colon = -1;
+  d = 0;
+  for (let i = q + 1; i < b; i++) {
+    const c = mask[i];
+    if (c === '(') d++;
+    else if (c === ')') d--;
+    else if (d === 0 && c === '?') nest++;
+    else if (d === 0 && c === ':') {
+      if (nest === 0) {
+        colon = i;
+        break;
+      }
+      nest--;
+    }
+  }
+  if (colon < 0) return null;
+  const cond = src.slice(a, q).trim();
+  if (!cond || mask.slice(a, q).includes(STR)) return null;
+  const then = readTextExpr(src, mask, q + 1, colon);
+  const els = then && readTextExpr(src, mask, colon + 1, b);
+  return then && els ? { cond, then, else: els } : null;
+}
+
+function textToEngine(n: TextNode, texts: string[]): string {
+  if ('lit' in n) {
+    let i = texts.indexOf(n.lit);
+    if (i < 0) i = texts.push(n.lit) - 1;
+    return String(i);
+  }
+  return `(${n.cond}) ? (${textToEngine(n.then, texts)}) : (${textToEngine(n.else, texts)})`;
+}
+
+/**
+ * Rewrites JS-isms into engine syntax (see above). `texts`: the output picks one of these
+ * strings; the engine expression then returns its index. Unchanged input when nothing applies.
+ */
+export function rewriteExpr(expr: string): { expr: string; decimals?: number; texts?: string[] } {
+  let src = expr;
+  let whole: number | undefined;
+  let mask = maskStrings(src);
+  if (!mask) return { expr };
+  for (let guard = 0; mask && guard < 100; guard++) {
+    const r = stepSimple(src, mask);
+    if (!r) break;
+    src = r.src;
+    mask = maskStrings(src);
+  }
+  for (const method of ['toLocaleString', 'toFixed'] as const) {
+    let from = 0;
+    for (let guard = 0; mask && guard < 100; guard++) {
+      const r = stepMethod(src, mask, from, method);
+      if (!r) break;
+      if (r.src === src) {
+        from = r.next;
+        continue;
+      }
+      src = r.src;
+      mask = maskStrings(src);
+      from = 0;
+      if (r.whole !== undefined) whole = r.whole;
+    }
+  }
+  if (!mask) return { expr };
+  if (mask.includes(STR)) {
+    const t = readTextExpr(src, mask, 0, src.length);
+    if (t) {
+      const texts: string[] = [];
+      return { expr: textToEngine(t, texts), texts };
+    }
+  }
+  return whole !== undefined ? { expr: src, decimals: whole } : { expr: src };
+}
+
 function readOutput(o: unknown): CalcOutputDefN | null {
   if (!isObj(o)) return null;
-  const expr = str(o.expr);
-  if (!expr) return null;
+  const raw = str(o.expr);
+  if (!raw) return null;
   const name = str(o.name);
   const dec = num(o.decimals);
+  const rw = rewriteExpr(raw);
+  const decimals = dec !== undefined ? dec : rw.decimals;
   return {
     name: name && IDENT.test(name) ? name : undefined,
     label: str(o.label) ?? name ?? 'Ergebnis',
-    expr,
+    expr: rw.expr,
+    ...(rw.expr !== raw ? { source: raw } : {}),
+    ...(rw.texts ? { texts: rw.texts } : {}),
     format: FORMATS.includes(o.format as FormatKind) ? (o.format as FormatKind) : 'number',
-    decimals: dec !== undefined ? Math.max(0, Math.min(10, Math.floor(dec))) : undefined,
+    decimals: decimals !== undefined ? Math.max(0, Math.min(10, Math.floor(decimals))) : undefined,
     unit: str(o.unit),
     emphasis: o.emphasis === true,
   };
@@ -290,21 +575,27 @@ export type OutputRow = {
   text: string;
   value: number | null;
   emphasis: boolean;
-  /** model bug (syntax, unknown name): shown in the formula disclosure */
+  /** model bug (syntax, unknown name): the row shows `notComputable`, details in the formula disclosure */
   error?: string;
 };
 
-export function computeOutputs(model: CalcModel, values: Record<string, CalcValue>, locale?: string): OutputRow[] {
+/**
+ * `text.notComputable` labels rows whose formula the engine rejects (default German, used for the
+ * protocol reply). A text output (`texts`) shows the chosen string.
+ */
+export function computeOutputs(model: CalcModel, values: Record<string, CalcValue>, locale?: string, text?: Pick<typeof S_DE.calc, 'notComputable'>): OutputRow[] {
   const res = evaluateOutputs(toScope(model.inputs, values), model.outputs);
   return model.outputs.map((o, i) => {
     const r = res[i];
     const value = r && typeof r.value === 'number' && Number.isFinite(r.value) ? r.value : null;
+    const error = r?.error?.message;
+    const pick = o.texts && value !== null && Number.isInteger(value) ? o.texts[value] : undefined;
     return {
       label: o.label,
       value,
-      text: formatValue(value, { format: o.format, decimals: o.decimals, unit: o.unit, locale }),
+      text: error ? (text ?? S_DE.calc).notComputable : pick ?? formatValue(o.texts ? null : value, { format: o.format, decimals: o.decimals, unit: o.unit, locale }),
       emphasis: o.emphasis,
-      error: r?.error?.message,
+      error,
     };
   });
 }
@@ -333,10 +624,12 @@ export const MAX_REPLY = 4000;
 /**
  * `[calc:<id>] Kreditsumme 20.000 € · Zins p. a. 4,5 % · Laufzeit 60 Monate → Monatliche Rate 372,86 €`
  * Emphasised outputs come first; at most 6 outputs; total ≤ 4000 chars. Null when any input is
- * invalid (the button is disabled then).
+ * invalid or every output formula is broken (the button is disabled then).
  */
 export function buildCalcReply(model: CalcModel, values: Record<string, CalcValue>, rows: OutputRow[]): string | null {
   const ins: string[] = [];
+  // nothing computable because every formula is broken: nothing to hand back as a result
+  if (rows.length && rows.every((r) => r.error)) return null;
   for (const i of model.inputs) {
     const v = values[i.name];
     if (i.kind !== 'toggle' && i.kind !== 'select' && (typeof v !== 'number' || !Number.isFinite(v))) return null;

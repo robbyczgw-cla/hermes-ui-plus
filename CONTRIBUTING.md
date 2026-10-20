@@ -40,8 +40,9 @@ BRIDGE_ALLOW_NO_AUTH=1 HERMES_BASE_URL=http://127.0.0.1:8787 HERMES_API_KEY=dev 
 ## Checks
 
 ```bash
-scripts/check.sh all                       # app: tsc (app + tests), app unit tests, scripts/*.test.mjs
+scripts/check.sh all                       # tsc (app + tests), app unit tests, scripts/*.test.mjs, bridge, push, plugin
 scripts/check.sh quick                     # inner loop: only what your change can affect (not a merge gate)
+scripts/check.sh all --host <ssh-host>     # the same gate on another Linux machine (small laptop, wrong file system)
 (cd bridge && npm test)                    # bridge tests
 (cd push && npm test)                      # push library tests
 (cd bridge && npm run eval)                # router evaluation set
@@ -60,6 +61,27 @@ tsc runs incrementally (cache in `~/.cache/hui-check/`) and is skipped when noth
 working-tree changes. It takes the same lock and memory scope as `all`, in at most two short steps. It is not a merge
 gate: run `scripts/check.sh all` before merging.
 
+`scripts/check.sh all` runs every step even after one fails and ends with one summary line, for example
+`check: tsc ok, tsc-test ok, app tests 2210 pass/0 fail, scripts 640 pass/0 fail, bridge 630 pass/0 fail, ... - all green in 6m2s`
+(exit 1 when a step failed, 75 when a step gave up waiting for the lock). The `bridge` step is the whole bridge suite
+(`npm test` in `bridge/`, the security corpus included) and needs `npm ci` in `bridge/` as well as in `app/`;
+`scripts/check.sh bridge` runs it alone, `scripts/check.sh bridge-security` only the dependency-free security corpus.
+
+`scripts/check.sh all --host <host>` runs that gate on another Linux machine over ssh when yours is too small for it
+(`<host>` is an ssh alias, or `linux` for `LINUX_HOST` from the environment or `$HUI_PRIVATE_DIR/build.env`). It ships
+the committed tree of HEAD and refuses a dirty working tree; `--worktree` includes the uncommitted changes (staged,
+unstaged and untracked), `--committed` checks HEAD anyway and only warns. Only the git objects the host does not have
+yet travel (the host keeps a bare repository with the trees of earlier runs; the first run sends the whole tree once).
+On the host, each run gets its own directory under `~/.cache/hui-check-remote/runs/` (`HUI_CHECK_REMOTE_DIR` changes
+the base), which is removed at the end, also when the run fails or is interrupted. The run's temp files (`TMPDIR`) live
+in that directory too, on disk, because a host's `/tmp` may be a small tmpfs other jobs fill up; set
+`HUI_CHECK_REMOTE_TMPDIR` to an absolute path on the host to use a per-run directory below it instead. Node 22 with TypeScript stripping
+comes from the host, or from a cached official nodejs.org tarball (SHA-256 checked, refreshed weekly), and
+`node_modules` from a cache keyed by the lockfile, so `npm ci` only runs when a lockfile changed. The host's own capped
+`check.sh all` does the rest; its per-step lock queues runs from several people or agents. The output is streamed, the
+last line sums up the run, and the exit code is the remote one (255 when ssh failed). macOS hosts are refused: run
+`check.sh all` there directly, in a case-sensitive volume.
+
 The underlying commands, if you prefer to run them yourself:
 
 ```bash
@@ -76,14 +98,14 @@ secrets, so pull requests from forks get the same checks:
 
 | Job | Same as locally |
 |---|---|
-| `app` | `scripts/check.sh all` (tsc app + tests, app unit tests, `scripts/*.test.mjs`) after `npm ci` in `app/` |
+| `app` | `scripts/check.sh all` (tsc app + tests, app unit tests, `scripts/*.test.mjs`, the bridge suite) after `npm ci` in `app/` and `bridge/` |
 | `services` | `cd bridge && npm ci && npm test`, `cd push && npm test` |
 | `website` | `node --test scripts/website.test.mjs` |
 | `leak-guard` | `node scripts/leak-guard.mjs --tree --generic-only` and its unit tests |
 | `gitleaks` | gitleaks over the git history with `.gitleaks.toml` |
 | `workflows` | actionlint and `node --test scripts/workflows.test.mjs` (pinned actions, read-only token, nothing publishes) |
 
-Run `scripts/check.sh all` and the bridge and push tests locally before opening a pull request. Do not start a native build just to test a JavaScript
+Run `scripts/check.sh all` (it includes the bridge and push tests) locally before opening a pull request. Do not start a native build just to test a JavaScript
 change. Workflow changes: actions stay pinned to a full commit SHA with a version comment, and `permissions` stay
 read-only; `scripts/workflows.test.mjs` fails otherwise. Dependency updates are made in the source repository and arrive
 with the next export (Expo packages only through `npx expo install`), so this repository has no automatic update pull requests.
@@ -123,7 +145,7 @@ Check your diff and your screenshots before you push. Automated leak guards may 
 
 ## Pull request checklist
 
-- [ ] `scripts/check.sh all`, `cd bridge && npm test` and `cd push && npm test` pass (CI runs the same).
+- [ ] `scripts/check.sh all` passes (it runs the bridge and push tests too; CI runs the same).
 - [ ] New strings exist in `de`, `en` and `es`.
 - [ ] No private data in the diff, fixtures or screenshots.
 - [ ] Protocol, router or skill changes are reflected in docs and examples.

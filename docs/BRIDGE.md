@@ -74,10 +74,15 @@ Hermes API directly, with the limitations above.
   - `GET /api/sessions`, `GET|PATCH|DELETE /api/sessions/{id}`, `GET /api/sessions/{id}/messages`,
     `POST /api/sessions/{id}/fork`, `POST /api/sessions/{id}/model` (Hermes v0.22 per-chat model lock, body ≤ 8 KB),
     `GET /api/model/options`
+  - Routines (Hermes cron jobs, `BRIDGE_ROUTINES`, bots opt-in via `BRIDGE_ROUTINES_BOTS`): `GET /api/jobs`,
+    `GET /api/jobs/{id}`, `POST /api/jobs/{id}/pause|resume|run`. Not a pass-through: the bridge answers with a reduced
+    job record and never forwards the client's body. Paired devices may only view unless the owner grants `manage`;
+    results land in the bridge's own inbox (`/bridge/routines/*`). Details in
+    [ROUTER.md](ROUTER.md#hermes-routines-cron-jobs)
 
   Everything else is refused before it reaches Hermes: unknown paths with 404, a wrong method with 405 and an `Allow`
   header. That includes run creation (`POST /v1/runs`), run events/steer/stop, `/v1/responses`, `/v1/toolsets`,
-  artifacts, `/health/detailed` and Hermes' admin, cron and config APIs. Requests keep the path of `HERMES_BASE_URL`
+  artifacts, `/health/detailed`, creating / editing / deleting cron jobs and Hermes' admin and config APIs. Requests keep the path of `HERMES_BASE_URL`
   (a reverse-proxy sub-path such as `https://example.com/hermes` works).
   Hermes profiles (bots, `/p/<profile>/…`) get exactly the same allow-list (their `/health` needs the token);
   which profiles exist is only answered after the token check (`BRIDGE_PROFILES`, `GET /bridge/profiles`).
@@ -242,6 +247,29 @@ So the bridge sends the skill's core text itself:
 
 SKILL.md itself is unchanged and still works as a normal Hermes skill. Background: ADR 0001, addendum to decision 5.
 
+### Capabilities line
+
+The bootstrap message the bridge injects ends with one more line that tells the model what this bridge can do:
+
+```
+[hermes-ui-caps] image_search=off
+```
+
+- **`image_search`:** `on` when the bridge has web image search (a `SERPER_API_KEY` or `BRAVE_API_KEY` for a provider
+  in `BRIDGE_IMAGE_PROVIDERS`), else `off`. Same rule as `available` in `GET /bridge/images/config`.
+- **Why:** query-only web pictures (`source:"web"` on `image` / `gallery`) can only be found by a web image search. With
+  `image_search=off` the skill (SKILL.md "Images", `references/products.md` "Photos without web image search") tells
+  the model to use image URLs its own extract tool returned (`{url, caption}` items) or text links instead, so a
+  "Photos?" question no longer ends in a gallery nothing can fill.
+- **Prompt cache:** computed once at startup from the environment and appended to the bootstrap text then, so the
+  message stays byte-identical on every turn. Changing an image key takes a bridge restart (as before).
+- **When there is no line:** bootstrap off, a direct connection to Hermes, or a client that sends its own
+  `[hermes-ui-app] Client:` bootstrap (the bridge then injects no bootstrap, so no caps line either; the current app
+  does not send it on bridge connections). The skill treats a missing line like `image_search=on`, as before. A custom
+  `BRIDGE_BOOTSTRAP_FILE` that already contains a `[hermes-ui-caps]` line is sent unchanged.
+- **Where to see it:** the `skill` line of the startup summary (`caps image_search=off`), the `imageSearch` field of the
+  `listening` log line and `caps` in `GET /bridge/status`.
+
 ## Hermes profiles (bots)
 
 A Hermes profile (`hermes profile create <name>`) is a bot with its own model, memory, skills and sessions. One
@@ -288,6 +316,19 @@ and listens on loopback only; the bridge is the transport:
 - **Not per profile:** the plugin listens once for the whole gateway and answers with its `auxiliary.hui_quick`
   model, whichever profile loaded it first. So the app offers ⚡ only in chats of the default profile, not in bot
   (`/p/<profile>/`) chats.
+
+## Skills & memory library (optional plugin)
+
+`GET /bridge/library/config`, `/bridge/library/skills`, `/bridge/library/skills/content?name=` and
+`/bridge/library/memory` (all with optional `?bot=<profile>`, device token required, GET only) are read-only
+projections of the `hermes-ui-plus` plugin's `/library/*` answers ([SKILLS-MEMORY.md](SKILLS-MEMORY.md)). They use the
+same `BRIDGE_HERMES_PLUGIN_URL` / `BRIDGE_HERMES_PLUGIN_SECRET_FILE` as quick answers; `BRIDGE_QUICK=off` does not
+affect them. `BRIDGE_LIBRARY=off` turns them off (reason `bridge_off`). Only known fields reach the app, with capped
+sizes (2000 skills, 256 KiB per SKILL.md, 200 memory entries); plugin error text is never passed on. Without the plugin,
+for a bot the plugin does not serve (`other_bot`) or when the plugin switches a feature off, the data routes answer
+`404 feature_off` with a `reason`; an unknown bot gets `404 unknown_profile`, an unknown skill `404 skill_not_found`,
+plugin failures `502 upstream_error` / `504 timeout`. The plugin config probe is cached for 30 s
+(`BRIDGE_LIBRARY_PROBE_TTL_MS`); timeouts `BRIDGE_LIBRARY_PROBE_TIMEOUT_MS` (1.5 s) and `BRIDGE_LIBRARY_TIMEOUT_MS` (10 s).
 
 ## Where your data goes
 

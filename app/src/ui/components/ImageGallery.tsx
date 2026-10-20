@@ -1,7 +1,10 @@
 /**
  * `gallery` node: horizontal snapping photo carousel (next slide peeks in), page dots, captions,
- * attribution, fullscreen on tap. Items resolve by `query` (Wikipedia/Commons) or use `url`.
- * Items that can't be resolved are dropped; if none remain the block renders nothing.
+ * attribution, fullscreen on tap. Items resolve by `query` (Wikipedia/Commons, or web image search for
+ * `source:"web"`) or use `url` (from Hermes' tools; through the bridge image proxy when it has one).
+ * Items without a photo (no image search, images off, lookup failed, nothing found, photo did not load) never
+ * vanish: they keep a calm placeholder tile with their caption (tap → image search in the browser), and one quiet
+ * line under the block names the reason (imageMiss.tsx, images/miss.ts). No photo at all → a compact tile grid.
  *
  * Paging: native = ScrollView snapping (snapToInterval); web = CSS scroll snap (`pagingEnabled`) plus
  * mouse drag-to-scroll and ‹ › buttons. A press only opens fullscreen when the pointer didn't drag.
@@ -15,8 +18,11 @@ import { HText } from '../primitives/basics';
 import { Skeleton } from '../primitives/Skeleton';
 import { ImageSkeleton } from '../skeletons';
 import { asNumber, asObjects, asOptString, clamp } from '../lib/format';
-import { useResolvedImages, type ImageSource } from '../../images';
+import { useImagesAllowed, useResolvedImages, useWebImagesEnabled, type ImageSource, type ResolvedImage, type ResolvedImageState } from '../../images';
+import { getImageSearchMode } from '../../images/web';
+import { IMAGE_LOOKUP_CAP_MS, blockMissReason, imageMissReason, type ImageMissReason } from '../../images/miss';
 import { AttributionLine, ImageLightbox, Photo, type LightboxItem } from './imageParts';
+import { MissNote, MissTile } from './imageMiss';
 import { useSlotCap } from './imageSlot';
 import { Icon } from '../primitives/Icon';
 import { isDrag, offsetForPage, pageAfterDrag, pageAtOffset, type GalleryGeometry } from './galleryPaging';
@@ -25,6 +31,27 @@ import type { NodeProps } from './content';
 import { useT } from '../../i18n';
 
 const MAX_ITEMS = 6;
+/** height of a placeholder tile when no item has a photo (compact grid, not a row of big empty boxes) */
+const MISS_TILE_H = 88;
+
+type Item = { query?: string; url?: string; caption?: string; web: boolean };
+type Slide = Item & { photo: ResolvedImage | null; pending: boolean; miss: ImageMissReason | null };
+
+/** Per item: photo, still resolving (shimmer) or missing with its reason. */
+function useSlides(items: Item[], states: ResolvedImageState[], expired: boolean, broken: Record<string, true>): Slide[] {
+  const allowed = useImagesAllowed();
+  const webOn = useWebImagesEnabled();
+  const mode = getImageSearchMode();
+  return items.map((it, i) => {
+    const st = states[i];
+    const img = st?.status === 'ok' ? st.image : null;
+    if (img && !broken[img.url]) return { ...it, photo: img, pending: false, miss: null };
+    const loading = !st || st.status === 'idle' || st.status === 'loading';
+    if (loading && !expired) return { ...it, photo: null, pending: true, miss: null };
+    const status = img ? 'broken' : st?.status === 'error' ? 'error' : st?.status === 'none' ? 'none' : 'expired';
+    return { ...it, photo: null, pending: false, miss: imageMissReason({ allowed, webOnly: it.web, webEnabled: webOn, mode, status, urlOnly: !it.query && !!it.url }) };
+  });
+}
 
 export function ImageGallery({ node }: NodeProps<HuiGallery>) {
   const tr = useT();
@@ -33,7 +60,7 @@ export function ImageGallery({ node }: NodeProps<HuiGallery>) {
   const lang = asOptString(node.lang);
   const aspect = clamp(asNumber(node.aspect) ?? 4 / 3, 0.6, 2.4);
   const nodeWeb = node.source === 'web';
-  const items = asObjects(node.items)
+  const items: Item[] = asObjects(node.items)
     .map((it) => ({ query: asOptString(it.query), url: asOptString(it.url), caption: asOptString(it.caption), web: nodeWeb || it.source === 'web' }))
     .filter((it) => it.query || it.url)
     .slice(0, MAX_ITEMS);
@@ -43,8 +70,10 @@ export function ImageGallery({ node }: NodeProps<HuiGallery>) {
     items.map((it): ImageSource => ({ query: it.query, url: it.url, lang, source: it.web ? 'web' : undefined })),
     enabled,
   );
-  // resolving shimmers at most IMAGE_SLOT_CAP_MS, then the still-pending slides are dropped like unresolved ones
-  const expired = useSlotCap(states.some((s) => s.status === 'loading'), items.map((it) => `${it.query ?? ''}|${it.url ?? ''}`).join('\n'));
+  // resolving shimmers at most IMAGE_LOOKUP_CAP_MS, then the still-pending slides turn into placeholders
+  const expired = useSlotCap(states.some((s) => s.status === 'loading'), items.map((it) => `${it.query ?? ''}|${it.url ?? ''}`).join('\n'), IMAGE_LOOKUP_CAP_MS);
+  // photos that failed to load (bad URL, proxy refused it): placeholders too
+  const [broken, setBroken] = useState<Record<string, true>>({});
   const [w, setW] = useState(0);
   const [page, setPage] = useState(0);
   const [viewer, setViewer] = useState<number | null>(null);
@@ -53,11 +82,14 @@ export function ImageGallery({ node }: NodeProps<HuiGallery>) {
   const drag = useRef({ moved: false });
   const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const slides = items.map((it, i) => ({ ...it, st: states[i] })).filter((s) => s.st && s.st.status !== 'none' && s.st.status !== 'error' && !(expired && s.st.status === 'loading'));
+  const slides = useSlides(items, states, expired, broken);
   const n = slides.length;
+  // no photo at all and nothing resolving any more: compact tiles instead of a carousel of empty boxes
+  const grid = n > 0 && !streaming && slides.every((s) => s.miss);
+  const carousel = n > 0 && !grid;
   const gap = t.spacing.s;
   const slideW = n === 1 ? w : Math.round(w * 0.84);
-  const geo: GalleryGeometry = { n, slideW, gap, viewW: w };
+  const geo: GalleryGeometry = { n: carousel ? n : 0, slideW, gap, viewW: w };
   const geoRef = useRef(geo);
   geoRef.current = geo;
   const web = Platform.OS === 'web';
@@ -68,16 +100,40 @@ export function ImageGallery({ node }: NodeProps<HuiGallery>) {
     ref.current?.scrollTo({ x: offsetForPage(g, next), animated: true });
     setPage(next);
   }, []);
-  useWebDragScroll(ref, geoRef, drag, setPage, web && n > 1 && w > 0);
+  useWebDragScroll(ref, geoRef, drag, setPage, web && carousel && n > 1 && w > 0);
   useEffect(() => () => {
     if (resetTimer.current) clearTimeout(resetTimer.current);
   }, []);
 
-  if (!items.length) return streaming ? <ImageSkeleton aspect={aspect} /> : null;
-  if (!n) return null;
+  if (!n) return streaming ? <ImageSkeleton aspect={aspect} /> : null;
 
-  const ready = slides.filter((s) => s.st.status === 'ok' && s.st.image);
-  const viewerItems: LightboxItem[] = ready.map((s) => ({ image: s.st.image!, caption: s.caption }));
+  const reason = streaming ? null : blockMissReason(slides.map((s) => s.miss));
+  const markBroken = (url: string) => setBroken((b) => (b[url] ? b : { ...b, [url]: true }));
+
+  if (grid) {
+    const cols = n === 1 ? 1 : 2;
+    const tileW = w > 0 ? Math.floor((w - gap * (cols - 1)) / cols) : 0;
+    return (
+      <View onLayout={(e) => setW(Math.round(e.nativeEvent.layout.width))} style={{ gap: t.spacing.s }}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap }} accessibilityLabel={tr('ui.image.galleryA11y', { n })}>
+          {slides.map((s, k) => (
+            <View key={`${k}-${s.query ?? s.url}`} style={{ width: tileW || (cols === 1 ? '100%' : '48%'), gap: 4 }}>
+              <MissTile query={s.query} label={s.caption} height={MISS_TILE_H} />
+              {s.caption ? (
+                <HText variant="callout" weight="500" numberOfLines={2}>
+                  {s.caption}
+                </HText>
+              ) : null}
+            </View>
+          ))}
+        </View>
+        {reason ? <MissNote reason={reason} /> : null}
+      </View>
+    );
+  }
+
+  const ready = slides.filter((s) => s.photo);
+  const viewerItems: LightboxItem[] = ready.map((s) => ({ image: s.photo!, caption: s.caption }));
   const photoH = slideW > 0 ? slideW / aspect : 0;
   // native: a drag ends with momentum; allow taps again shortly after it settles
   const endDrag = () => {
@@ -115,7 +171,7 @@ export function ImageGallery({ node }: NodeProps<HuiGallery>) {
             accessibilityLabel={tr('ui.image.galleryA11y', { n })}
           >
             {slides.map((s, k) => {
-              const img = s.st.status === 'ok' ? s.st.image : null;
+              const img = s.photo;
               const caption = s.caption ?? (img?.attribution.provider === 'wikipedia' ? img.title : undefined);
               return (
                 <View key={`${k}-${s.query ?? s.url}`} style={{ width: slideW, gap: 4 }}>
@@ -124,11 +180,14 @@ export function ImageGallery({ node }: NodeProps<HuiGallery>) {
                       uri={img.url}
                       aspect={aspect}
                       label={caption ?? img.title}
+                      onError={() => markBroken(img.url)}
                       onPress={() => {
                         if (drag.current.moved) return; // the release of a swipe/drag is not a tap
-                        setViewer(Math.max(0, ready.findIndex((r) => r.st.image === img)));
+                        setViewer(Math.max(0, ready.findIndex((r) => r.photo === img)));
                       }}
                     />
+                  ) : s.miss ? (
+                    <MissTile query={s.query} label={caption} aspect={aspect} />
                   ) : (
                     <ImageSkeleton aspect={aspect} />
                   )}
@@ -136,7 +195,7 @@ export function ImageGallery({ node }: NodeProps<HuiGallery>) {
                     <HText variant="callout" weight="500" numberOfLines={1} style={{ marginTop: 2 }}>
                       {caption}
                     </HText>
-                  ) : img ? null : (
+                  ) : img || s.miss ? null : (
                     <Skeleton width="45%" height={12} style={{ marginTop: 4 }} />
                   )}
                   {img ? <AttributionLine image={img} /> : null}
@@ -155,6 +214,7 @@ export function ImageGallery({ node }: NodeProps<HuiGallery>) {
         <ImageSkeleton aspect={aspect} />
       )}
       {n > 1 ? <Dots count={n} active={page} onSelect={goTo} /> : null}
+      {reason ? <MissNote reason={reason} /> : null}
       <ImageLightbox items={viewerItems} index={viewer} onClose={() => setViewer(null)} />
     </View>
   );

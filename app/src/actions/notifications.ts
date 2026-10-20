@@ -6,6 +6,8 @@
 import { Platform } from 'react-native';
 import { getActionI18n } from './i18nState.ts';
 import type { TimerNotifier } from './timerStore.ts';
+import { hiddenRoutinePush } from '../push/model';
+import { routinesEnabled } from '../routines/enabled';
 
 export const NOTIFICATION_CHANNEL_ID = 'timers-reminders';
 
@@ -33,7 +35,11 @@ async function prepare(N: NotificationsModule): Promise<void> {
   if (!handlerInstalled) {
     handlerInstalled = true;
     N.setNotificationHandler({
-      handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: false }),
+      // a Routine result push while Routines are off on this device stays hidden (push/model.ts hiddenRoutinePush)
+      handleNotification: async (n) => {
+        const show = !hiddenRoutinePush(n.request.content.data, routinesEnabled());
+        return { shouldShowBanner: show, shouldShowList: show, shouldPlaySound: show, shouldSetBadge: false };
+      },
     });
   }
   if (Platform.OS === 'android') {
@@ -73,8 +79,8 @@ export function ensureNotificationPermission(): Promise<NotificationPermission> 
 
 export type ScheduleResult = { ok: true; id: string } | { ok: false; reason: 'denied' | 'unsupported' | 'error' };
 
-/** Schedule one local notification at an absolute time. */
-export async function scheduleLocalNotification(o: { title: string; body?: string; at: Date }): Promise<ScheduleResult> {
+/** Schedule one local notification at an absolute time. `data` tags it (string values; read back by listLocalNotifications). */
+export async function scheduleLocalNotification(o: { title: string; body?: string; at: Date; data?: Record<string, string> }): Promise<ScheduleResult> {
   const perm = await ensureNotificationPermission();
   if (perm !== 'granted') return { ok: false, reason: perm };
   const N = await loadModule();
@@ -82,12 +88,23 @@ export async function scheduleLocalNotification(o: { title: string; body?: strin
   try {
     const at = Math.max(o.at.getTime(), Date.now() + 1000);
     const id = await N.scheduleNotificationAsync({
-      content: { title: o.title, body: o.body ?? undefined, sound: 'default' },
+      content: { title: o.title, body: o.body ?? undefined, sound: 'default', ...(o.data ? { data: o.data } : {}) },
       trigger: { type: N.SchedulableTriggerInputTypes.DATE, date: at, channelId: NOTIFICATION_CHANNEL_ID },
     });
     return { ok: true, id };
   } catch {
     return { ok: false, reason: 'error' };
+  }
+}
+
+/** Pending local notifications of this app with their `data` tags; [] where there are none (web, no module, error). */
+export async function listLocalNotifications(): Promise<{ id: string; data: Record<string, unknown> }[]> {
+  const N = await loadModule();
+  if (!N) return [];
+  try {
+    return (await N.getAllScheduledNotificationsAsync()).map((n) => ({ id: n.identifier, data: (n.content.data ?? {}) as Record<string, unknown> }));
+  } catch {
+    return [];
   }
 }
 

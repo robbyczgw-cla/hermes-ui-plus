@@ -11,7 +11,8 @@
 #                      --universal-apk); lower-case letters and digits after one dash
 #   HERMES_CERT_SHA256 expected signer fingerprint (env or $HUI_PRIVATE_DIR/build.env). REQUIRED: a published APK
 #                      must carry the release certificate that README.md names.
-#   ANDROID_HOME       SDK with build-tools/36.0.0 (apksigner, aapt2) [/var/tmp/hiui-android-sdk, then ~/android/sdk]
+#   ANDROID_HOME       SDK with build-tools/36.0.0 (apksigner, aapt2) [/Users/Shared/hiui-android-sdk (macOS), /var/tmp/hiui-android-sdk,
+#                      then ~/android/sdk]
 # Refuses when the APK is debug-signed (-debugsigned name or another signer), is not the official app id, has another
 # versionName, or fails the release gate (scripts/scan-artifact.sh). The sha256 file is in `sha256sum -c` format.
 set -euo pipefail
@@ -28,7 +29,7 @@ APK_REAL="$(realpath "$APK")"
 case "$(basename "$APK_REAL")" in *debugsigned*) die "$APK_REAL is a debug-signed test build (ALLOW_DEBUG_SIGNED=1); never publish it" ;; esac
 
 if [ -z "${ANDROID_HOME:-}" ]; then
-  for d in /var/tmp/hiui-android-sdk "$HOME/android/sdk"; do [ -d "$d/build-tools/36.0.0" ] && { ANDROID_HOME="$d"; break; }; done
+  for d in /Users/Shared/hiui-android-sdk /var/tmp/hiui-android-sdk "$HOME/android/sdk"; do [ -d "$d/build-tools/36.0.0" ] && { ANDROID_HOME="$d"; break; }; done
 fi
 BT="${ANDROID_HOME:-}/build-tools/36.0.0"
 [ -x "$BT/apksigner" ] && [ -x "$BT/aapt2" ] || die "apksigner/aapt2 not found in $BT (set ANDROID_HOME)"

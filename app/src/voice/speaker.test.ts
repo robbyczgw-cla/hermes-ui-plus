@@ -128,3 +128,15 @@ test('speakLive (bridge): pieces that arrive before a chunk is needed are fetche
   assert.equal(rn.net.calls.length, 1);
   assert.equal(speaker.getSpeakerState().status, 'idle');
 });
+
+test('PC-07: read-aloud of an answer with raw tool-call markup speaks the notice line, never the call JSON', async () => {
+  const pc07 =
+    'Ich richte die Erinnerung jetzt ein und prüfe, ob sie wirklich angelegt ist.\n' +
+    '<tool_call>{"name":"cronjob_manage","arguments":{"action":"create","schedule":"in 15h"}}</tool_call>';
+  void speaker.speak({ ...base, plain: false, text: pc07, id: 'pc07', conn: null });
+  await settle();
+  const said = rn.spoken.join(' ');
+  assert.doesNotMatch(said, /cronjob_manage|\{"name"|"arguments"/);
+  assert.match(said, /^Ich richte die Erinnerung jetzt ein/);
+  assert.match(said, /Tool call not available here: nothing was run\.$/);
+});

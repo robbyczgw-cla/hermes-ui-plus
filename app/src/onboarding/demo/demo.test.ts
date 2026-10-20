@@ -17,6 +17,11 @@ import { pickScenario, scenarios } from './scenarios.ts';
 import { PATHS_ID, PRODUCTS_ID, QUIZ_ID, SHOPPING_ID, TRAVEL_CHOICE_ID, TRIP_CHOICE_ID } from './scenes-core.ts';
 import { INSTANT_TIMING, runDemoTurn, tokenize } from './transport.ts';
 import { findCitationList } from '../../chat/answers/citations.ts';
+import { liveEventsOf } from '../../live/extract.ts';
+import { foldLive, headOf, type UserBatch } from '../../live/model.ts';
+import { demoLibrary, DEMO_SKILLS } from '../../library/demo.ts';
+import { LIVE_LIST_ID } from './scenes-live.ts';
+import { SKILL_SUMMARY, forgetTarget } from './scenes-library.ts';
 
 const LANGS: DemoLang[] = ['de', 'en', 'es'];
 const LOCALE = { de: 'de-DE', en: 'en-US', es: 'es-ES' } as const;
@@ -24,7 +29,7 @@ const tr = (lang: DemoLang) => makeT(lang, LOCALE[lang]);
 
 const noSleep = (_ms: number, signal?: AbortSignal) => (signal?.aborted ? Promise.reject(Object.assign(new Error('a'), { name: 'AbortError' })) : Promise.resolve());
 
-async function replay(text: string, o: { lang?: DemoLang; approve?: 'once' | 'deny'; history?: string[] } = {}) {
+async function replay(text: string, o: { lang?: DemoLang; approve?: 'once' | 'deny'; history?: string[]; live?: Record<string, UserBatch> } = {}) {
   const events: HermesEvent[] = [];
   let msg: ChatMessage = createAssistantMessage(0);
   const r = await runDemoTurn({
@@ -33,6 +38,7 @@ async function replay(text: string, o: { lang?: DemoLang; approve?: 'once' | 'de
     turn: 1,
     lang: o.lang ?? 'de',
     history: o.history,
+    live: o.live,
     timing: INSTANT_TIMING,
     sleep: noSleep,
     now: () => new Date(2026, 9, 10, 12, 0),
@@ -137,11 +143,13 @@ const REQUEST: Record<string, string> = {
   plain: 'xyzzy', needsNet: 'map', tour: PROMPTS.tour.en, chart: PROMPTS.chart.en, approval: PROMPTS.approval.en, cacheList: PROMPTS.cacheList.en,
   checklist: PROMPTS.checklist.en, choice: PROMPTS.choice.en, trip: PROMPTS.tripLisbon.en, reiseChoice: PROMPTS.travel.en, paths: PROMPTS.paths.en,
   products: PROMPTS.products.en, recipe: PROMPTS.recipe.en, quiz: PROMPTS.quiz.en, flashcards: PROMPTS.flashcards.en, explain: PROMPTS.explain.en,
-  charts3: PROMPTS.prices.en, werkzeuge: PROMPTS.status.en, mixed: PROMPTS.mixed.en, compare: PROMPTS.compare.en, loan: PROMPTS.loan.en, connect: PROMPTS.connect.en,
+  charts3: PROMPTS.prices.en, werkzeuge: PROMPTS.status.en, mixed: PROMPTS.mixed.en, compare: PROMPTS.compare.en, loan: PROMPTS.loan.en, multi: PROMPTS.multi.en, connect: PROMPTS.connect.en,
   mindmap: 'mind map', table: 'table', wideTable: 'wide table', gameTable: 'ps2', longWords: 'oled', stats: 'stats', form: 'form', steps: 'steps', timeline: 'timeline',
   buttons: 'buttons', calculator: 'calculator', calc: 'compound interest', kreditCalc: 'schieberegler', places: 'restaurants', weather: 'weather',
   poll: 'poll', translation: 'translate this', agenda: 'plan my saturday', webSuche: 'jet lag', blocks: 'architecture', coding: 'Fix the bug in my code', error: 'error', long: 'long',
   tool: 'what time', tools2: 'parallel',
+  liveList: PROMPTS.liveList.en, liveAdd: PROMPTS.liveAdd.en, memoryWhat: PROMPTS.memoryWhat.en, lastDone: PROMPTS.lastDone.en, memoryForget: PROMPTS.memoryForget.en, skillsList: PROMPTS.skillsList.en,
+  skillDoc: PROMPTS.skillDoc.en, skillUse: 'Use the skill meal-planner: plan next week',
   formResult: '[form:kredit] {"betrag":20000}', interaction: '[confirm:x] ja',
   checklistReply: checklistReply(SHOPPING_ID, ['Butter'], ['Eggs', 'Basil']), quizResult: quizReply(QUIZ_ID, 2, 3), pathsPick: pathsReply(PATHS_ID, 'Cloud sync'),
   productTake: `[products:${PRODUCTS_ID}] Pick: Fjord Demo Calm 5`, reformat: reformatMessage('shorter', tr('en')), reiseDecision: choiceReply(TRAVEL_CHOICE_ID, 'q', ['Price']),
@@ -528,6 +536,9 @@ test('the fallback and the demo chrome follow the UI language; the official buil
     assert.ok(t('chat.header.demo.text') !== 'chat.header.demo.text' && t('chat.header.demo.connect') !== 'chat.header.demo.connect');
     // the demo says it plainly: no server, and the way out is named like the answers name it
     assert.match(t('chat.header.demo.text'), /Server|server|servidor/);
+    // one line in the header: the German strip is the longest that fits a 1080 px phone (Spanish was cut, store shots 0.2)
+    const de = tr('de');
+    assert.ok(t('chat.header.demo.text').length + t('chat.header.demo.connect').length <= de('chat.header.demo.text').length + de('chat.header.demo.connect').length, `${lang}: demo strip longer than the German one`);
     const connect = t('chat.header.demo.connect');
     assert.match(scenarios.connect.steps({ userText: '', turn: 1, sessionId: 's', now: new Date(), lang }).map((s) => ('text' in s ? s.text : '')).join(''), new RegExp(connect.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
@@ -581,5 +592,109 @@ test('web research demo: WSP search + extract carry their results, the card and 
     assert.ok(src?.node.items.every((i) => i.snippet && !i.unverified), lang);
     // fictional sources only
     for (const h of card.hits) assert.match(h.domain, /(^|\.)example\.(org|com|net)$/, lang);
+  }
+});
+
+// ── 0.2: live card and Skills & memory ──────────────────────────────────────────────────────────────────────────
+
+const umsg = (id: string, text: string, live?: Record<string, UserBatch>): ChatMessage => ({ id, role: 'user', text, tools: [], status: 'done', createdAt: 1, ...(live ? { live } : {}) });
+
+test('live card: the list is made live in turn 1 and patched in turn 2 (receipt), in every language; the fold agrees', async () => {
+  for (const lang of LANGS) {
+    const first = await replay(PROMPTS.liveList[lang], { lang });
+    const list = nodeOf(first.msg, 'checklist') as unknown as { id: string; live?: boolean; items: { id: string; text: string; checked?: boolean }[] };
+    assert.equal(list.id, LIVE_LIST_ID);
+    assert.equal(list.live, true, `${lang}: live`);
+    assert.equal(list.items.length, 7);
+    assert.ok(list.items.every((i) => /^[a-z0-9-]+$/.test(i.id)), 'every item has a slug id');
+    assert.ok(chipsOf(first.msg).includes(PROMPTS.liveAdd[lang]), `${lang}: the follow-up is offered`);
+
+    // turn 2: the user ticked the sausages on the card; the answer patches the card and keeps that tick
+    const live = { [LIVE_LIST_ID]: { v: 1, ops: [{ check: 'sausages' }], bid: 'b-test' } };
+    const second = await replay(PROMPTS.liveAdd[lang], { lang, history: [PROMPTS.liveList[lang]], live });
+    const callout = nodeOf(second.msg, 'callout') as unknown as { text: string; livePatch?: { card: string; ops: unknown[] } };
+    assert.equal(callout.livePatch?.card, LIVE_LIST_ID, `${lang}: a patch of the list`);
+    assert.equal(callout.livePatch?.ops.length, 3);
+    assert.match(callout.text, /\+ .+, \+ .+ \(2\), ✓ /, `${lang}: old apps read the change in the callout text`);
+    assert.equal(nodeOf(second.msg, 'checklist'), undefined, 'no second card');
+    assert.match(second.msg.text, /Häkchen|ticks|marcas/, `${lang}: the user's ticks are acknowledged`);
+
+    const fold = foldLive(
+      liveEventsOf(
+        [umsg('u1', PROMPTS.liveList[lang]), { ...first.msg, id: 'a1' }, umsg('u2', PROMPTS.liveAdd[lang], live), { ...second.msg, id: 'a2' }],
+        (m) => parseMessage(m.text),
+      ),
+    );
+    const card = fold.cards.get(LIVE_LIST_ID)!;
+    const head = headOf(card).state;
+    assert.equal(head.items.length, 9, `${lang}: charcoal and halloumi added`);
+    assert.deepEqual(head.items.filter((i) => i.checked).map((i) => i.id).sort(), ['sausages', 'tomatoes'], `${lang}: the user's tick and Hermes' tick`);
+    assert.equal(head.items[2].id, 'halloumi', 'added after the veggie skewers');
+  }
+});
+
+test('live card: a deleted item is not ticked again, and without a list the follow-up starts one', async () => {
+  const gone = await replay(PROMPTS.liveAdd.en, { lang: 'en', history: [PROMPTS.liveList.en], live: { [LIVE_LIST_ID]: { v: 1, ops: [{ del: 'tomatoes' }] } } });
+  const patch = (nodeOf(gone.msg, 'callout') as unknown as { livePatch: { ops: Record<string, unknown>[] } }).livePatch;
+  assert.ok(!patch.ops.some((op) => op.check === 'tomatoes'), 'no tick on a removed item');
+  assert.match(gone.msg.text, /already removed the tomatoes/);
+  for (const lang of LANGS) {
+    const fresh = await replay(PROMPTS.liveAdd[lang], { lang });
+    const list = nodeOf(fresh.msg, 'checklist') as unknown as { live?: boolean; items: { id: string; checked?: boolean }[] };
+    assert.equal(list.live, true, `${lang}: a new live list`);
+    assert.ok(['charcoal', 'halloumi'].every((id) => list.items.some((i) => i.id === id)));
+    assert.equal(list.items.find((i) => i.id === 'tomatoes')?.checked, true);
+    assert.equal(nodeOf(fresh.msg, 'callout'), undefined, 'no patch without a card');
+  }
+});
+
+test('Skills & memory: every question the screen sends gets its own answer (never the generic fallback), in every language', async () => {
+  for (const lang of LANGS) {
+    const t = tr(lang);
+    const lib = demoLibrary(0, lang);
+    const entries = lib.memory.stores.flatMap((st) => st.entries);
+    const asks: [string, string][] = [
+      [t('library.memory.askWhatPrompt'), 'memoryWhat'],
+      [t('library.skills.askListPrompt'), 'skillsList'],
+      [t('library.skill.askDocPrompt', { name: 'meal-planner' }), 'skillDoc'],
+      [t('library.skill.usePrompt', { name: 'pdf-extract' }) + 'invoice.pdf', 'skillUse'],
+      [t('library.memory.forgetSomethingPrompt', { text: 'my old address' }), 'memoryForget'],
+      ...entries.map((entry): [string, string] => [t('library.memory.forgetEntryPrompt', { entry }), 'memoryForget']),
+    ];
+    for (const [text, name] of asks) {
+      assert.equal(pickScenario(text).name, name, `${lang}: ${text}`);
+      const { msg } = await replay(text, { lang });
+      assert.equal(msg.status, 'done');
+      assert.ok(msg.text.trim().length > 40, `${lang} ${name}: answer`);
+    }
+    // the chat lists exactly what the screen shows
+    const what = await replay(t('library.memory.askWhatPrompt'), { lang });
+    for (const e of entries) assert.ok(what.msg.text.includes(e), `${lang}: lists "${e}"`);
+    // forgetting an entry names it and is honest that the demo keeps nothing
+    const forget = await replay(t('library.memory.forgetEntryPrompt', { entry: entries[1] }), { lang });
+    assert.ok(forget.msg.text.includes(entries[1]), `${lang}: names the forgotten entry`);
+    assert.match(forget.msg.text, /Demo|demo/);
+    assert.ok(forget.msg.tools.some((x) => x.name === 'memory'), 'memory tool step');
+    // the coriander chip removes the coriander entry
+    assert.equal(forgetTarget(PROMPTS.memoryForget[lang], lang), lib.memory.stores[1].entries[1]);
+    const skills = await replay(t('library.skills.askListPrompt'), { lang });
+    for (const s of DEMO_SKILLS) assert.ok(skills.msg.text.includes(`\`${s.name}\``), `${lang}: lists ${s.name}`);
+  }
+  for (const s of DEMO_SKILLS) assert.ok(SKILL_SUMMARY[s.name], `summary for ${s.name}`);
+});
+
+test('the memory question with typical typos still reaches the memory answer', () => {
+  for (const text of ['what do you remmeber about me', 'What do u rember about me?', 'what do you know about me', 'wat weisst du über mich', 'was weißt du alles über mich?', 'Was hast du dir über mich gemerkt', 'que recuedas de mi', '¿Qué sabes de mí?', 'qué recuerdas sobre mí']) {
+    assert.equal(pickScenario(text).name, 'memoryWhat', text);
+  }
+  // not every "remember" is the memory question
+  assert.notEqual(pickScenario('remember to buy milk').name, 'memoryWhat');
+});
+
+test('tour: the live list and the memory question are on the first answer', async () => {
+  for (const lang of LANGS) {
+    const { msg } = await replay(PROMPTS.tour[lang], { lang });
+    assert.ok(chipsOf(msg).includes(PROMPTS.liveList[lang]), `${lang}: live list chip`);
+    assert.ok(chipsOf(msg).includes(PROMPTS.memoryWhat[lang]), `${lang}: memory chip`);
   }
 });

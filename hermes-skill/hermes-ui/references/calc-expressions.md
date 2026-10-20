@@ -13,7 +13,9 @@ Used in `calc.outputs[].expr` and `calc.chart.y`. Identifiers = input `name`s + 
 - `%` is MODULO, not percent. Percent inputs are divided by 100 inside the expression (`rate / 100`).
 - Constants `pi`, `e`. Functions: `min max` (1+ args) · `round(x)` / `round(x, d)` · `floor ceil abs sqrt` · `pow(x,y)` · `log` (base 10) · `ln` · `exp` · `clamp(x, lo, hi)` · `if(c, a, b)`.
 - Toggle inputs are 1/0. Comparisons give 1/0. Division by zero, `sqrt(-1)`, `log(0)` give "–" and propagate; a dead ternary branch is not evaluated.
-- NOT available: strings, `a.b`, `[]`, `{}`, `=`, `;`, single `&`/`|`, `3,5` (decimal comma), `1.000` thousands dots (that is 1.0; write `1000` or `1_000`), chained `a < b < c`, unknown names (error shown to the user).
+- A text result (a recommendation): `zug > auto ? "Train" : "Car"` or `if(zug > auto, "Train", "Car")`: numeric
+  condition, texts ONLY as the two results (nesting allowed). Never compare texts (`fuel == "diesel"`): select values are numbers.
+- NOT available: other strings, `a.b`, `[]`, `{}`, `=`, `;`, single `&`/`|`, `3,5` (decimal comma), `1.000` thousands dots (that is 1.0; write `1000` or `1_000`), chained `a < b < c`, unknown names (error shown to the user).
 - Limits: 500 chars, nesting depth 50, 200 AST nodes (avoid sums of > ~49 terms). Chart sweep: max 60 steps.
 
 ## Formats (`outputs[].format`, shown in the app's number format)
@@ -42,7 +44,8 @@ Used in `calc.outputs[].expr` and `calc.chart.y`. Identifiers = input `name`s + 
 | Discount | `price * (1 - discount / 100)` |
 
 ## Rules
-- Show units on inputs and outputs; state formula/assumptions in `note` (one line).
+- Show units on inputs and outputs; state formula/assumptions in `note` (one line). A label names the scale the
+  expression gives (a weighted average of 0-10 ratings is 0-10, not "0-100").
 - Rounded shares must sum to the total: compute the last share as `total - (n - 1) * share` instead of rounding every share.
 - Guard divisions that can hit zero (`b == 0 ? 0 : a / b`) or accept "–". Keep defaults realistic; the user can reset in the app.
 - Do not claim a payment, booking or contract: results are orientation only.

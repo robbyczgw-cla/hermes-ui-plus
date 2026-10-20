@@ -87,8 +87,10 @@ test('website + README: one component count (the protocol node types) and consis
     const s = readFileSync(join(ROOT, f), 'utf8');
     assert.doesNotMatch(s, /not attached to the GitHub release|maintainer's download page/, f);
   }
-  assert.match(readme, /no remote push in 0\.1/i);
-  assert.ok(site.includes('noremotepushin01'), 'website: Android has no remote push in 0.1');
+  // the release line (0.2) of app/package.json: README and website name the same one
+  const minor = JSON.parse(readFileSync(join(ROOT, 'app/package.json'), 'utf8')).version.split('.').slice(0, 2).join('.');
+  assert.ok(readme.toLowerCase().includes(`no remote push in ${minor}`), `README: no remote push in ${minor}`);
+  assert.ok(site.includes(`noremotepushin${minor.replace('.', '')}`), `website: Android has no remote push in ${minor}`);
   // fresh-user test of 0.1.1: the arm64 APK crashed on an x86_64 emulator despite ARM translation; both say so
   assert.match(readme, /does not start on x86 Android emulators or x86 ChromeOS/);
   assert.ok(site.includes('doesnotstartonx86emulatorsorx86chromeos'), 'website: APK does not start on x86');

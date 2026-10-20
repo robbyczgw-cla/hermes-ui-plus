@@ -22,6 +22,7 @@ export type CommandId =
   | 'deny'
   | 'search'
   | 'skills'
+  | 'memory'
   | 'branch'
   | 'usage'
   | 'status'
@@ -66,6 +67,7 @@ export const COMMANDS: readonly CommandDef[] = [
   def('title', 'required', ['titel', 'umbenennen', 'titulo', 'renombrar'], ['rename']),
   def('search', 'required', ['suche', 'suchen', 'buscar', 'busqueda'], [], { sendsText: true }),
   def('skills', 'none', ['faehigkeiten', 'fertigkeiten', 'habilidades'], ['skill']),
+  def('memory', 'none', ['gedaechtnis', 'erinnerung', 'erinnerungen', 'memoria', 'recuerdos'], ['memories']),
   def('branch', 'none', ['verzweigen', 'abzweigen', 'ramificar', 'bifurcar'], ['fork']),
   def('usage', 'none', ['nutzung', 'verbrauch', 'tokens', 'uso', 'consumo']),
   def('status', 'none', ['zustand', 'info', 'estado']),

@@ -12,7 +12,7 @@ import { docUrl } from './links.mjs';
 export const HELP = `hermes-ui-plus-bridge - optional UI bridge for the Hermes Interactive UI+ app
 
 Usage: hermes-ui-plus-bridge [options]   (the old command name hermes-ui-bridge still works)
-       hermes-ui-plus-bridge setup | devices ...
+       hermes-ui-plus-bridge setup | devices ... | routines ... | doctor bots | bots ...
 
 Options:
   --env-file <file>   load KEY=VALUE pairs from a file (repeatable; real environment variables win). The file
@@ -33,6 +33,16 @@ Setup wizard (run on the Hermes host; re-run to update):
 Device tokens (each paired app gets its own, revocable token; BRIDGE_TOKEN stays the admin token):
   hermes-ui-plus-bridge devices list | add [label] | revoke <id>   [--env-file f] [--state-dir d]
   (without --env-file, the env file written by setup is used if it exists)
+
+Routines (Hermes cron jobs): which bots offer them, and what each paired device may do (default: view only):
+  hermes-ui-plus-bridge routines status | enable <bot> | disable <bot>
+  hermes-ui-plus-bridge routines grant <device-id> <bot> manage|read|none|default   [--env-file f] [--state-dir d]
+
+Bots (Hermes profiles) on this server, read-only checks and the owner's safety net (docs/BOTS-SERVER.md):
+  hermes-ui-plus-bridge doctor bots [--json] | bots backup [--to dir] | bots rollback <backup-dir> [--yes]
+  [--hermes-home dir] [--env-file f]
+Creating bots from the app (off until you enable it; admin token yes, paired devices only with a grant):
+  hermes-ui-plus-bridge bots status | enable | disable | grant <device-id> | revoke <device-id>   [--env-file f] [--state-dir d]
 
 Required: HERMES_BASE_URL (e.g. http://127.0.0.1:8642). Usually also HERMES_API_KEY.
 BRIDGE_TOKEN is generated on first run and stored in <state-dir>/state.json (mode 0600) if not set.
@@ -345,11 +355,17 @@ export function featureSummary(config, env, { pairing, profiles } = {}) {
   // not a provider: no key, no model; it only fetches pictures that Hermes' own tools returned (src/image-proxy.mjs)
   lines.push(['images', /^(off|0|false|no)$/i.test((env.BRIDGE_IMAGE_PROXY ?? '').trim()) ? 'proxy off (BRIDGE_IMAGE_PROXY=off)' : 'proxy on (pictures from Hermes answers, fetched by the bridge)']);
   const inline = config.skillInline ? ' + skill core inline' : config.skillInlineMissing ? ` (skill core inline MISSING: ${config.skillInlineMissing})` : ' (skill core inline off)';
-  lines.push(['skill', config.bootstrap ? `bootstrap message on${inline} (the hermes-ui skill triggers for app chats)`
+  const caps = config.caps ? `, caps ${Object.entries(config.caps).map(([k, v]) => `${k}=${v}`).join(' ')}` : '';
+  lines.push(['skill', config.bootstrap ? `bootstrap message on${inline}${caps} (the hermes-ui skill triggers for app chats)`
     : config.bootstrapMissing ? `bootstrap message MISSING (${config.bootstrapMissing}): no interactive components, see the warning above`
       : 'bootstrap message off (BRIDGE_BOOTSTRAP=off)']);
   lines.push(['pairing', pairing ? (pairing.isEnabled() ? 'remote pairing enabled (BRIDGE_PAIRING=1)' : 'local only') : 'n/a']);
   lines.push(['extras', directProvidersLine(direct)]);
+  // routines (src/routines-rights.mjs): bots are opt-in; the device registry can enable more than the env lists
+  const rb = config.routinesBots ?? { all: false, names: [] };
+  const bots = [...(rb.all ? ['*'] : []), ...rb.names].join(',');
+  lines.push(['routines', config.routines === 'off' ? 'off (BRIDGE_ROUTINES=off)'
+    : `${config.routines ?? 'control'}, bots ${bots || 'none from BRIDGE_ROUTINES_BOTS'} (more: \`routines enable <bot>\`)`]);
   if (profiles) {
     const n = profiles.names().length;
     const desc = { off: 'off (BRIDGE_PROFILES=off)', any: 'any /p/<name>/ (Hermes home not readable; Hermes decides)', auto: `auto, ${n} besides default`, list: `${n} besides default (BRIDGE_PROFILES)` };

@@ -12,7 +12,7 @@
 - **What you need:** your own Hermes Agent (v0.21 or newer) and a **small bridge** that you run next to it (`npx hermes-ui-plus-bridge setup`). There is no hosted service and no account. See [Quick start](#quick-start).
 - **Where it runs:** Android (APK), web app (PWA, also on iPhone/iPad), macOS (signed and notarized) and Linux (alpha). Downloads: [GitHub Releases](https://github.com/robbyczgw-cla/hermes-ui-plus/releases).
 
-> **Status: alpha (0.1).** Expect rough edges; see [Known limitations](#known-limitations-alpha). Hermes Interactive UI+ (Hermes Interactive UI Plus) is an **unofficial community client**. It is not affiliated with, endorsed by, or supported by Nous Research.
+> **Status: alpha (0.2).** Expect rough edges; see [Known limitations](#known-limitations-alpha). Hermes Interactive UI+ (Hermes Interactive UI Plus) is an **unofficial community client**. It is not affiliated with, endorsed by, or supported by Nous Research.
 
 
 ## Quick start
@@ -44,7 +44,7 @@ Rules:
 
 ### Before you start
 
-- **Hermes Agent v0.21 or newer** on a machine you control. Tested with Hermes v0.22.0; see [Hermes compatibility](#hermes-compatibility).
+- **Hermes Agent v0.21 or newer** on a machine you control. Tested with Hermes v0.22.0 and v0.22.2; see [Hermes compatibility](#hermes-compatibility).
 - **Node.js 22+** on that machine, for the bridge (check with `node --version`). The Hermes installer brings its own private Node.js, which is not on your `PATH`, so `npx` may be missing. Distribution packages are often too old (Ubuntu 24.04's `nodejs` is version 18): install a current LTS from [nodejs.org](https://nodejs.org/en/download), the NodeSource packages or nvm. **Docker** works too, but there is no prebuilt image in 0.1: you build it from a checkout ([docs/SELF-HOSTING.md](docs/SELF-HOSTING.md#with-docker)).
 - **A private network path** from your phone to that machine. **[Tailscale](https://tailscale.com) is strongly recommended** (HTTPS, nothing exposed to the internet). No Tailscale? For the Android app a LAN address over plain HTTP is enough for a test ([LAN only](docs/SELF-HOSTING.md#alternative-lan-only)); a first test of the web app in a browser on the bridge machine itself needs neither ([docs/WEB-APP.md](docs/WEB-APP.md#first-test-without-https)).
 
@@ -103,7 +103,7 @@ A QR code or pair link carries a **one-time pairing code**, not a token: the app
 - **Act on answers instead of just reading them.** **51 native answer components**, 25 of them interactive: checklists you tick, choices and decisions you make, forms and calculators you fill in, products and places you compare, polls, rankings and scales, quizzes, flashcards and vocabulary trainers, timers, workouts, study plans, and **paths** (2-6 ways or variants with a verdict badge, optionally one to choose). Every check, vote, choice or slider value goes back to Hermes as the next message, so you pick the next step with a tap instead of typing it; the state is kept per conversation. The others present: tables, charts (bar, line, pie, radar, gauge, heatmap and more), stats, comparisons, steps, timelines, mind maps and **blocks** (an architecture at a glance: boxes in up to three columns with an optional shared base layer). Hermes picks the component; the count includes layout and text nodes, and sandboxed HTML widgets come on top.
 - **Coding views.** After Hermes edits files or runs commands, the answer can show a native `diff` (file by file, word-level highlight, split view on wide screens, comments on single lines that go back to Hermes as one message), a `terminal` view with the real output, exit code and duration, and a `changes` list with a review sheet.
 - **Share in and out.** [Share to HUI+](docs/SHARE-TARGET.md) from other apps (links, text, images, files; Android and the web app, iOS prepared) opens a small sheet and sends nothing until you tap Send. Any answer can be shared as an image, with what you ticked or picked.
-- **Approvals.** When Hermes asks before running a command, you see the command, Hermes' reason and an estimated risk, and answer in the app: allow once, for this task, always, or deny. The web app (PWA) can also notify you through Web Push while it is closed. Android has no remote push in 0.1: no notification while the app is closed ([Known limitations](#known-limitations-alpha)).
+- **Approvals.** When Hermes asks before running a command, you see the command, Hermes' reason and an estimated risk, and answer in the app: allow once, for this task, always, or deny. The web app (PWA) can also notify you through Web Push while it is closed. Android has no remote push in 0.2: no notification while the app is closed ([Known limitations](#known-limitations-alpha)).
 
 | Choose a path | Tick a checklist | Approve a command |
 |:-:|:-:|:-:|
@@ -136,7 +136,7 @@ A QR code or pair link carries a **one-time pairing code**, not a token: the app
 
 | Platform | How to get it | Status |
 |---|---|---|
-| **Android** | Signed APK from [GitHub Releases](https://github.com/robbyczgw-cla/hermes-ui-plus/releases), or add the repo to [Obtainium](https://obtainium.imranr.dev) for automatic updates | Available. No remote push in 0.1 (no notification while the app is closed, see [Known limitations](#known-limitations-alpha)). Settings → About shows the version and build number |
+| **Android** | Signed APK from [GitHub Releases](https://github.com/robbyczgw-cla/hermes-ui-plus/releases), or add the repo to [Obtainium](https://obtainium.imranr.dev) for automatic updates | Available. No remote push in 0.2 (no notification while the app is closed, see [Known limitations](#known-limitations-alpha)). Settings → About shows the version and build number |
 | **Web (PWA)** | Prebuilt bundle from [GitHub Releases](https://github.com/robbyczgw-cla/hermes-ui-plus/releases), served by your own bridge, installable to the home screen | Available, install guide: [docs/WEB-APP.md](docs/WEB-APP.md). The only place with Web Push |
 | **macOS** | `hermes-ui-plus-<version>-macos-arm64.dmg` (+ `.sha256`) from [GitHub Releases](https://github.com/robbyczgw-cla/hermes-ui-plus/releases): native Tauri app for Apple Silicon (macOS 13+), Developer ID signed and notarized | Available, see [desktop/README.md](desktop/README.md) |
 | **Linux** | AppImage or .deb (x86_64) from [GitHub Releases](https://github.com/robbyczgw-cla/hermes-ui-plus/releases), built on Ubuntu 22.04: needs glibc 2.35 or newer (Ubuntu 22.04+, Debian 12+); not signed, no auto-update | Alpha, see [desktop/README.md](desktop/README.md#linux-alpha) |
@@ -161,7 +161,7 @@ To build from source, see [docs/BUILD.md](docs/BUILD.md).
 
 ## Hermes compatibility
 
-The app is built against the Hermes Agent API server (v0.21 or newer) and tested with **Hermes v0.22.0**. Two known Hermes issues affect it; neither is caused by this app, and both have upstream fixes in review:
+The app is built against the Hermes Agent API server (v0.21 or newer) and tested with **Hermes v0.22.0 and v0.22.2**. Two known Hermes issues affect it; neither is caused by this app, and both have upstream fixes in review:
 
 - **`/skills` fails on unpatched Hermes 0.21.5 to 0.22.2.** `GET /v1/skills` answers HTTP 500 there (upstream issue #120831, fix in PR #124861). The app recognises that error, tells you it is a Hermes bug and shows the server's message under "Details"; the skills themselves still work in chats.
 - **Claude answers can arrive in one piece on unpatched Hermes.** With the Claude subscription plugin (a provider that Hermes runs as an external process), Hermes does not stream the answer: it sends the finished text in a single chunk at the end. Upstream PR #124566 lets such providers stream; the plugin has to opt in as well. Any API client sees this, including this app: the answer appears all at once instead of word by word. The app has no workaround for it. Providers that Hermes calls directly (not as an external process) are not affected.
@@ -171,7 +171,7 @@ The app is built against the Hermes Agent API server (v0.21 or newer) and tested
 - **iOS:** web app (PWA) only. The native app is prepared for TestFlight / App Store, but nothing is submitted yet.
 - **Desktop:** the macOS app is Apple Silicon only. The Linux AppImage / .deb is an alpha: x86_64 only, not signed, no auto-update, needs glibc 2.35 or newer, and the tray icon and Alt+Space shortcut depend on the desktop environment (details in [desktop/README.md](desktop/README.md#linux-alpha)).
 - **No app-store builds** (Google Play, App Store). Android installs from the APK on GitHub Releases.
-- **No remote push on Android in 0.1.** The APK from GitHub Releases contains no Firebase (FCM) setup. While an answer is running, the app's keep-alive service shows its notification and keeps the answer coming; but a notification while the app is closed (for example "approval needed") is not available on Android in 0.1. Planned: UnifiedPush / ntfy.
+- **No remote push on Android in 0.2.** The APK from GitHub Releases contains no Firebase (FCM) setup. While an answer is running, the app's keep-alive service shows its notification and keeps the answer coming; but a notification while the app is closed (for example "approval needed") is not available on Android in 0.1. Planned: UnifiedPush / ntfy.
 - **Web Push works in the web app (PWA)**, including the iPhone/iPad home-screen app (iOS 16.4+). It needs the bridge with Web Push keys (the setup wizard offers them). The macOS app shows native notifications (also with approval buttons) while it is running; it does not use Web Push.
 - **Schnellfrage is experimental:** it needs the `hermes-ui-plus` Hermes plugin, which calls one internal Hermes function (`call_llm`) and may need an update after a Hermes release. Chats never depend on it. In a bot (Hermes profile) chat ⚡ is not offered: the plugin answers for the whole gateway, not per profile.
 - **Slash commands** are handled by the app. Hermes' API server does not interpret them, so an unknown command is sent as plain text.

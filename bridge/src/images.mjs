@@ -24,6 +24,16 @@ export function loadImagesConfig(env = process.env) {
   };
 }
 
+/**
+ * Does this bridge offer web image search? Same answer as `available` in GET /bridge/images/config: at least one
+ * provider of BRIDGE_IMAGE_PROVIDERS has its key. Fixed for the process lifetime (keys come from the environment).
+ * @param {Record<string, string|undefined>} env
+ */
+export function imageSearchAvailable(env = process.env) {
+  const cfg = loadImagesConfig(env);
+  return cfg.order.some((p) => cfg.keys[p] && PROVIDERS[p]);
+}
+
 const COUNTRY = { de: 'de', en: 'us', es: 'es' };
 const asNum = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.round(Number(v)) : 0);
 const str = (v) => (typeof v === 'string' ? v : '');

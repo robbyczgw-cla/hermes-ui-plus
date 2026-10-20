@@ -191,6 +191,8 @@ export const chat = {
   message: {
     copied: 'Message copied',
     answerCopied: 'Answer copied',
+    /** an answer's raw tool-call markup (chat/toolMarkup.ts): nothing ran */
+    toolMarkupHidden: 'Tool call not available here: nothing was run.',
     longPressCopy: 'Long-press to copy',
     extraContext: 'Context from an earlier chat sent along',
     extraNote: 'Note sent along',
@@ -221,6 +223,7 @@ export const chat = {
       tls: 'Secure connection failed (certificate/TLS) – check the server’s address and certificate.',
       offline: 'No internet connection – check your network and try again.',
       unreachable: 'Server not reachable – check the connection (e.g. Tailscale).',
+      plain: 'No connection right now. Check your internet connection, then tap “Retry”.',
     },
     showDetails: 'Details',
     hideDetails: 'Hide details',
@@ -340,6 +343,10 @@ export const chat = {
     router: 'UI router',
     status: 'Status',
     contextCompacted: 'Context compacted',
+    session: {
+      busy: 'Hermes is finishing another run in this chat; your message starts right after …',
+      free: 'Ready, loading the conversation …',
+    },
     fallbackModel: 'Fallback model',
     fallbackReason: 'Server-side switch after a refusal',
     continuation: 'Continuation',

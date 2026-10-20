@@ -10,6 +10,9 @@ import { fileURLToPath } from 'node:url';
 import { SCHEMA, assetManifest, cacheKey, fingerprint, lookup, register } from './lib/apk-fast.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
+// the build scripts started here take the Mac heavy lock when they run on a Mac: a private lock dir keeps a check run
+// that already holds the real one (scripts/check.sh all on the build Mac) from deadlocking
+process.env.HUI_MAC_LOCK_DIR = join(mkdtempSync(join(tmpdir(), 'hui-test-maclock-')), 'lock');
 const SWAP = join(ROOT, 'scripts', 'lib', 'apk_swap.py');
 const FAST = join(ROOT, 'scripts', 'build-apk-fast.sh');
 

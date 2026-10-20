@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildHermesProfile, parseOnboardedFlag, serializeOnboardedFlag, shouldShowOnboarding, skillInstallCommand } from './model.ts';
+import { afterConnectStep, buildHermesProfile, parseOnboardedFlag, serializeOnboardedFlag, shouldShowOnboarding, skillInstallCommand } from './model.ts';
 import type { ConnectionProfile } from '../settings/profiles.ts';
 
 test('onboarded flag round-trip and tolerant parsing', () => {
@@ -47,4 +47,9 @@ test('skill install command is generic (placeholder, no maintainer hosts)', () =
   assert.ok(cmd.includes('cp -r hermes-skill/hermes-ui ~/.hermes/skills/'));
   assert.ok(!/hermes-host|100\.114|example/.test(skillInstallCommand()));
   assert.ok(skillInstallCommand('https://git.example.org/x/hermes-ui').includes('https://git.example.org/x/hermes-ui'));
+});
+
+test('the skill hint follows a Hermes connection only (PC-03: never ~/.hermes/skills for another server)', () => {
+  assert.equal(afterConnectStep({ kind: 'hermes' }), 'skill');
+  assert.equal(afterConnectStep({ kind: 'demo' }), 'done');
 });

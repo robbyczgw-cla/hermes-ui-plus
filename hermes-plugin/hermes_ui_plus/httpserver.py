@@ -5,6 +5,14 @@ Routes:
   GET  /health                          no auth, {"ok": true}
   GET  /quick/config                    Bearer secret; {enabled, available, reason, ...} (self-test result)
   POST /quick/v1/chat/completions       Bearer secret, OpenAI-compatible (stream or JSON)
+  GET  /library/config                  Bearer secret; {version, profile, skills, memory} availability
+  GET  /library/skills                  Bearer secret; skills of this profile (name, enabled, source, ...)
+  GET  /library/skills/content?name=    Bearer secret; SKILL.md of a listed skill (capped)
+  GET  /library/memory                  Bearer secret; MEMORY.md / USER.md entries (opt-in: library.expose_memory)
+  GET  /bots                            Bearer secret; bots (named profiles) + whether this Hermes can create one
+  POST /bots                            Bearer secret; create a bot from the three fields (bots.py)
+  GET  /bots/<name>                     Bearer secret; the three fields of one bot (edit form)
+  PATCH /bots/<name>                    Bearer secret; rewrite title, main job and how it works
 """
 
 from __future__ import annotations
@@ -15,8 +23,11 @@ import logging
 import threading
 import time
 from typing import Any, Optional
+from urllib.parse import parse_qs
 
 from .config import MAX_BODY_BYTES, VERSION
+from .bots import BotsService
+from .library import LibraryService
 from .quick import QuickError, QuickService, chunk, completion_id, parse_request, usage_block
 from .secret import SecretCheck
 
@@ -27,7 +38,7 @@ MAX_HEADERS = 64
 HEADER_TIMEOUT = 10.0
 BODY_TIMEOUT = 10.0
 
-_REASONS = {200: "OK", 204: "No Content", 400: "Bad Request", 401: "Unauthorized", 404: "Not Found",
+_REASONS = {200: "OK", 201: "Created", 204: "No Content", 403: "Forbidden", 409: "Conflict", 400: "Bad Request", 401: "Unauthorized", 404: "Not Found",
             405: "Method Not Allowed", 408: "Request Timeout", 411: "Length Required", 413: "Payload Too Large",
             429: "Too Many Requests", 431: "Request Header Fields Too Large", 500: "Internal Server Error",
             502: "Bad Gateway", 503: "Service Unavailable", 504: "Gateway Timeout"}
@@ -40,8 +51,10 @@ class _HttpError(Exception):
 
 
 class Request:
-    def __init__(self, method: str, path: str, headers: dict[str, str], body: bytes):
+    def __init__(self, method: str, path: str, headers: dict[str, str], body: bytes,
+                 query: Optional[dict[str, str]] = None):
         self.method, self.path, self.headers, self.body = method, path, headers, body
+        self.query = query or {}  # first value per key
 
 
 async def _read_request(reader: asyncio.StreamReader) -> Request:
@@ -90,8 +103,12 @@ async def _read_request(reader: asyncio.StreamReader) -> Request:
                 raise ConnectionResetError("client closed") from None
             except asyncio.TimeoutError:
                 raise _HttpError(408, "timeout", "request body timeout") from None
-    path = target.split("?", 1)[0]
-    return Request(method, path, headers, body)
+    path, _, qs = target.partition("?")
+    try:
+        query = {k: v[0] for k, v in parse_qs(qs, keep_blank_values=True, max_num_fields=20).items()}
+    except ValueError:
+        raise _HttpError(400, "bad_request", "malformed query string") from None
+    return Request(method, path, headers, body, query)
 
 
 def _head(status: int, headers: dict[str, str]) -> bytes:
@@ -118,8 +135,11 @@ def _sse(obj: Any) -> bytes:
 
 
 class QuickHttpServer:
-    def __init__(self, service: QuickService, secret: str, *, host: str, port: int):
+    def __init__(self, service: QuickService, secret: str, *, host: str, port: int,
+                 library: Optional[LibraryService] = None, bots: Optional[BotsService] = None):
         self.service = service
+        self.library = library
+        self.bots = bots
         self._auth = SecretCheck(secret)
         self.host, self.port = host, port
         self._server: Optional[asyncio.base_events.Server] = None
@@ -181,7 +201,15 @@ class QuickHttpServer:
                 pass
 
     async def _dispatch(self, req: Request, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        routes = {"/health": ("GET",), "/quick/config": ("GET",), "/quick/v1/chat/completions": ("POST",)}
+        routes = {"/health": ("GET",), "/quick/config": ("GET",), "/quick/v1/chat/completions": ("POST",),
+                  "/library/config": ("GET",), "/library/skills": ("GET",), "/library/skills/content": ("GET",),
+                  "/library/memory": ("GET",)}
+        if req.path.startswith("/library/") and self.library is None:
+            await _send_json(writer, 404, QuickError(404, "not_found", "not found").body())
+            return
+        if req.path == "/bots" or req.path.startswith("/bots/"):
+            await self._bots(req, writer)
+            return
         if req.path not in routes:
             await _send_json(writer, 404, QuickError(404, "not_found", "not found").body())
             return
@@ -199,7 +227,63 @@ class QuickHttpServer:
         if req.path == "/quick/config":
             await _send_json(writer, 200, await self.service.config_payload())
             return
+        if req.path.startswith("/library/"):
+            await self._library(req, writer)
+            return
         await self._quick(req, reader, writer)
+
+    async def _library(self, req: Request, writer: asyncio.StreamWriter) -> None:
+        lib = self.library
+        assert lib is not None
+        try:
+            if req.path == "/library/config":
+                payload = await lib.config()
+            elif req.path == "/library/skills":
+                payload = await lib.skills()
+            elif req.path == "/library/skills/content":
+                payload = await lib.skill_content(req.query.get("name"))
+            else:
+                payload = await lib.memory()
+        except QuickError as e:
+            await _send_json(writer, e.status, e.body())
+            return
+        await _send_json(writer, 200, payload)
+
+    async def _bots(self, req: Request, writer: asyncio.StreamWriter) -> None:
+        if self.bots is None:
+            await _send_json(writer, 404, QuickError(404, "not_found", "not found").body())
+            return
+        name = req.path[len("/bots/"):] if req.path.startswith("/bots/") else None
+        allowed = ("GET", "PATCH") if name is not None else ("GET", "POST")
+        if name is not None and ("/" in name or not name):
+            await _send_json(writer, 404, QuickError(404, "not_found", "not found").body())
+            return
+        if req.method not in allowed:
+            await _send_json(writer, 405, QuickError(400, "method_not_allowed", "method not allowed").body(),
+                             {"allow": ", ".join(allowed)})
+            return
+        if not self._auth.check_header(req.headers.get("authorization")):
+            await _send_json(writer, 401, QuickError(401, "unauthorized", "invalid or missing secret").body(),
+                             {"www-authenticate": "Bearer"})
+            return
+        body = None
+        if req.method in ("POST", "PATCH"):
+            try:
+                body = json.loads(req.body.decode("utf-8")) if req.body else None
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                await _send_json(writer, 400, QuickError(400, "invalid_json", "body is not valid JSON").body())
+                return
+        try:
+            if name is None:
+                status, payload = (200, await self.bots.list()) if req.method == "GET" else (
+                    201, await self.bots.create(body))
+            else:
+                status, payload = 200, (await self.bots.get(name) if req.method == "GET" else
+                                        await self.bots.patch(name, body))
+        except QuickError as e:
+            await _send_json(writer, e.status, e.body())
+            return
+        await _send_json(writer, status, payload)
 
     async def _quick(self, req: Request, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         svc = self.service

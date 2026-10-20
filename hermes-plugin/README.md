@@ -35,6 +35,16 @@ Design and migration plan: [`docs/HERMES-PLUGIN.md`](../docs/HERMES-PLUGIN.md).
 | GET | `/health` | none | `{"ok": true}` |
 | GET | `/quick/config` | Bearer secret | `enabled`/`available` + `reason` (self-test), `scope` (diagnostics), aux slot, last route used, limits, prompt-size estimate |
 | POST | `/quick/v1/chat/completions` | Bearer secret | OpenAI-compatible; `stream: true` returns SSE `chat.completion.chunk` events and `[DONE]`; usage in the final chunk |
+| GET | `/library/config` | Bearer secret | `{version, profile, skills, memory}`; each part `{available, reason?}` |
+| GET | `/library/skills` | Bearer secret | skills of this profile: `name`, `description`, `category`, `enabled`, `source` (`bundled\|hub\|external\|local`) |
+| GET | `/library/skills/content?name=` | Bearer secret | SKILL.md of a listed skill (exact name only, 256 KiB cap, `truncated`) |
+| GET | `/library/memory` | Bearer secret | MEMORY.md / USER.md entries, limits, `updated_at`; 404 `feature_off` unless `library.expose_memory: true` |
+| GET | `/bots` | Bearer secret | bots (named profiles): `name`, `title`, `description`, `color`, `pinned`, `hidden`, `parked`, `app`, `template`; `create: {available, reason?}`, `limit`, `count` |
+| POST | `/bots` | Bearer secret | create a bot from `{title, job, how, template, lang, may, color, api_key}` → 201 (0.2.0, Bots v2; docs/BOTS-SERVER.md "Creating bots from the app") |
+| GET / PATCH | `/bots/<name>` | Bearer secret | the three fields of a bot / rewrite `SOUL.md` and `ui_meta` from `{title, job, how, lang?}`; never the default profile |
+
+The library routes (0.2.0) are read-only and serve only the plugin's own profile. Contract and reasons:
+[`docs/SKILLS-MEMORY.md`](../docs/SKILLS-MEMORY.md).
 
 Request limits:
 
@@ -101,6 +111,10 @@ secret as a credential instead: `LoadCredential=hui-plugin-secret:<hermes-home>/
 | `quick.total_timeout` | `60` s | |
 | `quick.allow_model_override` | `true` | per-request `provider`/`model` |
 | `quick.allowed_models` | `[]` (any) | e.g. `["opencode-go:deepseek-v4-flash", "kilocode:*"]` |
+| `library.enabled` | `true` | `false`: `/library/*` answers 404 `feature_off` (`disabled_by_config`) |
+| `library.expose_memory` | `false` | `true` lets paired devices read this profile's MEMORY.md / USER.md |
+| `bots.enabled` | `true` | `false`: `/bots` answers 404 `feature_off` (`disabled_by_config`); the bridge's owner switch (`bots enable`) is the second gate |
+| `bots.limit` | `50` | most bots (named profiles) the app may create (1 to 200) |
 
 Model choice is ordinary Hermes config:
 

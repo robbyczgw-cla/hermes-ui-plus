@@ -26,7 +26,9 @@ Every path is also mirrored under `/p/<profile>/…` (profile multiplexing, see 
 | `POST /v1/runs`, `GET /v1/runs/{id}`, `GET /v1/runs/{id}/events` (SSE), `POST /v1/runs/{id}/approval`, `/steer`, `/stop` | yes | structured runs API (RUNS:234). **`/approval` also resolves approvals of a streaming chat completion** (see below) |
 | `GET/POST /api/sessions`, `GET/PATCH/DELETE /api/sessions/{id}`, `GET /api/sessions/{id}/messages`, `POST …/fork`, `POST …/chat`, `POST …/chat/stream`, `POST …/model` | yes | Hermes-native session API (server root, not `/v1`). Used for drawer sync, transcript restore, tool details and (v0.22) the per-chat model lock – see "Sessions API" and "v0.22 additions" below |
 | `GET /api/model/options` | yes | provider/model catalog with per-model `capabilities` (reasoning/fast) – see "Capabilities + model_options" |
-| `GET /v1/skills`, `/v1/toolsets`, `/api/jobs…`, artifacts, browser-control | yes | out of scope |
+| `GET /api/jobs?include_disabled=true`, `GET /api/jobs/{id}`, `POST /api/jobs/{id}/pause\|resume\|run` | yes | cron jobs, used read-only + pause/resume/run by Routines (app `src/routines/jobs.ts`, bridge `src/jobs.mjs`). Verified at v0.22.2: id = 12 hex chars; `run` queues the job for the next ~60 s tick, **re-enables a paused job** and refuses completed/error jobs (500); list adds `latest_execution`. `POST /api/jobs` (create), `PATCH`/`DELETE` are not used. No run/result resource: the last report is read from the newest `cron_<id>_<timestamp>` session (`source=cron`) |
+| `GET /v1/skills` | yes | Skills & memory screen (read-only list; see [SKILLS-MEMORY.md](SKILLS-MEMORY.md)) |
+| `/v1/toolsets`, artifacts, browser-control | yes | out of scope |
 
 CORS (AS:797-800, 1470-1493, 811-826): **browsers get 403 for every request carrying an `Origin` header**
 unless `platforms.api_server.extra.cors_origins` / `API_SERVER_CORS_ORIGINS` lists the origin (or `*`) –
@@ -132,6 +134,11 @@ Telegram scope. The global files (MEMORY.md/USER.md/SOUL.md) are still part of t
   transcript up to that answer locally and prefixes the first new user message with a `[hui:context] … [/hui:context]`
   block of the prior turns (`app/src/hermes/turnOverride.ts`) until Hermes accepted a turn. One-turn retry notes are
   appended as `[hui:note] …`; both markers are stripped again when stored transcripts are matched (`userTextCore`).
+- Live cards (`app/src/live`): the user's own edits of a live checklist ride at the very end of their next message as
+  `[hui:live]{"<card>":{"v":<n>,"ops":[…],"bid":"…"}}[/hui:live]`. Part of the stored user message, so every device
+  folds the same history; the app cuts it (and `[hui:note]` / `[hui:context]`) from what it shows. Hermes is told about
+  live cards only by the constant system line `[hermes-ui-app] Features: live-cards. …` (sent on chats with the session
+  API; older apps never send it, so Hermes writes plain checklists for them).
 
 ### Non-streaming response (`stream` false/omitted)
 `200 {"id","object":"chat.completion","created","model","choices":[{"index":0,"message":{"role":"assistant","content":"…","reasoning_content"?:"…"},"finish_reason":"stop|length|error"}],"usage":{prompt_tokens,completion_tokens,total_tokens},"hermes"?:{completed,partial,failed,error,error_code}}`.
@@ -237,7 +244,7 @@ OpenAI envelope `{"error":{"message","type","param","code"}}` (AS:906-923):
 ## Known Hermes issues (as of Hermes v0.22.0)
 The client is tested with Hermes v0.22.0; the wire facts in this document were verified against v0.21.4.
 
-- **`GET /v1/skills` answers 500** `Failed to enumerate skills` on unpatched Hermes 0.21.5 to 0.22.2 (0.22.2 rechecked 2026-10-17) (stray `include_editorial` argument; upstream issue #120831, fix in PR #124861). The app's `/skills` sheet recognises the error, says it is a Hermes bug and that skills still work in chats. There is no fallback endpoint behind the bridge.
+- **`GET /v1/skills` answers 500** `Failed to enumerate skills` on Hermes 0.21.5 up to and including 0.22.2 (stray `include_editorial` argument, still in the v0.22.2 tag; upstream issue #120831, fix PR #124861 open on 2026-10-16). The Skills & memory screen recognises the error, says it is a Hermes bug and offers to ask Hermes in the chat. With the hermes-ui-plus plugin (0.2.0+) the list comes from the plugin instead (`/bridge/library/*`, [SKILLS-MEMORY.md](SKILLS-MEMORY.md)); the bridge never forwards the dashboard's `/api/skills`.
 - **Providers that Hermes runs as an external process do not stream** (for example the Claude subscription plugin): `/v1/chat/completions` with `stream: true` sends the finished answer as a single chunk at the end. Upstream PR #124566 lets such providers stream when their profile opts in; the plugin has to set that too. Clients see one big delta instead of a token stream; there is nothing to fix on the client side.
 
 ## Client implications (summary)

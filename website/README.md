@@ -45,7 +45,7 @@ When the platform status changes (a release is published, iOS or macOS ships), e
 
 ## Demo videos
 
-Posters (`media/*.jpg`, including `hero-loop.jpg`) are committed. The videos (`media/*.mp4`, about 130 MB) are too large for git (`.gitignore`) and are copied in or generated at deploy time from the demo export: the numbered clips for the demo reels, `trailer.mp4` for the film block, and the hero clip `hero-loop.mp4` (about 4 MB, autoplays muted), which `make-hero.sh` cuts from the vertical trailer:
+Posters (`media/*.jpg`, including `hero-loop.jpg`) are committed. The videos (`media/*.mp4`, about 130 MB) are too large for git (`.gitignore`) and are copied in or generated at deploy time from the demo export: the numbered clips for the demo reels (since 0.2 the bots clip is `bots-02.mp4`, 0.2 feature clip with music), `trailer-02.mp4` (16:9) and `trailer-02-vertical.mp4` (9:16) for the film block (general trailer with voice and music, recorded in the offline demo), `new-in-02.mp4` and `new-in-02-vertical.mp4` for the "New in 0.2" block (the 0.2 trailer), and the hero clip `hero-loop.mp4` (about 4 MB, autoplays muted), which `make-hero.sh` cuts from the 0.1 vertical trailer (the 0.2 trailer zooms and has a light backdrop, so the script cannot find its screen). New file names for changed videos and posters: media is cached for 30 days. Keep the old `trailer.mp4`, `trailer-vertical.mp4` and `clip-wsp.mp4` in the deploy, links to them were shared:
 
 ```
 cp dist/share/demos/[01][0-9]-*.mp4 dist/share/demos-20261015/[12][0-9]-*.mp4 dist/share/demos-20261015/trailer.mp4 website/media/

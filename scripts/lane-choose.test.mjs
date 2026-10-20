@@ -9,13 +9,16 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
+// the build scripts started here take the Mac heavy lock when they run on a Mac: a private lock dir keeps a check run
+// that already holds the real one (scripts/check.sh all on the build Mac) from deadlocking
+process.env.HUI_MAC_LOCK_DIR = join(mkdtempSync(join(tmpdir(), 'hui-test-maclock-')), 'lock');
 // the remote lanes sync a commit: a tree without one (the public export check) cannot run them
 const NO_HEAD = spawnSync('git', ['-C', ROOT, 'rev-parse', '--verify', '-q', 'HEAD'], { encoding: 'utf8' }).status !== 0 && 'no git commit in this tree';
 const LIB = join(ROOT, 'scripts/lib/lane-choose.sh');
 const BUILD = join(ROOT, 'scripts/build-apk.sh');
 const SMOKE = join(ROOT, 'scripts/e2e/smoke.sh');
 
-const IDLE = { MAC_LOCK: 'free', MAC_XCODEBUILD: 0, MAC_BOOTED: 0, MAC_AVAIL_MB: 7000, MAC_SWAP_USED_MB: 1300, MAC_SWAP_TOTAL_MB: 2048, MAC_PAGEOUTS_S: 0, MAC_DISK_GB: 40, MAC_SPEED_LIMIT: 100 };
+const IDLE = { MAC_LOCK: 'free', MAC_XCODEBUILD: 0, MAC_BOOTED: 0, MAC_AVAIL_MB: 7000, MAC_SWAP_USED_MB: 1300, MAC_SWAP_TOTAL_MB: 2048, MAC_PAGEOUTS_S: 0, MAC_DISK_GB: 40, MAC_SPEED_LIMIT: 100, MAC_SDK: 1 };
 
 function decide(over = {}, extraEnv = {}) {
   const v = { ...IDLE, ...over };
@@ -42,6 +45,7 @@ test('lane_decide_mac: every busy signal sends the build to the Linux lane and n
     [{ MAC_SWAP_USED_MB: 2000 }, /swap is 2000\/2048 MB full/],
     [{ MAC_DISK_GB: 5 }, /only 5 GB free disk/],
     [{ MAC_SPEED_LIMIT: 60 }, /thermally throttled \(CPU_Speed_Limit 60\)/],
+    [{ MAC_SDK: 0 }, /the Android SDK is missing on the Mac \(\/Users\/Shared\/hiui-android-sdk/],
   ];
   for (const [over, re] of cases) {
     const d = decide(over);
@@ -62,7 +66,8 @@ function zip(path, entries) {
   assert.equal(spawnSync('python3', ['-I', '-c', code, path, ...entries]).status, 0);
 }
 
-/** ssh stub for the probe: key=value lines for the probe script, silence for everything else */
+/** ssh stub for the probe: key=value lines for the probe script, silence for everything else. buildOut: what the "build" prints,
+ *  {RUN} = the run dir the build script cd's into; the APK check afterwards then gets the commit label of that build. */
 function sshStub(dir, probeLines, { reachable = true, buildOut = null } = {}) {
   const bin = join(dir, 'bin'); mkdirSync(bin, { recursive: true });
   const canned = join(dir, 'probe.out'); writeFileSync(canned, probeLines.join('\n') + '\n');
@@ -74,7 +79,14 @@ echo "ssh $host $*" >> "${log}"
 ${reachable ? '' : 'exit 255'}
 if [ "$*" = "bash -s" ]; then
   script="$(cat)"; echo "$script" >> "${log}"
-  case "$script" in *MAC_LOCK*) cat "${canned}"; exit 0;; *build-apk*.sh*) ${buildOut ? `printf '%s\\n' ${JSON.stringify(buildOut)}; exit 0` : 'exit 1'};; esac
+  case "$script" in
+    *MAC_LOCK*) cat "${canned}"; exit 0;;
+    *build-apk*.sh*)
+      run=$(printf '%s\\n' "$script" | sed -n 's#^cd "\\$HOME/\\(.*\\)"$#\\1#p')
+      printf '%s\\n' "$script" | sed -n "s#.*HUI_BUILD_SHA='\\([0-9a-f]*\\).*#\\1#p" > "${join(dir, 'label')}"
+      ${buildOut ? `out=${JSON.stringify(buildOut)}; printf '%s\\n' "\${out//\\{RUN\\}/$run}"; exit 0` : 'exit 1'};;
+    *lane_apk_source*) cat "${join(dir, 'label')}"; exit 0;;
+  esac
   exit 0
 fi
 cat > /dev/null
@@ -196,12 +208,13 @@ test('build-apk-fast.sh: auto is the default; an idle Mac runs the whole fast bu
     const priv = join(dir, 'priv'); mkdirSync(priv);
     const base = { HUI_PRIVATE_DIR: priv, FLAVOR: 'hermes', MAC_HOST: 'mac.example.com', FAST_MIN_AVAIL_GB: '9999' };
     // idle Mac: the host builds with build-apk-fast.sh (no fetch needed for this test: the stub prints the APK line it "made")
-    const idle = sshStub(dir, probe(), { buildOut: 'APK: /Users/x/hui-lane/src/dist/hermes-ui-plus-release-abc1234-mac-debugsigned-fast.apk (61M)' });
+    const idle = sshStub(dir, probe(), { buildOut: 'APK: /Users/x/{RUN}/dist/hermes-ui-plus-release-abc1234-mac-debugsigned-fast.apk (61M)' });
     let r = spawnSync('bash', [FAST, '--host', 'mac'], { encoding: 'utf8', env: envFor(base, idle.bin) });
     let out = r.stdout + r.stderr;
     assert.doesNotMatch(out, /lane: auto/, 'an explicit --host skips the choice');
     assert.match(idle.calls(), /bash scripts\/build-apk-fast\.sh release/);
-    assert.match(out, /APK stays on the host: ~\/hui-lane\/src\/dist\/hermes-ui-plus-release-abc1234-mac-debugsigned-fast\.apk/, 'the name the host really produced is used (fast or full fallback)');
+    assert.match(out, /APK stays on the host: ~\/hui-lane\/runs\/[0-9a-f-]+\/dist\/hermes-ui-plus-release-abc1234-mac-debugsigned-fast\.apk/, 'the name the host really produced is used (fast or full fallback)');
+    assert.match(out, /== APK verified: built from [0-9a-f]{7}/);
     // default lane = auto: idle Mac -> remote fast build, fetched back because nobody else would use it
     r = spawnSync('bash', [FAST], { encoding: 'utf8', env: envFor(base, idle.bin) });
     out = r.stdout + r.stderr;

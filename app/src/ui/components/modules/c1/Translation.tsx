@@ -118,7 +118,9 @@ function Pane({ t, ui, nodeId, pane, busy }: { t: Theme; ui: UiLang; nodeId: str
   const tr = useT();
   const [open, setOpen] = useState(false);
   const [copied, flashCopied] = useCopiedFlash();
-  const name = languageName(pane.lang, ui);
+  // the original in an unnamed language (models write "language":"English" for the target only): just "Original"
+  const unnamedSource = pane.isSource && parseLang(pane.lang).base === 'und';
+  const name = unnamedSource ? tr('ui.translation.original') : languageName(pane.lang, ui);
   const native = nativeName(pane.lang, ui);
   const rtl = isRtl(pane.lang);
   const long = isLongText(pane.text);
@@ -167,7 +169,7 @@ function Pane({ t, ui, nodeId, pane, busy }: { t: Theme; ui: UiLang; nodeId: str
               {native}
             </HText>
           ) : null}
-          {pane.isSource ? (
+          {pane.isSource && !unnamedSource ? (
             <HText variant="micro" color="subtle" numberOfLines={1}>
               · {tr('ui.translation.original')}
             </HText>

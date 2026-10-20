@@ -373,6 +373,17 @@ export function isCompactedStatus(kind: string | undefined, text: string | undef
 }
 
 /**
+ * Hermes' session-lock lifecycle lines (English only upstream, real-user round 3: a retried turn waited for the
+ * failed one) → a key under `chat.toolTimeline.session`, else undefined (shown as Hermes wrote it).
+ */
+export function sessionStatusKey(text: string | undefined): 'busy' | 'free' | undefined {
+  if (!text) return undefined;
+  if (/another hermes process is using this session/i.test(text)) return 'busy';
+  if (/^\W*session is free\b/i.test(text)) return 'free';
+  return undefined;
+}
+
+/**
  * B9: the "Kontext komprimiert" chat divider marks older conversation being summarized away.
  * When Hermes compressed during the very first turn of a brand-new chat there is no older
  * conversation — the compaction stays a small row in that answer's tool timeline instead

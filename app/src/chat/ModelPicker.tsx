@@ -5,10 +5,10 @@
  * provider of GET /api/model/options (cached per profile, refreshed when the sheet opens and the cache is old).
  */
 import { memo, useCallback, useEffect, useMemo, type ReactNode } from 'react';
-import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Text } from '../ui/primitives/Text';
 import { useHermesCapabilities } from '../hermes/useHermesCapabilities';
-import { botBaseUrl, botDisplayName, botOf, withBot, type HermesBot } from '../hermes/bots';
+import { botBaseUrl, botOf, withBot } from '../hermes/bots';
 import type { ConnectionProfile } from '../settings/profiles';
 import { useT } from '../i18n';
 import { SheetGrabber, SheetModal, useTheme } from '../ui';
@@ -19,7 +19,6 @@ import { HERMES_DEFAULT_MODEL, listsServerModels, modelEntries } from './models'
 import { ModelSearchList } from './ModelSearchList';
 import { useModelList } from './useModelList';
 import { useModelPrefs } from './useModelPrefs';
-import { a11yState } from '../ui/lib/a11yState';
 
 type Props = {
   open: boolean;
@@ -32,11 +31,11 @@ type Props = {
   initialQuery?: string;
   /** sheet title (default "Modell für diesen Chat"; the answer menu's one-turn retry uses its own) */
   title?: string;
-  /** Hermes bot of the chat (hermes/bots.ts): the model list is the bot's (`/p/<bot>/v1/models`) */
+  /**
+   * Hermes bot of the chat (hermes/bots.ts): the model list is the bot's (`/p/<bot>/v1/models`). Bots are picked in the
+   * drawer's Bots tab (bots/), not here.
+   */
   bot?: string;
-  /** more than the default profile → compact "Bot" section above the models */
-  bots?: readonly HermesBot[];
-  onPickBot?(bot: string | undefined): void;
 };
 
 /** memo + renders nothing while closed (the chat view re-renders on every streaming update) */
@@ -45,7 +44,7 @@ export const ModelPicker = memo(function ModelPicker(props: Props) {
   return present ? <ModelPickerSheet {...props} /> : null;
 });
 
-function ModelPickerSheet({ open, onClose, profile, current, onPick, initialQuery, title, bot, bots, onPickBot }: Props) {
+function ModelPickerSheet({ open, onClose, profile, current, onPick, initialQuery, title, bot }: Props) {
   const tr = useT();
   const win = useWindowDimensions();
   const hermes = profile.kind === 'hermes';
@@ -101,7 +100,6 @@ function ModelPickerSheet({ open, onClose, profile, current, onPick, initialQuer
 
   return (
     <ModelSheet open={open} onClose={onClose} title={title ?? tr('chat.modelPicker.title')} subtitle={profile.name} loading={loading} onRefresh={fetchable ? refresh : undefined}>
-      {bots && bots.length > 1 && onPickBot ? <BotRow bots={bots} selected={botOf(bot)} onPick={onPickBot} /> : null}
       <ModelSearchList
         entries={entries}
         selected={selected}
@@ -117,54 +115,6 @@ function ModelPickerSheet({ open, onClose, profile, current, onPick, initialQuer
         initialQuery={initialQuery}
       />
     </ModelSheet>
-  );
-}
-
-/**
- * "Bot" section: the connection's Hermes profiles as one compact, horizontally scrolling row of chips (default
- * first). Each bot has its own model, memory and skills; picking one on a chat with messages starts a new chat.
- */
-function BotRow({ bots, selected, onPick }: { bots: readonly HermesBot[]; selected: string | undefined; onPick(bot: string | undefined): void }) {
-  const t = useTheme();
-  const tr = useT();
-  return (
-    <View style={styles.bots}>
-      <Text testID="model-picker-bots" style={[t.typography.caption, styles.botsTitle, { color: t.colors.muted }]} accessibilityRole="header">
-        {tr('bots.picker.section')}
-      </Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.botsRow} keyboardShouldPersistTaps="handled">
-        {bots.map((b) => {
-          const name = b.default ? undefined : b.name;
-          const on = name === selected;
-          const label = botDisplayName(b, tr('bots.picker.default'));
-          return (
-            <Pressable
-              key={b.name}
-              onPress={() => {
-                lightHaptic();
-                onPick(name);
-              }}
-              accessibilityRole="radio"
-              {...a11yState({ selected: on, checked: on })}
-              accessibilityLabel={b.model ? tr('bots.picker.a11y', { name: label, model: b.model }) : label}
-              style={({ pressed }) => [
-                styles.bot, { borderRadius: t.radii.control },
-                { borderColor: on ? t.colors.accent : t.colors.border, backgroundColor: on ? t.colors.surfaceAlt : pressed ? t.colors.surfacePressed : 'transparent' },
-              ]}
-            >
-              <Text style={[t.typography.caption, styles.botName, { color: on ? t.colors.text : t.colors.muted }]} numberOfLines={1}>
-                {label}
-              </Text>
-              {b.model ? (
-                <Text style={[t.typography.micro, styles.botModel, { color: t.colors.subtle }]} numberOfLines={1}>
-                  {b.model}
-                </Text>
-              ) : null}
-            </Pressable>
-          );
-        })}
-      </ScrollView>
-    </View>
   );
 }
 
@@ -225,10 +175,4 @@ const styles = StyleSheet.create({
   title: { flex: 1, fontWeight: '600' },
   sub: { paddingHorizontal: 8, marginTop: 2, marginBottom: 6 },
   reload: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
-  bots: { marginBottom: 8 },
-  botsTitle: { fontWeight: '600', paddingHorizontal: 8, marginBottom: 4 },
-  botsRow: { gap: 6, paddingHorizontal: 8 },
-  bot: { borderWidth: StyleSheet.hairlineWidth * 2, paddingHorizontal: 10, paddingVertical: 5, maxWidth: 180 },
-  botName: { fontWeight: '600' },
-  botModel: { marginTop: 1 },
 });

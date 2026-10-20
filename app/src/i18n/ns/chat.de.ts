@@ -189,6 +189,8 @@ export const chat = {
   message: {
     copied: 'Nachricht kopiert',
     answerCopied: 'Antwort kopiert',
+    /** an answer's raw tool-call markup (chat/toolMarkup.ts): nothing ran */
+    toolMarkupHidden: 'Werkzeugaufruf hier nicht verfügbar: es wurde nichts ausgeführt.',
     longPressCopy: 'Lange drücken zum Kopieren',
     extraContext: 'Kontext aus früherem Chat mitgeschickt',
     extraNote: 'Hinweis mitgeschickt',
@@ -221,6 +223,7 @@ export const chat = {
       tls: 'Sichere Verbindung fehlgeschlagen (Zertifikat/TLS) – Adresse und Zertifikat des Servers prüfen.',
       offline: 'Keine Internetverbindung – Netzwerk prüfen und erneut versuchen.',
       unreachable: 'Server nicht erreichbar – Verbindung prüfen (z. B. Tailscale).',
+      plain: 'Gerade keine Verbindung. Prüfe deine Internetverbindung und tippe dann auf „Wiederholen“.',
     },
     showDetails: 'Details',
     hideDetails: 'Details ausblenden',
@@ -340,6 +343,10 @@ export const chat = {
     router: 'UI-Router',
     status: 'Status',
     contextCompacted: 'Kontext komprimiert',
+    session: {
+      busy: 'Hermes beendet noch einen anderen Durchlauf in diesem Chat, deine Nachricht startet danach …',
+      free: 'Bereit, der Verlauf wird geladen …',
+    },
     fallbackModel: 'Fallback-Modell',
     fallbackReason: 'Serverseitiger Wechsel nach Ablehnung',
     continuation: 'Fortsetzung',

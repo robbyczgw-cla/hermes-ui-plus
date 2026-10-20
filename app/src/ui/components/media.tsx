@@ -9,8 +9,13 @@ import { Icon, type IconName } from '../primitives/Icon';
 import { Skeleton } from '../primitives/Skeleton';
 import { haptic } from '../primitives/haptics';
 import { CodeSkeleton, ImageSkeleton } from '../skeletons';
-import { useResolvedImage } from '../../images';
+import { chipMinWidth, chipTextShrinks } from '../lib/chipText';
+import { useImagesAllowed, useResolvedImage, useWebImagesEnabled } from '../../images';
+import { getImageSearchMode } from '../../images/web';
+import { IMAGE_LOOKUP_CAP_MS, imageMissReason } from '../../images/miss';
 import { AttributionLine, ImageLightbox, Photo } from './imageParts';
+import { MissNote, MissTile } from './imageMiss';
+import { useSlotCap } from './imageSlot';
 import { useCopiedFlash } from '../lib/useCopiedFlash';
 import { useCaptureBusy } from '../lib/capture';
 import { asArray, asNumber, asObjects, asOptString, asString, clamp, isObject } from '../lib/format';
@@ -24,9 +29,11 @@ import { sendMatchesLabel } from '../../actions/describe';
 /* ───────────── image ───────────── */
 
 /**
- * `image` node: `url` (from a tool/source) or `query` → real photo resolved via Wikipedia/Commons.
+ * `image` node: `url` (from a tool/source; through the bridge image proxy when it has one) or `query` → real photo
+ * resolved via Wikipedia/Commons or the web image search (`source:"web"`).
  * Shimmer while resolving/loading, fade-in, attribution line, fullscreen on tap.
- * Nothing found → renders nothing (never a broken image).
+ * No photo (no image search, images off, lookup failed, nothing found, photo did not load) → a calm placeholder
+ * tile with the caption and one quiet line naming the reason (imageMiss.tsx), never nothing and never a broken image.
  */
 export function ImageBlock({ node }: NodeProps<HuiImage>) {
   const t = useTheme();
@@ -37,23 +44,38 @@ export function ImageBlock({ node }: NodeProps<HuiImage>) {
   const caption = asOptString(node.caption);
   const alt = asOptString(node.alt);
   // a partial URL/query while streaming would load the wrong thing – wait for the block to complete
-  const st = useResolvedImage({ url, query, lang: asOptString(node.lang), source: node.source === 'web' ? 'web' : undefined }, { enabled: !streaming });
+  const webOnly = node.source === 'web';
+  const st = useResolvedImage({ url, query, lang: asOptString(node.lang), source: webOnly ? 'web' : undefined }, { enabled: !streaming });
   const [open, setOpen] = useState(false);
-  const img = st.status === 'ok' ? st.image : null;
+  const [broken, setBroken] = useState<string | null>(null);
+  const allowed = useImagesAllowed();
+  const webOn = useWebImagesEnabled();
+  const resolved = st.status === 'ok' ? st.image : null;
+  const img = resolved && resolved.url !== broken ? resolved : null;
+  // the lookup shimmers at most IMAGE_SLOT_CAP_MS, then the placeholder takes over (a late photo still replaces it)
+  const expired = useSlotCap(st.status === 'loading', `${url ?? ''}|${query ?? ''}`, IMAGE_LOOKUP_CAP_MS);
   const natural = img && img.width > 0 && img.height > 0 ? img.width / img.height : undefined;
   const aspect = clamp(fixedAspect ?? natural ?? 3 / 2, 0.75, 2.4);
   // share-as-image: the lookup holds the capture; past its deadline the block is left out like a miss
   const captureExpired = useCaptureBusy(!streaming && !!(url || query) && (st.status === 'idle' || st.status === 'loading'));
   if (!url && !query) return streaming ? <ImageSkeleton aspect={aspect} /> : null;
-  if ((st.status === 'idle' || st.status === 'loading') && captureExpired) return caption ? <InlineText variant="caption" color="muted" text={caption} /> : null;
-  if (st.status === 'idle' || st.status === 'loading') return <ImageSkeleton aspect={aspect} />;
+  const pending = st.status === 'idle' || (st.status === 'loading' && !expired);
+  if (pending && !captureExpired) return <ImageSkeleton aspect={aspect} />;
   if (!img) {
-    // not found / failed: omit; keep a subtle trace only if the model gave a caption
-    return caption ? <InlineText variant="caption" color="muted" text={caption} /> : null;
+    const status = resolved ? 'broken' : st.status === 'error' ? 'error' : st.status === 'none' ? 'none' : 'expired';
+    const reason = imageMissReason({ allowed, webOnly, webEnabled: webOn, mode: getImageSearchMode(), status, urlOnly: !query && !!url });
+    const label = caption ?? alt ?? query;
+    return (
+      <View style={{ gap: t.spacing.xs + 2 }}>
+        <MissTile query={query} label={label} height={96} />
+        {label ? <InlineText variant="caption" color="muted" text={label} /> : null}
+        <MissNote reason={reason} />
+      </View>
+    );
   }
   return (
     <View style={{ gap: t.spacing.xs + 2 }}>
-      <Photo uri={img.url} aspect={aspect} label={alt ?? caption ?? img.title} onPress={() => setOpen(true)} />
+      <Photo uri={img.url} aspect={aspect} label={alt ?? caption ?? img.title} onPress={() => setOpen(true)} onError={() => setBroken(img.url)} />
       {caption ? <InlineText variant="caption" color="muted" text={caption} /> : null}
       <AttributionLine image={img} />
       <ImageLightbox items={[{ image: img, caption: caption ?? alt }]} index={open ? 0 : null} onClose={() => setOpen(false)} />
@@ -192,6 +214,25 @@ export function Buttons({ node }: NodeProps<HuiButtons>) {
 
 /* ───────────── suggestions ───────────── */
 
+/** A chip's label: short ones keep one line at full size (chipText.ts chipMinWidth: Android's 0.1 dp rounding loss). */
+function ChipLabel({ text, row }: { text: string; row: boolean }) {
+  const [minWidth, setMinWidth] = useState<number | null>(null);
+  const shrinks = chipTextShrinks(text);
+  return (
+    <HText
+      variant="callout"
+      numberOfLines={row ? 3 : 2}
+      style={shrinks ? { flexShrink: 1 } : minWidth ? { minWidth } : undefined}
+      onTextLayout={shrinks ? undefined : (e) => {
+        const w = chipMinWidth(text, e.nativeEvent.lines);
+        if (w !== null && w !== minWidth) setMinWidth(w);
+      }}
+    >
+      {text}
+    </HText>
+  );
+}
+
 export function Suggestions({ node }: NodeProps<HuiSuggestions>) {
   const tr = useT();
   const t = useTheme();
@@ -231,9 +272,7 @@ export function Suggestions({ node }: NodeProps<HuiSuggestions>) {
             }}
             pressedStyle={{ backgroundColor: t.colors.surfacePressed }}
           >
-            <HText variant="callout" numberOfLines={row ? 3 : 2} style={{ flexShrink: 1 }}>
-              {s}
-            </HText>
+            <ChipLabel text={s} row={row} />
             <Icon name="arrowRight" size={13} color={t.colors.subtle} />
           </PressableScale>
         );

@@ -79,7 +79,7 @@ test('terminology and register stay consistent per locale', () => {
   const bad: string[] = [];
   for (const { lang, re, why } of TERMS) {
     for (const [k, v] of Object.entries(flat[lang])) {
-      // consent texts are fingerprinted (AI_CONSENT_VERSION): wording changes there need a version bump
+      // consent texts are fingerprinted (CONSENT_TEXT_FINGERPRINT): wording changes there are a deliberate decision
       if (k.startsWith('compliance.consent.') || !re.test(v)) continue;
       bad.push(`${lang} ${k}: /${re.source}/ (${why}) in "${v.slice(0, 80)}"`);
     }
@@ -132,6 +132,7 @@ const ALLOW: [RegExp, string][] = [
   [/^ui\/(galleryData|Gallery)\.tsx?$/, 'dev gallery'],
   [/^ui\/components\/(GallerySection\w+|modules\/\w+\/(GallerySection\w+|samples|galleryInteractive))\.tsx?$/, 'dev gallery'],
   [/^onboarding\/demo\//, 'offline demo content: per-language scripts (L() triples / de,en,es tables)'],
+  [/^library\/demo\.ts$/, 'offline demo: stands for server-side skill/memory data (Hermes content is not translated)'],
   [/^sandbox\/sandboxSamples\.ts$/, 'sandbox sample apps'],
   [/^pi\/stepSamples\.ts$/, 'dev gallery: StepSummary samples (fake paths and output)'],
   [/^pi\/pocket\/turns\.ts$/, 'Pi Pocket port: SUMMARY_EN keeps summarize()\'s English output; the UI formats through ui.steps.* (formatSummary)'],
@@ -143,6 +144,7 @@ const ALLOW: [RegExp, string][] = [
   [/^(attachments\/encode\w+|attachments\/pickers|chat\/ask|chat\/replyMessage|hermes\/sessionMapping|hermes\/trace|claude\/(dateContext|systemPrompt)|ui\/components\/modules\/d3\/mindmapModel|actions\/lists|compat\/runtimeProbe)\.ts$/, 'model-facing text (attachment markers, replies, prompts) or probe data'],
   [/^ui\/components\/modules\/(a\/checklistModel|b\/mapModel|d1\/d1Model)\.ts$/, 'category keywords / canonical German category ids / parser patterns'],
   [/^protocol\/streamParser\.ts$/, 'parser diagnostics (logged, not rendered)'],
+  [/^live\/focus\.ts$/, 'edit-request patterns (the bridge router\'s phrase list), matched, never shown'],
   [/^meta\/core\.ts$/, 'metaErrorText has no UI caller yet'],
   [/^settings\/storage\.ts$/, 'error is mapped to settings.storage.readOnlySave by every caller'],
   [/^hermes\/chatState\.ts$|^(hermes\/useHermesChat|claude\/useClaudeChat|openaicompat\/useOpenAICompatChat)\.ts$/, 'last-resort fallback behind an errorText key / provider error text'],

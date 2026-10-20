@@ -14,7 +14,7 @@ import { useHui } from '../primitives/context';
 import { HText, PressableScale, textStyle } from '../primitives/basics';
 import { Icon } from '../primitives/Icon';
 import { Skeleton } from '../primitives/Skeleton';
-import { attributionText, attributionUrl, useImageGate, useResolvedImage, type ResolvedImage } from '../../images';
+import { attributionText, attributionUrl, imageSourceFor, useImageGate, useImageProxyKey, useResolvedImage, type ResolvedImage } from '../../images';
 import { useT } from '../../i18n';
 import { shareImageUrl } from '../../images/share';
 import { useImageEdit } from '../../imageedit/context';
@@ -93,7 +93,10 @@ export function Photo({
   // share-as-image: wait for the photo (web: its local copy, captureImage.ts); past the capture deadline, or when it
   // cannot be read, it is drawn as the glyph box (no shimmer, no empty box)
   const capture = useCaptureMode();
-  const plain = useMemo(() => (uri ? { uri } : null), [uri]);
+  // bridge image proxy URLs (answer-provided photos, images/proxy.ts) carry the device token as a header; memoized:
+  // expo-image (web) refetches whenever the source object changes
+  const proxyKey = useImageProxyKey();
+  const plain = useMemo(() => (uri ? imageSourceFor(uri) : null), [uri, proxyKey]);
   const cap = useCaptureImageSource(gate.allowed ? plain : null);
   const capFailed = cap.state === 'failed';
   const captureExpired = useCaptureBusy(!!uri && gate.allowed && !capFailed && state === 'loading');
@@ -187,6 +190,8 @@ export function ImageConsent({ host, onLoad, radius, aspect, height, style, dark
 function LightboxImage({ item, width, height, onClose }: { item: LightboxItem; width: number; height: number; onClose: () => void }) {
   const tr = useT();
   const gate = useImageGate(item.image.url);
+  const proxyKey = useImageProxyKey();
+  const source = useMemo(() => imageSourceFor(item.image.url), [item.image.url, proxyKey]);
   if (!gate.allowed) {
     return (
       <View style={{ width, height, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 }}>
@@ -197,7 +202,7 @@ function LightboxImage({ item, width, height, onClose }: { item: LightboxItem; w
   return (
     // the page is the picture (named by its caption); a tap closes, like the explicit close button in the top bar
     <Pressable onPress={onClose} style={{ width, height }} accessibilityRole="image" accessibilityLabel={item.caption || item.image.title || tr('ui.image.fullscreenNoLabel')} accessibilityHint={tr('ui.image.close')}>
-      <Image source={{ uri: item.image.url }} placeholder={{ uri: item.image.thumbUrl }} style={{ width, height }} contentFit="contain" transition={200} accessibilityLabel={item.caption ?? item.image.title} />
+      <Image source={source} placeholder={item.image.thumbUrl !== item.image.url ? { uri: item.image.thumbUrl } : undefined} style={{ width, height }} contentFit="contain" transition={200} accessibilityLabel={item.caption ?? item.image.title} />
     </Pressable>
   );
 }

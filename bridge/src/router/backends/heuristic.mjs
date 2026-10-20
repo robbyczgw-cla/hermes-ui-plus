@@ -5,6 +5,7 @@
 // everything else is text with low confidence (=> no hint is injected).
 
 import { reformatDecision } from '../reformat.mjs';
+import { fixListTypos } from '../listtypos.mjs';
 
 export const HEURISTIC_MODEL = 'heuristic-v1';
 
@@ -125,7 +126,10 @@ const notProductLookup = (t) => notAskingOrWriting(t) || PHONE_NUMBER.test(t);
 // Precision over recall: only product lines that name a device on their own ("iPhone 17", "Odin 2 mini", "Steam Deck")
 // or a maker followed by a model token ("Sony XM6", "Bose QC", "BMW i4"). Concepts, plans and services ("Kubernetes vs
 // Nomad", "Miete vs Kauf", "Apple Music vs Spotify") match neither and stay compare.
-const PRODUCT_LINE = String.raw`(iphone|ipad|macbook|imac|mac mini|mac studio|airpods|apple watch|pixel \d+|pixel (pro|fold|buds|watch)|galaxy (s|z|a|tab|watch|buds)\s?\d*|xperia|oneplus|redmi|fairphone|thinkpad|ideapad|zenbook|vivobook|surface (pro|laptop|go|book)|kindle|kobo|tolino|playstation|ps[345]|xbox|nintendo|switch (\d|oled|lite)|steam deck|rog ally|legion go|ayaneo|trimui|anbernic|miyoo|retroid|powkiddy|odin \d|rg ?\d{2,3}\p{L}*|rg (rotate|cube|arc|nano|ds)|game ?boy|gopro|garmin|fitbit|roborock|dyson|thermomix|nespresso|tesla model|model [3ysx]\b>|vw id\.?\s?\d|wh-1000\p{L}*\d*|quietcomfort)`;
+// Dictated handheld names: brands split by speech-to-text ("Trim ui hammer", "Aya neo", "Mi yoo"; the spaced TrimUI form only
+// before a TrimUI model word, "trim UI" is also a UI phrase) and Anbernic's "XX" line with a misheard digit ("RG 3gxx",
+// "RG 35 XX"): "rg" + digits + "xx" is distinctive enough; plain "RG"/"RGB" without digits stays out.
+const PRODUCT_LINE = String.raw`(iphone|ipad|macbook|imac|mac mini|mac studio|airpods|apple watch|pixel \d+|pixel (pro|fold|buds|watch)|galaxy (s|z|a|tab|watch|buds)\s?\d*|xperia|oneplus|redmi|fairphone|thinkpad|ideapad|zenbook|vivobook|surface (pro|laptop|go|book)|kindle|kobo|tolino|playstation|ps[345]|xbox|nintendo|switch (\d|oled|lite)|steam deck|rog ally|legion go|aya ?neo|trimui|trim[ -]ui (brick|hammer|smart|model)|an ?bernic|mi ?yoo|retroid|pow ?kiddy|odin \d|rg ?\d{2,3}\p{L}*|rg ?\d{1,3} ?\p{L}?x ?x\p{L}*|rg (rotate|cube|arc|nano|ds)|game ?boy|gopro|garmin|fitbit|roborock|dyson|thermomix|nespresso|tesla model|model [3ysx]\b>|vw id\.?\s?\d|wh-1000\p{L}*\d*|quietcomfort)`;
 const PRODUCT_MAKER = String.raw`(apple|google|samsung|sony|bose|sennheiser|beyerdynamic|jbl|lg|lenovo|dell|hp|asus|acer|msi|razer|logitech|canon|nikon|fujifilm|panasonic|philips|bosch|siemens|miele|xiaomi|huawei|honor|oppo|anker|ecovacs|dji|nothing phone|vw|volkswagen|bmw|audi|mercedes|toyota|skoda|hyundai|kia|volvo|porsche|ford|renault|tesla)`;
 // a model token right after the maker: has a digit ("XM6", "i4", "S25") or is a typical model word ("QC", "Ultra")
 const MODEL_TOKEN = String.raw`([\p{L}-]*\d[\p{L}\p{N}-]*|qc|ultra|pro|max|mini|air|plus|lite|ultralight)`;
@@ -405,7 +409,7 @@ function firstMatch(rules, text) {
 export function classifyHeuristic(turns) {
   const latest = [...turns].reverse().find((t) => t.role === 'user');
   if (!latest) return decision('text', 0, 'no user message');
-  const text = latest.content.trim();
+  const text = fixListTypos(latest.content.trim());
   const prevAssistant = [...turns].reverse().find((t) => t.role === 'assistant');
   const isFollowup = Boolean(prevAssistant) && text.length < 120 && FOLLOWUP.test(text);
 

@@ -50,6 +50,8 @@ type Props = {
   followups?: HuiNode | null;
   /** older messages of this chat were dropped by the storage cap → subtle marker at the top */
   historyTruncated?: boolean;
+  /** the user scrolled away from the newest message / came back (the live-card tray collapses meanwhile) */
+  onAwayChange?: (away: boolean) => void;
 };
 
 const SHOW_JUMP_AT = STICK_AWAY_PX;
@@ -59,7 +61,7 @@ const SHOW_JUMP_AT = STICK_AWAY_PX;
  * free. When the user has scrolled up, `maintainVisibleContentPosition` (native) keeps the
  * visible content still while the newest message grows (web: browser scroll anchoring).
  */
-export const MessageList = forwardRef<MessageListHandle, Props>(function MessageList({ messages, onAction, onRetry, conversationId, voiceConn = null, followups = null, historyTruncated = false }, ref) {
+export const MessageList = forwardRef<MessageListHandle, Props>(function MessageList({ messages, onAction, onRetry, conversationId, voiceConn = null, followups = null, historyTruncated = false, onAwayChange }, ref) {
   const t = useTheme();
   const tr = useT();
   const list = useRef<FlatList<ChatMessage>>(null);
@@ -166,6 +168,8 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
   );
 
   const jumpShown = useRef(false);
+  const awayRef = useRef(onAwayChange);
+  awayRef.current = onAwayChange;
   // "Antwort ist da" routing (background/noticeState): is this chat scrolled to the newest message?
   useEffect(() => {
     setNearBottom(conversationId, !jumpShown.current);
@@ -178,6 +182,7 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
       jumpShown.current = v;
       setNearBottom(conversationId, !v);
       setShowJump(v);
+      awayRef.current?.(v);
       Animated.timing(jumpAnim, { toValue: v ? 1 : 0, duration: 160, useNativeDriver: Platform.OS !== 'web' }).start();
     },
     [jumpAnim, conversationId],

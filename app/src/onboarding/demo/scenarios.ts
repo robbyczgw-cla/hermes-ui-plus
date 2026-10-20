@@ -2,17 +2,23 @@
 //  - scenes-core.ts   the "Answers you can act on" showcase (approval, checklist, choices, products, recipe, quiz, …)
 //  - replies.ts       follow-ups for taps on those answers (`[kind:id] …` replies, reformat chips)
 //  - scenes-more.ts   one scenario per remaining block type
+//  - scenes-live.ts   a live card (shopping list) Hermes keeps up to date over two turns
+//  - scenes-library.ts the Skills & memory questions (what Hermes remembers, forget, skills, load / use a skill)
 //  - prompts.ts       the sample requests (chips, starters) in en/de/es, checked against `pickScenario` by tests
 // Everything is offline (no photos, map tiles or web lookups), fictional and written in en/de/es. Pure data – tested in
 // demo.test.ts.
 import { REPLIES } from './replies.ts';
 import { CORE, detectCity, PATHS_ID, SHOPPING_ID, TRIP_CHOICE_ID, TRAVEL_CHOICE_ID } from './scenes-core.ts';
 import { MORE } from './scenes-more.ts';
+import { LIBRARY_SCENES } from './scenes-library.ts';
+import { LIVE_SCENES } from './scenes-live.ts';
+import { multi } from './scenes-multi.ts';
+import { lastDone } from './scenes-bots.ts';
 import type { DemoScenario } from './kit.ts';
 
-export { L, type DemoApproval, type DemoContext, type DemoLang, type DemoScenario, type DemoStep, type DemoTool } from './kit.ts';
+export { L, type DemoApproval, type DemoBotRole, type DemoContext, type DemoLang, type DemoScenario, type DemoStep, type DemoTool } from './kit.ts';
 
-export const scenarios: Record<string, DemoScenario> = { ...MORE, ...CORE, ...REPLIES };
+export const scenarios: Record<string, DemoScenario> = { ...MORE, ...CORE, ...REPLIES, ...LIVE_SCENES, ...LIBRARY_SCENES, multi, lastDone };
 
 /** `[kind:id]` tags that interactive blocks and chips put in front of the user's reply (ui/components/modules/a/replies.ts) */
 const REPLY_TAG = /^\[([a-z]+)(?::([^\]\n]*))?\]/;
@@ -45,9 +51,22 @@ function pickReply(t: string): string | null {
 
 /** keyword routes in priority order; every entry covers de, en and es (the sample requests of prompts.ts included) */
 const ROUTES: [name: string, re: RegExp][] = [
+  // Skills & memory first: a forget request quotes a memory entry, which may contain any other keyword
+  ['memoryForget', /\bforget\b|vergiss|olvida|delete this entry|l[öo]sche diesen eintrag|borra esta entrada/],
+  // typos too ("remmeber", "rember", "weisst", "recuedas"): the question a user types into the demo first
+  ['memoryWhat', /\b(?:re?m+e*m*b\w*|know)\b.{0,12}\babout me\b|über mich (?:gemerkt|gespeichert)|(?:wei(?:ß|ss|s)t|gemerkt|merkst) du.{0,15}über mich|\brec(?:u?e|o)r?d\w*\s+(?:de|sobre)\s+m[ií](?![a-z])|\bsabes\s+(?:ya\s+)?(?:de|sobre)\s+m[ií](?![a-z])/],
+  ['skillDoc', /load the skill|lade den skill|carga el skill/],
+  // a starter of Hermes' own Bot Chat (bots/BotEmptyState): nothing done yet in the demo
+  ['lastDone', /zuletzt.{0,25}erledigt|what did you last do|last (?:thing )?you did|hiciste por m[ií] la [uú]ltima|[uú]ltima vez.{0,20}hiciste/],
+  ['skillUse', /use the skill|nutze den skill|usa el skill/],
+  ['skillsList', /which skills|welche skills|qu[eé] skills|your skills|deine skills|tus skills/],
+  // the live list before the plain shopping list ("Einkaufsliste")
+  ['liveAdd', /grillkohle|charcoal|\bcarb[oó]n\b/],
+  ['liveList', /grill|barbecue|\bbbq\b|barbacoa/],
   ['error', /fehler|error|crash/],
   ['approval', /freigabe|approval|genehmig|aprobaci[oó]n/],
   ['cacheList', /cach[eé]/],
+  ['multi', /umzugsfirma|moving company|empresa de mudanzas/],
   ['schieberegler', /schieberegler/],
   ['gameTable', /ps2|spieletabelle|game table/],
   ['longWords', /oled|lcd/],

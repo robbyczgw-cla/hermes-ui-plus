@@ -11,9 +11,17 @@ import type { ConversationMeta } from './types.ts';
 
 export type DrawerView = {
   chatScope: ChatScope;
+  /**
+   * no Bots tab (bots/): the default bot's Bot Chat is listed like a chat once it has messages, as "Hermes" (reminders and
+   * routine results of a normal user land there). Every other Bot Chat lives in the Bots tab only.
+   */
+  defaultBotChat?: boolean;
 };
 
 export function shownInDrawer(m: ConversationMeta, v: DrawerView): boolean {
+  // a bot's "Bot Chat" lives in the Bots tab (bots/), never in the desktop menus; without a Bots tab the default bot's
+  // thread is listed once it has messages
+  if (m.botChat && !(v.defaultBotChat && !m.hermesProfile && (m.messageCount > 0 || m.preview !== ''))) return false;
   if (!isConversationVisible(m) || !inChatScope(m, v.chatScope)) return false;
   return true;
 }

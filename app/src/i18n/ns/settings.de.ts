@@ -154,6 +154,9 @@ export const settings = {
     chatScopeAllHint: 'Die Liste zeigt die Chats dieser App von all deinen Geräten.',
     chatScopeDeviceHint: 'Die Liste zeigt nur Chats, die auf diesem Gerät begonnen wurden – auch wenn du einen anderen hier schon geöffnet hast. Ausgeblendete bleiben in Hermes und auf den anderen Geräten. Gilt nur für dieses Gerät; Telegram-, CLI- und Cron-Chats folgen weiter den Profil-Schaltern.',
     chatScopeKeywords: 'Chatliste Geräte Gerät synchronisieren andere Geräte ausblenden Liste',
+    routines: 'Routinen',
+    routinesSub: 'Geplante Aufträge deiner Bots, ihre Ergebnisse und Benachrichtigungen dazu. Aus: nirgends zu sehen. Erinnerungen aus dem Chat bleiben.',
+    routinesKeywords: 'Routinen Zeitpläne geplante Aufträge Cron Posteingang Ergebnisse ausblenden',
     keywords: 'Chats Unterhaltungen Unterhaltung Nachrichten Verlauf',
   },
   media: {

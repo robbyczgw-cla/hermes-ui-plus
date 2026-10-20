@@ -14,6 +14,7 @@ import type { RemoteMessage, RemoteToolCall } from './sessions';
 import { DETAIL_MAX_BYTES, LINKS_MAX, capPayload, sanitize } from './trace.ts';
 import { parseWebToolOutput, webMetaOf } from './webResults.ts';
 import { splitTurnExtras, stripTurnExtras, type TurnExtras } from './turnOverride.ts';
+import type { LiveBatches } from '../live/trailer.ts';
 import { applyEvent } from './chatState.ts';
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -162,6 +163,11 @@ export function mapRemoteMessages(rows: RemoteMessage[]): ChatMessage[] {
   const out: ChatMessage[] = [];
   let cur: { msg: ChatMessage; texts: string[]; reasoning: string[]; textLen: number } | null = null;
   let lastTs = 0;
+  // hidden rows (compaction scaffolding): the next message that STARTS after them carries `contextCut` (a turn with
+  // one inside stays one bubble; what it said may be gone from the model's context after it)
+  let cut = false;
+  let cutCur = false;
+  const pushOut = (m: ChatMessage, marked: boolean) => out.push(marked ? { ...m, contextCut: true } : m);
 
   const close = () => {
     if (!cur) return;
@@ -173,12 +179,18 @@ export function mapRemoteMessages(rows: RemoteMessage[]): ChatMessage[] {
       const step: TraceStep = { id: 'thinking-0', kind: 'thinking', at: m.createdAt, endedAt: m.createdAt, data: { from: 0, to: reasoning.length } };
       m.trace = [step];
     }
-    if (m.text || m.tools.length || m.reasoning || m.status === 'error') out.push(m);
+    if (m.text || m.tools.length || m.reasoning || m.status === 'error') pushOut(m, cutCur);
+    else if (cutCur) cut = true; // an empty turn passes its mark on
     cur = null;
+    cutCur = false;
   };
 
   for (const r of rows) {
-    if (!visible(r)) continue;
+    if (!visible(r)) {
+      // a turn with a compaction inside stays one bubble (and carries the mark)
+      if (r.role === 'user' || r.role === 'assistant') cut = true;
+      continue;
+    }
     const ts = r.timestamp ?? lastTs;
     lastTs = ts;
     if (r.role === 'user') {
@@ -188,13 +200,17 @@ export function mapRemoteMessages(rows: RemoteMessage[]): ChatMessage[] {
       const split = splitAttachmentMarkers(contentText(r.content).trim(), id);
       const { attachments } = split;
       // hidden app text (retry note, branch context) is not what the user wrote: cut, the bubble shows a chip
-      const { text, extras } = splitStoredExtras(split.text);
-      if (!text && !attachments.length && !extras) continue;
-      out.push({ id, role: 'user', text, ...(attachments.length ? { attachments } : {}), ...(extras ? { turnExtras: extras } : {}), tools: [], status: 'done', createdAt: ts });
+      // live-card edits (`[hui:live]`): folded by live/, shown as a quiet line instead of raw JSON
+      const { text, extras, live } = splitStoredExtras(split.text);
+      if (!text && !attachments.length && !extras && !live) continue;
+      pushOut({ id, role: 'user', text, ...(attachments.length ? { attachments } : {}), ...(extras ? { turnExtras: extras } : {}), ...(live ? { live } : {}), tools: [], status: 'done', createdAt: ts }, cut);
+      cut = false;
       continue;
     }
     if (r.role === 'assistant') {
       if (!cur) {
+        cutCur = cut;
+        cut = false;
         cur = {
           msg: { id: remoteMessageId(r.id, 'assistant'), role: 'assistant', text: '', tools: [], status: 'done', createdAt: ts },
           texts: [],
@@ -326,13 +342,14 @@ export function userTextCore(s: string): { core: string; attachments: boolean } 
  * `splitTurnExtras` for a stored user text: the `[Bild]` / `[N Bilder]` / `[Datei]` marker lines `contentText` puts
  * after the text part (and so after a trailing note) stay at the end.
  */
-export function splitStoredExtras(text: string): { text: string; extras?: TurnExtras } {
+export function splitStoredExtras(text: string): { text: string; extras?: TurnExtras; live?: LiveBatches } {
   const lines = text.split('\n');
   let n = lines.length;
   while (n > 0 && MARKER_LINE_RE.test(lines[n - 1].trim())) n--;
-  const split = splitTurnExtras(lines.slice(0, n).join('\n'));
-  if (!split.extras) return { text };
-  return { text: [split.text, ...lines.slice(n)].join('\n').trim(), extras: split.extras };
+  const head = lines.slice(0, n).join('\n');
+  const split = splitTurnExtras(head);
+  if (split.text === head) return { text };
+  return { text: [split.text, ...lines.slice(n)].join('\n').trim(), ...(split.extras ? { extras: split.extras } : {}), ...(split.live ? { live: split.live } : {}) };
 }
 
 function sameNorm(x: string, y: string): boolean {

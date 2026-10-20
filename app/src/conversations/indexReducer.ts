@@ -1,7 +1,7 @@
 /**
  * Pure reducer for the conversation index (no I/O, no React).
  */
-import type { ConversationMeta, HermesChatOptions, IndexState, ProfileKind, ProfileRef } from './types.ts';
+import type { ConversationMeta, HermesChatOptions, IndexState, ProfileKind, ProfileRef, RemoteInfo } from './types.ts';
 import type { ModelLockState } from '../hermes/modelLock.ts';
 import { DEFAULT_TITLE } from './types.ts';
 import { cleanUserTitle, makeTitle } from './title.ts';
@@ -30,6 +30,13 @@ export type IndexAction =
    * dropped). Ignored once the chat has messages or for remote / non-Hermes chats.
    */
   | { type: 'setBot'; id: string; bot?: string; sessionId: string }
+  /**
+   * a bot's "Bot Chat" (bots/core.ts): a new entry bound to that Hermes session, or (`adopt`) an existing entry of the same
+   * session (synced earlier as an ordinary chat) turned into it. `remote` = what the server reported for the session.
+   */
+  /** what the server reports for a bot's "Bot Chat" now (Bots tab refresh): newer activity is fetched on open */
+  | { type: 'botChatRemote'; id: string; lastActive?: number; remoteCount?: number; preview?: string }
+  | { type: 'botChat'; id: string; profile: ProfileRef; bot?: string; sessionId: string; now: number; title: string; adopt?: boolean; remote?: RemoteInfo; preview?: string; messageCount?: number; activate?: boolean }
   | {
       /** messages were saved: refresh preview/title/updatedAt */
       type: 'saved';
@@ -86,6 +93,48 @@ export function indexReducer(state: IndexState, a: IndexAction): IndexState {
       if (bot) meta.hermesProfile = bot;
       return { ...state, items: [meta, ...state.items], activeId: a.activate === false ? state.activeId : a.id };
     }
+    case 'botChat': {
+      const bot = botOf(a.bot);
+      const activeId = a.activate === false ? state.activeId : a.id;
+      if (a.adopt) {
+        const next = mapOne(state, a.id, (c) => {
+          if (c.botChat) return c;
+          const { archived: _a, pinned: _p, ...rest } = c;
+          return { ...rest, botChat: true, title: a.title, titleSource: 'remote', ...(a.remote ? { remote: { ...c.remote, ...a.remote } } : {}) };
+        });
+        return next.activeId === activeId ? next : { ...next, activeId };
+      }
+      const meta: ConversationMeta = {
+        id: a.id,
+        title: a.title,
+        titleSource: 'remote',
+        profileId: a.profile.id,
+        profileKind: a.profile.kind,
+        hermesSessionId: a.sessionId,
+        createdAt: a.now,
+        updatedAt: a.remote?.lastActive ?? a.now,
+        preview: a.preview ?? '',
+        messageCount: a.messageCount ?? 0,
+        botChat: true,
+        ...(bot ? { hermesProfile: bot } : {}),
+        // a session with history on the server: its transcript is fetched when the chat opens (needsRemoteLoad)
+        ...(a.remote ? { remote: a.remote, ...(a.messageCount ? { origin: 'remote' as const } : {}) } : {}),
+      };
+      return { ...state, items: [meta, ...state.items], activeId };
+    }
+    case 'botChatRemote':
+      return mapOne(state, a.id, (c) => {
+        if (!c.botChat) return c;
+        const lastActive = Math.max(c.remote?.lastActive ?? 0, a.lastActive ?? 0) || undefined;
+        const remote: RemoteInfo = { source: c.remote?.source ?? 'api_server', ...c.remote, ...(lastActive ? { lastActive } : {}), ...(a.remoteCount !== undefined ? { remoteCount: a.remoteCount } : {}) };
+        const updatedAt = lastActive && lastActive > c.updatedAt + 1000 ? lastActive : c.updatedAt;
+        // never loaded here yet: the server's preview stands in until the transcript is fetched
+        const preview = !c.remote?.loadedAt && !c.messageCount && a.preview ? a.preview.slice(0, 90) : c.preview;
+        const messageCount = !c.messageCount && a.remoteCount ? Math.max(1, a.remoteCount) : c.messageCount;
+        const origin = messageCount && !c.remote?.loadedAt && c.messageCount === 0 ? { origin: 'remote' as const } : {};
+        if (JSON.stringify(remote) === JSON.stringify(c.remote) && updatedAt === c.updatedAt && preview === c.preview && messageCount === c.messageCount) return c;
+        return { ...c, ...origin, remote, updatedAt, preview, messageCount };
+      });
     case 'remove':
       return {
         ...state,
@@ -225,7 +274,7 @@ export function indexReducer(state: IndexState, a: IndexAction): IndexState {
         ...(a.truncated || c.historyTruncated ? { historyTruncated: true } : {}),
       }));
     case 'pruneDrafts': {
-      const items = state.items.filter((c) => c.messageCount > 0 || c.preview !== '' || c.id === a.keep);
+      const items = state.items.filter((c) => c.messageCount > 0 || c.preview !== '' || c.botChat || c.id === a.keep);
       return items.length === state.items.length ? state : { ...state, items };
     }
     default:
@@ -246,5 +295,6 @@ function mapOne(state: IndexState, id: string, fn: (c: ConversationMeta) => Conv
 
 /** Drafts (nothing sent yet) are not shown in the list. */
 export function isDraft(c: ConversationMeta): boolean {
-  return c.messageCount === 0 && c.preview === '';
+  // a bot's empty "Bot Chat" is a place, not a draft: never re-used for a new chat, rebound or pruned
+  return c.messageCount === 0 && c.preview === '' && !c.botChat;
 }

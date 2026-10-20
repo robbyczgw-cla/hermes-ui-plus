@@ -22,6 +22,7 @@ Numeric `qty`, `unit` separate; the servings stepper scales it. Unit-less single
 {id, label, seconds (1-86400; 0 or omit with until/stopwatch/timers), until?: ISO datetime, mode?:"countdown"|"stopwatch", timers?:[{id?, label, seconds}] (<=6), autostart?}
 - Single: `seconds`. Countdown to a date/time ("until kick-off at 20:45"): `until` (ISO local, e.g. "2026-10-17T20:45"), only with a date you know. Stopwatch: `mode:"stopwatch"`. Several at once (menu, intervals): `timers` of 2-6 with a short `label`. Never `autostart:true` (the user taps start).
 - "Remind me in 10 minutes" is a reminder/timer request: if the user wants a countdown, use `timer`; a reminder at a clock time stays text + `reminder` action button.
+- Changing a timer you showed ("make it 3 minutes"): the same `id` with the new `seconds`; the app replaces the running one. Another timer: its own `id` and `label`.
 {"type":"timer","id":"pasta","label":"Pasta al dente","seconds":540}
 {"type":"timer","id":"dinner","label":"Dinner","seconds":0,"timers":[{"label":"Lasagne","seconds":2700},{"label":"Rice","seconds":1080},{"label":"Broccoli","seconds":420}]}
 {"type":"timer","id":"kickoff","label":"Until kick-off","seconds":0,"until":"2026-10-17T20:45"}

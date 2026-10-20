@@ -3,6 +3,7 @@ import http from 'node:http';
 import https from 'node:https';
 import { randomUUID } from 'node:crypto';
 import { routingContext } from './router/context.mjs';
+import { parseLiveHeader } from './router/live.mjs';
 import { applySystemMessages, buildHint } from './router/hint.mjs';
 import { asciiJson, createAssistantCollector, sseFrame } from './sse.mjs';
 import { LruCache } from './lru.mjs';
@@ -11,6 +12,8 @@ import { checkRequestPath, upstreamUrl } from './paths.mjs';
 import { makeAuthorizer, makeCredentials } from './auth.mjs';
 import { approvalAnswerRun } from './approvals.mjs';
 import { createReplayStore, idempotencyKey, resumeOffset, RESUMABLE_HEADER } from './replay.mjs';
+import { createJobsHandler, isJobsPath } from './jobs.mjs';
+import { createRoutinesRights } from './routines-rights.mjs';
 import { createProfiles, DEFAULT_PROFILE, isProfileName, PROFILES_PATH, splitProfilePath } from './profiles.mjs';
 
 const SAFE_ID = /^[A-Za-z0-9._:-]{1,128}$/;
@@ -19,6 +22,9 @@ const API_TIMEOUT_MS = 30_000;
 const STOP_BODY_MAX = 4 * 1024;
 const APPROVAL_BODY_MAX = 8 * 1024;
 const MODEL_LOCK_BODY_MAX = 8 * 1024;
+const BOT_CHAT_BODY_MAX = 1024;
+/** Title of a bot's one shared thread (Hermes Desktop's bot mode convention, docs/BOTS-SERVER.md) */
+export const BOT_CHAT_TITLE = 'Bot Chat';
 export const STOP_PATH = '/bridge/chat/stop';
 
 export const ROUTE_EVENT = 'hermes.ui.route';
@@ -86,7 +92,8 @@ const truthy = (v) => v === true || v === 1 || (typeof v === 'string' && /^(1|tr
  *   logger?: ReturnType<typeof import('./log.mjs').createLogger>,
  *   turns?: {begin: (sessionId: string, profile?: string|null) => () => void},
  *   approvals?: ReturnType<typeof import('./approvals.mjs').createApprovalWatcher>,
- *   profiles?: ReturnType<typeof import('./profiles.mjs').createProfiles>}} deps
+ *   profiles?: ReturnType<typeof import('./profiles.mjs').createProfiles>,
+ *   routinesRights?: ReturnType<typeof import('./routines-rights.mjs').createRoutinesRights>}} deps
  *   turns: push watcher (src/push-hermes.mjs) skips what we stream; approvals: approval.request → inbox + push (src/approvals.mjs);
  *   profiles: Hermes profiles reachable under `/p/<name>/…` (src/profiles.mjs; default: from process.env)
  */
@@ -269,6 +276,94 @@ export function createBridgeHandler(config, deps) {
     up.end(body ?? undefined);
   }
 
+  /** One buffered upstream request (JSON in/out) for the bridge's own composed calls. Never throws. */
+  function upstreamJson(method, path, headers, body) {
+    return new Promise((resolve) => {
+      const h = { ...headers, 'accept-encoding': 'identity' };
+      delete h['content-length'];
+      const buf = body === undefined ? null : Buffer.from(JSON.stringify(body));
+      if (buf) { h['content-type'] = 'application/json'; h['content-length'] = String(buf.length); } else delete h['content-type'];
+      const up = upstreamRequest(method, path, h);
+      up.setTimeout(limits.apiTimeoutMs, () => up.destroy(Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' })));
+      up.on('response', (r) => {
+        const chunks = [];
+        let size = 0;
+        r.on('data', (c) => { size += c.length; if (size <= 2_000_000) chunks.push(c); });
+        r.on('end', () => {
+          const text = Buffer.concat(chunks).toString('utf8');
+          let json = null;
+          try { json = JSON.parse(text); } catch { json = null; }
+          resolve({ status: r.statusCode ?? 502, json, text, headers: r.headers });
+        });
+        r.on('error', (err) => resolve({ status: 0, error: err }));
+      });
+      up.on('error', (err) => resolve({ status: 0, error: err }));
+      up.end(buf ?? undefined);
+    });
+  }
+
+  /**
+   * POST /api/sessions (also /p/<bot>/api/sessions): ONLY a bot's "Bot Chat" thread (docs/BOTS-SERVER.md). The body
+   * must be exactly {title:"Bot Chat"}; anything else is refused before Hermes. Adopt before create: an existing session
+   * with that exact title (also a hidden one, Hermes Desktop creates it hidden) is returned instead of a second one
+   * (Hermes titles are unique per profile), so two devices opening a bot at once end up in the same thread.
+   * 200 {session, adopted: true} | Hermes' own create answer (201 {session}) with `adopted: false`.
+   */
+  async function botChatSession(req, res, reqId) {
+    let body;
+    try {
+      const chunks = [];
+      let size = 0;
+      for await (const c of req) {
+        size += c.length;
+        if (size > BOT_CHAT_BODY_MAX) return openaiError(res, 413, 'Request body too large', 'invalid_request_error', 'payload_too_large');
+        chunks.push(c);
+      }
+      body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+    } catch {
+      return openaiError(res, 400, 'Invalid JSON', 'invalid_request_error');
+    }
+    const keys = body && typeof body === 'object' && !Array.isArray(body) ? Object.keys(body) : null;
+    if (!keys || body.title !== BOT_CHAT_TITLE || keys.some((k) => k !== 'title')) {
+      return openaiError(res, 403, 'Only the bot\'s "Bot Chat" session can be created through the bridge', 'invalid_request_error', 'bot_chat_only');
+    }
+    const headers = filterRequestHeaders(req.headers);
+    const listPath = `${String(req.url).split('?')[0]}?title=${encodeURIComponent(BOT_CHAT_TITLE)}&include_hidden=1&limit=20`;
+    const found = await upstreamJson('GET', listPath, headers);
+    if (found.status === 0) return upstreamFailed(res, found.error, reqId);
+    if (found.status >= 200 && found.status < 300) {
+      const rows = Array.isArray(found.json?.sessions) ? found.json.sessions : Array.isArray(found.json?.data) ? found.json.data : Array.isArray(found.json) ? found.json : [];
+      const hit = rows
+        .filter((r) => r && typeof r === 'object' && r.title === BOT_CHAT_TITLE && typeof r.id === 'string' && SAFE_ID.test(r.id))
+        .sort((a, b) => Number(b.last_active ?? b.started_at ?? 0) - Number(a.last_active ?? a.started_at ?? 0))[0];
+      if (hit) {
+        log.info('bot_chat', { reqId, adopted: true });
+        return sendJson(res, 200, { object: 'hermes.session', session: hit, adopted: true });
+      }
+    } else if (found.status === 401 || found.status === 403 || found.status === 404) {
+      // a profile without its key (401) / an unknown profile or an old Hermes without the sessions API (404)
+      res.writeHead(found.status, { 'content-type': 'application/json', 'x-hermes-ui-bridge': '1' });
+      return res.end(found.text || '{}');
+    }
+    const made = await upstreamJson('POST', String(req.url).split('?')[0], headers, { title: BOT_CHAT_TITLE });
+    if (made.status === 0) return upstreamFailed(res, made.error, reqId);
+    log.info('bot_chat', { reqId, adopted: false, status: made.status });
+    if (made.json && typeof made.json === 'object' && !Array.isArray(made.json) && made.status >= 200 && made.status < 300) return sendJson(res, made.status, { ...made.json, adopted: false });
+    res.writeHead(made.status, { 'content-type': String(made.headers?.['content-type'] ?? 'application/json'), 'x-hermes-ui-bridge': '1' });
+    res.end(made.text);
+  }
+
+  // Hermes cron jobs (routines): own allow-list, guarded run, projected responses (src/jobs.mjs)
+  // rights per request and bot (src/routines-rights.mjs); without the server's auth layer (handler built directly, tests)
+  // the caller is the owner and only BRIDGE_ROUTINES / BRIDGE_ROUTINES_BOTS / the device registry decide
+  const routinesRights = deps.routinesRights ?? createRoutinesRights({
+    mode: config.routines ?? 'control', bots: config.routinesBots ?? { all: false, names: [] }, devices: config.auth?.devices ?? null, profiles,
+  });
+  const who = (req) => (config.auth && typeof config.auth.check === 'function' ? config.auth.check(req) : { kind: 'admin' });
+  const jobs = createJobsHandler({
+    routines: config.routines ?? 'control', access: (req, bot) => routinesRights.access(who(req), bot), upstreamRequest, openaiError, sendJson, limits, log,
+  });
+
   function readBody(req) {
     return new Promise((resolve, reject) => {
       /** @type {Buffer[]} */
@@ -343,7 +438,7 @@ export function createBridgeHandler(config, deps) {
       const prior = sessionHeader && memory ? memory.get(memoryKey(profile, sessionHeader)) : undefined;
       turns = routingContext(body.messages, { prior, maxChars: config.router.contextMaxChars });
       if (router && !routeOptOut && (stream || config.router.routeNonStream)) {
-        decision = await router.route(turns, { signal: ac.signal, reqId });
+        decision = await router.route(turns, { signal: ac.signal, reqId, liveCards: parseLiveHeader(req.headers['x-hui-live']) });
         if (ac.signal.aborted) return false;
       }
       // Header-less multi-turn clients: Hermes derives the session id from the system prompt +
@@ -534,7 +629,7 @@ export function createBridgeHandler(config, deps) {
 
     if (req.method === 'OPTIONS' && req.headers.origin && config.corsOrigins.length) {
       res.writeHead(204, {
-        'access-control-allow-methods': 'GET, POST, PATCH, DELETE, OPTIONS',
+        'access-control-allow-methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
         'access-control-allow-headers': String(req.headers['access-control-request-headers'] ?? 'authorization, content-type, x-hermes-session-id, x-hermes-session-key'),
         'access-control-max-age': '600',
       });
@@ -563,6 +658,7 @@ export function createBridgeHandler(config, deps) {
         router: router ? { kind: config.router.kind, mode: router.mode, model: router.backend?.model ?? 'heuristic-v1', timeoutMs: router.timeoutMs, cacheSize: router.cache?.size ?? 0 } : null,
         hint: config.hint.mode,
         bootstrap: Boolean(config.bootstrap),
+        caps: config.caps ?? null, // src/caps.mjs, what the bootstrap tells the model (e.g. image_search off)
         memorySessions: memory?.size ?? 0,
         resume: replay ? { enabled: true, ...replay.stats() } : { enabled: false },
       });
@@ -629,6 +725,20 @@ export function createBridgeHandler(config, deps) {
     }
     if (req.method === 'POST' && path === STOP_PATH) {
       return void stopRun(req, res, reqId).catch(() => res.destroy());
+    }
+    if (isJobsPath(path)) {
+      return void jobs.handle(req, res, reqId, profile, path).catch((err) => {
+        log.error('jobs_failed', { reqId, error: String(err?.message ?? err).slice(0, 200) });
+        if (!res.headersSent) openaiError(res, 500, 'Bridge error', 'bridge_error');
+        else res.destroy();
+      });
+    }
+    if (req.method === 'POST' && path === '/api/sessions') {
+      return void botChatSession(req, res, reqId).catch((err) => {
+        log.error('bot_chat_failed', { reqId, error: String(err?.message ?? err).slice(0, 200) });
+        if (!res.headersSent) openaiError(res, 500, 'Bridge error', 'bridge_error');
+        else res.destroy();
+      });
     }
     if (path.startsWith('/api/')) {
       // session ids are plain [A-Za-z0-9._:-]: any %-escape in the raw path is refused (no second decoding upstream)

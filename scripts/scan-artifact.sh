@@ -61,7 +61,13 @@ else
   lg --require-denylist ${HERMES[@]+"${HERMES[@]}"} || rc=1
 fi
 echo "== gitleaks (secrets) =="
-gitleaks dir "$scan_dir" --config "$ROOT/.gitleaks.toml" --redact --no-banner --verbose || rc=1
+# gitleaks gets a copy in which every Hermes bytecode file is replaced by its decoded strings, one per line: in the raw
+# string storage unrelated neighbours run together into fake tokens (generic-api-key false positive). Text bundles and
+# all other files are copied unchanged, so nothing is hidden. A bytecode file that does not decode fails the gate.
+gl_dir="$(mktemp -d "${TMPDIR:-/tmp}/hui-gl.XXXXXX")"
+trap 'cleanup; rm -rf "$gl_dir"' EXIT
+node "$ROOT/scripts/hermes-strings-dump.mjs" "$scan_dir" "$gl_dir/tree" || rc=1
+[ -d "$gl_dir/tree" ] && { gitleaks dir "$gl_dir/tree" --config "$ROOT/.gitleaks.toml" --redact --no-banner --verbose || rc=1; }
 if [ "$rc" -ne 0 ]; then
   echo "scan-artifact: FAILED: do not publish $target" >&2
   exit 1

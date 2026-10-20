@@ -6,7 +6,10 @@ import { createSseParser } from '../../hermes/sse.ts';
 import { mapFrame } from '../../hermes/events.ts';
 import { toolDetailFrom } from '../../hermes/sessionMapping.ts';
 import type { ApprovalChoice, HermesEvent } from '../../hermes/types';
-import { L, pickScenario, type DemoLang, type DemoStep } from './scenarios.ts';
+import type { UserBatch } from '../../live/model.ts';
+import { L, pickScenario, type DemoBotRole, type DemoLang, type DemoStep } from './scenarios.ts';
+import { pickBotScenario } from './scenes-bots.ts';
+import { routinesEnabled } from '../../routines/enabled.ts';
 
 export type DemoTiming = {
   /** delay per prose token (ms) */
@@ -30,10 +33,18 @@ export type DemoTurnParams = {
   sessionId: string;
   /** UI language of the chat (default German) */
   lang?: DemoLang;
+  /** the answering bot (`default` or a profile name; multi-bot sample) */
+  bot?: string;
+  /** a demo bot's role (onboarding/demo/bots.ts): it answers with its own canned texts (scenes-bots.ts) */
+  role?: DemoBotRole;
+  /** replay these steps instead of picking a scenario (a demo bot's turn that waits for an approval, bots.ts) */
+  script?: { name: string; steps: DemoStep[] };
   /** 1-based number of this turn in the session */
   turn: number;
   /** earlier user messages, newest first (a reformat chip reshapes the last answer that is not itself a reformat) */
   history?: string[];
+  /** the user's live-card edits sent with this message (live/outgoing.ts batches) */
+  live?: Record<string, UserBatch>;
   signal?: AbortSignal;
   onEvent: (ev: HermesEvent) => void;
   /** resolves with the user's choice for an approval request (DemoSession wires the approval sheet) */
@@ -107,10 +118,16 @@ function completionId(): string {
 export async function runDemoTurn(p: DemoTurnParams): Promise<DemoTurnResult> {
   const timing = p.timing ?? DEFAULT_TIMING;
   const sleep = p.sleep ?? defaultSleep;
-  const { name, scenario } = pickScenario(p.text);
+  const pick = (t: string) => (p.role ? pickBotScenario(t, p.role) : pickScenario(t));
+  const picked = p.script ? null : pick(p.text);
+  const name = p.script?.name ?? picked!.name;
+  const format = picked?.scenario.format ?? 'text';
   const lang = p.lang ?? 'de';
-  const previousScenario = (p.history ?? []).map((h) => pickScenario(h).name).find((n) => n !== 'reformat');
-  const steps: DemoStep[] = scenario.steps({ userText: p.text, turn: p.turn, sessionId: p.sessionId, now: (p.now ?? (() => new Date()))(), lang, previousScenario });
+  const earlier = (p.history ?? []).map((h) => pick(h).name);
+  const previousScenario = earlier.find((n) => n !== 'reformat');
+  const steps: DemoStep[] = p.script
+    ? p.script.steps.slice()
+    : picked!.scenario.steps({ userText: p.text, turn: p.turn, sessionId: p.sessionId, now: (p.now ?? (() => new Date()))(), lang, bot: p.bot, role: p.role, previousScenario, earlier, live: p.live, routines: routinesEnabled() });
   const id = completionId();
   const model = 'hermes-demo';
   const created = Math.floor(Date.now() / 1000);
@@ -134,7 +151,7 @@ export async function runDemoTurn(p: DemoTurnParams): Promise<DemoTurnResult> {
 
   try {
     await wait(120);
-    write(frame({ format: scenario.format, confidence: scenario.format === 'text' ? 0.62 : 0.93, reason: L({ lang }, `Demo-Szenario „${name}“`, `Demo scenario “${name}”`, `Escenario de demo «${name}»`), model: 'demo-router', ms: 0 }, 'hermes.ui.route'));
+    write(frame({ format, confidence: format === 'text' ? 0.62 : 0.93, reason: L({ lang }, `Demo-Szenario „${name}“`, `Demo scenario “${name}”`, `Escenario de demo «${name}»`), model: 'demo-router', ms: 0 }, 'hermes.ui.route'));
     write(frame(chunk({ role: 'assistant' })));
     await wait(250);
 
@@ -178,16 +195,17 @@ export async function runDemoTurn(p: DemoTurnParams): Promise<DemoTurnResult> {
               // the demo offers exactly "Allow once" / "Deny": a global allowlist makes no sense without a server
               allow_permanent: false,
               allow_session: false,
-              request_id: `req-${id}`,
-              run_id: id,
+              request_id: a.requestId ?? `req-${id}`,
+              run_id: a.runId ?? id,
               timestamp: Date.now() / 1000,
+              ...(a.timeoutSeconds ? { timeout_seconds: a.timeoutSeconds } : {}),
               session_id: p.sessionId,
               choices: ['once', 'deny'],
             },
             'approval.request',
           ),
         );
-        const choice = await raceAbort(p.waitForApproval(id), p.signal);
+        const choice = await raceAbort(p.waitForApproval(a.runId ?? id), p.signal);
         const denied = choice === 'deny' || choice === 'timeout';
         const follow: DemoStep[] = denied
           ? (a.deny ?? [{ text: L({ lang }, '\n\nOkay, der Befehl wurde abgelehnt; ich lasse alles unverändert.', '\n\nOkay, the command was denied; I am leaving everything unchanged.', '\n\nDe acuerdo, el comando fue denegado; dejo todo sin cambios.') }])

@@ -23,6 +23,7 @@ const sessions = new Map(); // id -> {session, messages}
 const jobs = [
   { id: 'aaa111', name: 'Morning Briefing', deliver: 'telegram:-100:2' },
   { id: 'bbb222', name: 'Shared Memory Sync', deliver: 'local' },
+  { id: 'ccc333', name: 'Wasser-Erinnerung', deliver: 'bot-chat' },
 ];
 function addSession(id, source, extra = {}) {
   const t = nowSec() - 60;
@@ -323,4 +324,46 @@ test('push: Web Push and FCM fetch with redirect: manual; a 3xx is a failure, no
   const fcm = createFcmSender({ serviceAccount: sa, fetch: async (_u, init) => (fcmInits.push(init), new Response(null, { status: 302, headers: { location: 'https://attacker.example/' } })) });
   assert.equal((await fcm.send('tok', { title: 'a', body: 'b' })).ok, false);
   assert.ok(fcmInits.length >= 1 && fcmInits.every((i) => i.redirect === 'manual'));
+});
+
+/** a poll that starts after the rows were added (pollNow returns a poll that may already be in flight) */
+const pollFresh = async () => {
+  await ctx.push.pollNow();
+  await ctx.push.pollNow();
+};
+
+test('Bots: a reminder delivered into a Bot Chat (any source) is pushed with its text and the bot; silent runs and streamed turns are not', async () => {
+  const { parseCronInjection } = await import('../src/push-hermes.mjs');
+  assert.deepEqual(parseCronInjection('[Cronjob "Wasser" output — scheduled job, not the user. Review it.]\n\nZeit fürs Wasser'), { name: 'Wasser', output: 'Zeit fürs Wasser' });
+  assert.deepEqual(parseCronInjection('[Cronjob "X" output - scheduled job]\n\n[SILENT]'), { name: 'X', output: '[SILENT]' });
+  assert.equal(parseCronInjection('Erinnere mich an [Cronjob "x" output]'), null);
+  // Hermes created the default bot's Bot Chat itself when the first `deliver: bot-chat` job fired (source cli)
+  const sid = '20261020_073521_fee558';
+  addSession(sid, 'cli', { title: 'Bot Chat' });
+  addMessage(sid, 'user', 'hallo', { ts: nowSec() - 50 });
+  await pollFresh(); // first sight = baseline
+  const before = fcm.calls.length;
+  // the job's own cron session (every run has one) is not pushed: its delivery into the Bot Chat is (one ping per run)
+  addSession('cron_ccc333_20261020_073500', 'cron', { ended: true });
+  addMessage('cron_ccc333_20261020_073500', 'assistant', 'Zeit fürs Wasser trinken', { ts: nowSec() - 7 });
+  addMessage(sid, 'user', '[Cronjob "Wasser-Erinnerung" output — scheduled job, not the user. Review it, act on anything that needs action, and summarize for the chat.]\n\nZeit fürs Wasser trinken', { ts: nowSec() - 6 });
+  addMessage(sid, 'assistant', 'Die Erinnerung ist gelaufen, nichts weiter zu tun.', { ts: nowSec() - 5 });
+  await pollFresh();
+  const got = fcm.calls.slice(before);
+  // every registered device of the default scope (both phones of this file) gets it once
+  assert.deepEqual(new Set(got.map((c) => c.token)).size, got.length);
+  assert.ok(got.length >= 1);
+  for (const c of got) assert.deepEqual([c.n.title, c.n.body, c.n.data.sessionId, c.n.data.botChat, c.n.data.source], ['Hermes · Wasser-Erinnerung', 'Zeit fürs Wasser trinken', sid, '1', 'api_server']);
+  const perPoll = got.length;
+  // a routine with nothing new: no push, even with a comment
+  addMessage(sid, 'user', '[Cronjob "Preis-Check" output — scheduled job, not the user.]\n\n[SILENT]', { ts: nowSec() - 3 });
+  addMessage(sid, 'assistant', 'Nichts Neues heute.', { ts: nowSec() - 2 });
+  await pollFresh();
+  assert.equal(fcm.calls.length, before + perPoll, 'a silent run notifies nobody');
+  // the same thread asked from another client (Hermes Desktop): its answer reaches the phone
+  addMessage(sid, 'user', 'Frage am Desktop', { ts: nowSec() - 1 });
+  addMessage(sid, 'assistant', 'Antwort für den Desktop', { ts: nowSec() });
+  await pollFresh();
+  assert.equal(fcm.calls.at(-1).n.body, 'Antwort für den Desktop');
+  assert.equal(fcm.calls.at(-1).n.title, 'Hermes');
 });

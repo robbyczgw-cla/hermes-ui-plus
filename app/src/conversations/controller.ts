@@ -16,6 +16,7 @@ import type { ModelLockState } from '../hermes/modelLock.ts';
 import type { RemoteSession } from '../hermes/sessions.ts';
 import { hiddenKey, mergeRemoteSessions, type MergeResult, type SyncFilter } from './remoteSync.ts';
 import { botOf } from '../hermes/bots.ts';
+import { BOT_CHAT_TITLE, conversationOfSession, findBotChat } from '../bots/core.ts';
 import { PERF, perfNow, perfSpan } from '../perf/probe.ts';
 
 export function createController(store: IndexStore, repo: ConversationRepo, now: () => number = Date.now) {
@@ -113,6 +114,50 @@ export function createController(store: IndexStore, repo: ConversationRepo, now:
     },
 
     setBot,
+
+    /**
+     * A bot's "Bot Chat" (bots/core.ts): the existing one, an earlier ordinary entry of the same session (adopted), or a
+     * new entry bound to `session` (null = the server cannot open one: a chat of this app only, fresh session id).
+     * Activated unless `activate: false` (Bots tab refresh). `seed`: the transcript of a new entry without a server
+     * session (the offline demo's example bots, onboarding/demo/bots.ts), stored at once; the entry keeps the time of its
+     * last message.
+     */
+    openBotChat(
+      profile: ProfileRef,
+      bot: string | undefined,
+      session: { id: string; source?: string; lastActive?: number; messageCount: number; preview?: string } | null,
+      opts: { activate?: boolean; seed?: ChatMessage[] } = {}
+    ): ConversationMeta {
+      const activate = opts.activate !== false;
+      const items = store.get().items;
+      const existing = findBotChat(items, profile.id, bot);
+      if (existing) {
+        if (activate) store.dispatch({ type: 'setActive', id: existing.id });
+        return existing;
+      }
+      const t = now();
+      const remote = session ? { source: session.source ?? 'api_server', title: BOT_CHAT_TITLE, ...(session.lastActive ? { lastActive: session.lastActive } : {}), remoteCount: session.messageCount } : undefined;
+      const old = session ? conversationOfSession(items, profile.id, bot, session.id) : undefined;
+      if (old) {
+        store.dispatch({ type: 'botChat', id: old.id, adopt: true, profile, bot, sessionId: session!.id, now: t, title: BOT_CHAT_TITLE, remote, activate });
+        return get(old.id)!;
+      }
+      const id = newConversationId(t);
+      const seed = !session && opts.seed?.length ? opts.seed : undefined;
+      store.dispatch({
+        type: 'botChat', id, profile, bot, sessionId: session?.id ?? newSessionIdFor(profile.kind), now: seed ? (seed[seed.length - 1].createdAt || t) : t, title: BOT_CHAT_TITLE, activate,
+        ...(remote ? { remote } : {}),
+        // the server's preview is the FIRST user message: a placeholder until the transcript is fetched
+        ...(session?.messageCount ? { messageCount: session.messageCount, preview: '…' } : {}),
+      });
+      if (seed) save(id, seed, { keepOrder: true });
+      return get(id)!;
+    },
+
+    /** server activity of a bot's Bot Chat (Bots tab refresh); newer activity is fetched when the chat opens */
+    botChatRemote(id: string, info: { lastActive?: number; remoteCount?: number; preview?: string }) {
+      store.dispatch({ type: 'botChatRemote', id, ...info });
+    },
 
     /**
      * A branched chat ("In neuem Chat fortsetzen", /branch): ALWAYS a new conversation (never a re-used draft –

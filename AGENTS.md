@@ -21,6 +21,24 @@ This repository is (or will become) **public**. Everything tracked must be safe 
 
 ## Checks
 
-`scripts/check.sh all` (tsc + tests, memory-capped; never wrap it in `flock` yourself). Leak-guard tests:
+`scripts/check.sh all` (tsc + tests incl. the full bridge suite, memory-capped; never wrap it in `flock` yourself;
+needs `npm ci` in `app/` and `bridge/`, the `--host` mode does that on the host). Leak-guard tests:
 `node --test scripts/leak-guard.test.mjs`.
 While iterating use `scripts/check.sh quick` (related tests + incremental tsc + leak-guard; not a merge gate); `scripts/check.sh all` is required before every merge.
+On a machine too small for it, run the gate on a Linux build host: `scripts/check.sh all --host <ssh-host>` (or `--host linux`
+for `LINUX_HOST`); it ships the committed HEAD (dirty tree refused, `--worktree` to include changes), caches Node and
+node_modules there, queues behind other runs and returns the remote exit code. Details in CONTRIBUTING.md.
+
+## Test what a normal user gets, not only what we built
+
+Many tests check that our code does what we built it to do. Fewer check what a normal user with a normal setup
+actually sees. Cover that side too:
+
+- Test against the default configuration (bridge as a pure pass-through, no extras such as image search keys,
+  router `heuristic`), not only against mocks, the demo or our own special test setups.
+- Use realistic multi-turn conversations with typical follow-ups ("photos?", "as a table?", "more details?") and
+  typos, not only single clean prompts.
+- Every answer component must render something visible and understandable when its data is missing or cannot be
+  resolved (no empty gap, no silent disappearance), with a test for it.
+- Before a release, run the live conversation check against the default bridge on a Hermes test instance
+  (docs/RELEASING.md).

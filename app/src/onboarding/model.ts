@@ -82,6 +82,15 @@ export function skillInstallCommand(repoUrl: string | null = PROJECT_REPO_URL): 
   ].join('\n');
 }
 
+/**
+ * Step after the consent for a new connection: the `hermes-ui` skill hint only fits a Hermes server (it installs into
+ * ~/.hermes/skills). Other backends get the presentation prompt from the app itself, so there is nothing to install:
+ * straight to "Fertig" (real-user PC-03).
+ */
+export function afterConnectStep(profile: { kind: string }): 'skill' | 'done' {
+  return profile.kind === 'hermes' ? 'skill' : 'done';
+}
+
 /** Lines of a code box (onboarding CodeBox): one wrapping text each, trailing blank lines dropped. */
 export function codeBoxLines(code: string): string[] {
   const lines = code.replace(/\r\n?/g, '\n').split('\n');

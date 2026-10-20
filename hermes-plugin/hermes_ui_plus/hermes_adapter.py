@@ -37,6 +37,8 @@ streaming.
 from __future__ import annotations
 
 import contextlib
+import os
+import tempfile
 import logging
 import threading
 from pathlib import Path
@@ -371,3 +373,207 @@ class HermesAuxBackend:
         finally:
             _close(it)
             _close(resp)
+
+
+class HermesLibrary:
+    """Read-only skills/memory source for ``library.LibraryService`` (hermes-agent v0.22 internals, all imported
+    lazily inside the plugin profile's scope; any failure propagates and becomes ``hermes_unsupported``).
+
+        tools.skills_tool: _find_all_skills(skip_disabled=True), _sort_skills
+        tools.skill_manager_tool: _find_skill
+        tools.skill_usage: _read_bundled_names, _read_hub_installed_names, _external_skill_names
+        hermes_cli.config.load_config, hermes_cli.skills_config.get_disabled_skills
+
+    Same provenance order as the dashboard (hub > bundled > external), the rest is called ``local``.
+    """
+
+    def __init__(self, home: Optional[str] = None):
+        self.home = home
+
+    def skills(self) -> list[dict]:
+        with profile_scope(self.home):
+            from hermes_cli.config import load_config
+            from hermes_cli.skills_config import get_disabled_skills
+            from tools.skill_usage import _external_skill_names, _read_bundled_names, _read_hub_installed_names
+            from tools.skills_tool import _find_all_skills, _sort_skills
+
+            cfg = load_config()
+            disabled = get_disabled_skills(cfg) | get_disabled_skills(cfg, "api_server")  # the API server's view
+            bundled, hub = set(_read_bundled_names()), set(_read_hub_installed_names())
+            external = set(_external_skill_names()) - bundled - hub
+            out = []
+            for s in _sort_skills(_find_all_skills(skip_disabled=True)):
+                n = s["name"]
+                out.append({"name": n, "description": s.get("description") or "", "category": s.get("category"),
+                            "enabled": n not in disabled,
+                            "source": "hub" if n in hub else "bundled" if n in bundled
+                            else "external" if n in external else "local"})
+            return out
+
+    def skill_md(self, name: str) -> Optional[bytes]:
+        """SKILL.md bytes of the skill Hermes resolves ``name`` to (at most 256 KiB + 1), None if there is none."""
+        with profile_scope(self.home):
+            from tools.skill_manager_tool import _find_skill
+
+            found = _find_skill(name)
+            if not found:
+                return None
+            path = Path(found["path"]) / "SKILL.md"
+            if not path.is_file():
+                return None
+            with open(path, "rb") as f:
+                return f.read(256 * 1024 + 1)
+
+    def memory_settings(self) -> dict:
+        with profile_scope(self.home):
+            from hermes_cli.config import load_config
+
+            mem = load_config().get("memory") or {}
+            if not isinstance(mem, dict):
+                mem = {}
+
+            def num(key: str, default: int) -> int:
+                v = mem.get(key, default)
+                return v if isinstance(v, int) and not isinstance(v, bool) and v > 0 else default
+
+            def on(key: str) -> bool:
+                v = mem.get(key, True)
+                return v if isinstance(v, bool) else True
+
+            provider = mem.get("provider")
+            return {"provider": provider.strip() if isinstance(provider, str) and provider.strip() else None,
+                    "memory_enabled": on("memory_enabled"), "user_enabled": on("user_profile_enabled"),
+                    "memory_limit": num("memory_char_limit", 2200), "user_limit": num("user_char_limit", 1375)}
+
+
+def _write_atomic(path: Path, data: bytes, mode: Optional[int] = None) -> None:
+    """Write ``data`` next to ``path`` and rename it into place (keeps the old file's mode unless ``mode`` is given)."""
+    if mode is None:
+        try:
+            mode = path.stat().st_mode & 0o777
+        except OSError:
+            mode = 0o644
+    fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".hui-tmp", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
+class HermesBots:
+    """Profiles as bots for ``bots.BotsService`` (hermes-agent v0.22 internals, imported lazily per call; any failure
+    propagates and becomes ``hermes_unsupported`` or ``create_failed``).
+
+        hermes_cli.profiles: list_profile_names, get_profile_dir, create_profile(clone_from="default")
+        hermes_cli.gateway_multiplex_served.notify_multiplexer_profiles_changed
+        agent.secret_scope.is_multiplex_active
+        hermes_yaml (v0.22.2: ruamel with Hermes' YAML 1.1 policy), else PyYAML (older images), for profile.yaml /
+        config.yaml of the new profile
+
+    Creating a profile is file work plus a rescan of the running multiplexer: no package manager, no gateway restart
+    (docs/BOTS-SERVER.md). Files are only written inside ``<root>/profiles/<name>/`` of a name Hermes validated.
+    """
+
+    MEMORY_FILES = ("MEMORY.md", "USER.md")
+
+    @staticmethod
+    def _profiles() -> Any:
+        from hermes_cli import profiles  # profile directories, create, list
+
+        return profiles
+
+    def names(self) -> list[str]:
+        return [n for n in self._profiles().list_profile_names() if n != "default"]
+
+    def _dir(self, name: str) -> Path:
+        d = Path(self._profiles().get_profile_dir(name))
+        if d.name != name or d.parent.name != "profiles":
+            raise ValueError("unexpected profile directory")
+        return d
+
+    @staticmethod
+    def _yaml() -> Any:
+        try:
+            import hermes_yaml  # Hermes' own YAML policy (v0.22.2)
+
+            return hermes_yaml
+        except ImportError:
+            import yaml  # PyYAML, what older Hermes images read configs with
+
+            return yaml
+
+    def _load_yaml(self, path: Path) -> dict:
+        yaml = self._yaml()
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _rmw_yaml(self, path: Path, fn: Callable[[dict], dict]) -> None:
+        doc = fn(self._load_yaml(path))
+        # no line folding: a folded long value does not always read back identical (Hermes #119844)
+        text = self._yaml().safe_dump(doc, sort_keys=False, allow_unicode=True, width=2**31 - 1)
+        _write_atomic(path, text.encode("utf-8"))
+
+    def read_profile_yaml(self, name: str) -> dict:
+        try:
+            return self._load_yaml(self._dir(name) / "profile.yaml")
+        except Exception:
+            return {}
+
+    def is_parked(self, name: str) -> bool:
+        return (self._dir(name) / "gateway.parked").exists()
+
+    def create(self, name: str, description: str) -> None:
+        self._profiles().create_profile(name, clone_from="default", clone_config=True, description=description)
+
+    def drop_memory(self, name: str) -> None:
+        mem = self._dir(name) / "memories"
+        for f in self.MEMORY_FILES:
+            with contextlib.suppress(FileNotFoundError):
+                (mem / f).unlink()
+
+    def write_soul(self, name: str, text: str) -> None:
+        _write_atomic(self._dir(name) / "SOUL.md", text.encode("utf-8"))
+
+    def update_config(self, name: str, fn: Callable[[dict], dict]) -> None:
+        self._rmw_yaml(self._dir(name) / "config.yaml", fn)
+
+    def update_profile_yaml(self, name: str, fn: Callable[[dict], dict]) -> None:
+        self._rmw_yaml(self._dir(name) / "profile.yaml", fn)
+
+    def set_env(self, name: str, key: str, value: str) -> None:
+        path = self._dir(name) / ".env"
+        try:
+            lines = path.read_text(encoding="utf-8-sig", errors="replace").splitlines()
+        except FileNotFoundError:
+            lines = []
+        kept = [ln for ln in lines if ln.strip().removeprefix("export ").split("=", 1)[0].strip() != key]
+        kept.append(f"{key}={value}")
+        _write_atomic(path, ("\n".join(kept) + "\n").encode("utf-8"), mode=0o600)
+
+    def park(self, name: str) -> None:
+        (self._dir(name) / "gateway.parked").write_text("hermes-ui-plus: setup failed\n", encoding="utf-8")
+
+    def notify(self, name: str) -> None:
+        try:
+            from hermes_cli.gateway_multiplex_served import notify_multiplexer_profiles_changed  # rescan now
+
+            notify_multiplexer_profiles_changed(name)
+        except Exception as exc:  # the multiplexer rescans every 30 s anyway
+            logger.debug("bots: rescan notification failed (%s)", type(exc).__name__)
+
+    @staticmethod
+    def multiplex_active() -> Optional[bool]:
+        ss, _ = _scope_modules()
+        if ss is None or not hasattr(ss, "is_multiplex_active"):
+            raise RuntimeError("no profile multiplexing in this Hermes")
+        return bool(ss.is_multiplex_active())

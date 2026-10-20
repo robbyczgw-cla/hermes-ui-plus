@@ -106,7 +106,8 @@ fetch_source() {
   elif [ -f "$SELF_DIR/remotes.env" ]; then read -r primary fallback <<<"$(sed -n 's/^HUI_NIGHTLY_REMOTES=//p' "$SELF_DIR/remotes.env" | tail -1)"
   else
     primary="$(git -C "$SELF_DIR" remote get-url origin 2>/dev/null || true)"
-    fallback="$(git -C "$SELF_DIR" remote get-url forgejo 2>/dev/null || true)"
+    fallback="$(git -C "$SELF_DIR" remote get-url github 2>/dev/null || git -C "$SELF_DIR" remote get-url forgejo 2>/dev/null || true)"
+    [ "$fallback" = "$primary" ] && fallback=""
   fi
   [ -n "${primary:-}" ] || { log "no source remote (run install.sh, or set HUI_NIGHTLY_REMOTES)"; return 1; }
   [ -d "$src/.git" ] || { rm -rf "$src"; git init -q "$src"; }

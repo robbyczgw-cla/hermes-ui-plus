@@ -22,6 +22,8 @@ export type Reminder = {
   nextRun?: number;
   /** recurring job (anything but "in 30m" / an absolute timestamp) */
   recurring: boolean;
+  /** where Hermes posts the run's answer (`deliver` of the result / job / arguments): `local`, `telegram`, `all`, … */
+  deliver?: string;
 };
 
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
@@ -40,11 +42,15 @@ export function parseNextRun(v: unknown): number | undefined {
   return Number.isNaN(ms) ? undefined : ms;
 }
 
-/** One-shot schedules fire once: "in 30m" or an ISO timestamp. Everything else repeats ("30m" = every 30 minutes, "every monday 9am", cron). */
+/**
+ * One-shot schedules fire once: "in 30m", an ISO timestamp, or Hermes' display of either ("once in 30m", "once at
+ * 2026-10-21 09:00", what v0.22 returns as `schedule`). Everything else repeats ("30m" = every 30 minutes, "every monday
+ * 9am", cron).
+ */
 export function isRecurringSchedule(schedule: string | undefined): boolean {
   if (!schedule) return false;
   const s = schedule.trim().toLowerCase();
-  if (/^in\s+\d/.test(s)) return false;
+  if (/^in\s+\d/.test(s) || /^once\b/.test(s)) return false;
   if (/^\d{4}-\d{2}-\d{2}([t ]\d{2}:\d{2}(:\d{2})?)?/.test(s)) return false;
   return true;
 }
@@ -65,6 +71,7 @@ export function parseReminders(tools: readonly ToolEvent[]): Reminder[] {
     if (!name) continue;
     const prompt = str(input?.prompt) ?? str(job?.prompt);
     const schedule = str(output.schedule) ?? str(job?.schedule_display) ?? str(input?.schedule);
+    const deliver = str(output.deliver) ?? str(job?.deliver) ?? str(input?.deliver);
     out.push({
       id: ev.id,
       action,
@@ -74,9 +81,50 @@ export function parseReminders(tools: readonly ToolEvent[]): Reminder[] {
       schedule,
       nextRun: parseNextRun(output.next_run_at ?? job?.next_run_at),
       recurring: isRecurringSchedule(schedule),
+      ...(deliver ? { deliver } : {}),
     });
   }
   return out;
+}
+
+/**
+ * Where a fired reminder goes, from Hermes' `deliver` (tools/cronjob_tools.py): `none` = saved only (`local`; what a job
+ * created from the app gets when Hermes has no home channel, because an API session cannot receive it), `botChat` = the
+ * bot's "Bot Chat" thread, `all` = every connected channel (none connected: the run ends as "delivery failed"),
+ * `targets` = named platforms. null = nothing reliable to say (`origin`, unknown words).
+ */
+export type ReminderDelivery = { kind: 'none' } | { kind: 'botChat' } | { kind: 'all' } | { kind: 'targets'; targets: string[] };
+
+const PLATFORM_NAMES: Record<string, string> = {
+  telegram: 'Telegram',
+  discord: 'Discord',
+  slack: 'Slack',
+  whatsapp: 'WhatsApp',
+  signal: 'Signal',
+  matrix: 'Matrix',
+  email: 'E-Mail',
+  sms: 'SMS',
+};
+
+export function reminderDelivery(deliver: string | undefined): ReminderDelivery | null {
+  const parts = (deliver ?? '')
+    .split(',')
+    .map((p) => p.trim().toLowerCase())
+    .filter(Boolean);
+  if (!parts.length) return null;
+  if (parts.every((p) => p === 'local' || p === 'none')) return { kind: 'none' };
+  if (parts.some((p) => p === 'origin')) return null;
+  if (parts.some((p) => p === 'all')) return { kind: 'all' };
+  if (parts.every((p) => p === 'bot-chat' || p.startsWith('bot-chat:'))) return { kind: 'botChat' };
+  // `telegram:-100…:17` → Telegram (chat ids are never shown); unknown platforms keep their word
+  const names = [...new Set(parts.filter((p) => p !== 'local' && p !== 'none').map((p) => (p.startsWith('bot-chat') ? 'Bot Chat' : (PLATFORM_NAMES[p.split(':')[0]] ?? p.split(':')[0]))))];
+  return names.length ? { kind: 'targets', targets: names } : null;
+}
+
+/** A device reminder can mirror a one-shot reminder that is still at least a minute away; recurring jobs never. */
+export function deviceReminderAt(r: Pick<Reminder, 'recurring' | 'nextRun'>, now: number = Date.now()): number | null {
+  if (r.recurring || r.nextRun === undefined) return null;
+  return r.nextRun > now + 60_000 ? r.nextRun : null;
 }
 
 const startOfDay = (ms: number) => {

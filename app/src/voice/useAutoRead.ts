@@ -18,6 +18,7 @@ import type { VoiceConn } from './types';
 import { answerText } from '../hermes/progressNotes';
 import type { ToolEvent } from '../hermes/types';
 import { freshest, liveMessages } from '../hermes/liveMessages';
+import { TOOL_MARKUP_NOTICE_KEY } from '../chat/toolMarkup';
 
 /** Structural subset of hermes ChatMessage. */
 export type SpeakableMessage = { id: string; role: string; text: string; status: string; tools?: ToolEvent[] };
@@ -51,7 +52,8 @@ export function useAutoRead(messages: readonly SpeakableMessage[], conn: VoiceCo
     // read-aloud while streaming: only answers whose start we saw (a new turn begins with an empty placeholder)
     const last = messages[messages.length - 1];
     if (enabled && last?.role === 'assistant' && last.status === 'streaming' && live.current?.id !== last.id && !step.lastWasKnown && last.text.length < LIVE_JOIN_MAX) {
-      live.current = { id: last.id, reader: createLiveReader(), speech: null };
+      // the reader reads the shown text: raw tool-call markup becomes the answer's notice line (chat/toolMarkup.ts)
+      live.current = { id: last.id, reader: createLiveReader({ notice: t(TOOL_MARKUP_NOTICE_KEY) }), speech: null };
     }
     const cur = live.current;
     const lm = cur ? (last?.id === cur.id ? last : messages.find((m) => m.id === cur.id)) : undefined;
@@ -68,7 +70,8 @@ export function useAutoRead(messages: readonly SpeakableMessage[], conn: VoiceCo
       cur.speech?.end();
       live.current = null;
     }
-    // the final answer only (interim notes before tool calls are not read aloud)
+    // the final answer only (interim notes before tool calls are not read aloud); raw tool-call markup is spoken as the
+    // notice line (speak → toSpeechText → chat/toolMarkup.ts answerOutputText)
     const text = toRead?.tools?.length ? answerText({ ...toRead, role: 'assistant', status: 'done', tools: toRead.tools }) : toRead?.text;
     if (enabled && toRead && text?.trim()) void speak({ id: toRead.id, text, conn: connRef.current, t, locale });
   }, [messages, enabled, t, locale]);

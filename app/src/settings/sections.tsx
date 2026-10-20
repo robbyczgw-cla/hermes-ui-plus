@@ -239,6 +239,8 @@ export function useCustomizationSections(): SettingsSection[] {
       sw('showStarters', tr('settings.chat.starters'), tr('settings.chat.startersSub')),
       sw('autoTitles', tr('settings.chat.autoTitles'), tr('settings.chat.autoTitlesSub')),
       sw('confirmLargeAttachments', tr('settings.chat.largeConfirm'), tr('settings.chat.largeConfirmSub', { size: largeSize })),
+      // "Routinen" (routines/enabled.ts): off = no Routines surface anywhere; reminders from the chat stay
+      { ...sw('routines', tr('settings.chat.routines'), tr('settings.chat.routinesSub')), texts: [tr('settings.chat.routines'), tr('settings.chat.routinesSub'), tr('settings.chat.routinesKeywords')] },
       block(
         'toolDetails',
         tr('settings.appearance.toolDetails'),

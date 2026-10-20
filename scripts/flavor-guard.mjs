@@ -167,7 +167,7 @@ function checkExpoConfig(dir, pdir) {
  */
 async function artifactScan(dir, pdir, env = process.env) {
   const file = join(pdir, 'leak-denylist.txt');
-  const { parseDenylist, makeScanner, loadAllowList } = await import('./leak-guard.mjs');
+  const { parseDenylist, makeScanner, loadAllowList, fileEntries } = await import('./leak-guard.mjs');
   const hasList = existsSync(file);
   const denylist = hasList ? parseDenylist(readFileSync(file, 'utf8')) : [];
   const allow = loadAllowList(ROOT, { ...env, HUI_PRIVATE_DIR: pdir });
@@ -176,13 +176,16 @@ async function artifactScan(dir, pdir, env = process.env) {
   const errs = [];
   for (const p of walk(dir, [], false)) {
     if (!lstatSync(p).isFile()) continue;
-    for (const f of scanner.scanContent(relative(dir, p), readFileSync(p))) {
-      if (f.error) {
-        errs.push(`${f.path}: ${f.rule}: ${f.text}`);
-        continue;
+    // .gz/.br/.zip: scan the decompressed content (compressed bytes can form a short term by chance), as leak-guard --path
+    for (const e of fileEntries(p, relative(dir, p))) {
+      for (const f of scanner.scanContent(e.path, e.read())) {
+        if (f.error) {
+          errs.push(`${f.path}: ${f.rule}: ${f.text}`);
+          continue;
+        }
+        const at = f.line ? `:${f.line}` : f.offset != null ? `@${f.offset}` : '';
+        errs.push(`${f.path}${at}: ${f.rule} ${f.text.length <= 3 ? '***' : f.text.slice(0, 2) + '***'}`);
       }
-      const at = f.line ? `:${f.line}` : f.offset != null ? `@${f.offset}` : '';
-      errs.push(`${f.path}${at}: ${f.rule} ${f.text.length <= 3 ? '***' : f.text.slice(0, 2) + '***'}`);
     }
   }
   return { errs, note: hasList ? '' : `no ${file}: private term scan skipped (generic patterns still checked)` };

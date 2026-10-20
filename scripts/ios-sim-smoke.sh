@@ -8,12 +8,13 @@
 # the test project and its DerivedData are removed at the end.
 #
 # Usage: scripts/ios-sim-smoke.sh
-# Env:   SIM_DEVICE [device of the last --simulator build, else "iPhone 18 Pro"]  HUI_LANG [en] (en|de)
+# Env:   SIM_DEVICE [device of the last --simulator build, else "iPhone 18 Pro"]  HUI_LANG [en] (en|de|es)
 #        HUI_APPEARANCE [unchanged] (light|dark: set before the run; reboots the simulator, it stays in that mode)
 #        HUI_TEST [smoke] (smoke: the smoke walk above; store: App Store screenshot drafts, one demo chat per scene of
 #        the store story, docs/STORE.md "Screenshots")
+#        HUI_STORE_ONLY [] (store test: "web-search" = only the web card scene)
 #        REMOTE_DIR [/Users/Shared/hermes-ui-build]  MAC_HOST [build.env]
-# Output: dist/ios-sim-smoke/<timestamp>/{NN-<step>.png, results.txt, app-errors.log, crashes.txt, xcodebuild-test.log}
+# Output: dist/ios-sim-smoke/<timestamp>/{NN-<step>.jpg (smoke; store drafts stay .png), results.txt, app-errors.log, crashes.txt, xcodebuild-test.log}
 #         Screenshots may show nothing private (demo mode), but check before copying them into docs/.
 set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -27,14 +28,17 @@ REMOTE_DIR="${REMOTE_DIR:-/Users/Shared/hermes-ui-build}"
 if ! [[ "$REMOTE_DIR" =~ ^(/[A-Za-z0-9._-]+)+$ ]] || [[ "$REMOTE_DIR/" == */../* || "$REMOTE_DIR/" == */./* ]]; then
   echo "REMOTE_DIR must be an absolute path on the Mac of [A-Za-z0-9._-] segments (got '$REMOTE_DIR')" >&2; exit 2
 fi
-printf -v Q_SMOKE '%q' "$REMOTE_DIR/smoke"
 SSH=(ssh -o BatchMode=yes "$MAC_HOST")
 TS="$(date +%Y%m%d-%H%M%S)"
+# one test dir per run: the sources are copied before the Mac lock is taken, so a shared dir let parallel runs
+# overwrite each other's test sources and shots
+SMOKE_DIR="$REMOTE_DIR/smoke-$TS-$$"
+printf -v Q_SMOKE '%q' "$SMOKE_DIR"
 OUT="$ROOT/dist/ios-sim-smoke/$TS"
 mkdir -p "$OUT"
 
 "${SSH[@]}" "rm -rf $Q_SMOKE && mkdir -p $Q_SMOKE/shots"
-rsync -a "$ROOT/scripts/ios-sim/" "$MAC_HOST:$REMOTE_DIR/smoke/"
+rsync -a "$ROOT/scripts/ios-sim/" "$MAC_HOST:$SMOKE_DIR/"
 # one heavy job at a time on the Mac (scripts/lib/maclock.sh, shared with the builds and the Android lane)
 "${SSH[@]}" "mkdir -p hui-lane" && rsync -a "$ROOT/scripts/lib/maclock.sh" "$MAC_HOST:hui-lane/maclock.sh"
 
@@ -48,13 +52,13 @@ if [ "${HUI_TEST:-smoke}" = store ]; then
   code="$(curl -fsS -X POST -d '{}' "$STORE_MOCK/__store/pair-code" | sed -n 's/.*"code":"\([^"]*\)".*/\1/p')"
   HUI_PAIR_LINK="hermesuiplus://pair?u=http%3A%2F%2F127.0.0.1%3A${STORE_MOCK##*:}%2Fv1&c=$code&n=Hermes"
 fi
-printf -v REMOTE_ENV '%q=%q ' REMOTE_DIR "$REMOTE_DIR" SIM_DEVICE "${SIM_DEVICE:-}" HUI_LANG "${HUI_LANG:-en}" HUI_APPEARANCE "${HUI_APPEARANCE:-}" HUI_MAC_LOCK_WAIT "${HUI_MAC_LOCK_WAIT:-2700}" TEST_METHOD "$TEST_METHOD" HUI_PAIR_LINK "$HUI_PAIR_LINK"
+printf -v REMOTE_ENV '%q=%q ' REMOTE_DIR "$REMOTE_DIR" SMOKE_DIR "$SMOKE_DIR" SIM_DEVICE "${SIM_DEVICE:-}" HUI_LANG "${HUI_LANG:-en}" HUI_APPEARANCE "${HUI_APPEARANCE:-}" HUI_MAC_LOCK_WAIT "${HUI_MAC_LOCK_WAIT:-2700}" TEST_METHOD "$TEST_METHOD" HUI_PAIR_LINK "$HUI_PAIR_LINK" HUI_STORE_ONLY "${HUI_STORE_ONLY:-}"
 remote_rc=0
 "${SSH[@]}" "${REMOTE_ENV}bash -s" <<'REMOTE' || remote_rc=$?
 set -euo pipefail
 export PATH="$HOME/.local/node/bin:$HOME/.local/ruby/bin:$HOME/.local/cocoapods/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export GEM_HOME="$HOME/.local/cocoapods" GEM_PATH="$HOME/.local/cocoapods" LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
-B="$REMOTE_DIR"; S="$B/smoke"; SH="$S/shots"
+B="$REMOTE_DIR"; S="$SMOKE_DIR"; SH="$S/shots"
 . "$HOME/hui-lane/maclock.sh"
 maclock_acquire ios-sim "$HUI_MAC_LOCK_WAIT" || exit 3
 trap 'rm -rf "$S/DD" "$S/Smoke.xcodeproj"; maclock_release' EXIT
@@ -100,7 +104,8 @@ xcrun simctl uninstall "$UDID" "$BID" 2>/dev/null || true
 xcrun simctl install "$UDID" "$APP"
 ruby "$S/make-smoke-project.rb" "$S"
 START="$(date '+%Y-%m-%d %H:%M:%S')"; touch "$S/.start"
-TEST_RUNNER_HUI_BUNDLE_ID="$BID" TEST_RUNNER_HUI_SHOT_DIR="$SH" TEST_RUNNER_HUI_LANG="$HUI_LANG" TEST_RUNNER_HUI_PAIR_LINK="${HUI_PAIR_LINK:-}" \
+TEST_RUNNER_HUI_BUNDLE_ID="$BID" TEST_RUNNER_HUI_SHOT_DIR="$SH" TEST_RUNNER_HUI_LANG="$HUI_LANG" TEST_RUNNER_HUI_PAIR_LINK="${HUI_PAIR_LINK:-}" TEST_RUNNER_HUI_STORE_ONLY="${HUI_STORE_ONLY:-}" \
+  TEST_RUNNER_HUI_LOSSLESS="$([ "${HUI_TEST:-smoke}" = store ] && echo 1 || echo 0)" \
   xcodebuild test -project "$S/Smoke.xcodeproj" -scheme SmokeUITests -destination "id=$UDID" \
   -only-testing:"SmokeUITests/SmokeUITests/$TEST_METHOD" \
   -derivedDataPath "$S/DD" COMPILER_INDEX_STORE_ENABLE=NO > "$SH/xcodebuild-test.log" 2>&1 && test_rc=0 || test_rc=$?
@@ -118,7 +123,7 @@ find "$HOME/Library/Logs/DiagnosticReports" -newer "$S/.start" -name "$EXE*" 2>/
 echo "app errors/faults: $(wc -l < "$SH/app-errors.log" | tr -d ' ') lines, crash reports: $(wc -l < "$SH/crashes.txt" | tr -d ' ')"
 REMOTE
 
-rsync -a "$MAC_HOST:$REMOTE_DIR/smoke/shots/" "$OUT/" || echo "could not copy the results back"
+rsync -a "$MAC_HOST:$SMOKE_DIR/shots/" "$OUT/" || echo "could not copy the results back"
 "${SSH[@]}" "rm -rf $Q_SMOKE" || true
 echo
 cat "$OUT/results.txt" 2>/dev/null || echo "(no results.txt: the UI test did not run, see $OUT/xcodebuild-test.log)"

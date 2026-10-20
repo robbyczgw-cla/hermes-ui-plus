@@ -4,6 +4,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { streamChatCore, respondApprovalCore, HermesError, isHermesError } from './stream.ts';
 import { BOOTSTRAP_SYSTEM_MESSAGE } from './bootstrap.ts';
+import { userTimeZoneMessage } from './timeZone.ts';
+
+/** every Hermes turn carries the device's time zone line right before the user message (timeZone.ts) */
+const tz = () => ({ role: 'system', content: userTimeZoneMessage() });
 import { CAP_MARKER, MAX_MESSAGE_TEXT } from './chatState.ts';
 import type { HermesEvent, HermesConn } from './types';
 
@@ -69,6 +73,7 @@ test('sends only the new message with session headers; parses tool fixture acros
     stream: true,
     messages: [
       { role: 'system', content: BOOTSTRAP_SYSTEM_MESSAGE },
+      tz(),
       { role: 'user', content: 'Wie spät ist es?' },
     ],
   });
@@ -291,10 +296,10 @@ test('approval events reach onApproval; respondApproval posts choice + request_i
   assert.equal(err.code, 'approval_not_pending');
 });
 
-test('bootstrap:false (bridge) sends only the user message; system message is byte-identical across requests', async () => {
+test('bootstrap:false (bridge) sends only the time zone line + the user message; system messages are byte-identical across requests', async () => {
   const bridge = fakeFetch(() => sseResponse(fixture('01-plain.sse'), [100]).res);
   await streamChatCore(bridge.fn, { conn: { ...conn, bootstrap: false }, text: 'hi', sessionId: 's', onEvent: () => {} });
-  assert.deepEqual(JSON.parse(bridge.calls[0].init.body as string).messages, [{ role: 'user', content: 'hi' }]);
+  assert.deepEqual(JSON.parse(bridge.calls[0].init.body as string).messages, [tz(), { role: 'user', content: 'hi' }]);
 
   const direct = fakeFetch(() => sseResponse(fixture('01-plain.sse'), [100]).res);
   await streamChatCore(direct.fn, { conn, text: 'a', sessionId: 's', onEvent: () => {} });
@@ -302,6 +307,8 @@ test('bootstrap:false (bridge) sends only the user message; system message is by
   const sys = direct.calls.map((c) => JSON.parse(c.init.body as string).messages[0].content);
   assert.equal(sys[0], sys[1]);
   assert.equal(sys[0], BOOTSTRAP_SYSTEM_MESSAGE);
+  const zone = direct.calls.map((c) => JSON.parse(c.init.body as string).messages[1].content);
+  assert.equal(zone[0], zone[1]);
 });
 
 test('content parts (attachments) replace the text as user content', async () => {
@@ -311,7 +318,7 @@ test('content parts (attachments) replace the text as user content', async () =>
     { type: 'image_url' as const, image_url: { url: 'data:image/jpeg;base64,AAAA' } },
   ];
   await streamChatCore(f.fn, { conn: { ...conn, bootstrap: false }, text: 'Was ist das?', content, sessionId: 's', onEvent: () => {} });
-  assert.deepEqual(JSON.parse(f.calls[0].init.body as string).messages, [{ role: 'user', content }]);
+  assert.deepEqual(JSON.parse(f.calls[0].init.body as string).messages, [tz(), { role: 'user', content }]);
 });
 
 for (const status of [200, 401]) {

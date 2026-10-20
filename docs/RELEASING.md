@@ -45,12 +45,32 @@ The maintainers cut releases with a script in their source repository that runs 
 ### 2. Checks
 
 ```
-scripts/check.sh all                       # tsc, app tests, scripts tests (plain mode outside a systemd session)
-(cd bridge && npm test) && (cd push && npm test)
+scripts/check.sh all                       # tsc, app, scripts, bridge, push tests (plain mode outside a systemd session)
 node scripts/leak-guard.mjs --tree         # with the private denylist where it exists (docs/LEAK-GUARD.md)
 ```
 
 CI (`.github/workflows/ci.yml`) runs the same suites on every pull request and on pushes to main.
+
+Two checks that CI cannot run, both against what users actually see. Run them before every release:
+
+```
+FLAVOR=hermes scripts/build-web.sh && node scripts/ux-check/render-sweep.mjs --lang=de && node scripts/ux-check/render-sweep.mjs --lang=en --theme=dark
+scripts/test-instance/ti.sh --host mac sync && scripts/test-instance/ti.sh --host mac setup
+scripts/test-instance/ti.sh --host mac conversation-test
+```
+
+- **Render sweep** (`scripts/ux-check/render-sweep.mjs`): every answer node type with missing data, empty lists,
+  unknown fields and image items that cannot be resolved (no image search, failed fetches), rendered in the web build
+  the way the chat renders a block. Every fixture has to show text or a photo, never nothing, an empty box or a
+  shimmer that does not settle. A new node type has to be added to `app/src/ui/renderFixtures.ts` (a unit test fails
+  otherwise).
+- **Live conversation test** (`bridge/eval/conversations/run.mjs`, via `ti.sh … conversation-test`): realistic
+  multi-turn chats (dictation typos, short follow-ups such as "Fotos?", "als Tabelle?") through the bridge with its
+  **default configuration** (no image search keys, router `heuristic`), what production and most users run, on the
+  throwaway test instance (session + lock, left stopped). Every answer is parsed with the app's parser: each block must
+  render content, and images must arrive as real URLs (checked through the bridge's image proxy) or show the visible
+  fallback. Report: `$HUI_PRIVATE_DIR/reports/conversations/<time>/conversation-report.md` (outside the repo). For product questions with
+  real tool data, set the instance up once with keyless web search: `ti.sh --host mac setup --force-config --web ddgs`.
 
 The **release workflow** (`.github/workflows/release.yml`, run by hand from the Actions tab or by pushing a `v*` tag)
 builds the web bundle and the `npm pack` of the bridge on a GitHub runner and attaches them to the run as artifacts,

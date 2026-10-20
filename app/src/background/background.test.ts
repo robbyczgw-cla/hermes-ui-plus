@@ -309,9 +309,23 @@ test('notification body: first readable line without hui/code blocks; previews o
   assert.equal(firstLine(text), 'Ergebnis: 3 Treffer');
   assert.equal(firstLine('- [Link](https://x.y) am Anfang'), 'Link am Anfang');
   assert.equal(firstLine('```hui\n{}\n```'), '');
-  assert.equal(notificationBody(answer({ text }), false, 'Deine Antwort ist fertig.'), 'Deine Antwort ist fertig.');
-  assert.equal(notificationBody(answer({ text: '```hui\n{}\n```' }), true, 'G'), 'G');
+  assert.equal(notificationBody(answer({ text }), false, 'Deine Antwort ist fertig.', 'N'), 'Deine Antwort ist fertig.');
+  assert.equal(notificationBody(answer({ text: '```hui\n{}\n```' }), true, 'G', 'N'), 'G');
   assert.equal(firstLine('x'.repeat(300), 10).length, 10);
+});
+
+test('PC-07 notification body: raw tool-call markup becomes the notice line, never the call JSON', () => {
+  const notice = 'Tool call not available here: nothing was run.';
+  const pc07 =
+    'Ich richte die Erinnerung jetzt ein und prüfe, ob sie wirklich angelegt ist.\n' +
+    '<tool_call>{"name":"cronjob_manage","arguments":{"action":"create","schedule":"in 15h"}}</tool_call>';
+  assert.equal(notificationBody(answer({ text: pc07 }), true, 'G', notice), 'Ich richte die Erinnerung jetzt ein und prüfe, ob sie wirklich angelegt ist.');
+  // the answer starts with the call: the notice, not `{"name":"cronjob_manage",…}`
+  const first = notificationBody(answer({ text: '<tool_call>\n{"name":"cronjob_manage","arguments":{}}\n</tool_call>\nGleich erledigt.' }), true, 'G', notice);
+  assert.equal(first, notice);
+  assert.doesNotMatch(first, /cronjob_manage|\{"name"/);
+  // without markup: unchanged
+  assert.equal(notificationBody(answer({ text: 'Fertig: a < b.' }), true, 'G', notice), 'Fertig: a < b.');
 });
 
 test('notification tap target: `turn` notifications open their conversation', () => {

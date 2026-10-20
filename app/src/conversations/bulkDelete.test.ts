@@ -96,6 +96,15 @@ test('plan: running turns are skipped, pinned only when included, tombstones for
   assert.deepEqual(withPinned.metas.map((c) => c.id), ['pin']);
 });
 
+test('plan: a bot\'s Bot Chat (shared with Hermes Desktop) is never part of "delete all", never deleted on Hermes', () => {
+  const botChat = meta('bc', { botChat: true, hermesSessionId: 'api_1792474903_2b8287a5', hermesProfile: 'writer', title: 'Bot Chat' });
+  assert.equal(remoteDeletable(botChat), false);
+  const p = planDelete([own, botChat], { isRunning: () => false, includePinned: true, isSynced: () => true, canDeleteRemote: () => true });
+  assert.deepEqual(p.metas.map((c) => c.id), ['own']);
+  assert.deepEqual(p.remote.map((c) => c.id), ['own']);
+  assert.equal(p.hide.some((h) => h.includes('api_1792474903')), false);
+});
+
 test('plan: foreign sessions and local-only chats are never offered for a Hermes delete', () => {
   const p = planDelete([...FOREIGN, nano, claude, own], { isRunning: () => false, includePinned: true, isSynced: () => true, canDeleteRemote: () => true });
   assert.equal(p.metas.length, 7, 'all removed locally');

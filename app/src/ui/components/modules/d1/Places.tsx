@@ -18,7 +18,7 @@ import type { HuiMap, HuiPlaces } from '../../../types';
 import { useModuleId } from '../a/shared';
 import { ProvenanceChip } from '../ProvenanceChip';
 import { MapNode } from '../MapNode';
-import { placeImageQuery } from '../../../../images';
+import { placeImageQuery, placeModelQuery, sharedPlaceCity } from '../../../../images';
 import { D1Icon } from './icons';
 import {
   cleanPhone,
@@ -69,6 +69,8 @@ export function Places({ node }: { node: Partial<HuiPlaces> }) {
   const animateIn = useRef(streaming).current;
   const now = nowMinutes();
 
+  // the city the places share (from their addresses): lets "Altstadt" search as "Altstadt <city>"
+  const city = useMemo(() => sharedPlaceCity(model.items), [model.items]);
   const mapNode = useMemo(() => placesMapNode(`${id}-all-map`, model.items, model.title), [id, model.items, model.title]);
   const saved = new Set(st.saved ?? []);
 
@@ -132,7 +134,7 @@ export function Places({ node }: { node: Partial<HuiPlaces> }) {
           <View style={{ gap: t.spacing.s }}>
             {model.items.map((p) => (
               <Appear key={p.key} on={animateIn}>
-                <PlaceRow t={t} p={p} lang={L} now={now} saved={saved.has(p.key)} onOpen={() => setOpenKey(p.key)} act={act} />
+                <PlaceRow t={t} p={p} city={city} lang={L} now={now} saved={saved.has(p.key)} onOpen={() => setOpenKey(p.key)} act={act} />
               </Appear>
             ))}
             {model.pending ? <SkeletonCard width="100%" imageH={0} lines={2} /> : null}
@@ -141,7 +143,7 @@ export function Places({ node }: { node: Partial<HuiPlaces> }) {
           <Rail layout={layout} count={count} label={tr('ui.places.carouselA11y', { n: count })} arrowTop={CARD_IMG / 2}>
             {model.items.map((p) => (
               <Appear key={p.key} on={animateIn} style={[{ width: layout.cardW }, SNAP_START]}>
-                <PlaceCard t={t} p={p} lang={L} now={now} layout={layout} saved={saved.has(p.key)} onOpen={() => setOpenKey(p.key)} act={act} />
+                <PlaceCard t={t} p={p} city={city} lang={L} now={now} layout={layout} saved={saved.has(p.key)} onOpen={() => setOpenKey(p.key)} act={act} />
               </Appear>
             ))}
             {model.pending ? <SkeletonCard width={layout.cardW} imageH={CARD_IMG} /> : null}
@@ -161,7 +163,7 @@ export function Places({ node }: { node: Partial<HuiPlaces> }) {
         open={!!opened}
         onClose={() => setOpenKey(null)}
         label={opened?.name ?? ''}
-        hero={opened ? <CardImage query={opened.imageQuery} autoQuery={placeImageQuery(opened)} url={opened.image} kind={placeKind(opened.category, opened.name)} height={220} iconSize={48} allowAsk /> : null}
+        hero={opened ? <CardImage query={placeModelQuery(opened.imageQuery, { city })} autoQuery={placeImageQuery(opened, { city })} url={opened.image} kind={placeKind(opened.category, opened.name)} height={220} iconSize={48} allowAsk /> : null}
       >
         {opened ? <PlaceDetails t={t} p={opened} id={id} lang={L} now={now} saved={saved.has(opened.key)} act={act} source={model.source} basis={model.basis} /> : null}
       </DetailSheet>
@@ -249,7 +251,7 @@ function PlaceActions({ p, saved, act }: { p: PlaceItem; saved: boolean; act: Ac
   );
 }
 
-function PlaceCard({ t, p, lang, now, layout, saved, onOpen, act }: { t: Theme; p: PlaceItem; lang: NumLang; now: number; layout: RailLayout; saved: boolean; onOpen: () => void; act: Acts }) {
+function PlaceCard({ t, p, city, lang, now, layout, saved, onOpen, act }: { t: Theme; p: PlaceItem; city: string; lang: NumLang; now: number; layout: RailLayout; saved: boolean; onOpen: () => void; act: Acts }) {
   const tr = useT();
   const open = openState(p, tr, now);
   const kind = placeKind(p.category, p.name);
@@ -258,7 +260,7 @@ function PlaceCard({ t, p, lang, now, layout, saved, onOpen, act }: { t: Theme; 
   return (
     <View style={{ flex: 1, width: layout.cardW, borderRadius: t.radii.card, backgroundColor: t.colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: t.colors.border, overflow: 'hidden', ...t.shadows.sm }}>
       <View style={noImg && saved ? { minHeight: 44 } : undefined}>
-        <CardImage query={p.imageQuery} autoQuery={placeImageQuery(p)} url={p.image} kind={kind} height={CARD_IMG} allowAsk onPress={onOpen} onMode={setImgMode} />
+        <CardImage query={placeModelQuery(p.imageQuery, { city })} autoQuery={placeImageQuery(p, { city })} url={p.image} kind={kind} height={CARD_IMG} allowAsk onPress={onOpen} onMode={setImgMode} />
         {saved ? (
           <View pointerEvents="none" style={{ position: 'absolute', top: 8, right: 8, width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.5)' }}>
             <D1Icon name="bookmarkFilled" size={14} color="#fff" />
@@ -287,7 +289,7 @@ function PlaceCard({ t, p, lang, now, layout, saved, onOpen, act }: { t: Theme; 
   );
 }
 
-function PlaceRow({ t, p, lang, now, saved, onOpen, act }: { t: Theme; p: PlaceItem; lang: NumLang; now: number; saved: boolean; onOpen: () => void; act: Acts }) {
+function PlaceRow({ t, p, city, lang, now, saved, onOpen, act }: { t: Theme; p: PlaceItem; city: string; lang: NumLang; now: number; saved: boolean; onOpen: () => void; act: Acts }) {
   const tr = useT();
   const open = openState(p, tr, now);
   const [imgMode, setImgMode] = useState<SlotMode>('skeleton');
@@ -295,7 +297,7 @@ function PlaceRow({ t, p, lang, now, saved, onOpen, act }: { t: Theme; p: PlaceI
     <View style={{ borderRadius: t.radii.card, backgroundColor: t.colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: t.colors.border, padding: t.spacing.s, gap: t.spacing.s }}>
       <View style={{ flexDirection: 'row', gap: t.spacing.m, alignItems: 'center' }}>
         <View style={imgMode === 'collapse' ? { display: 'none' } : { width: LIST_IMG }}>
-          <CardImage query={p.imageQuery} autoQuery={placeImageQuery(p)} url={p.image} kind={placeKind(p.category, p.name)} height={LIST_IMG} radius={t.radii.control} iconSize={26} inline allowAsk onPress={onOpen} onMode={setImgMode} />
+          <CardImage query={placeModelQuery(p.imageQuery, { city })} autoQuery={placeImageQuery(p, { city })} url={p.image} kind={placeKind(p.category, p.name)} height={LIST_IMG} radius={t.radii.control} iconSize={26} inline allowAsk onPress={onOpen} onMode={setImgMode} />
         </View>
         <PressableScale haptic="selection" scaleTo={0.99} onPress={onOpen} accessibilityLabel={placeA11y(p, tr, lang, now)} accessibilityHint={tr('ui.places.detailsHint')} style={{ flex: 1, gap: 3, minWidth: 0 }} pressedStyle={{ opacity: 0.85 }}>
           <HText variant="bodyStrong" numberOfLines={1}>

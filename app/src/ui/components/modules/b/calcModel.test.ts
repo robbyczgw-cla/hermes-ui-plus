@@ -10,6 +10,7 @@ import {
   normalizeCalc,
   numberToInputText,
   parseNumberInput,
+  rewriteExpr,
   splitHero,
   valueOf,
 } from './calcModel.ts';
@@ -95,12 +96,12 @@ test('computeOutputs formats via calc engine; invalid input → "–" (no stale 
   assert.equal(bad[1].value, null);
 });
 
-test('division by zero and model expression errors show "–" with an error message', () => {
+test('division by zero shows "–"; a model expression error shows "nicht berechenbar" with an error message', () => {
   const m = normalizeCalc({ inputs: [{ name: 'a', kind: 'number', default: 1 }, { name: 'b', kind: 'number', default: 0 }], outputs: [{ label: 'q', expr: 'a / b' }, { label: 'oops', expr: 'a + c' }] });
   const rows = computeOutputs(m, initialValues(m.inputs));
   assert.equal(rows[0].text, '–');
   assert.equal(rows[0].error, undefined);
-  assert.equal(rows[1].text, '–');
+  assert.equal(rows[1].text, 'nicht berechenbar');
   assert.match(rows[1].error ?? '', /Unbekannter Bezeichner/);
 });
 
@@ -162,4 +163,123 @@ test('locale consistency: currency outputs and euro-unit inputs use the same con
   assert.equal(formatInputValue(inp, 347475.93, { locale: 'de-DE' }), `347.475,93${NB}€`);
   assert.equal(formatInputValue(inp, 347475.93, { locale: 'en-US' }), '€347,475.93');
   assert.equal(formatInputValue(m.inputs[1], 4.5, { locale: 'en-US' }), `4.5${NB}%`);
+});
+
+/* ───────────── R2-06: JS-isms from a real model answer (claude-haiku-4-5, default bridge) ───────────── */
+
+const WEIGHTS = {
+  type: 'calc',
+  id: 'wien_graz_choice',
+  title: 'Zug vs. Auto: Deine Gewichtung',
+  inputs: [
+    { name: 'cost_weight', label: 'Kosten-Gewichtung (%)', kind: 'slider', min: 0, max: 100, default: 50 },
+    { name: 'time_weight', label: 'Zeit-Gewichtung (%)', kind: 'slider', min: 0, max: 100, default: 20 },
+    { name: 'env_weight', label: 'Umwelt-Gewichtung (%)', kind: 'slider', min: 0, max: 100, default: 30 },
+  ],
+  outputs: [
+    { label: 'Zug-Punktzahl', expr: '((cost_weight * 8 + time_weight * 6 + env_weight * 9) / (cost_weight + time_weight + env_weight)).toFixed(1)' },
+    { label: 'Auto-Punktzahl', expr: '((cost_weight * 7 + time_weight * 9 + env_weight * 4) / (cost_weight + time_weight + env_weight)).toFixed(1)' },
+    {
+      label: 'Empfehlung',
+      expr: "((cost_weight * 8 + time_weight * 6 + env_weight * 9) / (cost_weight + time_weight + env_weight) > (cost_weight * 7 + time_weight * 9 + env_weight * 4) / (cost_weight + time_weight + env_weight)) ? '✓ Zug' : '✓ Auto'",
+    },
+  ],
+};
+
+test('R2-06 real block: toFixed + string ternary compute, decimals from toFixed, reply carries the text', () => {
+  const m = normalizeCalc(WEIGHTS);
+  assert.deepEqual(m.outputs.map((o) => o.decimals), [1, 1, undefined]);
+  assert.deepEqual(m.outputs[2].texts, ['✓ Zug', '✓ Auto']);
+  assert.equal(m.outputs[0].source, WEIGHTS.outputs[0].expr); // disclosure shows what the model wrote
+  const v = initialValues(m.inputs);
+  const rows = computeOutputs(m, v);
+  // Zug (400+120+270)/100 = 7.9, Auto (350+180+120)/100 = 6.5
+  assert.deepEqual(rows.map((r) => r.text), ['7,9', '6,5', '✓ Zug']);
+  assert.ok(rows.every((r) => !r.error));
+  assert.deepEqual(computeOutputs(m, v, 'en-US').map((r) => r.text), ['7.9', '6.5', '✓ Zug']);
+  assert.equal(
+    buildCalcReply(m, v, rows),
+    '[calc:wien_graz_choice] Kosten-Gewichtung (%) 50 · Zeit-Gewichtung (%) 20 · Umwelt-Gewichtung (%) 30 → Zug-Punktzahl 7,9 · Auto-Punktzahl 6,5 · Empfehlung ✓ Zug',
+  );
+});
+
+test('R2-06 real block: a slider change recomputes all three outputs', () => {
+  const m = normalizeCalc(WEIGHTS);
+  // env 30 → 50: Zug (400+120+450)/120 = 8.083 → 8,1; Auto (350+180+200)/120 = 6.083 → 6,1
+  const rows = computeOutputs(m, { ...initialValues(m.inputs), env_weight: 50 });
+  assert.deepEqual(rows.map((r) => r.text), ['8,1', '6,1', '✓ Zug']);
+  // time dominates: cost 0, time 100, env 0 → Zug 6, Auto 9 → Auto
+  const t = computeOutputs(m, { cost_weight: 0, time_weight: 100, env_weight: 0 });
+  assert.deepEqual(t.map((r) => r.text), ['6,0', '9,0', '✓ Auto']);
+  // all weights 0: division by zero → "–" (an input state, not a model error)
+  const z = computeOutputs(m, { cost_weight: 0, time_weight: 0, env_weight: 0 });
+  assert.deepEqual(z.map((r) => r.text), ['–', '–', '–']);
+  assert.ok(z.every((r) => !r.error));
+});
+
+test('R2-06 chained string ternary, quotes and ?/: inside strings and parentheses', () => {
+  const m = normalizeCalc({
+    inputs: [{ name: 'a', kind: 'number', default: 3 }],
+    outputs: [{ label: 'Stufe', expr: `a > max(2, (a ? 1 : 0)) ? 'hoch: "sehr"' : a > 1 ? "mittel? ja: 'ok'" : 'nied\\'rig'` }],
+  });
+  assert.deepEqual(m.outputs[0].texts, ['hoch: "sehr"', "mittel? ja: 'ok'", "nied'rig"]);
+  assert.equal(computeOutputs(m, { a: 3 })[0].text, 'hoch: "sehr"');
+  assert.equal(computeOutputs(m, { a: 2 })[0].text, "mittel? ja: 'ok'");
+  assert.equal(computeOutputs(m, { a: 0 })[0].text, "nied'rig");
+  assert.equal(computeOutputs(m, { a: null })[0].text, '–');
+});
+
+test('R2-06 rewrites: Math.*, Number()/parseFloat(), ===, toLocaleString, toFixed inside an expression', () => {
+  assert.deepEqual(rewriteExpr('Math.round(a * 100) / 100'), { expr: 'round(a * 100) / 100' });
+  assert.deepEqual(rewriteExpr('Math.log(a) + Math.log10(a) + Math.PI'), { expr: 'ln(a) + log(a) + pi' });
+  assert.deepEqual(rewriteExpr('Number(a.toFixed(2))'), { expr: '(round(a, 2))', decimals: 2 });
+  assert.deepEqual(rewriteExpr('parseFloat(a) === 1 ? 1 : 0'), { expr: '(a) == 1 ? 1 : 0' });
+  assert.deepEqual(rewriteExpr("a.toLocaleString('de-DE')"), { expr: 'a' });
+  assert.deepEqual(rewriteExpr('a.toFixed(1) * 2'), { expr: 'round(a, 1) * 2' }); // not the whole result → no decimals
+  assert.deepEqual(rewriteExpr('kredit * zins'), { expr: 'kredit * zins' }); // engine syntax untouched
+  // explicit decimals win over toFixed
+  const m = normalizeCalc({ inputs: [{ name: 'a', kind: 'number', default: 1.256 }], outputs: [{ label: 'x', expr: 'a.toFixed(1)', decimals: 3 }] });
+  assert.equal(m.outputs[0].decimals, 3);
+  assert.equal(computeOutputs(m, { a: 1.256 })[0].text, '1,300');
+});
+
+test('R2-06 rewrite never enables property access or strings', () => {
+  const m = normalizeCalc({
+    inputs: [{ name: 'a', kind: 'number', default: 1 }],
+    outputs: [
+      { label: 'c', expr: 'constructor.toFixed(1)' },
+      { label: 'ab', expr: 'a.b' },
+      { label: 'abf', expr: 'a.b.toFixed(1)' },
+      { label: 'proto', expr: '__proto__.constructor' },
+      { label: 'rnd', expr: 'Math.random()' },
+      { label: 'concat', expr: "'Zug: ' + a.toFixed(1)" },
+      { label: 'mixed', expr: "a > 1 ? 'x' : a" },
+      { label: 'tpl', expr: '`${a}` ? 1 : 0' },
+      { label: 'fx', expr: 'a.toFixed(a)' },
+    ],
+  });
+  const rows = computeOutputs(m, { a: 1 });
+  for (const r of rows) {
+    assert.ok(r.error, `${r.label} must stay an engine error`);
+    assert.equal(r.value, null, r.label);
+    assert.equal(r.text, 'nicht berechenbar', r.label);
+  }
+  assert.equal(m.outputs.filter((o) => o.texts).length, 0);
+});
+
+test('R2-06 unrewritable output: visible error state; reply disabled only when every output failed', () => {
+  const m = normalizeCalc({
+    id: 'x',
+    inputs: [{ name: 'a', label: 'A', kind: 'number', default: 2 }],
+    outputs: [{ label: 'Gut', expr: 'a * 2' }, { label: 'Kaputt', expr: "'Wert: ' + a" }],
+  });
+  const v = initialValues(m.inputs);
+  const rows = computeOutputs(m, v);
+  assert.equal(rows[1].text, 'nicht berechenbar');
+  assert.notEqual(rows[1].text, '–');
+  assert.match(rows[1].error ?? '', /Zeichenketten/);
+  assert.equal(computeOutputs(m, v, 'en-US', { notComputable: 'cannot be calculated' })[1].text, 'cannot be calculated');
+  assert.equal(buildCalcReply(m, v, rows), '[calc:x] A 2 → Gut 4 · Kaputt nicht berechenbar');
+  const allBad = normalizeCalc({ id: 'y', inputs: [{ name: 'a', label: 'A', kind: 'number', default: 2 }], outputs: [{ label: 'K', expr: 'a.b' }] });
+  assert.equal(buildCalcReply(allBad, v, computeOutputs(allBad, v)), null);
 });

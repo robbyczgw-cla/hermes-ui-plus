@@ -5,6 +5,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Text } from '../ui/primitives/Text';
 import { brand } from '../brand';
+import { consentAudience, consentBodyKey, consentProviderName } from './consent';
 import { Icon } from '../chat/icons';
 import { useT } from '../i18n';
 import { Button, OnbScreen, Title } from '../onboarding/ui';
@@ -15,14 +16,18 @@ function openPrivacy() {
   if (url) void WebBrowser.openBrowserAsync(url).catch(() => {});
 }
 
-/** Body + provider line + privacy link (shared by sheet and onboarding step). */
-export function ConsentText() {
+/** the parts of a connection profile the wording depends on */
+type ConsentProfile = { kind: string; baseUrl?: string; provider?: string };
+
+/** Body + provider line + privacy link (shared by sheet and onboarding step), for the connection that sends. */
+export function ConsentText({ profile }: { profile?: ConsentProfile | null }) {
   const t = useTheme();
   const tr = useT();
   const privacy = brand().privacyUrl;
+  const body = tr(consentBodyKey(consentAudience(profile)));
   return (
     <View style={styles.text}>
-      <Text style={[textStyle(t, 'body'), { color: t.colors.text }]}>{tr('compliance.consent.body')}</Text>
+      <Text style={[textStyle(t, 'body'), { color: t.colors.text }]}>{body}</Text>
       <Text style={[textStyle(t, 'callout'), { color: t.colors.muted }]}>{tr('compliance.consent.providers')}</Text>
       {privacy ? (
         <Pressable onPress={openPrivacy} accessibilityRole="link" hitSlop={8} style={styles.link}>
@@ -34,8 +39,8 @@ export function ConsentText() {
   );
 }
 
-/** Sheet shown before the first message of a non-demo chat (also after a text version bump). */
-export const ConsentSheet = memo(function ConsentSheet({ visible, onAccept, onLater }: { visible: boolean; onAccept: () => void; onLater: () => void }) {
+/** Sheet shown before the first message of a non-demo chat (also after a text version bump), for `profile`. */
+export const ConsentSheet = memo(function ConsentSheet({ visible, profile, onAccept, onLater }: { visible: boolean; profile?: ConsentProfile | null; onAccept: () => void; onLater: () => void }) {
   const t = useTheme();
   const tr = useT();
   const title = tr('compliance.consent.title');
@@ -51,7 +56,7 @@ export const ConsentSheet = memo(function ConsentSheet({ visible, onAccept, onLa
         </Text>
       </View>
       <ScrollView style={styles.scroll}>
-        <ConsentText />
+        <ConsentText profile={profile} />
       </ScrollView>
       <View style={styles.buttons}>
         <UiButton label={tr('compliance.consent.later')} variant="tertiary" onPress={onLater} grow />
@@ -61,13 +66,13 @@ export const ConsentSheet = memo(function ConsentSheet({ visible, onAccept, onLa
   );
 });
 
-/** Onboarding step (after the connection is saved, before the first message can go out). */
-export function ConsentStep({ onAccept, onBack, step, total }: { onAccept: () => void; onBack?: () => void; step?: number; total?: number }) {
+/** Onboarding step (after the connection `profile` is saved, before the first message can go out). */
+export function ConsentStep({ profile, onAccept, onBack, step, total }: { profile?: ConsentProfile | null; onAccept: () => void; onBack?: () => void; step?: number; total?: number }) {
   const tr = useT();
   return (
     <OnbScreen onBack={onBack} step={step} total={total} footer={<Button label={tr('compliance.consent.accept')} onPress={onAccept} />}>
       <Title>{tr('compliance.consent.title')}</Title>
-      <ConsentText />
+      <ConsentText profile={profile} />
     </OnbScreen>
   );
 }

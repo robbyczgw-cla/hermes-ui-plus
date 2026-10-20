@@ -9,6 +9,10 @@
 #   session [--wait S] -- CMD    exclusive start -> CMD -> stop; CMD runs ON THE HOST (e.g. api-test)
 #   api-test [ARGS]              scripted API checks on the host, inside an exclusive session (starts and stops it)
 #   quick-off-test               like api-test: ⚡ without the plugin, inside a session
+#   bots-test [--approval]       Bots v2 live checks (Bot Chat route, turns on it, per-bot always-allow), inside a session
+#   bots-create-test [all|snapshot|check|cleanup]  Bots v2 slice 3: create / edit bots via bridge + plugin (session for `all`)
+#   conversation-test [--out D]  live multi-turn chats through the bridge, every answer checked with the app's parser
+#                                (bridge/eval/conversations/run.mjs, runs here), instance inside a session; pre-release step
 #   pair | lock | remove         see README
 #   tunnel start|stop|status|print           ssh tunnel to the host's 127.0.0.1 ports (same local port numbers)
 set -euo pipefail
@@ -41,6 +45,13 @@ case "$cmd" in
   api-test)
     # inside an exclusive session: the instance is started for the test and stopped afterwards
     ti_ssh "$host" "bash $rdir/session.sh --wait 600 --label api-test -- bash -c '. \"\$0/lib.sh\"; exec node \"\$0/api-test.mjs\" \"\$@\"' $rdir$(quoted "$@")" ;;
+  bots-test)
+    ti_ssh "$host" "bash $rdir/session.sh --wait 600 --label bots-test -- bash $rdir/bots-test.sh$(quoted "$@")" ;;
+  bots-create-test)
+    ti_ssh "$host" "bash $rdir/session.sh --wait 600 --label bots-create-test -- bash $rdir/bots-create-test.sh$(quoted "$@")" ;;
+  conversation-test)
+    # session on the host, runner here (app parser of this checkout) through an own tunnel: conversation-test.sh
+    exec "$here/conversation-test.sh" --host "${name:-$host}" "$@" ;;
   copy-key)
     [ "${1:-}" = "--from" ] || { echo "usage: ti.sh --host TO copy-key --from FROM_HOST" >&2; exit 2; }
     from="$(ti_resolve_host "${2:?--from needs mac|linux|<alias>}")"

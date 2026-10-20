@@ -46,6 +46,7 @@ export const push = {
     open: 'Open',
     dismiss: 'Close',
     notifyTitle: 'Hermes is waiting for your approval',
+    notifyTitleBot: '{name} is waiting for your approval',
     notifyBody: 'A command is waiting for your decision.',
   },
   newMessage: 'New message',

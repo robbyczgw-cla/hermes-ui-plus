@@ -1,5 +1,6 @@
 // useHermesChat-compatible hook for the offline demo (`kind: 'demo'`, `demo://local`). Same state
-// transitions as useHermesChat (hermes/chatState.ts), events from the local replay (transport.ts).
+// transitions as useHermesChat (hermes/chatState.ts), events from the local replay (transport.ts). Live cards work
+// like with Hermes: `liveOutgoing` hands over this device's card edits, which the scripted answer gets as `live`.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Attachment } from '../../attachments/types';
 import { applyEvent, createAssistantMessage, createUserMessage, errorTextOf, finalize, newId } from '../../hermes/chatState';
@@ -7,9 +8,22 @@ import { createThrottle, streamIntervalFor } from '../../hermes/throttle';
 import type { ApprovalChoice, ApprovalRequest, ChatMessage, ChatStatus } from '../../hermes/types';
 import type { UseHermesChat, UseHermesChatOptions } from '../../hermes/useHermesChat';
 import { useLocale } from '../../i18n';
+import { hasBatches, withLiveOnLastUser } from '../../live/outgoing';
+import type { DemoBotRole, DemoStep } from './kit';
 import { runDemoTurn } from './transport';
 
-export function useDemoChat(options: UseHermesChatOptions = {}): UseHermesChat {
+/** a demo bot's turn that continues from its stored history (Scout's waiting approval, onboarding/demo/bots.ts) */
+export type DemoResume = { id: string; name: string; steps: DemoStep[] };
+
+export type UseDemoChat = UseHermesChat & {
+  /** append an answer with this id and replay `steps` into it (no user message); false while a turn runs */
+  resume(r: DemoResume): boolean;
+};
+
+export function useDemoChat(
+  options: UseHermesChatOptions = {},
+  extra: { bot?: string; role?: DemoBotRole; onApprovalAnswer?: (runId: string, choice: ApprovalChoice | 'timeout') => void } = {},
+): UseDemoChat {
   const [messages, setMessages] = useState<ChatMessage[]>(options.initialMessages ?? []);
   const [status, setStatus] = useState<ChatStatus>('idle');
   const [sessionId, setSessionId] = useState<string>(() => options.sessionId ?? newId('demo'));
@@ -18,6 +32,8 @@ export function useDemoChat(options: UseHermesChatOptions = {}): UseHermesChat {
   const { lang } = useLocale();
   const langRef = useRef(lang);
   langRef.current = lang;
+  const botRef = useRef(extra);
+  botRef.current = extra;
 
   const messagesRef = useRef<ChatMessage[]>(messages);
   const sessionRef = useRef(sessionId);
@@ -53,7 +69,7 @@ export function useDemoChat(options: UseHermesChatOptions = {}): UseHermesChat {
   );
 
   const run = useCallback(
-    async (text: string) => {
+    async (text: string, script?: { name: string; steps: DemoStep[] }) => {
       const ctrl = new AbortController();
       abortRef.current = ctrl;
       setStatus('streaming');
@@ -64,6 +80,14 @@ export function useDemoChat(options: UseHermesChatOptions = {}): UseHermesChat {
       const turn = users.length;
       // earlier user messages, newest first (the current one is the last): lets "Shorter" / "As a table" find the answer they reshape
       const priorUserTexts = users.slice(0, -1).map((m) => m.text).reverse();
+      // live-card edits of this device go along with the message and are "accepted" at once (no server): they move onto
+      // the user message like a real turn (live/outgoing.ts), so the fold and the "sent along" line see them
+      const live = script ? null : (optsRef.current.liveOutgoing?.(text) ?? null);
+      if (hasBatches(live)) {
+        messagesRef.current = withLiveOnLastUser(messagesRef.current, live.batches);
+        setMessages(messagesRef.current);
+        live.onAccepted();
+      }
       let failure: string | undefined;
       try {
         const r = await runDemoTurn({
@@ -71,7 +95,11 @@ export function useDemoChat(options: UseHermesChatOptions = {}): UseHermesChat {
           sessionId: sid,
           turn,
           history: priorUserTexts,
+          live: hasBatches(live) ? live.batches : undefined,
           lang: langRef.current,
+          bot: botRef.current.bot,
+          role: botRef.current.role,
+          script,
           signal: ctrl.signal,
           onEvent: (ev) => {
             if (!current()) return;
@@ -80,7 +108,13 @@ export function useDemoChat(options: UseHermesChatOptions = {}): UseHermesChat {
           },
           waitForApproval: (runId) =>
             new Promise((resolve) => {
-              approvalRef.current = { runId, resolve };
+              approvalRef.current = {
+                runId,
+                resolve: (c) => {
+                  botRef.current.onApprovalAnswer?.(runId, c);
+                  resolve(c);
+                },
+              };
             }),
         });
         if (!current()) return;
@@ -119,6 +153,17 @@ export function useDemoChat(options: UseHermesChatOptions = {}): UseHermesChat {
       messagesRef.current = [...messagesRef.current, createUserMessage(trimmed, now, attachments), createAssistantMessage(now)];
       setMessages(messagesRef.current);
       void run(trimmed || 'Anhang');
+      return true;
+    },
+    [run],
+  );
+
+  const resume = useCallback(
+    (r: DemoResume) => {
+      if (abortRef.current || !mountedRef.current) return false;
+      messagesRef.current = [...messagesRef.current, { ...createAssistantMessage(Date.now()), id: r.id }];
+      setMessages(messagesRef.current);
+      void run('', { name: r.name, steps: r.steps });
       return true;
     },
     [run],
@@ -174,5 +219,5 @@ export function useDemoChat(options: UseHermesChatOptions = {}): UseHermesChat {
     [throttle],
   );
 
-  return { messages, send, stop, retry, newSession, status, sessionId, error, approval, respondApproval, replaceMessages };
+  return { messages, send, stop, retry, newSession, status, sessionId, error, approval, respondApproval, replaceMessages, resume };
 }

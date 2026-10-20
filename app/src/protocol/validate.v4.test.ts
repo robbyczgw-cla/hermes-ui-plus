@@ -334,7 +334,7 @@ test('vocab: lang codes, items need term + translation, cap 40', () => {
     ],
   }) as A;
   assert.equal(v.from, 'es');
-  assert.equal(v.to, 'und');
+  assert.equal(v.to, 'de'); // a language name is mapped to its code
   assert.equal(v.mode, 'type');
   assert.equal(v.items.length, 40);
   assert.deepEqual(v.items[0], { id: 'v0', term: 'casa', translation: 'Haus', example: 'Mi casa', romanization: 'x' });

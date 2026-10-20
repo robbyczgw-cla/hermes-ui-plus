@@ -58,6 +58,7 @@ export const APP_TITLE: string =
     ? process.env.EXPO_PUBLIC_APP_NAME || 'Hermes'
     : process.env.EXPO_PUBLIC_APP_SHORT_NAME || BRANDS.hermes.displayName;
 
+
 /** Wordmark of the share-as-image frame (chat/answers/ShareFrame.tsx). */
 export function shareWordmark(flavor: Flavor = FLAVOR): string {
   return flavor === 'personal' ? 'Hermes' : BRANDS.hermes.displayName;

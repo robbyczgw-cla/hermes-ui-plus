@@ -22,6 +22,14 @@ export type HermesBot = {
   label?: string;
   /** the profile's configured model (bridge, from its config.yaml) */
   model?: string;
+  /** one line about the bot (bridge, Hermes Desktop's bot metadata / profile description) */
+  description?: string;
+  /** Desktop's bot colour (`#rrggbb`) */
+  color?: string;
+  /** pinned in Hermes Desktop: listed right after the default bot */
+  pinned?: boolean;
+  /** role template of a bot made in the app (bots/create/core.ts): its first-screen starters */
+  template?: string;
 };
 
 export function isBotName(name: unknown): name is string {
@@ -111,7 +119,14 @@ export function parseBridgeProfiles(json: unknown): HermesBot[] | null {
     if (!isBotName(name) || out.some((b) => b.name === name)) continue;
     const label = str(r.label, 40);
     const model = str(r.model, 120);
-    out.push({ name, default: isDefault, ...(label ? { label } : {}), ...(model ? { model } : {}) });
+    const description = str(r.description, 160);
+    const color = typeof r.color === 'string' && /^#[0-9a-f]{6}$/i.test(r.color) ? r.color.toLowerCase() : undefined;
+    const template = typeof r.template === 'string' && /^[a-z]{2,12}$/.test(r.template) ? r.template : undefined;
+    out.push({
+      name, default: isDefault, ...(label ? { label } : {}), ...(model ? { model } : {}),
+      ...(description ? { description } : {}), ...(color ? { color } : {}), ...(r.pinned === true ? { pinned: true } : {}),
+      ...(template ? { template } : {}),
+    });
   }
   out.sort((a, b) => Number(b.default) - Number(a.default));
   return out;
@@ -157,18 +172,15 @@ export function botBadge(bot: string | null | undefined, entries?: readonly Herm
 export type BotProfile = { kind: string; bridge?: boolean; hermesBots?: readonly string[] };
 
 /**
- * Bots of a connection: demo → DEMO_BOTS; Hermes → the bridge list (`server`, bridge connections only) + the
+ * Bots of a connection: demo → `server` (its bot list, onboarding/demo/bots.ts) or DEMO_BOTS; Hermes → the bridge list (`server`, bridge connections only) + the
  * manual list of the connection editor (+ the chat's own bot). Other kinds → [] (no bots).
  */
 export function botsForProfile(p: BotProfile | undefined, server: readonly HermesBot[] | null | undefined, current?: string | null): HermesBot[] {
   if (!p) return [];
-  if (p.kind === 'demo') return botEntries({ server: DEMO_BOTS, current });
+  if (p.kind === 'demo') return botEntries({ server: server ?? DEMO_BOTS, current });
   if (p.kind !== 'hermes') return [];
   return botEntries({ server: p.bridge ? server : null, manual: p.hermesBots, current });
 }
 
-/** Offline demo: one fake second bot so the picker can be shown in demos and tests (never sent anywhere). */
-export const DEMO_BOTS: readonly HermesBot[] = Object.freeze([
-  { name: DEFAULT_BOT, default: true },
-  { name: 'research', default: false, label: 'Research', model: 'demo-research' },
-]);
+/** Offline demo without its bot list (onboarding/demo/bots.ts demoBotList): Hermes only (never sent anywhere). */
+export const DEMO_BOTS: readonly HermesBot[] = Object.freeze([{ name: DEFAULT_BOT, default: true }]);

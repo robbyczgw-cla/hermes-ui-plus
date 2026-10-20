@@ -57,14 +57,36 @@ export function scrubHosts(text: string): string {
 
 export type PresentedError = { text: string; detail?: string };
 
+/** what the card knows besides the message: `plain` = a UI without setup jargon, `offline` = the browser says so */
+export type PresentOptions = { plain?: boolean; offline?: boolean };
+
+/**
+ * fetch failures of OpenAI-compatible servers: their text is setup advice for whoever runs the server (CORS headers,
+ * cleartext http, "localhost"); real-user PC-08 got it in the reduced UI for an ordinary offline browser
+ */
+const SETUP_ADVICE_KEY = /^backends\.openaicompat\.errors\.(cors|corsHttp|network[A-Za-z]*)$/;
+
 /** What the failure card shows for an error message: the text, and a technical detail for the "Details" toggle. */
-export function presentMessageError(m: Pick<ChatMessage, 'error' | 'errorText'>, t: TFn): PresentedError {
+export function presentMessageError(m: Pick<ChatMessage, 'error' | 'errorText'>, t: TFn, opts: PresentOptions = {}): PresentedError {
   let raw: string | null = null;
+  const key = m.errorText?.key;
   const detail = m.errorText?.params?.detail;
-  if (m.errorText?.key === 'backends.hermes.errors.networkDetail' && typeof detail === 'string') raw = detail;
+  if (key === 'backends.hermes.errors.networkDetail' && typeof detail === 'string') raw = detail;
   else if (!m.errorText && m.error && RAW_NETWORK.test(m.error)) raw = m.error;
+  if (raw === null && key && SETUP_ADVICE_KEY.test(key)) {
+    // offline browser or plain UI: one sentence, the advice behind "Details" (the full UI keeps it visible)
+    if (!opts.plain && !opts.offline) return { text: messageErrorText(m, t) };
+    return { text: plainNetworkText(opts.offline ? 'offline' : 'unreachable', t, opts.plain), detail: scrubHosts(messageErrorText(m, t)).trim() };
+  }
   if (raw === null) return { text: messageErrorText(m, t) };
-  const kind = networkFailureKind(raw) ?? 'unreachable';
+  const kind = opts.offline ? 'offline' : (networkFailureKind(raw) ?? 'unreachable');
+  const text = plainNetworkText(kind, t, opts.plain);
   const shown = scrubHosts(raw).trim().slice(0, 300);
-  return shown ? { text: t(`chat.message.network.${kind}` as TKey), detail: shown } : { text: t(`chat.message.network.${kind}` as TKey) };
+  return shown ? { text, detail: shown } : { text };
+}
+
+/** the card's sentence for a transport failure; `plain`: no Tailscale / bridge / certificate wording */
+function plainNetworkText(kind: NetworkFailureKind, t: TFn, plain = false): string {
+  if (plain) return t(kind === 'offline' ? 'chat.message.network.offline' : 'chat.message.network.plain');
+  return t(`chat.message.network.${kind}` as TKey);
 }

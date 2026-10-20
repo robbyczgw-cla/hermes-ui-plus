@@ -71,3 +71,18 @@ test('previewText cuts at a word boundary', () => {
   assert.equal(previewText('alpha beta gamma delta', 12), 'alpha beta…');
   assert.equal(previewText('a  b\n\nc'), 'a b c');
 });
+
+test('PC-07: the announcement says what the answer shows: raw tool-call markup becomes the notice, never its JSON', () => {
+  const pc07 =
+    'Ich richte die Erinnerung jetzt ein und prüfe, ob sie wirklich angelegt ist.\n' +
+    '<tool_call>{"name":"cronjob_manage","arguments":{"action":"create","schedule":"in 15h"}}</tool_call>';
+  const said = announcements(run([text(pc07), finish]).map((m) => [m]));
+  assert.equal(said.length, 1);
+  assert.doesNotMatch(said[0], /cronjob_manage|\{"name"|tool_call/);
+  assert.equal(said[0], 'Answer ready: Ich richte die Erinnerung jetzt ein und prüfe, ob sie wirklich angelegt ist. Tool call not available here: nothing was run.');
+  // only the call: the notice is announced, not an empty "Answer ready"
+  const only = answerAnnouncement({ id: 'a', role: 'assistant', status: 'done', text: '<tool_call>{"name":"cronjob_manage"}</tool_call>' }, de);
+  assert.equal(only, 'Antwort fertig: Werkzeugaufruf hier nicht verfügbar: es wurde nichts ausgeführt.');
+  // without markup: unchanged
+  assert.equal(answerAnnouncement({ id: 'b', role: 'assistant', status: 'done', text: 'a < b, **klar**.' }, en), 'Answer ready: a < b, klar.');
+});

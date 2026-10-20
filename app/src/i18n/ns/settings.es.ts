@@ -156,6 +156,9 @@ export const settings = {
     chatScopeAllHint: 'La lista muestra los chats de esta app de todos tus dispositivos.',
     chatScopeDeviceHint: 'La lista solo muestra chats iniciados en este dispositivo, aunque ya hayas abierto otro aquí. Los ocultos siguen en Hermes y en tus otros dispositivos. Solo afecta a este dispositivo; los chats de Telegram, CLI y cron siguen los interruptores del perfil.',
     chatScopeKeywords: 'lista de chats dispositivos dispositivo sincronizar otros dispositivos ocultar lista',
+    routines: 'Rutinas',
+    routinesSub: 'Las tareas programadas de tus bots, sus resultados y los avisos sobre ellos. Desactivado: no aparecen en ningún sitio. Los recordatorios del chat se mantienen.',
+    routinesKeywords: 'rutinas horarios tareas programadas cron bandeja resultados ocultar',
     keywords: 'chats conversaciones conversación mensajes historial',
   },
   media: {

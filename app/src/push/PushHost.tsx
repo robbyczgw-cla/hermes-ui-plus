@@ -16,6 +16,7 @@ import { onDesktopNotificationOpen } from '../desktop/notifications';
 import { withBot } from '../hermes/bots';
 import { useI18n } from '../i18n';
 import { useConnection } from '../settings/ConnectionProvider';
+import { usePreferences } from '../settings/PreferencesProvider';
 import type { ConnectionProfile } from '../settings/profiles';
 import { readInbox, PushApiError } from './api';
 import { ApprovalBanner } from './ApprovalBanner';
@@ -24,7 +25,12 @@ import { notificationsModule, presentLocal, pushFetch } from './device';
 import { deliverToOpenChat, emitInboxConnected } from './inboxBus';
 import { emitAnswerReady } from '../background/noticeState';
 import { createKeyedQueue, recoverFromInbox, routeInboxEvent } from './inboxRouting';
-import { backoffMs, hermesInboxAllowed, hermesInboxSources, inboxUrl, parseTarget, pickConversation, pushFilterOf, pushServerKind, type InboxEvent, type PushTarget } from './model';
+import { backoffMs, hermesInboxAllowed, hermesInboxSources, inboxUrl, parseTarget, pickConversation, pushFilterOf, pushServerKind, routineTargetRoute, streamSources, type InboxEvent, type PushTarget } from './model';
+import { emitRoutineEvent } from '../routines/events';
+import { attention } from '../bots/state';
+import { adoptBotChat } from '../bots/adopt';
+import { botsNow } from '../hermes/useHermesBots';
+import { markUnread } from '../background/noticeState';
 import { serverConfig, syncRegistration } from './registration';
 import { runInbox } from './inboxRunner';
 import { allPushSettings, loadPushSettings, usePushSettingsState } from './settingsStore';
@@ -41,6 +47,8 @@ export function PushHost({ children }: { children: ReactNode }) {
   const { controller, store, ready: convReady } = useConversationsInternals();
   const { t, lang } = useI18n();
   const pushState = usePushSettingsState();
+  // Settings → Chat → "Routinen" (this device): off = no `routines` source in the device scope and the inbox stream
+  const { prefs: { routines: routinesOn }, loaded: prefsLoaded } = usePreferences();
   // "Freigabe nötig" banner (approval of another chat); at most one, the newest
   const [approvalBanner, setApprovalBanner] = useState<{ n: ApprovalNotice; profileId: string; conversationId?: string; preview: boolean } | null>(null);
   const latest = useRef({ profiles, active, setActive, controller, store, t });
@@ -74,6 +82,21 @@ export function PushHost({ children }: { children: ReactNode }) {
       const p = ps.find((x) => x.id === target.profileId);
       if (!p) return;
       if (p.id !== act.id) setAct(p.id);
+      // Routine result: the Routines screen of that bot, inbox tab, the result open (never a chat); with Routines off
+      // here the route explains that and offers to turn them on (routines/RoutinesHidden.tsx)
+      if (target.kind === 'routine') {
+        router.navigate(routineTargetRoute(target));
+        return;
+      }
+      // a bot's Bot Chat (a reminder / routine result, an answer from another device): that bot's thread, adopted if new
+      if (p.kind === 'hermes' && target.botChat && target.sessionId) {
+        const meta = await adoptBotChat(ctl, p, target.hermesProfile, target.sessionId, (c, id) => hermesSessions(c).get(id)).catch(() => null);
+        if (meta) {
+          ctl.setActive(meta.id);
+          router.navigate('/');
+          return;
+        }
+      }
       let conv = pickConversation(ctl.list(), p, target);
       if (p.kind === 'hermes' && target.sessionId) {
         try {
@@ -153,19 +176,20 @@ export function PushHost({ children }: { children: ReactNode }) {
   // ---------- registration refresh once per start
   const refreshed = useRef(false);
   useEffect(() => {
-    if (!connReady || !pushState.loaded || refreshed.current) return;
+    // after the preferences: the registration's scope follows the "Routinen" switch (routines/enabled.ts)
+    if (!connReady || !pushState.loaded || !prefsLoaded || refreshed.current) return;
     refreshed.current = true;
     const settings = allPushSettings();
     for (const p of profiles) {
       if (settings[p.id]?.enabled) void syncRegistration(p, t, lang).catch(() => {});
     }
-  }, [connReady, pushState.loaded, profiles, t, lang]);
+  }, [connReady, pushState.loaded, prefsLoaded, profiles, t, lang]);
 
-  // "Cron-Berichte anzeigen" changed → re-register so the bridge's device scope (push sources) follows
-  const scopeKey = profiles.filter((p) => pushServerKind(p) === 'bridge').map((p) => `${p.id}:${hermesInboxSources(p).join('+')}`).join(',');
+  // "Cron-Berichte anzeigen" or "Routinen" changed → re-register so the bridge's device scope (push sources) follows
+  const scopeKey = `${routinesOn ? 'r' : '-'}|` + profiles.filter((p) => pushServerKind(p) === 'bridge').map((p) => `${p.id}:${hermesInboxSources(p).join('+')}`).join(',');
   const lastScope = useRef<string | null>(null);
   useEffect(() => {
-    if (!connReady || !pushState.loaded) return;
+    if (!connReady || !pushState.loaded || !prefsLoaded) return;
     const prev = lastScope.current;
     lastScope.current = scopeKey;
     if (prev === null || prev === scopeKey) return; // first run: covered by the start refresh above
@@ -174,7 +198,7 @@ export function PushHost({ children }: { children: ReactNode }) {
       if (pushServerKind(p) === 'bridge' && settings[p.id]?.enabled) void syncRegistration(p, t, lang).catch(() => {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connReady, pushState.loaded, scopeKey]);
+  }, [connReady, pushState.loaded, prefsLoaded, scopeKey]);
 
   useEffect(() => {
     void loadPushSettings();
@@ -184,6 +208,24 @@ export function PushHost({ children }: { children: ReactNode }) {
   const handleInbox = useCallback(
     async (p: ConnectionProfile, ev: InboxEvent, foreground: boolean) => {
       const { controller: ctl, store: st, t: tr } = latest.current;
+      if (p.kind === 'hermes' && ev.botChat && ev.sessionId) {
+        // a bot's Bot Chat got a job delivery / an answer the app did not stream: the thread (adopted on first sight)
+        // learns of the activity (the open chat refetches its transcript), anywhere else it is unread
+        const meta = await adoptBotChat(ctl, p, ev.hermesProfile, ev.sessionId, (c, id) => hermesSessions(c).get(id)).catch(() => null);
+        if (meta) {
+          ctl.botChatRemote(meta.id, { lastActive: ev.timestamp, preview: ev.content });
+          if (!foreground || st.get().activeId !== meta.id) markUnread(meta.id);
+        }
+        if (!foreground) {
+          const preview = allPushSettings()[p.id]?.preview !== 'off';
+          await presentLocal({
+            title: ev.title || p.name,
+            body: preview ? ev.content.replace(/\s+/g, ' ').trim().slice(0, 140) || tr('push.newMessage') : tr('push.newMessage'),
+            data: { src: 'hermes', profileId: p.id, sessionId: ev.sessionId, botChat: '1', ...(ev.hermesProfile ? { hermesProfile: ev.hermesProfile } : {}) },
+          });
+        }
+        return;
+      }
       if (p.kind === 'hermes') {
         // cron reports / other sources: no chat, no notification unless the profile shows them
         if (!hermesInboxAllowed(p, ev)) return;
@@ -226,8 +268,10 @@ export function PushHost({ children }: { children: ReactNode }) {
   const presentApproval = useCallback(async (p: ConnectionProfile, n: ApprovalNotice) => {
     const tr = latest.current.t;
     const preview = allPushSettings()[p.id]?.preview !== 'off';
+    // a bot's request names the bot (its label from the bridge's list, else the profile name)
+    const bot = n.hermesProfile ? (botsNow(p).find((b) => b.name === n.hermesProfile)?.label ?? n.hermesProfile) : null;
     await presentLocal({
-      title: tr('push.approval.notifyTitle'),
+      title: bot ? tr('push.approval.notifyTitleBot', { name: bot }) : tr('push.approval.notifyTitle'),
       body: preview && n.command ? displayCommand(n.command).text.replace(/\s+/g, ' ').trim().slice(0, 140) : tr('push.approval.notifyBody'),
       data: { src: 'hermes', kind: 'approval', profileId: p.id, ...(n.sessionId ? { sessionId: n.sessionId } : {}), ...(n.hermesProfile ? { hermesProfile: n.hermesProfile } : {}), runId: n.runId, requestId: n.requestId, messageId: n.id },
       tag: approvalTag(n.requestId),
@@ -237,6 +281,12 @@ export function PushHost({ children }: { children: ReactNode }) {
   const handleApproval = useCallback(
     async (p: ConnectionProfile, n: ApprovalNotice, foreground: boolean) => {
       if (p.kind !== 'hermes') return;
+      // "Wartet auf dich" in the Bots tab (bots/): until answered, resolved elsewhere or past its deadline
+      const owner = n.sessionId ? pickConversation(latest.current.controller.list(), p, { sessionId: n.sessionId, hermesProfile: n.hermesProfile }) : null;
+      attention.addInbox({
+        requestId: n.requestId, runId: n.runId, profileId: p.id, bot: n.hermesProfile, since: n.timestamp,
+        ...(owner ? { conversationId: owner.id } : {}), ...(n.sessionId ? { sessionId: n.sessionId } : {}), ...(n.expiresAt ? { expiresAt: n.expiresAt } : {}),
+      });
       // desktop app in the background (the inbox stream stays open there): a notification with "allow once" / "deny"
       // buttons, and the banner / card as usual for when the user comes back
       if (isDesktopApp() && !desktopWindowFocused()) void presentApproval(p, n);
@@ -252,6 +302,7 @@ export function PushHost({ children }: { children: ReactNode }) {
   const handleApprovalResolved = useCallback(
     async (p: ConnectionProfile, r: ApprovalResolved) => {
       if (isDesktopApp()) desktopNotifyRemove(approvalTag(r.requestId)); // answered elsewhere: the buttons are moot
+      attention.resolve(r.requestId);
       if (p.kind === 'hermes') routeApprovalResolved(approvalDeps(p), p, r);
     },
     [approvalDeps],
@@ -282,7 +333,7 @@ export function PushHost({ children }: { children: ReactNode }) {
   const streamProfiles = profiles
     .filter((p) => pushServerKind(p) && (p.id === active.id || pushState.profiles[p.id]?.enabled))
     .slice(0, MAX_STREAMS);
-  const streamKey = streamProfiles.map((p) => `${p.id}|${p.baseUrl}|${p.apiKey.slice(-6)}|${p.kind === 'hermes' ? hermesInboxSources(p).join('+') : ''}`).join(',');
+  const streamKey = `${routinesOn ? 'r' : '-'}|` + streamProfiles.map((p) => `${p.id}|${p.baseUrl}|${p.apiKey.slice(-6)}|${p.kind === 'hermes' ? hermesInboxSources(p).join('+') : ''}`).join(',');
 
   useEffect(() => {
     if (!connReady || !convReady || !streamProfiles.length) return;
@@ -301,7 +352,9 @@ export function PushHost({ children }: { children: ReactNode }) {
         isFatal: fatal,
         backoff: backoffMs,
         connect: async (ready) => {
-          const url = inboxUrl(p, { since: lastTs.get(p.id), sources: p.kind === 'hermes' ? hermesInboxSources(p) : undefined });
+          // + `routines` when the bridge offers it and Routines are on here (config cached 5 min; loaded just before by loadConfig)
+          const cfg = p.kind === 'hermes' ? await serverConfig(p).catch(() => null) : null;
+          const url = inboxUrl(p, { since: lastTs.get(p.id), sources: p.kind === 'hermes' ? streamSources(p, cfg?.sources, routinesOn) : undefined });
           if (!url) throw new PushApiError('no inbox url', 404);
           await readInbox(pushFetch, url, p.apiKey, {
             signal: ctrl.signal,
@@ -315,6 +368,11 @@ export function PushHost({ children }: { children: ReactNode }) {
             },
             onApproval: (a) => void inboxQueue(p.id, () => handleApproval(p, a, appActive)).catch(() => {}),
             onApprovalResolved: (r) => void inboxQueue(p.id, () => handleApprovalResolved(p, r)).catch(() => {}),
+            // a Routine result was stored: badge + open inbox refetch; no navigation, no local notification (the
+            // bridge pushes Routine results per device, an open stream does not suppress them)
+            onRoutine: (r) => {
+              if (routinesOn) emitRoutineEvent({ ...r, profileId: p.id });
+            },
           });
         },
       }).finally(() => {

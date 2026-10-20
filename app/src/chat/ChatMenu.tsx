@@ -20,6 +20,11 @@ type Props = {
   /** the chat has messages (a draft has nothing to search / export / archive) */
   hasMessages: boolean;
   onFind(): void;
+  /** the chat has live cards (live/LiveProvider): "Alle Live-Karten" opens their list */
+  onLiveCards?: () => void;
+  /** a Hermes chat: "Über <Name>" (bots/BotInfoSheet.tsx: model, the bot's routines); `aboutName` = the bot's name */
+  onAbout?: () => void;
+  aboutName?: string;
   onExport(): void;
   onPin(): void;
   onRename(title: string): void;
@@ -27,17 +32,26 @@ type Props = {
   onDelete(): void;
 };
 
-export const ChatMenu = memo(function ChatMenu({ open, onClose, meta, hasMessages, onFind, onExport, onPin, onRename, onArchive, onDelete }: Props) {
+export const ChatMenu = memo(function ChatMenu({ open, onClose, meta, hasMessages, onFind, onLiveCards, onAbout, aboutName, onExport, onPin, onRename, onArchive, onDelete }: Props) {
   const tr = useT();
   const [renaming, setRenaming] = useState(false);
   const stored = !!meta && hasMessages;
+  // a bot's Bot Chat is shared with Hermes Desktop and found by its title: no pin / rename / archive / delete here
+  const botChat = !!meta?.botChat;
   const items: MenuItem[] = [
+    // name, model and (unless Settings → Chat → "Routinen" is off) the bot's routines, for every Hermes chat, also without bots
+    ...(onAbout ? [{ key: 'about', icon: 'bell' as const, label: tr('bots.info.title', { name: aboutName ?? 'Hermes' }), onPress: onAbout }] : []),
     { key: 'find', icon: 'search', label: tr('menus.chat.find'), onPress: onFind, disabled: !hasMessages },
+    ...(onLiveCards ? [{ key: 'live', icon: 'checklist' as const, label: tr('live.list.open'), onPress: onLiveCards }] : []),
     { key: 'share', icon: 'share', label: tr('menus.chat.share'), onPress: onExport, disabled: !hasMessages },
-    { key: 'pin', icon: 'pin', label: meta?.pinned ? tr('menus.chat.unpin') : tr('menus.chat.pin'), onPress: onPin, disabled: !stored },
-    { key: 'rename', icon: 'edit', label: tr('menus.chat.rename'), onPress: () => setRenaming(true), disabled: !stored },
-    { key: 'archive', icon: 'archive', label: meta?.archived ? tr('menus.chat.unarchive') : tr('menus.chat.archive'), onPress: onArchive, disabled: !stored },
-    { key: 'delete', icon: 'trash', label: tr('menus.chat.delete'), onPress: onDelete, danger: true, disabled: !hasMessages },
+    ...(botChat
+      ? []
+      : ([
+          { key: 'pin', icon: 'pin', label: meta?.pinned ? tr('menus.chat.unpin') : tr('menus.chat.pin'), onPress: onPin, disabled: !stored },
+          { key: 'rename', icon: 'edit', label: tr('menus.chat.rename'), onPress: () => setRenaming(true), disabled: !stored },
+          { key: 'archive', icon: 'archive', label: meta?.archived ? tr('menus.chat.unarchive') : tr('menus.chat.archive'), onPress: onArchive, disabled: !stored },
+          { key: 'delete', icon: 'trash', label: tr('menus.chat.delete'), onPress: onDelete, danger: true, disabled: !hasMessages },
+        ] satisfies MenuItem[])),
   ];
   return (
     <>

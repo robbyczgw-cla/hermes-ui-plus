@@ -17,6 +17,8 @@ export type ShareDelivery = {
   files: SharedFile[];
   /** called once the composer has taken the files into its draft (web: frees the stored share) */
   release?: () => void;
+  /** only put the text into the composer, never send it (Skills: "Use in chat") */
+  fillOnly?: boolean;
 };
 
 export type OfferedShare = SharedPayload & {

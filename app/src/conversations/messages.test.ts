@@ -129,6 +129,27 @@ test('localizePreview maps stored German markers to the active language, leaves 
   assert.equal(localizePreview('[Grafik] [Datei] [Unbekannt]', mk(convEn) as never), '[Graphic] [File] [Unbekannt]');
 });
 
+test('PC-07 preview / search text: raw tool-call markup of an answer is a "[Werkzeug]" marker, never the call JSON', () => {
+  const pc07 =
+    'Ich richte die Erinnerung jetzt ein und prüfe, ob sie wirklich angelegt ist.\n' +
+    '<tool_call>{"name":"cronjob_manage","arguments":{"action":"create","schedule":"in 15h"}}</tool_call>';
+  const q = msg(0, { text: 'Erinnere mich in 15h' });
+  const p = previewOf([q, msg(1, { text: pc07 })], 200);
+  assert.equal(p, 'Ich richte die Erinnerung jetzt ein und prüfe, ob sie wirklich angelegt ist. [Werkzeug]');
+  // only the call: the marker (visible), not the call and not silently the question
+  assert.equal(previewOf([q, msg(1, { text: '<tool_call>\n{"name":"cronjob_manage"}\n</tool_call>' })]), '[Werkzeug]');
+  const tr = (key: string) => (convEn.marker as Record<string, string>)[key.replace('conversations.marker.', '')];
+  assert.equal(localizePreview('[Werkzeug]', tr as never), '[Tool call]');
+  assert.equal(localizePreview('[Werkzeug]', ((k: string) => (convDe.marker as Record<string, string>)[k.replace('conversations.marker.', '')]) as never), '[Werkzeugaufruf]');
+  // search (and its list snippets): the answer as it shows; the user's own text stays searchable as written
+  const st = searchTextOf([msg(0, { text: 'was ist <tool_call>?' }), msg(1, { text: pc07 })]);
+  assert.doesNotMatch(st, /cronjob_manage|\{"name"/);
+  assert.match(st, /angelegt ist\./);
+  assert.match(st, /was ist <toolcall\?/, 'flattened as before (markdown chars dropped)');
+  // without markup: unchanged
+  assert.equal(previewOf([msg(1, { text: 'a < b, **klar**.' })]), 'a < b, klar.');
+});
+
 test('H5: signature changes for every persisted change (same-length text, approval outcome, attachments, reasoning)', () => {
   const base = msg(0, { text: 'abc' });
   const sig = messagesSignature([base]);

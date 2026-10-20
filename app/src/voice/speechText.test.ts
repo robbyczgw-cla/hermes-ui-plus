@@ -82,3 +82,17 @@ test('spoken summaries follow the active language', () => {
   assert.equal(summarizeHuiNode({ type: 'progress', label: 'Upload', value: 40 }, en), 'Upload: 40 percent.');
   assert.equal(toSpeechText('```hui-html\n<p>x</p>\n```', en), 'Here is an interactive view.');
 });
+
+test('PC-07: raw tool-call markup is spoken as the notice line, never as the call JSON; other text unchanged', () => {
+  const en = makeT('en', 'en-US');
+  const pc07 =
+    'Ich richte die Erinnerung jetzt ein und prüfe, ob sie wirklich angelegt ist.\n' +
+    '<tool_call>{"name":"cronjob_manage","arguments":{"action":"create","schedule":"in 15h"}}</tool_call>';
+  const said = toSpeechText(pc07, en);
+  assert.doesNotMatch(said, /cronjob_manage|\{"name"|"arguments"/);
+  assert.equal(said, 'Ich richte die Erinnerung jetzt ein und prüfe, ob sie wirklich angelegt ist.\n\nTool call not available here: nothing was run.');
+  assert.match(toSpeechText(pc07, de), /Werkzeugaufruf hier nicht verfügbar: es wurde nichts ausgeführt\.$/);
+  // only the call: the notice alone, not silence
+  assert.equal(toSpeechText('<tool_call>\n{"name":"cronjob_manage"}\n</tool_call>', en), 'Tool call not available here: nothing was run.');
+  assert.equal(toSpeechText('Das ist **wichtig**: a < b.', de), 'Das ist wichtig: a < b.');
+});

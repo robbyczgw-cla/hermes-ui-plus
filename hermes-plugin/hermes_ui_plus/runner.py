@@ -22,9 +22,10 @@ import contextvars
 import errno
 import logging
 import threading
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from .httpserver import QuickHttpServer
+from .library import LibraryService
 from .quick import QuickService
 
 logger = logging.getLogger("hermes_ui_plus.runner")
@@ -33,9 +34,12 @@ BIND_RETRY_S = 15.0  # passive processes try to take over the port this often (c
 
 
 class ListenerThread:
-    def __init__(self, make_service: Callable[[], QuickService], secret: str, *, host: str, port: int):
+    def __init__(self, make_service: Callable[[], QuickService], secret: str, *, host: str, port: int,
+                 library: Optional[LibraryService] = None, bots: Optional[Any] = None):
         self._make_service = make_service
         self._secret = secret
+        self._library = library
+        self._bots = bots
         self.host, self.port = host, port
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._server: Optional[QuickHttpServer] = None
@@ -61,7 +65,8 @@ class ListenerThread:
         asyncio.set_event_loop(loop)
         try:
             self._service = self._make_service()
-            self._server = QuickHttpServer(self._service, self._secret, host=self.host, port=self.port)
+            self._server = QuickHttpServer(self._service, self._secret, host=self.host, port=self.port,
+                                         library=self._library, bots=self._bots)
             while True:
                 try:
                     loop.run_until_complete(self._server.start())

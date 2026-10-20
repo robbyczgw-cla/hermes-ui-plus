@@ -1,10 +1,11 @@
 // Namespace 'compliance' (German, source of truth): AI data-sharing consent (Apple 5.1.2(i)) and
 // "Antwort melden" (Google Play AI-generated content policy). See src/compliance/ and docs/STORE.md.
-// Changing any consent.* text below → bump AI_CONSENT_VERSION + CONSENT_TEXT_FINGERPRINT (src/compliance/consent.ts).
+// Changing any consent.* text below → new CONSENT_TEXT_FINGERPRINT and a decision on AI_CONSENT_VERSION (a bump asks
+// everyone again; src/compliance/consent.ts).
 export const compliance = {
   consent: {
     title: 'Wohin deine Nachrichten gehen',
-    body: 'Deine Nachrichten und Anhänge werden an deinen Hermes-Server gesendet und von dort an die KI-Anbieter, die in Hermes eingerichtet sind (z. B. OpenAI, Anthropic, xAI). {appShort} speichert deine Chats, Einstellungen und Schlüssel nur auf diesem Gerät und sammelt selbst nichts.',
+    body: 'Deine Nachrichten und Anhänge werden an deinen Hermes-Server gesendet und von dort an die KI-Anbieter, die in Hermes eingerichtet sind (z. B. OpenAI, Anthropic, xAI). Hermes speichert die Gespräche auch auf deinem Server, damit der Agent sie fortsetzen und sich Dinge merken kann. {appShort} speichert seine Kopie deiner Chats sowie Einstellungen und Schlüssel auf diesem Gerät und sammelt selbst nichts.',
     providers: 'Sprache: Diktat und Vorlesen laufen über die Sprachdienste der Bridge oder über den Anbieter, dessen API-Schlüssel du selbst eingetragen hast – Audio bzw. Text gehen dann direkt dorthin. Gerätestimme und Geräte-Erkennung laufen auf deinem Gerät; je nach System kann die Spracherkennung des Betriebssystems einen eigenen Online-Dienst nutzen. Bildersuchen gehen an den eingestellten Suchanbieter.',
     accept: 'Verstanden & weiter',
     later: 'Später',

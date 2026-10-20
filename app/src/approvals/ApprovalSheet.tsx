@@ -1,8 +1,10 @@
 import * as Clipboard from 'expo-clipboard';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, ScrollView, StyleSheet, View, useWindowDimensions, type StyleProp, type ViewStyle } from 'react-native';
 import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withSpring } from 'react-native-reanimated';
-import { useT } from '../i18n';
+import { useLocale, useT } from '../i18n';
+import { BotAvatar } from '../bots/BotAvatar';
+import { botApprovalChoices } from '../bots/core';
 import { Button, HText, Icon, PressableScale, haptic, useTheme, withAlpha } from '../ui';
 import { FADE_IN_SETTLED } from '../ui/lib/fadeIn';
 import { scaledLineLimit } from '../ui/lib/fontScaleLayout';
@@ -36,8 +38,22 @@ export type ApprovalSheetProps = {
   onClose?: () => void;
   /** Server `approvals.timeout` if known (default 300 s; the event carries no deadline). */
   timeoutSeconds?: number;
+  /**
+   * The request comes from a bot's chat (bots/): the card names the bot, offers no "for this session" (the Bot Chat
+   * never ends) and waits calmly ("{name} wartet auf dich, seit 7:12", a countdown only in the last minute).
+   * `scoped`: "Always allow" lands in THIS bot's allowlist only (a non-default Hermes profile), so it is a plain choice;
+   * the default bot's "always" stays Hermes' global list behind "More options".
+   */
+  bot?: BotContext;
   style?: StyleProp<ViewStyle>;
 };
+
+export type BotContext = { name: string; bot?: string; color?: string; scoped: boolean };
+
+/** a countdown only this close to Hermes' deadline in a bot chat (before: "waiting since") */
+const BOT_COUNTDOWN_S = 60;
+/** a category text short enough for the "Always allow" subline */
+const CATEGORY_MAX = 48;
 
 function useNow(active: boolean, intervalMs = 1000): number {
   const [now, setNow] = useState(() => Date.now());
@@ -53,9 +69,13 @@ function useNow(active: boolean, intervalMs = 1000): number {
  * Prominent card shown above the composer while Hermes waits for an `approval.request` answer.
  * One answer only: taps are ignored while sending or after success; a failed send can be retried.
  */
-export function ApprovalSheet({ approval, onRespond, onDismiss, onClose, timeoutSeconds, style }: ApprovalSheetProps) {
+export function ApprovalSheet({ approval: raw, onRespond, onDismiss, onClose, timeoutSeconds, bot, style }: ApprovalSheetProps) {
   const t = useTheme();
   const tr = useT();
+  const { formatDate } = useLocale();
+  // a bot chat never offers "for this session" (bots/core.ts botApprovalChoices)
+  const botMode = !!bot;
+  const approval = useMemo(() => (botMode && raw.choices ? { ...raw, choices: botApprovalChoices(raw.choices) } : raw), [botMode, raw]);
   const reduced = useReducedMotion();
   // Recompute only when the request changes; `now` is captured once so the deadline stays fixed.
   const [view, setView] = useState(() => toApprovalView(approval, { timeoutSeconds }));
@@ -179,6 +199,21 @@ export function ApprovalSheet({ approval, onRespond, onDismiss, onClose, timeout
   const failed = state.phase === 'error' ? state : null;
   const close = onClose ?? onDismiss;
   const level = view.risk.level;
+  const scoped = !!bot?.scoped;
+  const title = bot ? tr(view.smartDenied ? 'approvals.title.blockedBot' : 'approvals.title.requestBot', { name: bot.name }) : tr(view.titleKey);
+  // bot chat: "waiting since …" until the last minute, then the usual countdown
+  const sinceMs = view.deadlineMs - view.timeoutSeconds * 1000;
+  const sinceText = formatDate(new Date(sinceMs), { hour: 'numeric', minute: '2-digit' });
+  const showCountdown = !botMode || expired || left <= BOT_COUNTDOWN_S;
+  const category = view.description && view.description.length <= CATEGORY_MAX ? view.description : '';
+  const alwaysText = (ch: ChoiceView) =>
+    ch.value === 'always' && scoped && bot
+      ? {
+          label: tr('approvals.choice.alwaysBot.label'),
+          a11y: tr('approvals.choice.alwaysBot.a11y', { name: bot.name }),
+          hint: category ? tr('approvals.choice.alwaysBot.hintCategory', { name: bot.name, category }) : tr('approvals.choice.alwaysBot.hint', { name: bot.name }),
+        }
+      : undefined;
   const estimatedRisk = level !== 'normal' && !view.smartDenied;
   const c = t.colors;
 
@@ -212,13 +247,21 @@ export function ApprovalSheet({ approval, onRespond, onDismiss, onClose, timeout
     >
       {/* header: the approval seal + title; risk as one quiet line (seal mark + text), never a pill */}
       <View style={styles.header}>
-        <View style={[styles.seal, { backgroundColor: c.seal }]} accessible={false} importantForAccessibility="no-hide-descendants">
-          {/* an unbroken wax seal (pressed rim, no glyph): a check here would read as "already allowed" */}
-          <View style={[styles.sealRim, { borderColor: withAlpha(c.onSeal, 0.6) }]} />
-        </View>
+        {bot ? (
+          // the bot's avatar with the small seal at its corner
+          <View accessible={false} importantForAccessibility="no-hide-descendants">
+            <BotAvatar name={bot.name} bot={bot.bot} color={bot.color} size={40} />
+            <View style={[styles.sealBadge, { backgroundColor: c.seal, borderColor: c.surface }]} />
+          </View>
+        ) : (
+          <View style={[styles.seal, { backgroundColor: c.seal }]} accessible={false} importantForAccessibility="no-hide-descendants">
+            {/* an unbroken wax seal (pressed rim, no glyph): a check here would read as "already allowed" */}
+            <View style={[styles.sealRim, { borderColor: withAlpha(c.onSeal, 0.6) }]} />
+          </View>
+        )}
         <View style={styles.headerText}>
           <HText variant="headline" accessibilityRole="header" numberOfLines={4}>
-            {tr(view.titleKey)}
+            {title}
           </HText>
           {level !== 'normal' ? (
             <View style={styles.riskRow}>
@@ -300,7 +343,7 @@ export function ApprovalSheet({ approval, onRespond, onDismiss, onClose, timeout
       {view.description ? (
         <View style={styles.reason}>
           <HText variant="caption" color="muted">
-            {tr('approvals.reason.label')}
+            {bot ? tr('approvals.reason.labelBot', { name: bot.name }) : tr('approvals.reason.label')}
           </HText>
           <HText variant="body" selectable>
             {view.description}
@@ -308,7 +351,17 @@ export function ApprovalSheet({ approval, onRespond, onDismiss, onClose, timeout
         </View>
       ) : null}
 
+      {/* bot chat: calm "waiting since" line instead of a running clock (the countdown below takes over at the end) */}
+      {!showCountdown && bot ? (
+        <View style={styles.sinceRow} accessible accessibilityLabel={tr('approvals.waiting.sinceA11y', { name: bot.name, time: sinceText })}>
+          <Icon name="timer" size={14} color={c.muted} />
+          <HText variant="caption" color="muted">
+            {tr('approvals.waiting.since', { name: bot.name, time: sinceText })}
+          </HText>
+        </View>
+      ) : null}
       {/* countdown: brass progress (accent = progress), the text turns to danger in the last 30 s */}
+      {showCountdown ? (
       <View
         style={styles.countdownRow}
         accessible
@@ -327,11 +380,12 @@ export function ApprovalSheet({ approval, onRespond, onDismiss, onClose, timeout
               : tr('approvals.countdown.leftExact', { time: formatCountdown(left) })}
         </HText>
       </View>
+      ) : null}
       {expired && !failed ? (
         <View accessibilityRole="alert" style={[styles.noteBox, { backgroundColor: c.dangerSoft, borderRadius: t.radii.control }]}>
           <Icon name="alert" size={16} color={c.danger} />
           <HText variant="callout" color="danger" style={styles.flex1}>
-            {tr('approvals.countdown.expiredNote')}
+            {bot ? tr('approvals.waiting.expired', { name: bot.name }) : tr('approvals.countdown.expiredNote')}
           </HText>
         </View>
       ) : null}
@@ -364,11 +418,11 @@ export function ApprovalSheet({ approval, onRespond, onDismiss, onClose, timeout
           <HText variant="bodyStrong" style={{ color: c.seal }}>
             {tr('approvals.confirm.title')}
           </HText>
-          <HText variant="callout">{tr('approvals.confirm.body')}</HText>
+          <HText variant="callout">{scoped && bot ? tr('approvals.confirm.bodyBot', { name: bot.name }) : tr('approvals.confirm.body')}</HText>
           <View style={styles.actionRow}>
             <Button label={tr('approvals.confirm.back')} variant="primary" haptic="selection" numberOfLines={2} onPress={() => setConfirming(null)} style={styles.flowBtn} />
             <Button
-              label={tr('approvals.confirm.yes')}
+              label={scoped && bot ? tr('approvals.confirm.yesBot', { name: bot.name }) : tr('approvals.confirm.yes')}
               variant="secondary"
               tone="seal"
               haptic="medium"
@@ -381,7 +435,27 @@ export function ApprovalSheet({ approval, onRespond, onDismiss, onClose, timeout
       ) : null}
 
       {/* choices */}
-      {confirming && !expired ? null : (
+      {confirming && !expired ? null : scoped ? (
+        // a non-default bot: "Always allow" only touches this bot's allowlist → one stack of plain choices
+        <View style={styles.choices}>
+          {view.choices.map((ch) => {
+            const text = alwaysText(ch);
+            return (
+              <View key={ch.value} style={styles.botChoice}>
+                <ChoiceButton {...choiceProps(ch)} text={text} variant={ch.kind === 'danger' ? 'secondary' : undefined} block />
+                {text?.hint ? (
+                  <HText variant="caption" color="muted" align="center">
+                    {text.hint}
+                  </HText>
+                ) : null}
+              </View>
+            );
+          })}
+          {(expired || (failed && !failed.error.retryable)) && close ? (
+            <Button label={tr('actions.close')} variant="secondary" haptic="selection" onPress={close} />
+          ) : null}
+        </View>
+      ) : (
         <View style={styles.choices}>
           {/* side by side while both labels fit, otherwise stacked (wrap) – never truncated */}
           <View style={styles.actionRow}>
@@ -430,11 +504,31 @@ export function ApprovalSheet({ approval, onRespond, onDismiss, onClose, timeout
 }
 
 /** One answer as a `Button`: primary (the recommended answer), secondary (alternatives), tertiary (quiet Deny). */
-function ChoiceButton({ choice, sending, retry, disabled, onPress }: { choice: ChoiceView; sending: boolean; retry: boolean; disabled: boolean; onPress: () => void }) {
+function ChoiceButton({
+  choice,
+  sending,
+  retry,
+  disabled,
+  onPress,
+  text,
+  variant: forced,
+  block,
+}: {
+  choice: ChoiceView;
+  sending: boolean;
+  retry: boolean;
+  disabled: boolean;
+  onPress: () => void;
+  /** bot chat: own label / spoken text / hint (the per-bot "Always allow") */
+  text?: { label: string; a11y: string; hint?: string };
+  variant?: 'primary' | 'secondary' | 'tertiary';
+  /** full width (bot chat stack) */
+  block?: boolean;
+}) {
   const t = useTheme();
   const tr = useT();
-  const label = tr(choice.labelKey);
-  const variant = choice.kind === 'primary' || choice.kind === 'denyPrimary' ? 'primary' : choice.kind === 'danger' ? 'tertiary' : 'secondary';
+  const label = text?.label ?? tr(choice.labelKey);
+  const variant = forced ?? (choice.kind === 'primary' || choice.kind === 'denyPrimary' ? 'primary' : choice.kind === 'danger' ? 'tertiary' : 'secondary');
   // the label says what gets allowed ("Always allow (everywhere, …)"): more lines at large text instead of cutting it
   const labelLines = scaledLineLimit(3, t.fontScale * (useWindowDimensions().fontScale || 1));
   return (
@@ -446,10 +540,10 @@ function ChoiceButton({ choice, sending, retry, disabled, onPress }: { choice: C
       disabled={disabled}
       numberOfLines={labelLines}
       haptic={choice.kind === 'danger' || choice.kind === 'denyPrimary' ? 'medium' : 'light'}
-      accessibilityLabel={tr(choice.a11yKey)}
-      accessibilityHint={choice.hintKey ? tr(choice.hintKey) : undefined}
+      accessibilityLabel={text?.a11y ?? tr(choice.a11yKey)}
+      accessibilityHint={text ? text.hint : choice.hintKey ? tr(choice.hintKey) : undefined}
       accessibilityState={{ busy: sending }}
-      style={variant === 'tertiary' ? null : styles.flowBtn}
+      style={block ? styles.blockBtn : variant === 'tertiary' ? null : styles.flowBtn}
     />
   );
 }
@@ -460,6 +554,10 @@ const styles = StyleSheet.create({
   // the seal sits on the title's first line (headline 23 px line: (23 - 20) / 2 ≈ 2)
   seal: { width: 20, height: 20, borderRadius: 10, marginTop: 2, alignItems: 'center', justifyContent: 'center' },
   sealRim: { width: 12, height: 12, borderRadius: 6, borderWidth: 1.5 },
+  sealBadge: { position: 'absolute', right: -3, bottom: -3, width: 14, height: 14, borderRadius: 7, borderWidth: 2 },
+  sinceRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  botChoice: { gap: 4 },
+  blockBtn: { alignSelf: 'stretch' },
   headerText: { flex: 1, gap: 2 },
   riskRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   riskDot: { width: 6, height: 6, borderRadius: 3 },

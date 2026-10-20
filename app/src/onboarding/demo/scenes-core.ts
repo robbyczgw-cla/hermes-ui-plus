@@ -18,7 +18,7 @@ export function factsText(id: FactsId, lang: DemoLang): string {
 
 // ── tour / fallback ────────────────────────────────────────────────────────────────────────────────────────────
 
-const TOUR_CHIPS: PromptKey[] = ['approval', 'checklist', 'choice', 'products', 'webResearch', 'recipe', 'quiz', 'explain', 'status', 'paths', 'connect'];
+const TOUR_CHIPS: PromptKey[] = ['liveList', 'approval', 'checklist', 'choice', 'products', 'webResearch', 'recipe', 'quiz', 'explain', 'status', 'paths', 'memoryWhat', 'connect'];
 
 export const tour: DemoScenario = {
   format: 'text',

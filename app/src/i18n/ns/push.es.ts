@@ -46,6 +46,7 @@ export const push = {
     open: 'Abrir',
     dismiss: 'Cerrar',
     notifyTitle: 'Hermes espera tu aprobación',
+    notifyTitleBot: '{name} espera tu aprobación',
     notifyBody: 'Un comando espera tu decisión.',
   },
   newMessage: 'Nuevo mensaje',

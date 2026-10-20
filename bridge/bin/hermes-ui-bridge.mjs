@@ -11,15 +11,14 @@ if (nodeTooOld(process.versions.node)) {
   process.stderr.write(nodeTooOldMessage(process.versions.node, process.execPath));
   process.exit(1);
 }
-const { HELP, parseArgs, prepareEnv, preflight, featureSummary, pairHint, inBridgeImage, recheckUntilReachable, checkMark } = await import('../src/cli.mjs');
+const { HELP, parseArgs, prepareEnv, loadEnvFiles, preflight, featureSummary, pairHint, inBridgeImage, recheckUntilReachable, checkMark } = await import('../src/cli.mjs');
 
 const here = dirname(fileURLToPath(import.meta.url));
 const out = (s = '') => process.stdout.write(`${s}\n`);
 const err = (s) => process.stderr.write(`${s}\n`);
 
-/** `hermes-ui-bridge devices list|add <label>|revoke <id> [--env-file f] [--state-dir d]` (review M5). */
-async function devicesCmd(argv) {
-  const [sub, ...rest] = argv;
+/** Shared by `devices` and `routines`: flags, the setup wizard's env file, the device store of the state dir. */
+async function deviceStoreFromArgs(rest) {
   const positional = [];
   const flags = [];
   for (let i = 0; i < rest.length; i++) {
@@ -43,7 +42,13 @@ async function devicesCmd(argv) {
     err('device tokens are off (BRIDGE_DEVICE_TOKENS=0) or no state directory');
     process.exit(2);
   }
-  const store = createDeviceStore({ dir });
+  return { env, positional, store: createDeviceStore({ dir }) };
+}
+
+/** `hermes-ui-bridge devices list|add <label>|revoke <id> [--env-file f] [--state-dir d]` (review M5). */
+async function devicesCmd(argv) {
+  const [sub, ...rest] = argv;
+  const { env, positional, store } = await deviceStoreFromArgs(rest);
   if (sub === 'list' || !sub) {
     const list = store.list();
     if (!list.length) return out(`no device tokens in ${store.file}`);
@@ -69,6 +74,50 @@ async function devicesCmd(argv) {
   throw new Error('usage: hermes-ui-bridge devices list|add [label]|revoke <id> [--env-file f] [--state-dir d]');
 }
 
+/** `hermes-ui-bridge routines status|enable <bot>|disable <bot>|grant <device-id> <bot> <right>` (src/routines-rights.mjs). */
+async function routinesCmd(argv) {
+  const [sub, ...rest] = argv;
+  const { env, positional, store } = await deviceStoreFromArgs(rest);
+  const { routinesCli } = await import('../src/routines-rights.mjs');
+  for (const line of routinesCli(sub, positional, { env, store })) out(line);
+}
+
+/**
+ * `hermes-ui-plus-bridge doctor bots` / `bots backup|rollback` (src/bots-doctor.mjs, docs/BOTS-SERVER.md): read-only
+ * checks of the Hermes home for bots, and the owner's backup / rollback around the one-time server steps.
+ */
+async function botsCmd(sub, argv) {
+  const flags = [];
+  const rest = [];
+  let home;
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--hermes-home') home = argv[++i];
+    else if (argv[i] === '--env-file') flags.push(argv[i], argv[++i]);
+    else rest.push(argv[i]);
+  }
+  const opts = parseArgs(flags);
+  if (!opts.envFiles.length) {
+    const { defaultEnvFile } = await import('../src/setup/files.mjs');
+    const file = defaultEnvFile(process.env, undefined, { root: process.getuid?.() === 0 });
+    if (existsSync(file)) { opts.envFiles.push(file); err(`(settings from ${file})`); }
+  }
+  // read-only: no prepareEnv (it would generate and store a BRIDGE_TOKEN)
+  const env = loadEnvFiles(opts.envFiles, process.env, process.cwd());
+  const { hermesHome } = await import('../src/setup/detect.mjs');
+  const { botsCli } = await import('../src/bots-doctor.mjs');
+  const r = botsCli(sub, rest, { home: home ? resolve(home) : hermesHome(env), env });
+  for (const line of r.lines) out(line);
+  process.exitCode = r.code;
+}
+
+/** `hermes-ui-plus-bridge bots status|enable|disable|grant <device-id>|revoke <device-id>` (src/bots-manage.mjs). */
+async function botsManageCmd(argv) {
+  const [sub, ...rest] = argv;
+  const { env, positional, store } = await deviceStoreFromArgs(rest);
+  const { botsManageCli } = await import('../src/bots-manage.mjs');
+  for (const line of botsManageCli(sub, positional, { env, store })) out(line);
+}
+
 /** `hermes-ui-plus-bridge setup [--yes] [--dry-run] [--json] ...` (src/setup/wizard.mjs). */
 async function setupCmd(argv) {
   const { parseSetupArgs, runSetup, SETUP_HELP } = await import('../src/setup/wizard.mjs');
@@ -81,7 +130,11 @@ async function setupCmd(argv) {
 
 async function main() {
   if (process.argv[2] === 'devices') return devicesCmd(process.argv.slice(3));
+  if (process.argv[2] === 'routines') return routinesCmd(process.argv.slice(3));
   if (process.argv[2] === 'setup') return setupCmd(process.argv.slice(3));
+  if (process.argv[2] === 'doctor' && process.argv[3] === 'bots') return botsCmd('doctor', process.argv.slice(4));
+  if (process.argv[2] === 'bots' && ['status', 'enable', 'disable', 'grant', 'revoke'].includes(process.argv[3])) return botsManageCmd(process.argv.slice(3));
+  if (process.argv[2] === 'bots') return botsCmd(process.argv[3], process.argv.slice(4));
   const opts = parseArgs(process.argv.slice(2));
   if (opts.help) return out(HELP);
   if (opts.version) return out(JSON.parse(readFileSync(join(here, '../package.json'), 'utf8')).version);

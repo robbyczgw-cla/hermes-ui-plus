@@ -1,6 +1,7 @@
 // Shared building blocks of the offline demo scenarios (types, language helper, hui fence builder).
 // Pure; no UI imports. Scenario files import from here, not from each other.
 import type { Flavor } from '../../flavor.ts';
+import type { UserBatch } from '../../live/model.ts';
 
 /**
  * `result`: what the tool returned (arguments + raw result text), replayed after the call like the stored session row
@@ -17,6 +18,11 @@ export type DemoApproval = {
   allow?: DemoStep[];
   /** steps replayed after "Deny" (default: a short generic note) */
   deny?: DemoStep[];
+  /** fixed request / run id (a bot's waiting approval is the same request in the Bots tab and in its chat) */
+  requestId?: string;
+  runId?: string;
+  /** how long Hermes would wait for the answer (s; default: Hermes' timeout, 300 s) */
+  timeoutSeconds?: number;
 };
 export type DemoStep =
   | { text: string }
@@ -27,6 +33,9 @@ export type DemoStep =
   | { approval: DemoApproval }
   | { fail: 'error' | 'drop' };
 
+/** A demo bot's role (onboarding/demo/bots.ts): its template's canned answers (scenes-bots.ts), its name and job. */
+export type DemoBotRole = { template: 'research' | 'deals' | 'travel' | 'briefing' | 'code' | 'own' | 'blank'; name: string; job: string };
+
 /** `lang`: UI language of the chat (all demo answers and the demo chrome follow it). */
 export type DemoLang = 'de' | 'en' | 'es';
 export type DemoContext = {
@@ -36,8 +45,18 @@ export type DemoContext = {
   now: Date;
   lang?: DemoLang;
   flavor?: Flavor;
+  /** Hermes profile ("bot") that answers: the unprefixed default or a profile name (lets one question get different answers, see multi) */
+  bot?: string;
+  /** the demo bot that answers (its own canned answers); undefined = Hermes */
+  role?: DemoBotRole;
   /** scenario of the last answer that is not itself a reformat (what a `[reformat:…]` chip refers to) */
   previousScenario?: string;
+  /** scenarios of the earlier user messages of this chat, newest first (does the live list exist yet?) */
+  earlier?: string[];
+  /** the user's live-card edits that came with this message (card id → batch, the `[hui:live]` trailer) */
+  live?: Record<string, UserBatch>;
+  /** Settings → Chat → "Routinen" on this device (routines/enabled.ts); false = answers do not point at the hidden Routines UI */
+  routines?: boolean;
 };
 
 /** pick the text for the demo language (German when unknown) */

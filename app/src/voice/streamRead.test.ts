@@ -96,3 +96,51 @@ test('live reader: a replaced (shorter / different) text stops live reading', ()
   assert.deepEqual(r.push({ text: 'Anders', status: 'streaming' }), []);
   assert.deepEqual(r.push({ text: 'Anders und länger. Ganz neu. Text', status: 'done' }), []);
 });
+
+const NOTICE = 'Tool call not available here: nothing was run.';
+const PC07 =
+  'Ich richte die Erinnerung jetzt ein und prüfe, ob sie wirklich angelegt ist.\n' +
+  '<tool_call>{"name":"cronjob_manage","arguments":{"action":"create","schedule":"in 15h"}}</tool_call>';
+
+test('PC-07 live reader: streamed raw tool-call markup is never read, the notice line is (any step size)', () => {
+  // the payload alone: its only sentence never becomes stable before the end, so the end-of-turn read speaks it
+  // (speak → toSpeechText hides the call there, speechText.test.ts); text after the call is read live
+  const after = '\n\nDanach: die Erinnerung ist für morgen um acht Uhr gesetzt. Mehr dazu gleich.';
+  for (const [text, live] of [[PC07, false], [PC07 + after, true]] as const) {
+    for (const step of [1, 4, 13, 1000]) {
+      const r = createLiveReader({ minChars: 20, notice: NOTICE });
+      const out: string[] = [];
+      for (let i = step; i < text.length; i += step) {
+        const got = r.push({ text: text.slice(0, i), status: 'streaming' });
+        assert.doesNotMatch(got.join(''), /cronjob|\{"name"|tool_c|<tool/, `step ${step} at ${i}`);
+        out.push(...got);
+      }
+      out.push(...r.push({ text, status: 'done' }));
+      const read = out.join('');
+      assert.doesNotMatch(read, /cronjob|\{"name"|tool_c|<tool/, `step ${step}`);
+      if (live && step < 1000) {
+        assert.equal(r.started, true, `step ${step}`);
+        assert.equal(ws(read), ws(`Ich richte die Erinnerung jetzt ein und prüfe, ob sie wirklich angelegt ist. _${NOTICE}_ ${after}`), `step ${step}`);
+      } else assert.equal(r.started, false, `step ${step}: left to the end-of-turn read`);
+    }
+  }
+});
+
+test('PC-07 live reader: tool offsets after hidden markup still start the right section; no markup = unchanged', () => {
+  // notice '' keeps the note one paragraph (a notice line is a paragraph of its own and would start the section)
+  const r = createLiveReader({ minChars: 30, notice: '' });
+  const note = 'Kurz noch nachsehen.\n<tool_call>{"name":"cronjob_manage","arguments":{"action":"create"}}</tool_call>\n';
+  assert.deepEqual(r.push({ text: note, status: 'streaming' }), []);
+  const tools = [{ textAt: note.length }]; // raw offset: longer than the shown text before it
+  const answer = 'Hier ist das Ergebnis der Suche mit allen Details.\n\nDie Erinnerung steht für morgen früh um acht Uhr.';
+  const out = [...r.push({ text: note + answer, status: 'streaming', tools }), ...r.push({ text: `${note + answer}\n`, status: 'done', tools })];
+  assert.equal(out.join('').trim(), answer, 'the note is skipped, the answer read from its start');
+  // regression: same text without markup reads exactly as before
+  const plain = 'Erster langer Abschnitt mit Inhalt. Weiter geht es mit dem zweiten Satz.\n\nUnd noch einer. Ende.';
+  const a = createLiveReader({ minChars: 20 });
+  const b = createLiveReader({ minChars: 20, notice: NOTICE });
+  for (let i = 5; i <= plain.length + 4; i += 5) {
+    const m = { text: plain.slice(0, i), status: i >= plain.length ? 'done' : 'streaming' };
+    assert.deepEqual(b.push(m), a.push(m));
+  }
+});

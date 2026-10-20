@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isRecurringSchedule, parseNextRun, parseReminders, reminderChangePrefill, reminderDeleteMessage, reminderWhen } from './reminder.ts';
+import { deviceReminderAt, isRecurringSchedule, parseNextRun, parseReminders, reminderChangePrefill, reminderDeleteMessage, reminderDelivery, reminderWhen } from './reminder.ts';
 import type { ToolEvent } from '../hermes/types.ts';
 import { makeT } from '../i18n/core.ts';
 
@@ -89,4 +89,57 @@ test('button messages', () => {
   assert.equal(reminderChangePrefill(de, { name: 'Zahnarzt' }), 'Ändere die Erinnerung Zahnarzt: ');
   assert.equal(reminderDeleteMessage(de, { name: 'Zahnarzt' }), 'Bitte lösche die Erinnerung Zahnarzt.');
   assert.equal(reminderDeleteMessage(en, { name: 'dentist' }), 'Please delete the reminder dentist.');
+});
+
+test('isRecurringSchedule: Hermes display strings of one-shot jobs are one-shot', () => {
+  assert.equal(isRecurringSchedule('once at 2026-10-21 09:00'), false);
+  assert.equal(isRecurringSchedule('once in 2m'), false);
+  assert.equal(isRecurringSchedule('every monday 8am'), true);
+  assert.equal(isRecurringSchedule('0 8 * * 1'), true);
+});
+
+test('parseReminders: deliver from the result, else the job, else the arguments', () => {
+  const ok = { success: true, job_id: 'j1', name: 'Tee' };
+  assert.equal(parseReminders([cron({ action: 'create', deliver: 'telegram' }, { ...ok, deliver: 'local' })])[0].deliver, 'local');
+  assert.equal(parseReminders([cron({ action: 'update', job_id: 'j1' }, { success: true, job: { job_id: 'j1', name: 'Tee', deliver: 'bot-chat' } }, { label: 'update' })])[0].deliver, 'bot-chat');
+  assert.equal(parseReminders([cron({ action: 'create', deliver: 'all' }, ok)])[0].deliver, 'all');
+  assert.equal('deliver' in parseReminders([cron({ action: 'create' }, ok)])[0], false);
+});
+
+test('reminderDelivery: where a fired reminder goes, chat ids never shown', () => {
+  assert.deepEqual(reminderDelivery('local'), { kind: 'none' });
+  assert.deepEqual(reminderDelivery(' none '), { kind: 'none' });
+  assert.deepEqual(reminderDelivery('bot-chat'), { kind: 'botChat' });
+  assert.deepEqual(reminderDelivery('bot-chat:writer'), { kind: 'botChat' });
+  assert.deepEqual(reminderDelivery('all'), { kind: 'all' });
+  assert.deepEqual(reminderDelivery('telegram:-1000000000000:17'), { kind: 'targets', targets: ['Telegram'] });
+  assert.deepEqual(reminderDelivery('telegram,discord,local'), { kind: 'targets', targets: ['Telegram', 'Discord'] });
+  assert.deepEqual(reminderDelivery('mastodon'), { kind: 'targets', targets: ['mastodon'] });
+  // nothing reliable to say: no line on the card
+  assert.equal(reminderDelivery(undefined), null);
+  assert.equal(reminderDelivery(''), null);
+  assert.equal(reminderDelivery('origin'), null);
+  assert.equal(reminderDelivery('origin,telegram'), null);
+});
+
+test('deviceReminderAt: one-shot reminders at least a minute away; recurring or unknown time never', () => {
+  assert.equal(deviceReminderAt({ recurring: false, nextRun: NOW + 3_600_000 }, NOW), NOW + 3_600_000);
+  assert.equal(deviceReminderAt({ recurring: false, nextRun: NOW + 30_000 }, NOW), null);
+  assert.equal(deviceReminderAt({ recurring: false, nextRun: NOW - 1 }, NOW), null);
+  assert.equal(deviceReminderAt({ recurring: true, nextRun: NOW + 3_600_000 }, NOW), null);
+  assert.equal(deviceReminderAt({ recurring: false }, NOW), null);
+});
+
+test('card texts: delivery lines and the device copy in de/en/es', () => {
+  const es = makeT('es', 'es-ES');
+  for (const tr of [de, en, es]) {
+    for (const k of ['none', 'botChatHere', 'all'] as const) assert.ok(tr(`hermesTools.reminder.deliver.${k}`).length > 5);
+    // a bot-chat delivery names the thread it arrives in (the default bot's is "Hermes", bots/)
+    assert.match(tr('hermesTools.reminder.deliver.botChatIn', { name: 'Hermes' }), /Hermes/);
+    assert.match(tr('hermesTools.reminder.deliver.targets', { targets: 'Telegram' }), /Telegram/);
+    assert.match(tr('hermesTools.reminder.deviceSet', { when: '09:00' }), /09:00/);
+    assert.ok(tr('hermesTools.reminder.device').length > 5);
+    assert.ok(tr('hermesTools.reminder.deviceMove').length > 5);
+  }
+  assert.equal(de('hermesTools.reminder.deliver.none'), 'Hermes stellt sie keinem Kanal zu.');
 });

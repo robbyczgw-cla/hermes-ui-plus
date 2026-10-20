@@ -12,10 +12,12 @@
 #   available memory >= HUI_LANE_MIN_AVAIL_MB [4096]   not swapping hard: page-outs <= HUI_LANE_MAX_PAGEOUTS [50] per s
 #                                              and swap used <= HUI_LANE_MAX_SWAP_PCT [90] % of the swap file
 #   free disk >= HUI_LANE_MIN_DISK_GB [8]      CPU_Speed_Limit >= HUI_LANE_MIN_SPEED [80] (no thermal throttling)
+#   the Android SDK is installed (/Users/Shared/hiui-android-sdk, or the old /var/tmp one the next build moves there)
 # Otherwise: build here (ABIS=x86_64) + emulator on E2E_HOST. The decision and its reason are printed ("lane: …").
 #
 #   lane_decide_mac            pure: reads MAC_LOCK ("free" or text) MAC_XCODEBUILD MAC_BOOTED MAC_AVAIL_MB MAC_SWAP_USED_MB
-#                              MAC_SWAP_TOTAL_MB MAC_PAGEOUTS_S MAC_DISK_GB MAC_SPEED_LIMIT; sets LANE_CHOICE (mac|local), LANE_REASON
+#                              MAC_SWAP_TOTAL_MB MAC_PAGEOUTS_S MAC_DISK_GB MAC_SPEED_LIMIT MAC_SDK (1 = installed, unset = unknown);
+#                              sets LANE_CHOICE (mac|local), LANE_REASON
 #   lane_probe_mac HOST        ssh probe; sets those MAC_* variables (returns 1 when the Mac is unreachable)
 #   lane_auto HOST             probe + decide + print; sets LANE_CHOICE / LANE_REASON
 #   lane_for_apk APK           smoke.sh: ABI rule for a local APK file -> LANE_CHOICE / LANE_REASON (mac needs arm64-v8a, the
@@ -24,6 +26,7 @@
 lane_decide_mac() {
   local why=""
   if [ "${MAC_LOCK:-free}" != free ]; then why="the Mac's heavy-job lock is taken (${MAC_LOCK})"
+  elif [ "${MAC_SDK:-1}" = 0 ]; then why="the Android SDK is missing on the Mac (/Users/Shared/hiui-android-sdk; docs/BUILD.md has the sdkmanager line)"
   elif [ "${MAC_XCODEBUILD:-0}" -gt 0 ]; then why="xcodebuild is running on the Mac"
   elif [ "${MAC_BOOTED:-0}" -gt 0 ]; then why="${MAC_BOOTED} iOS simulator(s) are booted on the Mac"
   elif [ "${MAC_AVAIL_MB:-0}" -lt "${HUI_LANE_MIN_AVAIL_MB:-4096}" ]; then why="only ${MAC_AVAIL_MB:-0} MB available on the Mac (< ${HUI_LANE_MIN_AVAIL_MB:-4096})"
@@ -56,13 +59,14 @@ echo "MAC_SWAP_TOTAL_MB=\$total"; echo "MAC_SWAP_USED_MB=\$used"
 po1=\$(vm_stat | awk '/Pageouts/ { gsub("\\\\.", "", \$2); print \$2 }'); sleep 2
 po2=\$(vm_stat | awk '/Pageouts/ { gsub("\\\\.", "", \$2); print \$2 }')
 echo "MAC_PAGEOUTS_S=\$(( (po2 - po1) / 2 ))"
-echo "MAC_DISK_GB=\$(df -g /var/tmp | awk 'NR==2 { print \$4 }')"
+echo "MAC_DISK_GB=\$(df -g /Users/Shared | awk 'NR==2 { print \$4 }')"
+if [ -d /Users/Shared/hiui-android-sdk/platforms/android-36 ] || [ -d /var/tmp/hiui-android-sdk/platforms/android-36 ]; then echo MAC_SDK=1; else echo MAC_SDK=0; fi
 echo "MAC_SPEED_LIMIT=\$(pmset -g therm 2>/dev/null | awk '/CPU_Speed_Limit/ { print \$NF }')"
 PROBE
 )" || return 1
   [ -n "$out" ] || return 1
   while IFS='=' read -r k v; do
-    case "$k" in MAC_LOCK|MAC_XCODEBUILD|MAC_BOOTED|MAC_AVAIL_MB|MAC_SWAP_TOTAL_MB|MAC_SWAP_USED_MB|MAC_PAGEOUTS_S|MAC_DISK_GB|MAC_SPEED_LIMIT)
+    case "$k" in MAC_LOCK|MAC_XCODEBUILD|MAC_BOOTED|MAC_AVAIL_MB|MAC_SWAP_TOTAL_MB|MAC_SWAP_USED_MB|MAC_PAGEOUTS_S|MAC_DISK_GB|MAC_SPEED_LIMIT|MAC_SDK)
       case "$k" in MAC_LOCK) printf -v "$k" '%s' "${v//_/ }" ;; *) [[ "$v" =~ ^[0-9]+$ ]] && printf -v "$k" '%s' "$v" || printf -v "$k" '%s' 0 ;; esac ;;
     esac
   done <<<"$out"

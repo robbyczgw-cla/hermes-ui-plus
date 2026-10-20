@@ -15,6 +15,7 @@
  * enqueue once the card is (nearly) visible. Pure: no RN imports (tested in itemImage.test.ts).
  */
 import { normalizeImageQuery } from '../protocol/validate.ts';
+import { isGenericPlaceName, specificTokens } from './rank.ts';
 import type { ResolvedImage } from './types.ts';
 
 const isHttpUrl = (u: string | undefined): u is string => !!u && /^https?:\/\/\S+\.\S+/i.test(u);
@@ -64,15 +65,48 @@ export function addressCity(address: string | undefined): string {
   return usable(c) ? c : '';
 }
 
-/** Places: "name city category" (parts already contained in the name are skipped). */
-export function placeImageQuery(p: { name?: string; address?: string; category?: string }): string | undefined {
-  const name = p.name?.trim() ?? '';
+/**
+ * Places: "name city category" (parts already contained in the name are skipped). `ctx.city`: the city all other
+ * items of the same answer share (sharedPlaceCity), used when the item's own address has none.
+ *
+ * A name made only of generic place words ("Altstadt (Zentrum)", "Old Town", "Plaza Mayor", "Hauptbahnhof") names no
+ * particular place: it is searched only together with a city ("Altstadt Salzburg"), without a known city it gets NO
+ * automatic query – the card keeps its category glyph instead of the old town of some other city. Parenthetical
+ * qualifiers made of generic words ("(Zentrum)") are dropped from the query.
+ */
+export function placeImageQuery(p: { name?: string; address?: string; category?: string }, ctx: { city?: string } = {}): string | undefined {
+  const raw = p.name?.trim() ?? '';
+  const name = raw.replace(/\s*\(([^()]*)\)/g, (m, inner: string) => (specificTokens(inner).length ? m : '')).trim() || raw;
   if (!name) return undefined;
+  const generic = isGenericPlaceName(name);
+  const city = addressCity(p.address) || (generic ? (ctx.city?.trim() ?? '') : '');
+  if (generic && !city) return undefined;
   const parts = [name];
-  for (const extra of [addressCity(p.address), p.category?.trim() ?? '']) {
+  for (const extra of [city, generic ? '' : (p.category?.trim() ?? '')]) {
     if (extra && !covered(parts.join(' '), extra)) parts.push(extra);
   }
   return normalizeImageQuery(parts.join(' '));
+}
+
+/**
+ * A model-written `imageQuery` of a place, with the same rule as the automatic one: only generic words ("Altstadt")
+ * are searched with the city ("Altstadt Salzburg") or not at all (no photo beats the old town of another city).
+ */
+export function placeModelQuery(query: string | undefined, ctx: { city?: string } = {}): string | undefined {
+  const q = query?.trim();
+  if (!q || !isGenericPlaceName(q)) return query;
+  const city = ctx.city?.trim();
+  return city ? normalizeImageQuery(`${q} ${city}`) : undefined;
+}
+
+/** The one city every place of an answer with a recognisable address shares ('' when none or several). */
+export function sharedPlaceCity(items: readonly { address?: string }[]): string {
+  const cities = new Map<string, string>();
+  for (const it of items) {
+    const c = addressCity(it.address);
+    if (c) cities.set(lc(c), c);
+  }
+  return cities.size === 1 ? [...cities.values()][0] : '';
 }
 
 export type LoadDecision = (url: string) => 'load' | 'ask';

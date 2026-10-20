@@ -12,6 +12,7 @@
  */
 import type { ChatMessage } from '../hermes/types.ts';
 import { answerText } from '../hermes/progressNotes.ts';
+import { answerOutputText } from '../chat/toolMarkup.ts';
 
 export type NoticeRoute = 'notification' | 'banner' | 'pill' | 'flash' | 'none';
 
@@ -91,8 +92,11 @@ export function firstLine(text: string, max = 120): string {
   return plain.length > max ? `${plain.slice(0, max - 1).trimEnd()}…` : plain;
 }
 
-/** notification body: first line, or a generic text when previews are off / nothing readable */
-export function notificationBody(m: ChatMessage, preview: boolean, generic: string): string {
+/**
+ * notification body: first line, or a generic text when previews are off / nothing readable. `notice`: the line that
+ * replaces raw tool-call markup, as in the answer (chat/toolMarkup.ts)
+ */
+export function notificationBody(m: ChatMessage, preview: boolean, generic: string, notice: string): string {
   if (!preview) return generic;
-  return firstLine(answerText(m)) || generic;
+  return firstLine(answerOutputText(answerText(m), notice)) || generic;
 }

@@ -16,7 +16,8 @@
  */
 import type { HuiNode, Segment } from './types.ts';
 import { createPartialJsonParser, parseLenientJson, parsePartialJson, prunePartialItems } from './partialJson.ts';
-import { collectInteractiveIds, hasListContent, isEmptyCollection, isPartialTypeName, normalizeNode, readableFallback } from './validate.ts';
+import { collectInteractiveIds, hasListContent, hasReadableContent, isEmptyCollection, isPartialTypeName, normalizeNode, readableFallback } from './validate.ts';
+import { isEmptyNode } from './emptyNode.ts';
 import { shareStructure } from './structuralShare.ts';
 import type { AppendRun } from './appendRun.ts';
 
@@ -40,7 +41,7 @@ const MD_FENCE_OPEN_RE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 export const TYPED_FENCE_TYPES: ReadonlySet<string> = new Set([
   'suggestions', 'places', 'products', 'weather', 'recipe', 'compare', 'checklist', 'timeline', 'agenda',
   'stats', 'mindmap', 'vocab', 'quiz', 'flashcards', 'workout', 'studyplan', 'gallery', 'decision', 'poll', 'guide', 'paths', 'blocks',
-  'changes', 'diff', 'patch', 'terminal',
+  'changes', 'diff', 'patch', 'terminal', 'translation', 'choice', 'timer', 'map',
 ]);
 /**
  * Typed fences whose plain-text content is the node itself: ```diff / ```patch hold a unified diff (→ `diff` node with
@@ -198,7 +199,8 @@ function buildHuiUnsafe(key: string, raw: string, complete: boolean, reserved: r
     }
     // a list-like node whose entries all failed to normalise (shape written from memory) would
     // render as an empty card: show the block's content readably instead
-    const lost = !!node && isEmptyCollection(node) && hasListContent(value);
+    // (also any node that would only show the "no data" line of emptyNode.ts while the block has readable content)
+    const lost = !!node && ((isEmptyCollection(node) && hasListContent(value)) || (isEmptyNode(node) && (hasListContent(value) || hasReadableContent(value))));
     if (lost) node = null;
     if (node) return error ? { key, kind: 'hui', complete: true, raw, node, error } : { key, kind: 'hui', complete: true, raw, node };
     // still no node: show the content readably instead of only an error line

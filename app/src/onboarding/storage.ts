@@ -34,7 +34,7 @@ export async function resetOnboarding(): Promise<void> {
   await AsyncStorage.removeItem(ONBOARDED_KEY);
 }
 
-async function hasLegacySetup(): Promise<boolean> {
+export async function hasLegacySetup(): Promise<boolean> {
   try {
     const pairs = await AsyncStorage.multiGet([...LEGACY_SETUP_KEYS]);
     return pairs.some(([, v]) => v !== null);

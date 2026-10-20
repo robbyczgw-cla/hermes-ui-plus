@@ -2,6 +2,7 @@
 // Hermes profiles ("bots"): URL building, editor parsing, bridge list, picker data, cache, flavors, requests.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { demoBotList } from '../onboarding/demo/bots.ts';
 import {
   DEMO_BOTS,
   botBadge,
@@ -121,6 +122,18 @@ test('GET /bridge/profiles parsing: default first, junk dropped, no extra fields
   assert.equal(parseBridgeProfiles(null), null);
 });
 
+test('GET /bridge/profiles: Desktop bot metadata (description, colour, pinned), bad values dropped', () => {
+  const bots = parseBridgeProfiles({
+    data: [
+      { name: 'default', default: true },
+      { name: 'scout', default: false, label: 'Scout', description: 'Preise im Blick', color: '#3366CC', pinned: true },
+      { name: 'code', default: false, description: 'x'.repeat(300), color: 'red', pinned: 'yes' },
+    ],
+  });
+  assert.deepEqual(bots?.[1], { name: 'scout', default: false, label: 'Scout', description: 'Preise im Blick', color: '#3366cc', pinned: true });
+  assert.deepEqual(bots?.[2], { name: 'code', default: false, description: 'x'.repeat(160) });
+});
+
 test('picker data: default first, bridge bots, manual bots, the chat bot kept', () => {
   const server = parseBridgeProfiles({ data: [{ name: 'default', default: true }, { name: 'writer', default: false, label: 'Writer' }] });
   const e = botEntries({ server, manual: ['writer', 'work'], current: 'old' });
@@ -135,11 +148,12 @@ test('picker data: default first, bridge bots, manual bots, the chat bot kept', 
   assert.equal(botBadge(undefined, e), undefined);
 });
 
-test('botsForProfile: bridge list only for bridge connections, manual list always, demo has a fake second bot', () => {
+test('botsForProfile: bridge list only for bridge connections, manual list always, demo has its example bots', () => {
   const server = [{ name: 'default', default: true }, { name: 'writer', default: false }];
   assert.deepEqual(botsForProfile({ kind: 'hermes', bridge: true, hermesBots: ['work'] }, server).map((b) => b.name), ['default', 'writer', 'work']);
   assert.deepEqual(botsForProfile({ kind: 'hermes', hermesBots: ['work'] }, server).map((b) => b.name), ['default', 'work'], 'direct: no bridge list');
   assert.deepEqual(botsForProfile({ kind: 'demo' }, null), DEMO_BOTS);
+  assert.deepEqual(botsForProfile({ kind: 'demo' }, demoBotList('de')).map((b) => b.name), ['default', 'scout', 'atlas', 'lumi']);
   assert.deepEqual(botsForProfile({ kind: 'openai' }, server), []);
   assert.deepEqual(botsForProfile(undefined, server), []);
 });
@@ -147,7 +161,7 @@ test('botsForProfile: bridge list only for bridge connections, manual list alway
 test('flavors: bots work in BOTH builds (hermes + demo kinds are allowed everywhere)', () => {
   for (const f of FLAVORS) {
     assert.ok(isKindAllowed('hermes', f) && isKindAllowed('demo', f), f);
-    assert.ok(botsForProfile({ kind: 'demo' }, null).length > 1, `${f}: demo picker shows the Bot section`);
+    assert.ok(botsForProfile({ kind: 'demo' }, demoBotList('en')).length > 1, `${f}: demo has bots`);
     assert.ok(botsForProfile({ kind: 'hermes', hermesBots: ['work'] }, null).length > 1, `${f}: hermes bots`);
   }
 });

@@ -24,6 +24,8 @@ import { createJsonRequest, createSessionsClient, type ApiConn, type SessionsCli
 import { reportReachable } from '../chat/healthMachine';
 import { parseCapabilities, parseModelOptions, type HermesCapabilities, type ModelOptionsCatalog } from './capabilities';
 import { parseBridgeProfiles, serverRootOf, type HermesBot } from './bots';
+import { createJobsClient, type JobsClient } from '../routines/jobs';
+import { createInboxClient, type InboxClient } from '../routines/inbox';
 
 export { HermesError, isHermesError } from './stream';
 export type { StreamChatParams, StreamChatResult } from './stream';
@@ -141,6 +143,21 @@ export async function listModels(conn: HermesConn, timeoutMs = 8000): Promise<st
 /** Hermes-native session API (`/api/sessions…`) bound to expo/fetch. See sessions.ts. */
 export function hermesSessions(conn: ApiConn, timeoutMs?: number): SessionsClient {
   return createSessionsClient(nativeFetch, conn, timeoutMs);
+}
+
+/** Authenticated JSON request against the server root (`/p/<bot>` for a bot) bound to expo/fetch (bots/api.ts). */
+export function hermesJsonRequest(conn: ApiConn, timeoutMs?: number) {
+  return createJsonRequest(nativeFetch, conn, timeoutMs);
+}
+
+/** Hermes cron job API (`/api/jobs…`, Routines slice 1) bound to expo/fetch. See routines/jobs.ts. */
+export function hermesJobs(conn: ApiConn, timeoutMs?: number): JobsClient {
+  return createJobsClient(nativeFetch, conn, timeoutMs);
+}
+
+/** UI bridge Routines result inbox (`/bridge/routines/*` at the server root, routines slice 2). See routines/inbox.ts. */
+export function bridgeRoutinesInbox(conn: ApiConn, bot: string | undefined, timeoutMs?: number): InboxClient {
+  return createInboxClient(nativeFetch, conn, bot, timeoutMs);
 }
 
 /** GET /v1/capabilities → parsed flags/endpoints (null when the server answers something else). Throws HermesError. */

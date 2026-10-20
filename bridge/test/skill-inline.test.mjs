@@ -137,7 +137,7 @@ test('e2e: every app turn carries the identical skill message right after the bo
   const bootstrap = readFileSync(REPO_BOOT, 'utf8').trim();
   const skill = loadSkillInline({}, { bootstrap, candidates: [REPO_SKILL] }).skillInline;
   for (const { body } of seen) {
-    assert.equal(body.messages[0].content, bootstrap);
+    assert.equal(body.messages[0].content, `${bootstrap}\n[hermes-ui-caps] image_search=off`); // src/caps.mjs, no image key
     assert.equal(body.messages[1].content, skill);
     assert.equal(body.messages.filter((m) => m.content === skill).length, 1);
   }

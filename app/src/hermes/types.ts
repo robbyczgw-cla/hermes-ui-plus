@@ -6,6 +6,7 @@ import type { RouteDecision } from '../protocol/types';
 import type { Attachment } from '../attachments/types';
 import type { TKey, Vars } from '../i18n/core.ts';
 import type { TurnExtras } from './turnOverride';
+import type { LiveBatches } from '../live/trailer.ts';
 
 export type { RouteDecision };
 
@@ -243,6 +244,16 @@ export type ChatMessage = {
    * that was cut from `text` when the transcript was loaded; the bubble shows a compact chip instead.
    */
   turnExtras?: TurnExtras;
+  /**
+   * user messages only: the user's live-card edits this message carried to Hermes (`[hui:live]` trailer, live/trailer.ts),
+   * cut from `text`; the bubble shows a quiet "… mitgeschickt" line and the live cards fold them (live/model.ts).
+   */
+  live?: LiveBatches;
+  /**
+   * Hermes hid rows of its stored history right before this message (context compaction scaffolding): what came
+   * before may be gone from the model's context (live cards re-send their full state, live/extract.ts)
+   */
+  contextCut?: true;
   /**
    * user messages only: sent while attachment uploads were still running (hermes/pendingSend.ts). The bubble shows
    * per-attachment progress; the turn starts when every upload is done. Runtime only: persisted as `sendQueued`.

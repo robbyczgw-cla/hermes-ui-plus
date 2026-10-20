@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { once } from 'node:events';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from '../src/server.mjs';
@@ -21,7 +21,8 @@ export const tick = () => new Promise((resolve) => setImmediate(resolve));
 
 // Every connection is to an ephemeral loopback listener. No ambient environment, services or DNS.
 export async function localBridge(t, { env = {}, options = {}, respond } = {}) {
-  const root = await mkdtemp(join(tmpdir(), 'hui-security-test-'));
+  // the real path: on macOS tmpdir() is /var/folders/…, which the bridge resolves to /private/var/folders/…
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'hui-security-test-')));
   const seen = [];
   const upstream = http.createServer(async (req, res) => {
     const chunks = [];

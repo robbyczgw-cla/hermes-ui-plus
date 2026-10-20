@@ -7,11 +7,12 @@
  *   <Composer slash={slash.binding} … />   {slash.sheet}
  */
 import { fetch as expoFetch } from 'expo/fetch';
+import { useRouter } from 'expo-router';
 import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useConversations, useConversationsInternals } from '../../conversations/ConversationsProvider';
 import { chatOptionsSummary, type HermesChatOptions } from '../../hermes/capabilities';
 import { createJsonRequest, isNotFoundError, sessionErrorText } from '../../hermes/sessions';
-import { withBot } from '../../hermes/bots';
+import { botOf, withBot } from '../../hermes/bots';
 import type { FetchLike } from '../../hermes/stream';
 import { sessionsSupported } from '../../hermes/support';
 import type { UseHermesChat } from '../../hermes';
@@ -21,11 +22,12 @@ import type { ConnectionProfile } from '../../settings/profiles';
 import { useShareText } from '../actions';
 import { useChatShell } from '../ChatShellContext';
 import { useToast } from '../Toast';
-import { fetchSkills, fetchUsage, forkSession, skillsError } from './api';
+import { fetchUsage, forkSession } from './api';
 import type { ChatOptionsControl, SlashBinding } from './binding';
 import { CommandSheet, type SheetState } from './CommandSheet';
 import { confirmAsync } from './confirm';
 import { transcriptMarkdown } from './exportText';
+import { TOOL_MARKUP_NOTICE_KEY } from '../toolMarkup';
 import { availability, planCommand, stillPendingApproval, visibleCommands, type CommandContext, type CommandPlan } from './plan';
 import { commandById, type CommandDef, type CommandId } from './registry';
 
@@ -65,6 +67,7 @@ export function useSlashCommands(a: UseSlashCommandsArgs): SlashCommands {
   const convs = useConversations();
   const { controller } = useConversationsInternals();
   const [sheet, setSheet] = useState<SheetState | null>(null);
+  const router = useRouter();
   const { chat, profile, options } = a;
   const conversationId = shell?.conversationId;
   const meta = conversationId ? convs.get(conversationId) : undefined;
@@ -143,6 +146,11 @@ export function useSlashCommands(a: UseSlashCommandsArgs): SlashCommands {
   const execute = useCallback(
     async (def: CommandDef, plan: CommandPlan) => {
       const { a: cur, meta: m, sessionId: sid } = live.current;
+      // a bot's Bot Chat is one shared thread (Hermes Desktop finds it by its title): never renamed, deleted or branched
+      if (m?.botChat && (plan.type === 'rename' || plan.type === 'delete' || plan.type === 'branch')) {
+        toast(tr('bots.chat.notInBotChat'));
+        return;
+      }
       switch (plan.type) {
         case 'error':
           toast(reasonText(def, plan.key));
@@ -216,13 +224,12 @@ export function useSlashCommands(a: UseSlashCommandsArgs): SlashCommands {
           if (cur.sendText(plan.text)) toast(tr('slash.done.searchSent', { name: cur.backendName }));
           else toast(tr('chat.busy'));
           return;
-        case 'skills':
-          setSheet({ kind: 'skills', loading: true });
-          fetchSkills(request).then(
-            (skills) => setSheet((s) => (s?.kind === 'skills' ? { kind: 'skills', loading: false, skills } : s)),
-            (e: unknown) => setSheet((s) => (s?.kind === 'skills' ? { kind: 'skills', loading: false, error: skillsError(e) } : s)),
-          );
+        case 'library': {
+          // Skills & memory of THIS chat's bot (library/LibraryScreen)
+          const q = [botOf(m?.hermesProfile) ? `bot=${encodeURIComponent(m?.hermesProfile ?? '')}` : '', plan.tab === 'memory' ? 'tab=memory' : ''].filter(Boolean).join('&');
+          router.push(q ? `/skills?${q}` : '/skills');
           return;
+        }
         case 'usage':
         case 'status':
           loadSession(plan.type);
@@ -233,7 +240,7 @@ export function useSlashCommands(a: UseSlashCommandsArgs): SlashCommands {
         case 'export': {
           const title = m?.title || cur.backendName;
           await shareText(
-            transcriptMarkdown(cur.chat.messages, { title, user: tr('slash.export.user'), assistant: cur.backendName, attachment: tr('slash.export.attachment') }),
+            transcriptMarkdown(cur.chat.messages, { title, user: tr('slash.export.user'), assistant: cur.backendName, attachment: tr('slash.export.attachment'), toolNotice: tr(TOOL_MARKUP_NOTICE_KEY) }),
           );
           return;
         }
@@ -277,7 +284,7 @@ export function useSlashCommands(a: UseSlashCommandsArgs): SlashCommands {
         }
       }
     },
-    [convs, controller, shell?.remote, request, toast, tr, reasonText, errText, setOptions, loadSession, shareText],
+    [convs, controller, shell?.remote, request, router, toast, tr, reasonText, errText, setOptions, loadSession, shareText],
   );
 
   const visible = useMemo(() => visibleCommands(ctx), [

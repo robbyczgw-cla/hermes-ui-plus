@@ -17,12 +17,12 @@
 <meta property="og:title" content="Privacy policy – HUI+ (Hermes UI+)">
 <meta property="og:description" content="Privacy policy of Hermes Interactive UI+: the developers collect no data; your data goes only to the server you set up.">
 <meta property="og:url" content="https://hermesui.xyz/privacy">
-<meta property="og:image" content="https://hermesui.xyz/media/trailer-poster.jpg">
+<meta property="og:image" content="https://hermesui.xyz/media/trailer-02-poster.jpg">
 <meta property="og:image:width" content="1920">
 <meta property="og:image:height" content="1080">
-<meta property="og:image:alt" content="HUI+ on a phone: Hermes asks to run a command, with the buttons Allow once and Deny">
+<meta property="og:image:alt" content="HUI+ on a phone: Hermes asks where the city break should go, with four destinations to pick from">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:image:alt" content="HUI+ on a phone: Hermes asks to run a command, with the buttons Allow once and Deny">
+<meta name="twitter:image:alt" content="HUI+ on a phone: Hermes asks where the city break should go, with four destinations to pick from">
 </head>
 <body class="page-prose">
 <svg class="sprite" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
@@ -35,6 +35,7 @@
 <div class="frame bar">
 <a class="brand" href="/"><img src="/icon.svg" alt="" width="34" height="34"><span class="brand-text"><span>HUI<span class="plus">+</span></span><span class="brand-sub">Hermes Interactive UI+</span></span></a>
 <nav aria-label="Main"><ul>
+<li><a href="/#new">New in 0.2</a></li>
 <li><a href="/#features">Features</a></li>
 <li><a href="/#demos">Demos</a></li>
 <li><a href="/#platforms">Platforms</a></li>
@@ -57,6 +58,7 @@
 <div class="table-wrap" tabindex="0" role="region" aria-label="Table, scrolls sideways on narrow screens"><table><thead><tr><th scope="col">Extra</th><th scope="col">Provider</th><th scope="col">What is sent</th></tr></thead><tbody><tr><th scope="row">Model router (<code>ROUTER_BACKEND</code>)</th><td>Anthropic (Claude), Jev / TypeSafe, Drex / Nace.AI, or an OpenAI-compatible endpoint you configure</td><td>the last few messages, shortened, to pick an answer format</td></tr><tr><th scope="row">Chat titles and follow-up suggestions (<code>BRIDGE_META=on</code>)</th><td>Anthropic (Claude)</td><td>the first exchange of a chat</td></tr><tr><th scope="row">Image search</th><td>Serper or Brave</td><td>search terms</td></tr><tr><th scope="row">Voice</th><td>Groq, OpenAI (speech-to-text); Deepgram, ElevenLabs, OpenAI (text-to-speech)</td><td>dictation audio, text to be read aloud</td></tr></tbody></table></div>
 <p>The bridge prints which of these are active when it starts. Their privacy policies apply to that part.</p>
 <p>The bridge's logs contain routing metadata, not message content, at the default log level. You control the retention of uploaded files on your bridge (7 days by default).</p>
+<p>Routines: for each bot on which you turn routines on, the bridge keeps a copy of every finished run's result (routine name, time, status, the final answer up to 16 KB, any error text) in its state directory (<code>routines-inbox.json</code>, readable only by the bridge's user). Entries are deleted after 30 days, and the file holds at most 300 entries; the operator can lower or raise both limits. The copy stays on your server and goes nowhere else. A push about a new result carries no result text unless previews are on.</p>
 <h2 id="push-notifications">Push notifications</h2>
 <p>Push is optional and off until you enable it.</p>
 <ul><li><strong>Web Push</strong> goes through the push service of your browser vendor (Google, Mozilla or Apple). The payload is encrypted for your device.</li><li><strong>Android:</strong> the APK from GitHub Releases does not use Firebase Cloud Messaging, so no push data goes to Google. While an answer is running, the app's own keep-alive service shows a notification on the device.</li><li><strong>Self-built apps</strong> with Firebase Cloud Messaging (Android) or the Apple Push Notification service (iOS) deliver through Google or Apple. Your bridge then sends them a device push token and the notification content.</li><li><strong>Previews are off by default.</strong> Notifications then only say that a message or approval request arrived, without its text. If you or your server's operator turn previews on, the notification text passes through Google or Apple.</li></ul>

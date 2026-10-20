@@ -1,24 +1,32 @@
 /**
  * Hermes-specific blocks around an answer (all stroke icons, de/en/es via `hermesTools.*`):
  * - <ContextDivider/>   "Kontext komprimiert" (hermes.status compacted / pruned skill marker)
- * - <MemoryNotes/>      "gemerkt" chip per memory write
+ * - <MemoryNotes/>      "gemerkt" chip per memory write; a tap opens Skills & memory on the Memory tab of the chat's bot
  * - <MediaFiles/>       `MEDIA:<path>` tags as file chips / inline images (bridge GET /bridge/media)
- * - <ReminderCards/>    "Erinnerung gesetzt · morgen 08:00 · …" with Ändern / Löschen (chat-native)
- * Pure logic: hermesTools.ts, mediaTags.ts, reminder.ts.
+ * - <ReminderCards/>    "Erinnerung gesetzt · morgen 08:00 · …" with where Hermes posts it, Ändern / Löschen (chat-native)
+ *                        and, for a one-shot reminder on a phone, "Auch auf diesem Gerät erinnern" (deviceReminder.ts)
+ * Pure logic: hermesTools.ts, mediaTags.ts, reminder.ts, deviceReminder.ts.
  */
+import { useRouter } from 'expo-router';
 import { memo, useEffect, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import { Text } from '../ui/primitives/Text';
 import { formatBytes } from '../attachments/mime';
 import { useI18n } from '../i18n';
 import { Button, useTheme } from '../ui';
 import { Photo, useNaturalAspect } from '../ui/components/imageParts';
+import { useConversations } from '../conversations/ConversationsProvider';
+import { libraryApplies, libraryRoute } from '../library/source';
+import { useConnection } from '../settings/ConnectionProvider';
 import { useCopy } from './actions';
+import { useChatShell } from './ChatShellContext';
 import type { MemoryNote } from './hermesTools';
 import { Icon, type IconName } from './icons';
 import { fetchMedia, MediaUnavailable, openLocalMedia, probeMedia, type MediaConn } from './mediaFetch';
 import type { MediaKind, MediaRef } from './mediaTags';
-import { reminderChangePrefill, reminderDeleteMessage, reminderWhen, type Reminder } from './reminder';
+import { cancelLocalNotification, listLocalNotifications, scheduleLocalNotification } from '../actions/notifications';
+import { clearDeviceReminder, deviceReminderOf, setDeviceReminder, type DeviceNotifier } from './deviceReminder';
+import { deviceReminderAt, reminderChangePrefill, reminderDeleteMessage, reminderDelivery, reminderWhen, type Reminder, type ReminderDelivery } from './reminder';
 import { useToast } from './Toast';
 import { useTurnActions } from './turnActions';
 
@@ -42,25 +50,54 @@ export const ContextDivider = memo(function ContextDivider() {
 export const MemoryNotes = memo(function MemoryNotes({ notes }: { notes: MemoryNote[] }) {
   const t = useTheme();
   const { t: tr } = useI18n();
+  const target = useMemoryRoute();
+  const router = useRouter();
   if (!notes.length) return null;
   return (
     <View style={styles.notes}>
-      {notes.map((n) => (
-        <View
-          key={n.id}
-          accessible
-          accessibilityLabel={n.text ? `${tr('hermesTools.memory.chipA11y')}: ${n.text}` : tr('hermesTools.memory.updated')}
-          style={[styles.note, { borderRadius: t.radii.pill }, { backgroundColor: t.colors.surfaceAlt }]}
-        >
-          <Icon name="brain" size={14} color={t.colors.muted} />
-          <Text style={[t.typography.caption, styles.noteText, { color: t.colors.muted }]} numberOfLines={2}>
-            {n.text ? `${tr('hermesTools.memory.chip')} · ${n.text}` : tr('hermesTools.memory.updated')}
-          </Text>
-        </View>
-      ))}
+      {notes.map((n) => {
+        const label = n.text ? `${tr('hermesTools.memory.chipA11y')}: ${n.text}` : tr('hermesTools.memory.updated');
+        const body = (
+          <>
+            <Icon name="brain" size={14} color={t.colors.muted} />
+            <Text style={[t.typography.caption, styles.noteText, { color: t.colors.muted }]} numberOfLines={2}>
+              {n.text ? `${tr('hermesTools.memory.chip')} · ${n.text}` : tr('hermesTools.memory.updated')}
+            </Text>
+          </>
+        );
+        const shape = [styles.note, { borderRadius: t.radii.pill }, { backgroundColor: t.colors.surfaceAlt }];
+        // where a user looks after "remembered": what is stored now, and how to make Hermes forget it
+        return target ? (
+          <Pressable
+            key={n.id}
+            onPress={() => router.push(target as never)}
+            accessibilityRole="button"
+            accessibilityLabel={label}
+            accessibilityHint={tr('hermesTools.memory.openHint')}
+            testID="memory-note"
+            style={({ pressed }) => [...shape, pressed && { backgroundColor: t.colors.surfacePressed }]}
+          >
+            {body}
+          </Pressable>
+        ) : (
+          <View key={n.id} accessible accessibilityLabel={label} style={shape}>
+            {body}
+          </View>
+        );
+      })}
     </View>
   );
 });
+
+/** Skills & memory (Memory tab) of the chat this answer belongs to, or null (no such screen for that connection) */
+function useMemoryRoute(): string | null {
+  const shell = useChatShell();
+  const convs = useConversations();
+  const { profiles } = useConnection();
+  const meta = shell ? convs.get(shell.conversationId) : undefined;
+  const profile = meta ? profiles.find((p) => p.id === meta.profileId) : undefined;
+  return profile && libraryApplies(profile) ? libraryRoute(meta?.hermesProfile, 'memory') : null;
+}
 
 // ------------------------------------------------------------------ MEDIA files
 
@@ -208,6 +245,25 @@ export const ReminderCards = memo(function ReminderCards({ reminders }: { remind
   );
 });
 
+const deviceNotifier: DeviceNotifier = { list: listLocalNotifications, schedule: scheduleLocalNotification, cancel: cancelLocalNotification };
+// local notifications exist on the phone apps only (actions/notifications.ts); web and desktop never offer the copy
+const DEVICE_REMINDERS = Platform.OS === 'ios' || Platform.OS === 'android';
+
+/**
+ * `here`: the card sits in the bot's own thread (bots/), so a `bot-chat` delivery arrives in this chat; elsewhere it
+ * arrives in the thread of the chat's bot, which is "Hermes" for the default bot (a row of the chat list / the Bots tab).
+ */
+function deliveryText(tr: ReturnType<typeof useI18n>['t'], d: ReminderDelivery | null, ctx: { here: boolean; bot?: string }): string | null {
+  if (!d) return null;
+  if (d.kind === 'none') return tr('hermesTools.reminder.deliver.none');
+  if (d.kind === 'botChat') {
+    if (ctx.here) return tr('hermesTools.reminder.deliver.botChatHere');
+    return tr('hermesTools.reminder.deliver.botChatIn', { name: ctx.bot ?? tr('bots.roster.defaultName') });
+  }
+  if (d.kind === 'all') return tr('hermesTools.reminder.deliver.all');
+  return tr('hermesTools.reminder.deliver.targets', { targets: d.targets.join(', ') });
+}
+
 function ReminderCard({ r }: { r: Reminder }) {
   const t = useTheme();
   const { t: tr, locale } = useI18n();
@@ -219,18 +275,52 @@ function ReminderCard({ r }: { r: Reminder }) {
   const when = reminderWhen(tr, locale, r);
   const head = [title, when, r.text].filter(Boolean).join(' · ');
   const showSchedule = !!r.schedule && r.recurring && r.schedule !== when;
+  const shell = useChatShell();
+  const meta = useConversations().get(shell?.conversationId ?? '');
+  const delivery = deliveryText(tr, reminderDelivery(r.deliver), { here: !!meta?.botChat, bot: meta?.hermesProfile });
+  // device copy: tagged with the Hermes job, so the state survives a restart and a moved reminder replaces it
+  const deviceKey = r.jobId ?? r.id;
+  const deviceAt = DEVICE_REMINDERS ? deviceReminderAt(r) : null;
+  const [device, setDevice] = useState<{ at: number | null } | null>(null);
+  const [deviceBusy, setDeviceBusy] = useState(false);
+  useEffect(() => {
+    if (!DEVICE_REMINDERS) return;
+    let alive = true;
+    void deviceReminderOf(deviceNotifier, deviceKey).then((at) => alive && setDevice({ at }));
+    return () => {
+      alive = false;
+    };
+  }, [deviceKey]);
+  const deviceMatches = device?.at != null && deviceAt !== null && Math.abs(device.at - deviceAt) < 60_000;
+  // an older card of a moved reminder stays quiet once the device copy follows the newer time
+  const offerDevice = deviceAt !== null && device !== null && !deviceMatches && (device.at === null || r.action === 'update');
+  const setOnDevice = async () => {
+    if (deviceAt === null || deviceBusy) return;
+    setDeviceBusy(true);
+    const res = await setDeviceReminder(deviceNotifier, { key: deviceKey, title: tr('actionRunner.notify.reminderTitle'), body: r.text, at: deviceAt });
+    setDeviceBusy(false);
+    if (res.ok) {
+      setDevice({ at: deviceAt });
+      toast(tr('hermesTools.reminder.deviceSet', { when }));
+    } else {
+      toast(tr(res.reason === 'denied' ? 'actionRunner.exec.notificationsDenied' : res.reason === 'unsupported' ? 'actionRunner.exec.remindersUnsupported' : 'actionRunner.exec.reminderFailed'));
+    }
+  };
   const remove = () => {
     if (!sendMessage) return;
-    if (sendMessage(reminderDeleteMessage(tr, r))) setSent(true);
-    else toast(tr('chat.busy'));
+    if (sendMessage(reminderDeleteMessage(tr, r))) {
+      setSent(true);
+      if (DEVICE_REMINDERS) void clearDeviceReminder(deviceNotifier, deviceKey).then(() => setDevice({ at: null }));
+    } else toast(tr('chat.busy'));
     setAsking(false);
   };
   return (
     <View
       style={[styles.card, { backgroundColor: t.colors.surfaceAlt, borderColor: t.colors.border, borderRadius: t.radii.control }]}
       accessible={false}
+      testID="reminder-card"
     >
-      <View style={styles.cardHead} accessible accessibilityLabel={head}>
+      <View style={styles.cardHead} accessible accessibilityLabel={[head, delivery].filter(Boolean).join('. ')}>
         <Icon name="bell" size={18} color={t.colors.accent} />
         <View style={{ flex: 1 }}>
           <Text style={[t.typography.callout, { color: t.colors.text }]} numberOfLines={3}>
@@ -239,6 +329,8 @@ function ReminderCard({ r }: { r: Reminder }) {
             {r.text ? ` · ${r.text}` : ''}
           </Text>
           {showSchedule ? <Text style={[t.typography.caption, styles.cardSub, { color: t.colors.muted }]}>{r.schedule}</Text> : null}
+          {delivery ? <Text style={[t.typography.caption, styles.cardSub, { color: t.colors.muted }]}>{delivery}</Text> : null}
+          {deviceMatches ? <Text style={[t.typography.caption, styles.cardSub, { color: t.colors.muted }]}>{tr('hermesTools.reminder.deviceSet', { when })}</Text> : null}
         </View>
       </View>
       {sent ? null : asking ? (
@@ -249,6 +341,16 @@ function ReminderCard({ r }: { r: Reminder }) {
         </View>
       ) : (
         <View style={styles.cardButtons}>
+          {offerDevice ? (
+            <Button
+              label={tr(device?.at != null ? 'hermesTools.reminder.deviceMove' : 'hermesTools.reminder.device')}
+              icon={(color, size) => <Icon name="bell" size={size} color={color} />}
+              size="small"
+              loading={deviceBusy}
+              onPress={() => void setOnDevice()}
+              testID="reminder-device"
+            />
+          ) : null}
           <Button label={tr('hermesTools.reminder.change')} icon={(color, size) => <Icon name="edit" size={size} color={color} />} size="small" onPress={() => prefillComposer?.(reminderChangePrefill(tr, r))} disabled={!prefillComposer} />
           <Button label={tr('hermesTools.reminder.delete')} icon={(color, size) => <Icon name="trash" size={size} color={color} />} tone="seal" size="small" onPress={() => setAsking(true)} disabled={!sendMessage} />
         </View>

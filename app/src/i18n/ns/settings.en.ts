@@ -156,6 +156,9 @@ export const settings = {
     chatScopeAllHint: 'The list shows this app\'s chats from all your devices.',
     chatScopeDeviceHint: 'The list only shows chats started on this device – even if you already opened another one here. Hidden chats stay in Hermes and on your other devices. Applies to this device only; Telegram, CLI and cron chats still follow the profile switches.',
     chatScopeKeywords: 'chat list devices device sync other devices hide list',
+    routines: 'Routines',
+    routinesSub: 'Your bots’ scheduled tasks, their results and notifications about them. Off: hidden everywhere. Reminders from the chat stay.',
+    routinesKeywords: 'routines schedules scheduled tasks cron inbox results hide',
     keywords: 'chats conversations conversation messages history',
   },
   media: {

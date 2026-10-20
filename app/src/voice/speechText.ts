@@ -6,10 +6,12 @@
  *   (all spoken texts come from the `voice.speech.*` dictionary keys; `t` is passed in)
  * - Markdown syntax (headings, emphasis, links, lists, quotes, tables, HTML, emoji) is removed;
  *   headings and list items get a final period so the voice pauses.
+ * - Raw tool-call markup a model wrote as text (chat/toolMarkup.ts) is spoken as the answer's notice line, never as JSON.
  * Paragraphs are separated by "\n\n" (chunking.ts uses them as boundaries).
  */
 
 import type { TFn } from '../i18n/core.ts';
+import { answerOutputText, TOOL_MARKUP_NOTICE_KEY } from '../chat/toolMarkup.ts';
 
 export type SpeechTextOptions = {
   /** speak a short summary for hui / html / code / tables (default true); false = skip them silently */
@@ -156,7 +158,8 @@ function codeSummary(lang: string, body: string, summarize: boolean, t: TFn): st
 /** Convert one assistant message (markdown with hui fences) into speakable prose. */
 export function toSpeechText(markdown: string, t: TFn, opts: SpeechTextOptions = {}): string {
   const summarize = opts.summarizeBlocks !== false;
-  const lines = markdown.replace(/\r\n?/g, '\n').split('\n');
+  // every spoken output (read-aloud, auto-read, the screen-reader announcement) says what the answer shows
+  const lines = answerOutputText(markdown, t(TOOL_MARKUP_NOTICE_KEY)).replace(/\r\n?/g, '\n').split('\n');
   const paragraphs: string[] = [];
   let para: string[] = [];
   const flush = () => {

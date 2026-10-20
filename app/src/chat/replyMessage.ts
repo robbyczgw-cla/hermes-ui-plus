@@ -19,8 +19,11 @@ export type ParsedReply = { head: string; replies: ReplyPart[] };
 const TAG = /^\[([a-z]+)(?::([^\]\n]*))?\]\s*(.*)$/;
 const isKind = (k: string): k is ReplyKind => (REPLY_KINDS as readonly string[]).includes(k);
 
-/** "a, b, c" / "–" → item count */
-const countList = (s: string) => (!s.trim() || s.trim() === '–' ? 0 : s.split(/,\s*/).filter(Boolean).length);
+/**
+ * "a, b, c" / "a; b, c" (items with a comma of their own, modules/a/replies.ts) / "–" → item count. A comma without a
+ * space is a decimal comma ("0,25 kg Butter"), not a separator.
+ */
+const countList = (s: string, sep: RegExp = /,\s+/) => (!s.trim() || s.trim() === '–' ? 0 : s.split(sep).filter(Boolean).length);
 
 /** Text after the last "→" (question / inputs before it are context the card already shows). */
 function afterArrow(s: string): string {
@@ -84,11 +87,12 @@ export function replyDisplay(kind: ReplyKind, rest: string, t: TFn, id = ''): st
     case 'checklist': {
       const both = /^erledigt:\s*(.*?)\s*·\s*offen:\s*(.*)$/.exec(r);
       if (both) {
-        const done = countList(both[1]);
-        return t('chat.reply.checklist', { done, total: done + countList(both[2]) });
+        const sep = both[1].includes(';') || both[2].includes(';') ? /;\s*/ : /,\s+/;
+        const done = countList(both[1], sep);
+        return t('chat.reply.checklist', { done, total: done + countList(both[2], sep) });
       }
       const open = /^offen:\s*(.*)$/.exec(r);
-      if (open) return t('chat.reply.checklist', { done: 0, total: countList(open[1]) });
+      if (open) return t('chat.reply.checklist', { done: 0, total: countList(open[1], open[1].includes(';') ? /;\s*/ : /,\s+/) });
       return r;
     }
     case 'quiz': {

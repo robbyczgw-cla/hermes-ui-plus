@@ -5,26 +5,13 @@
 import { useEffect, useRef } from 'react';
 import { shellState } from '../background/noticeState';
 import { useCopy } from '../chat/actions';
-import { plainCopyText } from '../chat/format';
-import { extractMedia } from '../chat/mediaTags';
 import { useToast } from '../chat/Toast';
+import { TOOL_MARKUP_NOTICE_KEY } from '../chat/toolMarkup';
 import type { ChatMessage } from '../hermes/types';
-import { splitProgressNotes } from '../hermes/progressNotes';
 import { useT } from '../i18n';
 import { usePreferences } from '../settings/PreferencesProvider';
 import { onDesktopEvent } from './bridge';
-
-/** plain text of the newest finished answer (interim notes left out like the answer's own copy button) */
-export function lastAnswerText(messages: readonly ChatMessage[], notesInline: boolean): string | null {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (m.role !== 'assistant' || m.status === 'streaming' || m.status === 'error') continue;
-    const shown = notesInline ? m.text : splitProgressNotes(m).answer;
-    const text = plainCopyText(extractMedia(shown, false).text).trim();
-    if (text) return text;
-  }
-  return null;
-}
+import { lastAnswerText } from './lastAnswer';
 
 export function useDesktopChatCommands(messages: () => readonly ChatMessage[]): void {
   const copy = useCopy();
@@ -40,7 +27,7 @@ export function useDesktopChatCommands(messages: () => readonly ChatMessage[]): 
       onDesktopEvent((e) => {
         if (e.cmd !== 'copy-last' || !shellState.chatFocused) return;
         const r = ref.current;
-        const text = lastAnswerText(r.messages(), r.notesInline);
+        const text = lastAnswerText(r.messages(), r.notesInline, r.tr(TOOL_MARKUP_NOTICE_KEY));
         if (text) r.copy(text, r.tr('desktop.copiedLast'));
         else r.toast(r.tr('desktop.noAnswer'));
       }),

@@ -18,6 +18,7 @@ const ROOT = join(HERE, '..');
 const read = (p) => readFileSync(join(ROOT, p), 'utf8');
 // the released app version (all version fields agree, scripts/release-version-check.mjs)
 const VERSION = JSON.parse(read('app/package.json')).version;
+const MINOR = VERSION.split('.').slice(0, 2).join('.'); // "0.2" for the alpha badge and "in 0.2" notes
 const ID = JSON.parse(read('app/brand/identity.json'));
 
 const SITE = ID.homepage.replace(/\/+$/, '');
@@ -28,7 +29,7 @@ const NAME = ID.name;
 const APP = ID.displayName;
 const APP_INTRO = `${APP} (${ID.shortName})`;
 // Videos are too large for git (see website/README.md). Posters (media/*.jpg) are committed.
-const OG_ALT = `${APP} on a phone: Hermes asks to run a command, with the buttons Allow once and Deny`;
+const OG_ALT = `${APP} on a phone: Hermes asks where the city break should go, with four destinations to pick from`;
 const MEDIA = (process.env.WEBSITE_MEDIA_BASE || '/media/').replace(/([^/])$/, '$1/');
 
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -118,6 +119,7 @@ export function markdown(md, { h1 = false } = {}) {
 // Design: "The Messenger". Warm paper, ink, brass and one sealing-wax red for live/approval moments; Gloock (display),
 // Atkinson Hyperlegible Next (text) and JetBrains Mono (commands), self-hosted under fonts/. CSS only, no JavaScript.
 const NAV = [
+  ['/#new', `New in ${MINOR}`, 'new'],
   ['/#features', 'Features', 'features'],
   ['/#demos', 'Demos', 'demos'],
   ['/#platforms', 'Platforms', 'platforms'],
@@ -181,7 +183,7 @@ ${noindex ? '<meta name="robots" content="noindex">' : `<link rel="canonical" hr
 <meta property="og:site_name" content="${esc(NAME)}">
 <meta property="og:title" content="${esc(full)}">
 <meta property="og:description" content="${esc(description)}">
-${noindex ? '' : `<meta property="og:url" content="${SITE}${path}">\n`}<meta property="og:image" content="${SITE}/media/trailer-poster.jpg">
+${noindex ? '' : `<meta property="og:url" content="${SITE}${path}">\n`}<meta property="og:image" content="${SITE}/media/trailer-02-poster.jpg">
 <meta property="og:image:width" content="1920">
 <meta property="og:image:height" content="1080">
 <meta property="og:image:alt" content="${esc(OG_ALT)}">
@@ -232,7 +234,7 @@ const CLIPS = [
     ['12-langtask', 'Long task, answer waiting', 'A research task with several tool steps: switch to another chat, Hermes keeps working, and the app tells you when the answer – summary and sources – is ready. (Web app: push notification; Android: keeps running in the background.)', 29],
     ['13-toolsteps', 'Live tool steps', 'A server check: terminal commands, a file read and a web search appear live in “Tools & activity”, then a compact table.', 22],
     ['18-schnellfrage', 'Quick answers ⚡', 'The ⚡ in the composer: a fast model answers in a couple of seconds. When it needs real data, one tap continues as a normal Hermes chat. (Needs the optional Hermes plugin on your server.)', 39],
-    ['17-bots', 'A bot for every job', 'Each Hermes bot has its own model, memory and skills. Pick one per chat in the model menu: here, the Kitchen bot. (Bots are Hermes profiles you set up on your server.)', 18],
+    ['bots-02', 'A bot for every job', 'Your Hermes bots are contacts in the Bots tab, each with its own chat, memory and routines. When one wants to run a command, it asks you first, by name. (Bots are Hermes profiles on your server; recorded in the offline demo.)', 27, 'music'],
     ['08-befehle', 'Models & slash commands', 'Type “/” for the command palette: pick the model for this chat, set reasoning effort, see every command.', 18],
     ['20-modellsperre', 'Model per chat, locked in', 'The model you pick is locked on the Hermes session for that chat; the header shows a lock.', 12],
   ]],
@@ -256,9 +258,9 @@ const CLIPS = [
   ]],
 ];
 // A demo clip is the app recorded inside its own phone frame (1080×1920). The plate crops the empty margin at the sides.
-const clip = ([id, title, text, secs]) => `<figure class="plate">
+const clip = ([id, title, text, secs, sound]) => `<figure class="plate">
 <div class="plate-media">
-<video controls muted loop playsinline preload="none" poster="/media/${id}.webp" width="540" height="960" aria-label="${esc(title)}: demo recording, no sound">
+<video controls muted loop playsinline preload="none" poster="/media/${id}.webp" width="540" height="960" aria-label="${esc(title)}: demo recording, ${sound ? `with ${sound}, starts muted` : 'no sound'}">
 <source src="${esc(MEDIA)}${id}.mp4" type="video/mp4">
 <a href="${esc(MEDIA)}${id}.mp4">Download the demo video (MP4)</a>
 </video>
@@ -314,7 +316,7 @@ const FEATURES = [
 <li class="run"><i class="spin"></i><b>Writing the answer</b><span class="dots"><i></i><i></i><i></i></span></li>
 </ol>
 </div>`],
-  ['f-away', 'Leave the app', 'Switch chats or lock the phone: Hermes keeps working, and the finished answer waits for you. The web app sends a push notification. Android keeps running in the background, with no remote push in 0.1: no notification while the app is closed.',
+  ['f-away', 'Leave the app', `Switch chats or lock the phone: Hermes keeps working, and the finished answer waits for you. The web app sends a push notification. Android keeps running in the background, with no remote push in ${MINOR}: no notification while the app is closed.`,
     `<div class="app lock">
 <span class="stamp-delivered" aria-hidden="true">Delivered</span>
 <p class="lock-time">9:41</p>
@@ -331,6 +333,15 @@ const FEATURES = [
 <li class="on"><i></i>Encrypted cloud copy <em class="tag tag-good">Recommended</em></li>
 </ul>
 <p class="pick-send"><span>Sending “Encrypted cloud copy”</span><b>Undo</b></p>
+</div>`],
+  ['f-live', 'Live cards', 'A shopping list, trip plan or watchlist that Hermes keeps up to date over many messages. It stays pinned in the chat, shows what changed, and your own ticks go along with your next message. Needs the hermes-ui skill 0.7.1.',
+    `<div class="app rows">
+<p class="rows-head">Pinned · Barbecue on Saturday <span class="live-v">v3 · 2 of 9</span></p>
+<dl>
+<div><dt>Charcoal</dt><dd>Added by Hermes</dd></div>
+<div><dt>Halloumi</dt><dd>Added by Hermes</dd></div>
+<div><dt>Tomatoes</dt><dd>Ticked by you</dd></div>
+</dl>
 </div>`],
   ['f-local', 'Local-first', 'Conversations stay on your device and your own server. No accounts, no telemetry.',
     `<div class="app rows">
@@ -351,7 +362,7 @@ const FEATURES = [
 ];
 
 const PLATFORMS = [
-  ['Android', `Signed APK from <a href="${DOWNLOAD}">GitHub Releases</a>, or add the repository to <a href="https://obtainium.imranr.dev">Obtainium</a> for automatic updates (turn on “Include prereleases”). Google Play: internal testing only, not public yet. Android 7.0 or newer, 64-bit ARM (it does not start on x86 emulators or x86 ChromeOS; use the web app there). No remote push in 0.1: no notification while the app is closed.`, 'Alpha', ''],
+  ['Android', `Signed APK from <a href="${DOWNLOAD}">GitHub Releases</a>, or add the repository to <a href="https://obtainium.imranr.dev">Obtainium</a> for automatic updates (turn on “Include prereleases”). Google Play: internal testing only, not public yet. Android 7.0 or newer, 64-bit ARM (it does not start on x86 emulators or x86 ChromeOS; use the web app there). No remote push in ${MINOR}: no notification while the app is closed.`, 'Alpha', ''],
   ['Web app (PWA)', `Prebuilt bundle from GitHub Releases, served by your own bridge, installable to the home screen. <a href="${REPO}/blob/main/docs/WEB-APP.md">Install guide</a>.`, 'Alpha', ''],
   ['macOS', `Native desktop app for Apple Silicon (macOS 13+) from <a href="${DOWNLOAD}">GitHub Releases</a> (DMG), signed and notarized: menus and shortcuts, approval actions in notifications, dock badge, menu bar mode, Touch ID lock. See the <a href="${REPO}/blob/main/desktop/README.md">desktop notes</a>.`, 'Notarized', 'st-ink'],
   ['Linux', `Desktop app as AppImage or .deb (x86_64, Ubuntu 22.04 / Debian 12 or newer) from <a href="${DOWNLOAD}">GitHub Releases</a>, see the <a href="${REPO}/blob/main/desktop/README.md">desktop notes</a>. Still alpha.`, 'Alpha', ''],
@@ -368,7 +379,7 @@ const indexBody = `<section class="hero frame" aria-labelledby="h-title">
 <a class="btn-text" href="#agent-setup">Set up with your agent <span aria-hidden="true">→</span></a>
 </p>
 <ul class="meta" aria-label="Release">
-<li>Alpha 0.1</li><li>Open source</li><li>Unofficial</li><li class="meta-p">Android</li><li class="meta-p">Web</li><li class="meta-p">macOS</li><li class="meta-p">Linux</li>
+<li>Alpha ${esc(MINOR)}</li><li>Open source</li><li>Unofficial</li><li class="meta-p">Android</li><li class="meta-p">Web</li><li class="meta-p">macOS</li><li class="meta-p">Linux</li>
 </ul>
 <p class="req">For people who run <a href="https://github.com/NousResearch/hermes-agent">Hermes Agent</a> (v0.21 or newer) and talk to it through Telegram or the terminal today. You run a small bridge next to it.</p>
 </div>
@@ -406,9 +417,26 @@ ${seal('seal-hero')}
 </div>
 </section>
 
+<section id="new" class="film film-new" aria-labelledby="h-new">
+<div class="frame film-grid">
+<header class="film-head">
+${no(1)}
+<h2 id="h-new">New in ${esc(MINOR)}</h2>
+<p>Your Hermes bots as contacts, each with its own chat, and approvals that name the bot. Lists that Hermes keeps up to date over many messages. Reminders that reach you, and a look at what your agent knows and can do. 62 seconds, with voice and music.</p>
+<p class="credits">Recorded in the app's offline demo with invented content; some features need the bridge, the hermes-ui skill or the plugin on your server (<a href="${REPO}/releases/tag/v${esc(VERSION)}">release notes</a>). Voice and music made with ElevenLabs. Also as a <a href="${esc(MEDIA)}new-in-02-vertical.mp4">vertical video (MP4)</a>.</p>
+</header>
+<figure class="screen-169">
+<video controls playsinline preload="none" poster="/media/new-in-02-poster.webp" width="1920" height="1080" aria-label="What is new in ${esc(MINOR)}, 62 seconds, with voice and music">
+<source src="${esc(MEDIA)}new-in-02.mp4" type="video/mp4">
+<a href="${esc(MEDIA)}new-in-02.mp4">Download the video (MP4)</a>
+</video>
+</figure>
+</div>
+</section>
+
 <section id="features" class="sec feats frame" aria-labelledby="h-what">
 <header class="sec-head">
-${no(1)}
+${no(2)}
 <h2 id="h-what">What it does</h2>
 <p class="sec-lead">Hermes already does the work. Here you steer it: approve a command, pick an option, tick off a step, and Hermes carries on from your tap.</p>
 </header>
@@ -424,7 +452,7 @@ ${card}
 
 <section id="demos" class="sec demos" aria-labelledby="h-demos">
 <header class="sec-head frame">
-${no(2)}
+${no(3)}
 <h2 id="h-demos">Demos</h2>
 <p class="sec-lead">Short recordings of the app (web build, phone size). All content is prepared sample data, nothing real. The videos have no sound; scroll each row sideways.</p>
 </header>
@@ -439,15 +467,15 @@ ${items.map(clip).join('\n')}
 <section id="film" class="film" aria-labelledby="h-film">
 <div class="frame film-grid">
 <header class="film-head">
-${no(3)}
+${no(4)}
 <h2 id="h-film">The film</h2>
-<p>The best moments in 53 seconds. No sound.</p>
-<p class="credits">Credits: photos CC0 (Wikimedia Commons), product images generated, music from ElevenLabs Music. Per-file sources are in <a href="${REPO}/blob/main/scripts/demo-videos/media/CREDITS.json">CREDITS.json</a>.</p>
+<p>The app in 66 seconds, with voice and music: interactive answers, sources, bots, live cards and the offline demo.</p>
+<p class="credits">Recorded in the app's offline demo with invented content. Voice and music made with ElevenLabs. The demo clips use CC0 photos (Wikimedia Commons) and generated product images; per-file sources are in <a href="${REPO}/blob/main/scripts/demo-videos/media/CREDITS.json">CREDITS.json</a>. Also as a <a href="${esc(MEDIA)}trailer-02-vertical.mp4">vertical video (MP4)</a>.</p>
 </header>
 <figure class="screen-169">
-<video controls playsinline preload="none" poster="/media/trailer-poster.webp" width="1920" height="1080" aria-label="Trailer, 53 seconds">
-<source src="${esc(MEDIA)}trailer.mp4" type="video/mp4">
-<a href="${esc(MEDIA)}trailer.mp4">Download the trailer (MP4)</a>
+<video controls playsinline preload="none" poster="/media/trailer-02-poster.webp" width="1920" height="1080" aria-label="Trailer, 66 seconds, with voice and music">
+<source src="${esc(MEDIA)}trailer-02.mp4" type="video/mp4">
+<a href="${esc(MEDIA)}trailer-02.mp4">Download the trailer (MP4)</a>
 </video>
 </figure>
 </div>
@@ -455,9 +483,9 @@ ${no(3)}
 
 <section id="platforms" class="sec plats frame" aria-labelledby="h-platforms">
 <header class="sec-head">
-${no(4)}
+${no(5)}
 <h2 id="h-platforms">Where it runs</h2>
-<p class="sec-lead">The current version is ${esc(VERSION)}, an early release. Expect rough edges. It is not in the public Google Play Store or the Apple App Store yet.</p>
+<p class="sec-lead">The current version is ${esc(VERSION)}, still an early release. Expect rough edges. It is not in the public Google Play Store or the Apple App Store yet.</p>
 <p><a class="btn btn-ink" href="${DOWNLOAD}">Download the latest release</a></p>
 </header>
 <div class="receipt"><div class="rc-paper">
@@ -472,7 +500,7 @@ ${PLATFORMS.map(([name, how, status, cls]) => `<li><h3>${name}</h3><p>${how}</p>
 <section id="self-hosting" class="sec host frame" aria-labelledby="h-self">
 <div class="host-panel">
 <header class="sec-head">
-${no(5)}
+${no(6)}
 <h2 id="h-self">Run the bridge</h2>
 <p class="sec-lead">There is no hosted service. You run a small Node.js service, the <em>bridge</em>, next to your Hermes (Node.js 22+ or Docker). It authenticates your devices, routes presentation, handles uploads, voice and push, and pairs a new phone with a QR code. We strongly recommend reaching it over <a href="https://tailscale.com">Tailscale</a> and never exposing it to the public internet.</p>
 </header>
@@ -497,7 +525,7 @@ ${no(5)}
 
 <section id="agent-setup" class="sec agent frame" aria-labelledby="h-agent">
 <header class="sec-head">
-${no(6)}
+${no(7)}
 <h2 id="h-agent">Give this to your agent</h2>
 <p class="sec-lead">Hermes can run shell commands, so it can set up its own bridge. Paste this prompt into a direct chat with your Hermes (Telegram, Hermes CLI) or into a coding agent with a terminal on the same machine.</p>
 <ul class="agent-rules">
@@ -517,7 +545,7 @@ ${no(6)}
 
 <section id="privacy" class="sec priv frame" aria-labelledby="h-priv">
 <div class="letter">
-${no(7)}
+${no(8)}
 <h2 id="h-priv">Privacy in short</h2>
 <p>The developers collect no data. There are no accounts, no analytics, no advertising and no crash reporting. Your messages go from your device to your bridge, then to your Hermes, and from there to the model providers you configured. Nowhere else.</p>
 <p><a href="/privacy">Read the full privacy policy</a></p>
@@ -579,7 +607,7 @@ export function build() {
   const priv = read('PRIVACY.md');
   const sec = read('SECURITY.md');
   const pages = {
-    'index.html': page({ file: 'index.html', path: '/', title: NAME, description: `${ID.tagline}. An unofficial, open-source mobile and web app for Hermes Agent: approvals, live tool steps and interactive answers. No accounts, no tracking.`, current: '', body: indexBody, kind: 'home', jsonld: JSON_LD }),
+    'index.html': page({ file: 'index.html', path: '/', title: NAME, description: `${ID.tagline}. An unofficial, open-source mobile and web app for Hermes Agent: approvals, live tool steps, interactive answers and lists that stay up to date. No accounts, no tracking.`, current: '', body: indexBody, kind: 'home', jsonld: JSON_LD }),
     'privacy.html': page({ file: 'privacy.html', path: '/privacy', title: 'Privacy policy', description: `Privacy policy of ${NAME}: the developers collect no data; your data goes only to the server you set up.`, current: 'privacy', body: `<h1>${esc(/^#\s+(.*)$/m.exec(priv)[1])}</h1>\n${markdown(priv)}` }),
     'security.html': page({ file: 'security.html', path: '/security', title: 'Security', description: `Security policy and threat model of ${NAME}, and how to report a vulnerability.`, current: 'security', body: `<h1>${esc(/^#\s+(.*)$/m.exec(sec)[1])}</h1>\n${markdown(sec)}` }),
     'support.html': page({ file: 'support.html', path: '/support', title: 'Support', description: `Get help with ${NAME}: GitHub issues, documentation and the contact address.`, current: 'support', body: supportBody }),

@@ -12,7 +12,10 @@ import { displayTitle, renameUnique, uniqueTitle } from '../conversations/title'
 import type { ChatMessage, UseHermesChat } from '../hermes';
 import { useHermesCapabilities } from '../hermes/useHermesCapabilities';
 import { useHermesBots } from '../hermes/useHermesBots';
-import { botBadge, botOf, withBot } from '../hermes/bots';
+import { botBadge, withBot } from '../hermes/bots';
+import { botStatusKind } from '../bots/core';
+import { BotEmptyState } from '../bots/BotEmptyState';
+import { BotInfoSheet } from '../bots/BotInfoSheet';
 import type { HermesChatOptions } from '../hermes/capabilities';
 import type { TurnOverride } from '../hermes/turnOverride';
 import { shellState } from '../background/noticeState';
@@ -33,6 +36,12 @@ import { lightHaptic, useChatActionHandler } from './actions';
 import { buildAskMessage } from './ask';
 import { ChatHeader } from './ChatHeader';
 import { useChatShell } from './ChatShellContext';
+import { LiveTray } from '../live/ui/LiveTray';
+import { useLive } from '../live/LiveProvider';
+import { LiveAskChip } from '../live/ui/LiveAskChip';
+import { LiveCardSheet } from '../live/ui/LiveCardSheet';
+import { LiveHistorySheet } from '../live/ui/LiveHistorySheet';
+import { LiveListSheet } from '../live/ui/LiveListSheet';
 import { MarkdownImageContext } from './MarkdownImageContext';
 import { crashTestChat } from './crashTest';
 import { perfWrap } from '../perf/react';
@@ -72,6 +81,7 @@ import { ConsentSheet } from '../compliance/Consent';
 import { profileNeedsConsent } from '../compliance/consent';
 import { useAiConsent } from '../compliance/store';
 import { isOnboardingVisible, subscribeOnboardingVisible } from '../onboarding/hostEvents';
+import { WhatsNew } from '../whatsnew/WhatsNewSheet';
 
 type Props = {
   chat: UseHermesChat;
@@ -198,7 +208,15 @@ function ChatViewInner({
   const streaming = chat.status === 'streaming';
   const keyboardVisible = useKeyboardVisible();
   const listRef = useRef<MessageListHandle>(null);
+  // the live-card tray folds to one row while the user reads older messages, and opens again at the newest one
+  const [trayCollapsed, setTrayCollapsed] = useState(false);
+  const expandTray = useCallback(() => setTrayCollapsed(false), []);
   const composerRef = useRef<ComposerHandle>(null);
+  const liveCtx = useLive();
+  const hasLiveCards = !!liveCtx?.cards.length;
+  const openLive = liveCtx?.openSheet;
+  const openLiveList = useMemo(() => (hasLiveCards && openLive ? () => openLive({ kind: 'list' }) : undefined), [hasLiveCards, openLive]);
+  const focusComposer = useCallback(() => setTimeout(() => composerRef.current?.focus(), 250), []);
   const quickMode = !!quick;
   // the open chat while the quick thread is shown on top of it (display: none, stays mounted)
   const covered = !!shell?.covered;
@@ -301,7 +319,8 @@ function ChatViewInner({
     if (failedAnswer) requestAnimationFrame(() => listRef.current?.revealLatest());
   }, [failedAnswer]);
   // ---- AI data-sharing consent (compliance/consent.ts, Apple 5.1.2(i)): asked before the first message to a
-  // non-demo backend and again after a text version bump. A refused send is parked and goes out on "weiter".
+  // non-demo backend and again after a text version bump (one acceptance covers every backend; the sheet is worded for
+  // this one). A refused send is parked and goes out on "weiter".
   const consent = useAiConsent();
   const consentBlocked = profileNeedsConsent(profile) && !consent.current;
   const [consentOpen, setConsentOpen] = useState(false);
@@ -446,11 +465,12 @@ function ChatViewInner({
     enabled: prefs.autoTitles && !quickMode,
     bridge: metaConn,
     conversationKey: conversationId,
-    hasTitle: !!meta && meta.titleSource !== 'auto',
+    // a bot's Bot Chat keeps its title: Hermes Desktop finds the thread by it (bots/core.ts)
+    hasTitle: !!meta && (meta.titleSource !== 'auto' || !!meta.botChat),
     onTitle: (newTitle) => {
       if (!conversationId) return;
       const cur = convs.get(conversationId);
-      if (!cur || cur.titleSource === 'user') return; // the user renamed it meanwhile
+      if (!cur || cur.titleSource === 'user' || cur.botChat) return; // the user renamed it meanwhile
       // N8: Hermes titles are unique per server → pick a free variant ("… #2") up front, retry on a conflict
       const taken = convs.list.filter((c) => c.id !== conversationId).flatMap((c) => [c.title, c.remote?.title]);
       const title = uniqueTitle(newTitle, taken);
@@ -517,29 +537,15 @@ function ChatViewInner({
 
   const onTimerDone = useCallback((tm: { label: string }) => toast(tr('chat.timerDone', { label: tm.label })), [toast, tr]);
   const kindTitle = KIND_TITLES[profile.kind] ?? 'Hermes';
-  // Hermes profiles ("bots", hermes/bots.ts): a non-default bot names the chat (header, composer); the model
-  // picker gets a compact "Bot" section when the connection has more than the default profile
+  // Hermes profiles ("bots", hermes/bots.ts): a non-default bot names the chat (header, composer). A bot's own thread
+  // ("Bot Chat", bots/) gets the bot header, the bot's approval card and its start screen; bots are picked in the
+  // drawer's Bots tab, not in the model menu
   const chatBot = meta?.hermesProfile;
+  const botChat = !!meta?.botChat;
   const { bots } = useHermesBots(profile.kind === 'hermes' || profile.kind === 'demo' ? profile : undefined, chatBot);
-  const botName = botBadge(chatBot, bots);
+  const botEntry = bots.find((b) => (chatBot ? b.name === chatBot : b.default));
+  const botName = botBadge(chatBot, bots) ?? (botChat ? botEntry?.label : undefined);
   const shownTitle = title ?? botName ?? kindTitle;
-  const showBots = bots.length > 1 && !retryPick;
-  const pickBot = useCallback(
-    (bot: string | undefined) => {
-      if (!conversationId || botOf(bot) === botOf(chatBot)) return;
-      // an empty chat switches its bot; a chat with messages stays on its bot (its session lives there) → new chat
-      if (!live.current.messages.length && live.current.status !== 'streaming') {
-        convs.setBot(conversationId, bot);
-        return;
-      }
-      setModelOpen(false);
-      stopSpeaking();
-      lightHaptic();
-      convs.create({ id: profile.id, kind: profile.kind }, { bot });
-      toast(tr('bots.picker.newChat', { name: botBadge(bot, bots) ?? tr('bots.picker.default') }));
-    },
-    [conversationId, chatBot, convs, profile.id, profile.kind, toast, tr, bots],
-  );
 
   // approval cards line up with the message column on wide windows (Settings → Chatbreite)
   const columnMax = columnMaxWidth(chatMaxWidth(prefs), 12);
@@ -579,7 +585,8 @@ function ChatViewInner({
   const answerActions = useMemo<AnswerActions>(
     () => ({
       kind: profile.kind,
-      canBranch: !!conversationId && !quickMode,
+      // one thread per bot: no branches out of a bot's Bot Chat
+      canBranch: !!conversationId && !quickMode && !botChat,
       branchFrom: (id) => void branchFrom(id),
       quick: quickMode,
       handOff: quick?.handOff,
@@ -607,7 +614,7 @@ function ChatViewInner({
       modelInfo: (m) =>
         answerModelInfo({ kind: profile.kind, reported: m.metrics?.model ?? (m as { model?: string }).model, selected: model, serverDefault, effort }),
     }),
-    [profile.kind, conversationId, quickMode, quick?.handOff, branchFrom, isBusy, toast, tr, retryWith, sendText, model, serverDefault, effort, getMessages],
+    [profile.kind, conversationId, quickMode, botChat, quick?.handOff, branchFrom, isBusy, toast, tr, retryWith, sendText, model, serverDefault, effort, getMessages],
   );
 
   // ---- "Im Chat suchen" (chat menu, ⌘/Ctrl+F): find bar, highlighted matches, scroll to the current one
@@ -697,6 +704,13 @@ function ChatViewInner({
 
   // ---- chat menu (header ⋯ / wide title): find, export, pin, rename, archive, delete
   const [chatMenuOpen, setChatMenuOpen] = useState(false);
+  // "Über <Name>" (bots/BotInfoSheet.tsx): the bot header's name in a bot's chat, the chat menu in every Hermes chat
+  const [botInfoOpen, setBotInfoOpen] = useState(false);
+  const openBotInfo = useCallback(() => setBotInfoOpen(true), []);
+  const openBotInfoFromMenu = useCallback(() => {
+    setChatMenuOpen(false);
+    setBotInfoOpen(true);
+  }, []);
   const openChatMenu = useCallback(() => {
     Keyboard.dismiss();
     setChatMenuOpen(true);
@@ -730,7 +744,40 @@ function ChatViewInner({
     }),
     [],
   );
-  const chatMenu = <ChatMenu open={chatMenuOpen} meta={meta} hasMessages={messages.length > 0} onFind={openFind} {...menuHandlers} />;
+  const hermesChat = profile.kind === 'hermes' || profile.kind === 'demo';
+  const chatMenu = (
+    <ChatMenu
+      open={chatMenuOpen}
+      meta={meta}
+      hasMessages={messages.length > 0}
+      onFind={openFind}
+      onLiveCards={openLiveList}
+      onAbout={hermesChat && !quickMode ? openBotInfoFromMenu : undefined}
+      aboutName={shownTitle}
+      {...menuHandlers}
+    />
+  );
+
+  // a bot's Bot Chat: header status (waiting > working > its description / model) and the bot's approval card
+  const waitingApproval = approvals.some((a) => !a.expired);
+  const headerBot = useMemo(
+    () =>
+      botChat
+        ? {
+            name: shownTitle,
+            bot: chatBot,
+            color: botEntry?.color,
+            status: botStatusKind({ working: streaming, waiting: waitingApproval }),
+            detail: botEntry?.description ?? headerModelLabel(profile, model) ?? undefined,
+            onInfo: openBotInfo,
+          }
+        : undefined,
+    [botChat, shownTitle, chatBot, botEntry?.color, botEntry?.description, streaming, waitingApproval, profile, model, openBotInfo],
+  );
+  const approvalBot = useMemo(
+    () => (botChat ? { name: shownTitle, bot: chatBot, color: botEntry?.color, scoped: !!chatBot } : undefined),
+    [botChat, shownTitle, chatBot, botEntry?.color],
+  );
 
   return (
     <ImageEditProvider profile={profile} backendName={shownTitle} history={history} send={sendGated} onSent={onEditSent}>
@@ -756,6 +803,7 @@ function ChatViewInner({
         options={options}
         demo={profile.kind === 'demo' ? DEMO_HEADER : undefined}
         onChatMenu={!conversationId ? undefined : openChatMenu}
+        bot={headerBot}
       />
       )}
       {findOpen ? (
@@ -783,6 +831,8 @@ function ChatViewInner({
           {notice}
         </Text>
       ) : null}
+      {/* live cards of this Hermes chat (live/LiveProvider; renders nothing elsewhere) */}
+      {!quick && area === 'list' ? <LiveTray collapsed={trayCollapsed} onExpand={expandTray} /> : null}
       <KeyboardAvoidingView style={styles.flex} behavior="padding">
         {area === 'list' ? (
           <AnswerActionsContext.Provider value={answerActions}>
@@ -798,6 +848,7 @@ function ChatViewInner({
                 voiceConn={voiceConn}
                 followups={followups}
                 historyTruncated={!!meta?.historyTruncated}
+                onAwayChange={setTrayCollapsed}
               />)}
               </QueuedSendContext.Provider>
               </PendingSendContext.Provider>
@@ -807,6 +858,8 @@ function ChatViewInner({
           <HistoryPlaceholder />
         ) : quick ? (
           <QuickEmptyState onPick={sendText} model={quick.model} />
+        ) : botChat ? (
+          <BotEmptyState name={shownTitle} bot={chatBot} color={botEntry?.color} description={botEntry?.description} template={botEntry?.template} onPick={sendText} offline={health === 'offline'} offlineHint={offlineHint} demo={profile.kind === 'demo'} />
         ) : (
           <EmptyState
             onPick={sendText}
@@ -820,8 +873,9 @@ function ChatViewInner({
         )}
         <TimersBar onTimerDone={onTimerDone} />
         <View style={[styles.approvalCol, columnStyle]}>
-          <ApprovalStack approvals={approvals} onRespond={onApprovalRespond} onClose={chat.dismissApproval} focus={chat.approvalFocus} style={styles.sheet} />
+          <ApprovalStack approvals={approvals} onRespond={onApprovalRespond} onClose={chat.dismissApproval} focus={chat.approvalFocus} bot={approvalBot} style={styles.sheet} />
         </View>
+        {!quick ? <LiveAskChip /> : null}
         {perfWrap('Composer', <Composer
           ref={composerRef}
           streaming={streaming}
@@ -843,14 +897,30 @@ function ChatViewInner({
         current={model}
         onPick={pickModel}
         bot={chatBot}
-        bots={showBots ? bots : undefined}
-        onPickBot={pickBot}
         initialQuery={modelQuery}
         title={retryPick ? tr('menus.answer.retryModelTitle') : undefined}
       />
       {slash.sheet}
       {chatMenu}
-      <ConsentSheet visible={consentVisible} onAccept={acceptConsent} onLater={laterConsent} />
+      {profile.kind === 'hermes' || profile.kind === 'demo' ? (
+        <BotInfoSheet
+          open={botInfoOpen}
+          onClose={() => setBotInfoOpen(false)}
+          profile={profile}
+          name={shownTitle}
+          bot={chatBot}
+          color={botEntry?.color}
+          description={botEntry?.description}
+          model={headerModelLabel(profile, model)}
+          onPickModel={openModel}
+        />
+      ) : null}
+      <LiveCardSheet offline={health === 'offline'} onAsk={focusComposer} />
+      <LiveHistorySheet />
+      <LiveListSheet />
+      <ConsentSheet visible={consentVisible} profile={profile} onAccept={acceptConsent} onLater={laterConsent} />
+      {/* "Neu in dieser Version" once after an update: not over onboarding or the consent sheet, not in a hidden view */}
+      {!quick ? <WhatsNew profile={profile} bot={chatBot} blocked={hiddenSession || onboardingShown || consentVisible || (profileNeedsConsent(profile) && !consent.loaded)} /> : null}
       <AnswerAnnouncer messages={messages} />
     </View>
     </ImageEditProvider>

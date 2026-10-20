@@ -302,6 +302,9 @@ class AdapterTest(unittest.TestCase):
                         s.split()[1].startswith(m) for m in ("agent", "gateway", "hermes_cli", "hermes_constants",
                                                             "tools", "run_agent", "hermes_state")):
                     offenders.append(f"{f.name}: {s}")
+        self.assertTrue(all(o.startswith("hermes_adapter.py: ") for o in offenders), offenders)  # the only module
+        # the library source (HermesLibrary) imports tools.* / hermes_cli.* lazily, per call
+        offenders = [o for o in offenders if not o.split(": ", 1)[1].startswith(("from tools", "from hermes_cli"))]
         self.assertEqual(sorted(offenders), [
             "hermes_adapter.py: from agent import secret_scope  # profile-scoped credentials (Hermes v0.22+)",
             "hermes_adapter.py: from agent.auxiliary_client import aux_probe_mode, get_text_auxiliary_client  "
@@ -319,7 +322,10 @@ class AdapterTest(unittest.TestCase):
                 s = line.strip()
                 if s.startswith("import ") or (s.startswith("from ") and " import " in s):
                     mod = s.split()[1]
-                    if mod.startswith(".") or mod.split(".")[0] in ("agent", "hermes_constants"):  # Hermes, adapter only
+                    if mod.startswith(".") or mod.split(".")[0] in ("agent", "hermes_constants", "tools",
+                                                                  "hermes_cli"):  # Hermes, adapter only
+                        continue
+                    if f.name == "hermes_adapter.py" and mod in ("yaml", "hermes_yaml"):  # Hermes' YAML (HermesBots)
                         continue
                     self.assertIn(mod.split(".")[0], std, f"{f.name}: {s}")
 

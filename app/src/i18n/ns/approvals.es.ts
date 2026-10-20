@@ -5,6 +5,8 @@ export const approvals = {
   title: {
     blocked: 'Hermes ha sido bloqueado',
     request: 'Hermes quiere ejecutar algo',
+    blockedBot: '{name} ha sido bloqueado',
+    requestBot: '{name} quiere ejecutar algo',
   },
   risk: {
     flagged: 'Hermes lo marcó como peligroso',
@@ -37,6 +39,12 @@ export const approvals = {
       label: 'Rechazar',
       a11y: 'Rechazar este comando',
     },
+    alwaysBot: {
+      label: 'Permitir siempre',
+      hint: 'Solo para {name}',
+      hintCategory: 'Solo para {name} · vale para todos los comandos del tipo «{category}»',
+      a11y: 'Permitir siempre comandos similares para {name}; los demás bots siguen preguntando',
+    },
     retry: '{label} – intentar de nuevo',
     more: 'Más opciones',
     less: 'Menos opciones',
@@ -46,6 +54,8 @@ export const approvals = {
     body: 'El patrón se añade de forma permanente a la lista global de permisos de Hermes. Los comandos similares se ejecutarán sin preguntar, también en Telegram y en tareas cron.',
     yes: 'Sí, permitir siempre en todas partes',
     back: 'Volver',
+    bodyBot: 'El patrón se guarda para siempre en la lista de permisos de {name}. Los comandos similares se ejecutarán en {name} sin preguntar, también en rutinas. Los demás bots siguen preguntando.',
+    yesBot: 'Sí, permitir siempre para {name}',
   },
   error: {
     notPending: 'Esta solicitud ya se ha respondido o ha caducado.',
@@ -65,6 +75,12 @@ export const approvals = {
   },
   reason: {
     label: 'Motivo según Hermes',
+    labelBot: 'Motivo según {name}',
+  },
+  waiting: {
+    since: '{name} te espera desde las {time}',
+    sinceA11y: '{name} espera tu respuesta desde las {time}',
+    expired: 'Caducado, no se ejecutó nada. Escribe a {name} si debe intentarlo de nuevo.',
   },
   stack: {
     position: 'Aprobación {index} de {total}',
@@ -80,6 +96,7 @@ export const approvals = {
     once: 'Permitido (una vez)',
     session: 'Permitido (para esta tarea)',
     always: 'Siempre permitido (en todas partes)',
+    alwaysBot: 'Permitido siempre (solo para {name})',
     deny: 'Rechazado',
     expired: 'Caducado – rechazado',
     cancelled: 'Sin respuesta – ejecución terminada',

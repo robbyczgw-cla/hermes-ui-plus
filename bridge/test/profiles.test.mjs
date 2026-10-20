@@ -220,7 +220,7 @@ test('allow-listed paths under /p/<profile>/ are forwarded WITH the prefix and t
   const cases = [
     ['GET', '/p/writer/api/sessions'], ['GET', '/p/writer/api/sessions/hui-1'], ['PATCH', '/p/writer/api/sessions/hui-1'],
     ['DELETE', '/p/writer/api/sessions/hui-1'], ['GET', '/p/writer/api/sessions/hui-1/messages?order=latest'], ['POST', '/p/writer/api/sessions/hui-1/fork'],
-    ['GET', '/p/writer/api/model/options'], ['GET', '/p/writer/v1/models'], ['GET', '/p/writer/v1/capabilities'], ['GET', '/p/writer/v1/runs/run1'],
+    ['GET', '/p/writer/api/model/options'], ['GET', '/p/writer/v1/models'], ['GET', '/p/writer/v1/capabilities'], ['GET', '/p/writer/v1/skills'], ['GET', '/p/writer/v1/runs/run1'],
     ['POST', '/p/writer/v1/runs/run1/approval'], ['GET', '/p/writer/health'],
   ];
   for (const [method, p] of cases) {
@@ -236,13 +236,15 @@ test('allow-listed paths under /p/<profile>/ are forwarded WITH the prefix and t
 test('/p/ paths outside the allow-list, unknown profiles and bridge routes → 404, never upstream', async () => {
   seen = [];
   for (const [method, p] of [
-    ['GET', '/p/writer/api/jobs'], ['POST', '/p/writer/api/sessions/s1/chat'], ['POST', '/p/writer/api/sessions'], ['GET', '/p/writer/bridge/status'],
+    ['POST', '/p/writer/api/jobs'], ['GET', '/p/writer/api/cron'], ['POST', '/p/writer/v1/skills'], ['POST', '/p/writer/api/sessions/s1/chat'], ['GET', '/p/writer/bridge/status'],
     ['GET', '/p/writer/bridge/profiles'], ['POST', '/p/writer/bridge/chat/stop'], ['GET', '/p/writer'], ['GET', '/p/writer/'], ['GET', '/p/nope/v1/models'],
     ['GET', '/p/Writer/v1/models'], ['GET', '/p/writer/p/writer/v1/models'], ['GET', '/p/default-not-listed/api/sessions'],
   ]) {
     const r = await call(p, { method });
     assert.ok(r.status === 404 || r.status === 405, `${method} ${p} → ${r.status}`);
   }
+  // POST /p/<bot>/api/sessions exists only for the "Bot Chat" thread (test/bot-chat.test.mjs): no body → 403, nothing upstream
+  assert.equal((await call('/p/writer/api/sessions', { method: 'POST' })).status, 403);
   // same method rules as unprefixed (PUT on a session)
   assert.equal((await call('/p/writer/api/sessions/s1', { method: 'PUT' })).status, 405);
   assert.equal(seen.length, 0);

@@ -13,6 +13,12 @@
 //   GET  /bridge/inbox/stream live SSE of unsolicited messages (?sources=api_server[,cron]; default api_server only);
 //                             push only when no stream
 //   POST /bridge/hermes-hook  Hermes outbound webhook (X-Hermes-Signature-256), triggers a poll; 404 without secret
+//
+// Bots (docs/BOTS-SERVER.md): every watched profile's "Bot Chat" (the session with exactly that title, any source: the
+// app creates it as api_server, Hermes itself as cli when a `deliver: bot-chat` job fires first) is watched too. A cron
+// delivery there is an injected user-ish row `[Cronjob "<name>" output — …]` + the bot's comment: the notification
+// carries the job's output (the reminder text), titled with the bot; silent runs ([SILENT]) notify nobody. Inbox events
+// of a Bot Chat carry `botChat: true` (the app opens that bot's thread).
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -36,6 +42,18 @@ export const MAX_POLLED_PROFILES = 8;
 /** What a client gets when it does not ask for sources (stream / device scope): the app's own sessions only.
  * api_server sessions are further limited to BRIDGE_PUSH_SESSION_PREFIX (hui-) by the poller. Cron is opt-in. */
 export const DEFAULT_CLIENT_SOURCES = Object.freeze(['api_server']);
+/** Sources a registration / stream may ask for. `routines`: results of the routines inbox (src/routines-inbox.mjs). */
+export const KNOWN_SOURCES = Object.freeze(['api_server', 'cron', 'telegram', 'cli', 'routines']);
+/** a bot's one shared thread (Hermes Desktop's convention; src/bridge.mjs BOT_CHAT_TITLE) */
+const BOT_CHAT = 'Bot Chat';
+/** `[Cronjob "<name>" output — scheduled job, not the user. …]\n\n<output>` (dash variants tolerated) */
+const CRON_INJECT = /^\[Cronjob "([^"\n]{0,200})" output\b[^\]\n]*\]\s*([\s\S]*)$/;
+
+/** A cron delivery row in a Bot Chat → {name, output}, else null. */
+export function parseCronInjection(text) {
+  const m = CRON_INJECT.exec(String(text ?? '').trim());
+  return m ? { name: m[1].trim(), output: m[2].trim() } : null;
+}
 
 const bool = (v, d) => (v === undefined || v === '' ? d : /^(1|true|yes|on)$/i.test(v));
 const num = (v, d) => (v === undefined || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
@@ -123,10 +141,17 @@ export function createHermesPush(config, o = {}) {
   const routes = service.routes({
     sendJson,
     validateScope: (user, scope) => {
-      const bad = (scope.sources ?? []).find((s) => !['cron', 'api_server', 'telegram', 'cli'].includes(s));
+      const bad = (scope.sources ?? []).find((s) => !KNOWN_SOURCES.includes(s));
       return bad ? { ok: false, message: `unknown source ${bad}` } : { ok: true, value: { sources: scope.sources } };
     },
+    // apps add `routines` to their scope only when the bridge lists it (an older bridge refuses unknown sources)
+    publicConfig: () => ({ ...service.publicConfig(), sources: [...KNOWN_SOURCES] }),
   });
+
+  // routines inbox hooks (src/routines-inbox.mjs, set by server.mjs): which bots it covers, rights per credential
+  /** @type {{covers: (bot: string) => boolean, rightOfCredential: (cred: any, bot: string) => string} | null} */
+  let routinesHooks = null;
+  const canReadRoutines = (cred, bot) => Boolean(routinesHooks) && routinesHooks.rightOfCredential(cred, bot) !== 'none';
 
   // ---------- state: per session last_active + seen-until (epoch s), persisted without content ----------
   const stateFile = pc.stateDir ? path.join(pc.stateDir, 'push-hermes.json') : null;
@@ -199,6 +224,8 @@ export function createHermesPush(config, o = {}) {
           threadKey: `approval|${ev.requestId}`, // one notification per request, never coalesced with another
           kind: 'approval',
           title: 'Hermes',
+          // a bot's request names the bot ("Scout wartet auf deine Freigabe"), the default one stays "Hermes"
+          ...(ev.hermesProfile ? { botName: botName(ev.hermesProfile) } : {}),
           text: ev.command,
           previewDefault: pc.preview, // previews off: generic body, no command text
           ttl: Math.max(60, Math.ceil(pc.approvalTimeoutMs / 1000)),
@@ -321,11 +348,14 @@ export function createHermesPush(config, o = {}) {
           if (isSilence(text)) continue;
           const job = await cronJob(s.id, prefix);
           if (pc.cronMode === 'delivered' && job && (!job.deliver || /^(local|none)$/i.test(String(job.deliver)))) continue;
+          // delivered into a bot's Bot Chat: the Bot Chat watcher notifies (one ping per run, not two)
+          if (job && /^bot-chat\b/i.test(String(job.deliver ?? ''))) continue;
           name = job?.name || name;
         }
         const title = name ? `${pc.title} · ${String(name).replace(/<think>[\s\S]*?(<\/think>|$)/g, '').trim().slice(0, 60)}` : pc.title;
         // hermesProfile: the bot of the session (absent = default) – the app fetches it under /p/<profile>/
         const bot = profile ? { hermesProfile: profile } : {};
+        const cronCovered = s.source === 'cron' && Boolean(routinesHooks?.covers(profile ?? 'default'));
         const inbox = { id: `h_${profile ? `${profile}_` : ''}${s.id}_${last.id}`, sessionId: s.id, ...bot, source: s.source, messageId: String(last.id), role: 'assistant', content: text, timestamp: Math.round(last.timestamp * 1000), title, count: fresh.length };
         const via = await service.dispatch({
           user: OWNER,
@@ -336,14 +366,91 @@ export function createHermesPush(config, o = {}) {
           count: fresh.length,
           previewDefault: pc.preview,
           data: { src: 'hermes', sessionId: s.id, ...bot, source: s.source, messageId: String(last.id) },
-          match: (reg) => (reg.scope?.sources?.length ? reg.scope.sources : DEFAULT_CLIENT_SOURCES).includes(s.source),
+          match: (reg) => {
+            const sources = reg.scope?.sources?.length ? reg.scope.sources : DEFAULT_CLIENT_SOURCES;
+            if (!sources.includes(s.source)) return false;
+            // the routines inbox pushes this cron run itself to registrations that asked for `routines`: no second push
+            return !(cronCovered && sources.includes('routines') && canReadRoutines(reg.credential, profile ?? 'default'));
+          },
           inbox,
         });
         log.info('push_hermes_message', { source: s.source, via, count: fresh.length, ...(profile ? { profile } : {}) });
       }
     }
+    await pollBotChat(profile, prefix, first, nowSec);
     if (profile && !state.profiles.includes(profile)) state.profiles = [...state.profiles, profile].slice(-50);
     return true;
+  }
+
+  /** display name of a bot for a notification title (label, else the profile name; default: BRIDGE_PUSH_TITLE) */
+  function botName(profile) {
+    const entry = o.profiles?.list?.().find((b) => (profile ? b.name === profile : b.default));
+    return entry?.label || profile || pc.title;
+  }
+
+  /** the profile's Bot Chat: new cron deliveries / unsolicited answers → push + live inbox (botChat: true) */
+  async function pollBotChat(profile, prefix, first, nowSec) {
+    let rows;
+    try {
+      rows = (await hermes(`${prefix}/api/sessions?title=${encodeURIComponent(BOT_CHAT)}&include_hidden=1&limit=5`))?.data ?? [];
+    } catch {
+      return;
+    }
+    const s = rows
+      .filter((r) => r?.title === BOT_CHAT && typeof r.id === 'string' && typeof r.last_active === 'number')
+      .sort((a, b) => b.last_active - a.last_active)[0];
+    if (!s) return;
+    const key = sessionKey(profile, s.id);
+    const prev = state.sessions[key];
+    if (first || !prev) {
+      state.sessions[key] = { la: s.last_active, su: s.last_active };
+      return;
+    }
+    if (s.last_active <= prev.la || busy(key)) return;
+    if (nowSec - s.last_active < pc.settleMs / 1000) return; // the bot may still be commenting: next poll
+    let msgs = [];
+    try {
+      msgs = (await hermes(`${prefix}/api/sessions/${encodeURIComponent(s.id)}/messages?order=latest&limit=12`))?.data ?? [];
+    } catch {
+      return;
+    }
+    const su = prev.su ?? 0;
+    const fresh = msgs
+      .filter((m) => typeof m?.timestamp === 'number' && m.timestamp > su && m.display_kind !== 'hidden')
+      .sort((a, b) => a.timestamp - b.timestamp);
+    state.sessions[key] = { la: s.last_active, su: Math.max(su, s.last_active, ...msgs.map((m) => (typeof m?.timestamp === 'number' ? m.timestamp : 0))) };
+    // what the user did not see: cron deliveries, and answers the bridge did not stream (another client, a lost stream)
+    const cron = fresh.filter((m) => m.role === 'user').map((m) => ({ m, c: parseCronInjection(messageText(m.content)) })).filter((x) => x.c);
+    const answers = fresh
+      .filter((m) => m.role === 'assistant' && m.finish_reason !== 'tool_calls' && messageText(m.content).trim() && !streamedByBridge(key, m.timestamp))
+      .filter((m) => !isSilence(messageText(m.content)));
+    const job = cron.at(-1)?.c ?? null;
+    // a cron run with nothing new ([SILENT] output) notifies nobody, whatever the bot commented
+    if (job && isSilence(job.output)) return;
+    if (!job && !answers.length) return;
+    const last = answers.at(-1) ?? cron.at(-1).m;
+    const text = job && !isSilence(job.output) ? job.output : messageText(last.content);
+    const name = botName(profile);
+    const title = job?.name ? `${name} · ${job.name.replace(/^\[bot:[^\]]*\]\s*/, '').slice(0, 60)}` : name;
+    const bot = profile ? { hermesProfile: profile } : {};
+    const inbox = {
+      id: `b_${profile ? `${profile}_` : ''}${s.id}_${last.id}`, sessionId: s.id, ...bot, source: 'api_server', botChat: true,
+      messageId: String(last.id), role: 'assistant', content: text, timestamp: Math.round(last.timestamp * 1000), title, count: cron.length + answers.length,
+    };
+    const via = await service.dispatch({
+      user: OWNER,
+      key: `${key}#${last.id}`,
+      threadKey: key,
+      title,
+      text,
+      count: 1,
+      previewDefault: pc.preview,
+      data: { src: 'hermes', sessionId: s.id, ...bot, source: 'api_server', botChat: '1', messageId: String(last.id) },
+      // the app's own default scope (api_server) covers a bot's thread
+      match: (reg) => (reg.scope?.sources?.length ? reg.scope.sources : DEFAULT_CLIENT_SOURCES).includes('api_server'),
+      inbox,
+    });
+    log.info('push_hermes_bot_chat', { via, cron: cron.length, answers: answers.length, ...(profile ? { profile } : {}) });
   }
 
   function poll() {
@@ -407,6 +514,12 @@ export function createHermesPush(config, o = {}) {
     service,
     turns: turnHooks,
     approvals,
+    /** BRIDGE_PUSH_PREVIEW: previews of routine results follow the same operator default */
+    previewDefault: pc.preview,
+    /** @param {{covers: (bot: string) => boolean, rightOfCredential: (cred: any, bot: string) => string} | null} hooks */
+    setRoutines(hooks) {
+      routinesHooks = hooks;
+    },
     pollNow: () => poll(),
     matches(req) {
       if (req.method === 'OPTIONS') return false; // CORS preflight is answered by the bridge handler
@@ -426,7 +539,10 @@ export function createHermesPush(config, o = {}) {
       if (p === INBOX_PATH && req.method === 'GET') {
         const want = (url.searchParams.get('sources') ?? '').split(',').map((s) => s.trim()).filter(Boolean);
         const allowed = new Set(want.length ? want : DEFAULT_CLIENT_SOURCES);
-        service.inbox.attach(OWNER, req, res, { filter: (ev) => allowed.has(ev.source), headers: { 'x-hermes-ui-bridge': '1' }, ready: { sources: [...allowed] } });
+        const cred = credentials.of(req);
+        // routine hints (no content) only reach streams whose credential may read that bot's routines
+        const filter = (ev) => allowed.has(ev.source) && (ev.source !== 'routines' || canReadRoutines(cred, ev.hermesProfile));
+        service.inbox.attach(OWNER, req, res, { filter, headers: { 'x-hermes-ui-bridge': '1' }, ready: { sources: [...allowed] } });
         // a revoked device token (src/devices.mjs) must not keep its live stream
         const recheck = setInterval(() => {
           if (!authorized(req)) res.end();

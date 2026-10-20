@@ -67,7 +67,7 @@ export function Calc({ node }: NodeProps<HuiCalc>) {
     for (const k of Object.keys(errors)) if (errors[k]) out[k] = null;
     return out;
   }, [values, errors]);
-  const rows = useMemo(() => (live ? computeOutputs(model, effective, locale) : []), [live, model, effective, locale]);
+  const rows = useMemo(() => (live ? computeOutputs(model, effective, locale, CALC) : []), [live, model, effective, locale, CALC]);
   // protocol reply stays German whatever the UI language (docs/SPEC-modules-v2.md)
   const replyRows = useMemo(() => (live ? computeOutputs(model, effective) : []), [live, model, effective]);
   const sweepPts = useMemo(() => (live ? computeSweep(model, effective) : null), [live, model, effective]);
@@ -124,7 +124,7 @@ export function Calc({ node }: NodeProps<HuiCalc>) {
           <Skeleton width="60%" height={30} />
         </View>
       ) : (
-        <Outputs t={t} hero={hero} rest={rest} invalid={anyError} />
+        <Outputs t={t} hero={hero} rest={rest} invalid={anyError} broken={rows.filter((r) => r.error).length} />
       )}
 
       {/* chart */}
@@ -318,8 +318,9 @@ function NumberInput({ t, inp, value, error, onValue, onError }: { t: Theme; inp
 
 /* ───────────── outputs ───────────── */
 
-function Outputs({ t, hero, rest, invalid }: { t: Theme; hero: OutputRow | null; rest: OutputRow[]; invalid: boolean }) {
+function Outputs({ t, hero, rest, invalid, broken }: { t: Theme; hero: OutputRow | null; rest: OutputRow[]; invalid: boolean; broken: number }) {
   const CALC = useS().calc;
+  const valueColor = (r: OutputRow) => (r.error ? t.colors.danger : r.value === null ? t.colors.subtle : t.colors.text);
   return (
     <View style={{ gap: t.spacing.s }} accessibilityLiveRegion="polite">
       {hero ? (
@@ -327,7 +328,7 @@ function Outputs({ t, hero, rest, invalid }: { t: Theme; hero: OutputRow | null;
           <HText variant="caption" color="muted" weight="500">
             {hero.label}
           </HText>
-          <HText variant="display" tabular style={{ color: hero.value === null ? t.colors.subtle : t.colors.text }} numberOfLines={1} adjustsFontSizeToFit>
+          <HText variant={hero.error ? 'title' : 'display'} tabular style={{ color: valueColor(hero) }} numberOfLines={1} adjustsFontSizeToFit>
             {hero.text}
           </HText>
         </View>
@@ -341,7 +342,7 @@ function Outputs({ t, hero, rest, invalid }: { t: Theme; hero: OutputRow | null;
               <HText variant="callout" color="muted" style={{ flexGrow: 1, flexShrink: 1, flexBasis: 0, minWidth: 120 }}>
                 {r.label}
               </HText>
-              <HText variant="bodyStrong" tabular style={{ marginLeft: 'auto', flexShrink: 1, textAlign: 'right', color: r.value === null ? t.colors.subtle : t.colors.text }}>
+              <HText variant="bodyStrong" tabular style={{ marginLeft: 'auto', flexShrink: 1, textAlign: 'right', color: valueColor(r) }}>
                 {r.text}
               </HText>
             </View>
@@ -352,6 +353,16 @@ function Outputs({ t, hero, rest, invalid }: { t: Theme; hero: OutputRow | null;
         <HText variant="caption" color="muted">
           {CALC.invalidHint}
         </HText>
+      ) : null}
+      {broken ? (
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6 }}>
+          <View style={{ marginTop: 2 }}>
+            <Icon name="alert" size={13} color={t.colors.danger} />
+          </View>
+          <HText variant="caption" color="muted" style={{ flex: 1 }}>
+            {CALC.formulaBroken(broken)}
+          </HText>
+        </View>
       ) : null}
     </View>
   );
@@ -392,7 +403,7 @@ function Formula({ t, model, rows }: { t: Theme; model: CalcModel; rows: OutputR
             {o.name ? <HText variant="caption" color="subtle">{`  (${o.name})`}</HText> : null}
           </HText>
           <HText selectable style={[mono, { color: t.colors.text }]}>
-            {`= ${o.expr}`}
+            {`= ${o.source ?? o.expr}`}
           </HText>
           {rows[i]?.error ? (
             <HText variant="caption" style={{ color: t.colors.danger }}>

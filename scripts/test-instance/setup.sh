@@ -1,17 +1,29 @@
 #!/usr/bin/env bash
 # One-time setup of the throwaway Hermes test instance on THIS host (no sudo, nothing listens publicly).
-#   scripts/test-instance/setup.sh [--force-config]
+#   scripts/test-instance/setup.sh [--force-config] [--web ddgs]
 # docker flavor (Linux): needs docker (user in the docker group), node >= 22, npm, python3, systemd user session, openssl.
 # native flavor (macOS): needs git, python3.14 (Homebrew), node >= 22, npm, openssl. Hermes comes from a pinned git
 #   checkout in $TI_DIR/hermes-agent and its own venv in $TI_DIR/venv; nothing is written outside $TI_DIR.
 # Before: put the model key into $TI_DIR/secrets/anthropic.env (one line ANTHROPIC_API_KEY=..., mode 600), see README.
 # Re-runnable: keeps existing keys, data and sessions; --force-config rewrites the config files it owns.
+# --web ddgs (native only, with --force-config): keyless web SEARCH for the API (Hermes' ddgs backend, the `ddgs`
+#   package in the venv) so product questions get real tool data, as in the live conversation test; no extract backend.
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 . "$here/lib.sh"
 REPO="$(cd "$here/../.." && pwd)"
 FORCE=0
-[ "${1:-}" = "--force-config" ] && FORCE=1
+WEB=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --force-config) FORCE=1 ;;
+    --web) WEB="${2:?--web needs ddgs}"; shift ;;
+    *) die "unknown option $1" ;;
+  esac
+  shift
+done
+[ -z "$WEB" ] || [ "$WEB" = ddgs ] || die "--web: only ddgs is supported"
+[ -z "$WEB" ] || [ "$TI_FLAVOR" = native ] || die "--web ddgs needs the native flavor (the docker image has no ddgs package)"
 
 if [ "$TI_FLAVOR" = docker ]; then
   command -v docker >/dev/null || die "docker missing"
@@ -66,6 +78,10 @@ else
       -e "$TI_HERMES_SRC[$TI_HERMES_EXTRAS]" aiohttp==3.14.3
     printf '%s %s\n' "$TI_HERMES_COMMIT" "$TI_HERMES_EXTRAS" > "$stamp"
   fi
+  if [ "$WEB" = ddgs ] && ! "$TI_VENV/bin/python" -c 'import ddgs' 2>/dev/null; then
+    say "installing ddgs (keyless web search) into $TI_VENV"
+    PIP_CACHE_DIR="$TI_DIR/pip-cache" PIP_DISABLE_PIP_VERSION_CHECK=1 nice "$TI_VENV/bin/pip" install -q ddgs
+  fi
   say "Hermes: $(hermes_oneoff --version 2>&1 | head -1)"
 fi
 
@@ -83,9 +99,10 @@ model:
 gateway:
   # explicit: inside the s6 image the implicit default may stay standalone
   multiplex_profiles: true
-# API clients get the todo list only: no terminal, files, code, browser, web, memory or delegation
+# API clients get the todo list only (+ keyless web search with --web ddgs): no terminal, files, code, browser,
+# memory or delegation
 platform_toolsets:
-  api_server: [todo]
+  api_server: [todo${WEB:+, web}]
 auxiliary:
   title_generation: {provider: anthropic, model: $TI_MODEL}
   compression: {provider: anthropic, model: $TI_MODEL}
@@ -156,6 +173,13 @@ rm -rf "$TI_DATA/plugins/hermes-ui-plus"
 "${TI_PY3:-python3}" "$TI_SRC/hermes-plugin/install.py" --hermes-home "$TI_DATA" --copy >/dev/null
 [ -f "$TI_DATA/hermes-ui-plus/secret" ] || die "plugin secret missing"
 say "plugin installed (enabled via plugins.enabled in config.yaml)"
+
+# --- hermes-ui skill in the default profile's skills folder, as hermes-skill/INSTALL.md does it (references load via
+# skill_view; the bridge inlines the SKILL.md core itself) -----------------------------------------------------------
+mkdir -p "$TI_DATA/skills"
+rm -rf "$TI_DATA/skills/hermes-ui"
+cp -a "$REPO/hermes-skill/hermes-ui" "$TI_DATA/skills/hermes-ui"
+say "skill hermes-ui installed in $TI_DATA/skills"
 
 # --- bridge (repo copy, production deps only, memory-capped install) --------------------------------------------------
 rm -rf "$TI_SRC/bridge"

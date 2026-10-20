@@ -7,7 +7,10 @@ import {
   AI_CONSENT_VERSION,
   CONSENT_STORAGE_KEY,
   CONSENT_TEXT_FINGERPRINT,
+  consentAudience,
+  consentBodyKey,
   consentCurrent,
+  consentProviderName,
   consentRequired,
   consentTextFingerprint,
   makeConsent,
@@ -26,7 +29,7 @@ function mem(): ConsentStorage & { data: Map<string, string> } {
 const hermes = { kind: 'hermes', baseUrl: 'http://192.0.2.10:8642/v1' };
 const demo = { kind: 'demo', baseUrl: 'demo://local' };
 
-test('consent texts unchanged for this version (else bump AI_CONSENT_VERSION + CONSENT_TEXT_FINGERPRINT)', () => {
+test('consent texts unchanged (a change: bump AI_CONSENT_VERSION to ask everyone again, or keep it on purpose + new fingerprint)', () => {
   const texts = [de, en, es].flatMap((d) => {
     const c = d.consent;
     return [c.title, c.body, c.providers];
@@ -34,11 +37,11 @@ test('consent texts unchanged for this version (else bump AI_CONSENT_VERSION + C
   assert.equal(
     consentTextFingerprint(texts),
     CONSENT_TEXT_FINGERPRINT,
-    `compliance.consent.* changed: bump AI_CONSENT_VERSION (now ${AI_CONSENT_VERSION}) and set CONSENT_TEXT_FINGERPRINT to the new value`,
+    `compliance.consent.* changed: decide whether everyone is asked again (bump AI_CONSENT_VERSION, now ${AI_CONSENT_VERSION}) or only new users see it (keep it), then set CONSENT_TEXT_FINGERPRINT to the new value`,
   );
 });
 
-test('consent body names the server and example providers in every language', () => {
+test('consent body (Hermes wording) names the server and example providers in every language', () => {
   for (const d of [de, en, es]) {
     for (const p of ['Hermes', 'OpenAI', 'Anthropic', 'xAI']) assert.ok(d.consent.body.includes(p), `${p} in ${d.consent.body}`);
   }
@@ -99,3 +102,40 @@ test('consent wording is accurate: local storage, own-key voice and OS recogniti
   assert.match(de.consent.providers, /API-Schlüssel/);
   assert.match(es.consent.providers, /clave API/);
 });
+
+test('the Hermes wording no longer claims the chats exist only on this device (Hermes keeps sessions server-side, PC-04)', () => {
+  for (const d of [de, en, es]) {
+    for (const s of [d.consent.body]) {
+      assert.doesNotMatch(s, /nur auf diesem Gerät|only on this device|on this device only|solo en este dispositivo/i, s);
+      assert.match(s, /Server|server|servidor/);
+    }
+  }
+  assert.match(en.consent.body, /Hermes also keeps the conversations on your server/);
+});
+
+test('0.2 asks nobody again: the version stays 2, an existing acceptance stays valid', async () => {
+  assert.equal(AI_CONSENT_VERSION, 2, 'a bump asks every existing user again: a product decision, not a side effect of a wording change');
+  // stored by 0.1.x (and by 0.2 test builds, which wrote version 3 + the accepted audiences)
+  for (const raw of ['{"version":2,"at":1700000000000}', '{"version":3,"at":1,"audiences":["hermes"]}', '{"version":3,"at":1,"audiences":["server"]}']) {
+    const s = mem();
+    s.data.set(CONSENT_STORAGE_KEY, raw);
+    const r = await readConsent(s);
+    assert.equal(consentCurrent(r), true, raw);
+    assert.equal(consentRequired(hermes, r), false, raw);
+  }
+});
+
+test('a fresh install is asked before the first message to a server, never for the demo', () => {
+  assert.equal(consentRequired(hermes, null), true);
+  assert.equal(consentRequired(demo, null), false);
+  const accepted = makeConsent();
+  assert.equal(consentRequired(hermes, accepted), false);
+});
+
+test('the public flavor: every connection is a Hermes one', () => {
+  assert.equal(consentAudience({ kind: 'hermes', baseUrl: 'https://example.com/v1' }), 'hermes');
+  assert.equal(consentAudience(demo), 'hermes');
+  assert.equal(consentAudience(null), 'hermes');
+  assert.equal(consentBodyKey('hermes'), 'compliance.consent.body');
+});
+

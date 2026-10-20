@@ -71,7 +71,9 @@ test('slash commands offered for a Hermes chat (every state) name no other provi
   const other: BackendKind[] = ['demo'];
   for (const kind of other) {
     const visible = visibleCommands({ ...base, kind }).map((c) => c.id);
-    for (const hermesOnly of ['approve', 'deny', 'skills', 'branch']) assert.ok(!visible.includes(hermesOnly as never), `${kind} ${hermesOnly}`);
+    // the offline demo has /skills on purpose: Skills & memory shows demo data (commands/plan.ts DEMO_TOO)
+    const hermesOnly = kind === 'demo' ? ['approve', 'deny', 'branch'] : ['approve', 'deny', 'skills', 'branch'];
+    for (const id of hermesOnly) assert.ok(!visible.includes(id as never), `${kind} ${id}`);
   }
   assert.ok(COMMANDS.every((c) => !PROVIDER.test(c.name) && c.hermesAliases.every((a) => !PROVIDER.test(a))));
 });

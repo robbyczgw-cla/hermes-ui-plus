@@ -10,6 +10,11 @@
 //   (any)      internal: no Hermes home to look at → every syntactically valid name passes, Hermes answers 404
 // Names: Hermes' rule (lowercase letter/digit first, then lowercase letters, digits, `-`, `_`; max 64). Anything else
 // (dots, `%`, upper case, empty) never reaches Hermes.
+//
+// Bots the hermes-ui-plus plugin reports (src/bots-manage.mjs, `setExternal`) are merged in: `auto` adds them to the
+// directory scan, `any` (a sandboxed bridge that cannot read the Hermes home) lists exactly them, `list` adds the bots
+// made in the app (an explicit list stays the owner's choice for every other profile), `off` ignores them. Parked bots
+// (Hermes does not serve them) are never listed.
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { hermesHome, listProfiles, parseYamlSubset } from './setup/detect.mjs';
@@ -22,6 +27,9 @@ const SCAN_TTL_MS = 30_000;
 const CONFIG_MAX_BYTES = 256 * 1024;
 const LABEL_MAX = 40;
 const MODEL_MAX = 120;
+const DESCRIPTION_MAX = 160;
+/** Role templates of the app's create flow (bots-manage.mjs); anything else is not passed on. */
+export const BOT_TEMPLATES = ['research', 'deals', 'travel', 'briefing', 'code', 'own', 'blank'];
 
 export function isProfileName(name) {
   return typeof name === 'string' && PROFILE_NAME.test(name);
@@ -84,6 +92,33 @@ export function modelFromConfig(text) {
 }
 
 /**
+ * Hermes Desktop's bot metadata from a profile.yaml (`ui_meta['hermes-bots']`, falling back to the profile's
+ * `description`): display title, one-line description, colour, pinned / hidden. Plain text only, clipped; never anything
+ * else from the file.
+ */
+export function botMetaFromProfileYaml(text) {
+  let y;
+  try { y = parseYamlSubset(text); } catch { return {}; }
+  const meta = y?.ui_meta?.['hermes-bots'];
+  const m = meta && typeof meta === 'object' ? meta : {};
+  const clean = (v, max) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, max) : '');
+  const title = clean(m.title, LABEL_MAX);
+  const description = clean(m.description, DESCRIPTION_MAX) || clean(y?.description, DESCRIPTION_MAX);
+  const color = typeof m.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(m.color.trim()) ? m.color.trim().toLowerCase() : '';
+  const flag = (v) => v === true || /^(true|yes|on|1)$/i.test(String(v ?? ''));
+  const app = y?.ui_meta?.['hermes-ui-plus'];
+  const template = app && typeof app === 'object' && BOT_TEMPLATES.includes(app.template) ? app.template : '';
+  return {
+    ...(title ? { title } : {}),
+    ...(template ? { template } : {}),
+    ...(description ? { description } : {}),
+    ...(color ? { color } : {}),
+    ...(flag(m.pinned) ? { pinned: true } : {}),
+    ...(flag(m.hidden) ? { hidden: true } : {}),
+  };
+}
+
+/**
  * @param {Record<string, string|undefined>} env
  * @param {{fs?: {existsSync: Function, readFileSync: Function, readdirSync: Function, statSync: Function}, now?: () => number, home?: string}} [o]
  */
@@ -104,11 +139,36 @@ export function createProfiles(env = process.env, o = {}) {
     return names;
   }
 
-  /** Non-default profile names known to the bridge (`any`: none, it cannot know). */
+  /** @type {{name: string, title?: string, description?: string, color?: string, pinned?: boolean, hidden?: boolean, parked?: boolean, template?: string, app?: boolean}[]} */
+  let external = [];
+  const served = () => external.filter((b) => !b.parked);
+
+  /** Non-default profile names known to the bridge (`any`: only what the plugin reports). */
   function names() {
-    if (mode === 'list') return setting.names;
-    if (mode === 'auto') return scanned();
-    return [];
+    if (mode === 'off') return [];
+    const add = (base, more) => [...base, ...more.map((b) => b.name).filter((n) => !base.includes(n))];
+    if (mode === 'list') return add(setting.names, served().filter((b) => b.app));
+    if (mode === 'auto') return add(scanned(), served());
+    return served().map((b) => b.name);
+  }
+
+  /** Bots the plugin reports (GET /bots of hermes-ui-plus, already projected); the next list() is rebuilt. */
+  function setExternal(rows) {
+    external = (Array.isArray(rows) ? rows : []).filter((b) => b && isProfileName(b.name) && b.name !== DEFAULT_PROFILE);
+    listCache = { at: -Infinity, list: [] };
+  }
+
+  /** One bot the plugin just made (its list did not answer yet). */
+  function addExternal(row) {
+    if (!row || !isProfileName(row.name) || row.name === DEFAULT_PROFILE) return;
+    external = [...external.filter((b) => b.name !== row.name), row];
+    listCache = { at: -Infinity, list: [] };
+  }
+
+  /** Forget the directory scan and the list (a bot was just created or edited). */
+  function invalidate() {
+    scan = { at: -Infinity, names: [] };
+    listCache = { at: -Infinity, list: [] };
   }
 
   /** May `/p/<name>/…` be forwarded? */
@@ -130,20 +190,46 @@ export function createProfiles(env = process.env, o = {}) {
     }
   }
 
+  function readMeta(dir) {
+    const f = join(dir, 'profile.yaml');
+    try {
+      if (!fs.existsSync(f) || fs.statSync(f).size > CONFIG_MAX_BYTES) return {};
+      return botMetaFromProfileYaml(fs.readFileSync(f, 'utf8'));
+    } catch {
+      return {};
+    }
+  }
+
   let listCache = { at: -Infinity, list: /** @type {any[]} */ ([]) };
-  /** GET /bridge/profiles body: default first, then the known profiles (name, label?, model?). No secrets. */
+  /**
+   * GET /bridge/profiles body: default first, then the known profiles (name, label?, model?, description?, color?,
+   * pinned?). Label: BRIDGE_PROFILES `name=Label`, else Hermes Desktop's bot title. Bots Desktop hides are not listed
+   * (still reachable under /p/<name>/). No secrets.
+   */
   function list() {
     if (now() - listCache.at < SCAN_TTL_MS) return listCache.list;
-    const withModel = homeReadable && mode !== 'off';
+    const withFiles = homeReadable && mode !== 'off';
     const entry = (name, isDefault) => {
-      const label = setting.labels[name];
-      const model = withModel ? readModel(isDefault ? home : join(home, 'profiles', name)) : undefined;
-      return { name, default: isDefault, ...(label ? { label } : {}), ...(model ? { model } : {}) };
+      const dir = isDefault ? home : join(home, 'profiles', name);
+      const ext = isDefault ? undefined : external.find((b) => b.name === name);
+      const file = withFiles ? readMeta(dir) : {};
+      // the plugin reads the same profile.yaml inside the gateway; the files win when the bridge can read them
+      const meta = { ...(ext ? { title: ext.title, description: ext.description, color: ext.color, pinned: ext.pinned, hidden: ext.hidden, template: ext.template } : {}), ...file };
+      const label = setting.labels[name] ?? meta.title;
+      const model = withFiles ? readModel(dir) : undefined;
+      return {
+        name, default: isDefault, ...(label ? { label } : {}), ...(model ? { model } : {}),
+        ...(meta.description ? { description: meta.description } : {}), ...(meta.color ? { color: meta.color } : {}),
+        ...(meta.pinned ? { pinned: true } : {}), ...(meta.hidden ? { hidden: true } : {}),
+        ...(meta.template ? { template: meta.template } : {}),
+      };
     };
-    const out = [entry(DEFAULT_PROFILE, true), ...names().map((n) => entry(n, false))];
+    const out = [entry(DEFAULT_PROFILE, true), ...names().map((n) => entry(n, false))]
+      .filter((e) => e.default || !e.hidden)
+      .map(({ hidden: _h, ...e }) => e);
     listCache = { at: now(), list: out };
     return out;
   }
 
-  return { mode, allowed, names, list };
+  return { mode, allowed, names, list, setExternal, addExternal, invalidate };
 }

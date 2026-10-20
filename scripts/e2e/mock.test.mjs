@@ -126,6 +126,58 @@ test('bots and quick answers follow the config', async () => {
   await ctl('/__e2e/config', { profiles: false, quick: false });
 });
 
+test('bots: Bot Chat only, adopted on the second call, per profile; an approval turn waits for its answer', async () => {
+  const token = await pair();
+  const auth = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+  const post = (p, body) => fetch(base + p, { method: 'POST', headers: auth, body: JSON.stringify(body) });
+  await ctl('/__e2e/config', { profiles: true });
+  assert.equal((await post('/p/research/api/sessions', { title: 'Other' })).status, 403);
+  const first = await post('/p/research/api/sessions', { title: 'Bot Chat' });
+  assert.equal(first.status, 201);
+  const id = (await first.json()).session.id;
+  const again = await (await post('/p/research/api/sessions', { title: 'Bot Chat' })).json();
+  assert.deepEqual([again.session.id, again.adopted], [id, true]);
+  const listed = await (await fetch(`${base}/p/research/api/sessions?title=Bot%20Chat&include_hidden=1`, { headers: auth })).json();
+  assert.deepEqual(listed.data.map((x) => x.id), [id]);
+  const other = await (await fetch(`${base}/api/sessions?title=Bot%20Chat&include_hidden=1`, { headers: auth })).json();
+  assert.equal(other.data.length, 0, 'the default bot has no Bot Chat yet');
+
+  const r = await fetch(`${base}/p/research/v1/chat/completions`, {
+    method: 'POST', headers: { ...auth, 'x-hermes-session-id': id }, body: JSON.stringify({ model: 'hermes-agent', stream: true, messages: [{ role: 'user', content: 'e2e approval please' }] }),
+  });
+  const reader = r.body.getReader();
+  let raw = '';
+  while (!raw.includes('approval.request')) raw += new TextDecoder().decode((await reader.read()).value);
+  const ev = JSON.parse(raw.split('event: approval.request\ndata: ')[1].split('\n')[0]);
+  assert.deepEqual(ev.choices, ['once', 'session', 'always', 'deny']);
+  const status = await (await fetch(`${base}/p/research/v1/runs/${ev.run_id}`, { headers: auth })).json();
+  assert.equal(status.status, 'waiting_for_approval');
+  const ans = await post(`/p/research/v1/runs/${ev.run_id}/approval`, { choice: 'always', request_id: ev.request_id });
+  assert.equal((await ans.json()).resolved, 1);
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    raw += new TextDecoder().decode(value);
+  }
+  assert.match(sse(raw), /folder check/);
+  const turn = (await ctl('/__e2e/turns')).find((t) => t.text === 'e2e approval please');
+  assert.deepEqual([turn.profile, turn.sid, turn.approval.choice], ['research', id, 'always']);
+  await ctl('/__e2e/config', { profiles: false });
+});
+
+test('a fired bot-chat reminder: the default bot\'s Bot Chat gets the injected output + the comment; found by title', async () => {
+  const token = await pair();
+  const auth = { authorization: `Bearer ${token}` };
+  const r = await ctl('/__e2e/fire-reminder', { name: 'Buy tea', text: 'Time to buy tea.' });
+  const again = await ctl('/__e2e/fire-reminder', { name: 'Buy tea', text: 'Tea, really.' });
+  assert.equal(again.sessionId, r.sessionId, 'one thread per bot');
+  const list = await (await fetch(`${base}/api/sessions?title=Bot%20Chat&include_hidden=1`, { headers: auth })).json();
+  assert.deepEqual(list.data.map((x) => x.id), [r.sessionId]);
+  const msgs = await (await fetch(`${base}/api/sessions/${r.sessionId}/messages`, { headers: auth })).json();
+  assert.match(msgs.data[0].content, /^\[Cronjob "Buy tea" output/);
+  assert.equal(msgs.data.at(-1).role, 'assistant');
+});
+
 test('perf harness: perfreal / perfstress stream the long perf answer byte-equal, stress much faster', async () => {
   const { PERF_LONG } = await import('./perf-answers.mjs');
   assert.equal(scenarioFor('perfreal one').name, 'perf-real');
@@ -170,4 +222,99 @@ test('uploads: raw bytes with X-Filename → 201 RemoteRef, recorded for the sha
   assert.match(ref.path, /^\/tmp\/e2e-uploads\/e2e-up-\d+-My_Report\.pdf$/);
   const list = await ctl('/__e2e/uploads');
   assert.equal(list.at(-1).head, Buffer.from('%PDF-1.4').toString('hex'));
+});
+
+test('live list: created, the [hui:live] edits are applied before the next full version, the trailer never picks a scenario', async () => {
+  const token = await pair();
+  const block = (text) => JSON.parse(/```hui\n([\s\S]*?)\n```/.exec(text)[1]);
+  const v1 = block(sse(await (await send(token, 'Mach mir eine Einkaufsliste für Samstag', { sid: 'hui-live-1' })).text()));
+  assert.equal(v1.live, true);
+  assert.equal(v1.id, 'einkauf');
+  const trailer = `[hui:live]${JSON.stringify({ einkauf: { v: 1, ops: [{ check: 'milch' }, { add: { id: 'u-test1', text: 'Brot vom Bäcker' } }], bid: 'b-test' } })}[/hui:live]`;
+  const v2 = block(sse(await (await send(token, `Wir grillen doch am Samstag.\n\n${trailer}`, { sid: 'hui-live-1' })).text()));
+  assert.equal(v2.items.find((i) => i.id === 'milch').checked, true);
+  assert.ok(v2.items.some((i) => i.id === 'u-test1'));
+  assert.ok(v2.items.some((i) => i.id === 'grillkohle'));
+  assert.ok(!v2.items.some((i) => i.id === 'tomaten'));
+  // another device's turn, stored without a stream
+  const other = await ctl('/__e2e/live-turn', { sid: 'hui-live-1', text: 'Bitte vier Mozzarella' });
+  assert.equal(other.scenario, 'live-update');
+  // a trailer that mentions a scenario keyword is not the user's text
+  assert.equal(scenarioFor(`Hallo\n\n[hui:live]{"checklist":{"v":1,"ops":[{"check":"long"}]}}[/hui:live]`).name, 'short');
+});
+
+test('live trip and watchlist: created, the trailer edits are kept, a full version moves two blocks, prices come as a patch', async () => {
+  const token = await pair();
+  const block = (text) => JSON.parse(/```hui\n([\s\S]*?)\n```/.exec(text)[1]);
+  const sid = 'hui-live-2';
+  const t1 = block(sse(await (await send(token, 'Plane mir drei Tage Rom', { sid })).text()));
+  assert.equal(t1.type, 'tabs');
+  assert.equal(t1.live, true);
+  assert.deepEqual(t1.tabs.map((x) => x.id), ['fr13', 'sa14', 'so15', 'karte']);
+  assert.equal(t1.tabs[3].children[0].type, 'map');
+  const tripEdits = `[hui:live]${JSON.stringify({ rom: { v: 1, ops: [{ check: 'kolosseum' }, { set: 'trastevere', userNote: 'Tisch für 2' }, { add: { id: 'u-test2', title: 'Trevi', start: '12:00', end: '12:30' }, to: 'so15' }], bid: 'b-trip' } })}[/hui:live]`;
+  const t2 = block(sse(await (await send(token, `Am Samstag soll es regnen.\n\n${tripEdits}`, { sid })).text()));
+  const sa = t2.tabs.find((x) => x.id === 'sa14').children[0].blocks;
+  const by = (id) => sa.find((b) => b.id === id);
+  assert.equal(by('vatikan').start, '11:00');
+  assert.equal(by('forum').start, '15:30');
+  assert.equal(by('kolosseum').checked, true);
+  assert.equal(by('trastevere').userNote, 'Tisch für 2');
+  assert.ok(t2.tabs.find((x) => x.id === 'so15').children[0].blocks.some((b) => b.id === 'u-test2' && b.title === 'Trevi'));
+  const w1 = block(sse(await (await send(token, 'Leg mir eine Kopfhörer-Watchlist an', { sid })).text()));
+  assert.equal(w1.type, 'products');
+  assert.deepEqual(w1.products.map((p) => p.id), ['xm5', 'qc', 'm4']);
+  const target = `[hui:live]${JSON.stringify({ kopfhoerer: { v: 1, ops: [{ set: 'xm5', target: 249 }], bid: 'b-watch' } })}[/hui:live]`;
+  const p = block(sse(await (await send(token, `Prüf bitte die Preise.\n\n${target}`, { sid })).text()));
+  assert.deepEqual(p, { type: 'callout', tone: 'info', title: 'Kopfhörer-Watchlist aktualisiert', text: 'WH-1000XM5: 239 €', livePatch: { card: 'kopfhoerer', ops: [{ set: 'xm5', price: 239 }] } });
+  const live = (await ctl('/__e2e/sessions')).find((x) => x.id === sid);
+  assert.equal(live.rows, 8);
+});
+
+test('CORS for web builds: preflight and exposed headers', async () => {
+  const pre = await fetch(`${base}/v1/chat/completions`, { method: 'OPTIONS', headers: { origin: 'http://127.0.0.1:9', 'access-control-request-method': 'POST' } });
+  assert.equal(pre.status, 204);
+  assert.equal(pre.headers.get('access-control-allow-origin'), 'http://127.0.0.1:9');
+  const h = await fetch(`${base}/health`, { headers: { origin: 'http://127.0.0.1:9' } });
+  assert.match(h.headers.get('access-control-expose-headers'), /X-Hermes-UI-Bridge/);
+});
+
+test('"remind me": cron tool progress in the stream, wrapper rows in the session, the app reads one reminder card', async () => {
+  const { parseMessages } = await import('../../app/src/hermes/sessions.ts');
+  const { mapRemoteMessages } = await import('../../app/src/hermes/sessionMapping.ts');
+  const { parseReminders } = await import('../../app/src/chat/reminder.ts');
+  const token = await pair();
+  const raw = await (await send(token, 'Remind me tomorrow at 9 to buy tea', { sid: 'hui-remind-1' })).text();
+  assert.match(raw, /event: hermes\.tool\.progress\ndata: \{"tool":"cronjob_manage"[^\n]*"status":"running"/);
+  assert.match(sse(raw), /remind you tomorrow at 9:00/);
+  const rows = await fetch(`${base}/api/sessions/hui-remind-1/messages`, { headers: { authorization: `Bearer ${token}` } }).then((r) => r.json());
+  assert.deepEqual(rows.data.map((m) => m.role), ['user', 'assistant', 'tool', 'assistant', 'tool', 'assistant']);
+  const answer = mapRemoteMessages(parseMessages(rows, 'hui-remind-1').messages).find((m) => m.role === 'assistant');
+  const [r] = parseReminders(answer.tools ?? []);
+  assert.equal(r.name, 'Buy tea');
+  assert.equal(r.deliver, 'bot-chat'); // the skill asks for the bot's thread
+  assert.equal(r.recurring, false);
+  const at = new Date(r.nextRun);
+  assert.deepEqual([at.getHours(), at.getMinutes()], [9, 0]);
+  assert.ok(r.nextRun > Date.now());
+  assert.equal(scenarioFor('remind me later').name, 'reminder');
+});
+
+test('creating bots: off by default, allowed → a new bot is listed and served under /p/<name>/, a taken name is refused', async () => {
+  const token = await pair();
+  const call = (path, init = {}) => fetch(base + path, { ...init, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' } });
+  assert.deepEqual((await (await call('/bridge/bots')).json()).create, { allowed: false, reason: 'plugin_not_configured' });
+  await ctl('/__e2e/config', { botsCreate: 'owner_off' });
+  assert.deepEqual((await (await call('/bridge/bots')).json()).create, { allowed: false, reason: 'owner_off' });
+  await ctl('/__e2e/config', { botsCreate: 'allowed' });
+  const body = { title: 'Späher', job: 'Preise im Blick', how: 'Kurz.', template: 'deals', lang: 'de', color: '#3f7d6e' };
+  const r = await call('/bridge/bots', { method: 'POST', body: JSON.stringify(body) });
+  assert.equal(r.status, 201);
+  assert.deepEqual((await r.json()).bot, { name: 'spaher', label: 'Späher', description: 'Preise im Blick', color: '#3f7d6e', template: 'deals' });
+  assert.equal((await call('/bridge/bots', { method: 'POST', body: JSON.stringify(body) })).status, 409);
+  const list = (await (await call('/bridge/profiles')).json()).data;
+  assert.ok(list.some((b) => b.name === 'spaher' && b.template === 'deals'));
+  const s = await call('/p/spaher/api/sessions', { method: 'POST', body: JSON.stringify({ title: 'Bot Chat' }) });
+  assert.ok(s.status === 201 || s.status === 200, `Bot Chat ${s.status}`);
+  await ctl('/__e2e/config', { botsCreate: false });
 });

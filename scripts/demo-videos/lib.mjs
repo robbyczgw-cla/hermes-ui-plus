@@ -272,7 +272,7 @@ export function actions(page) {
     timeline.push({ name, seconds: (Date.now() - captureStart) / 1000 });
     if (!process.env.DEMO_SHOTS) return;
     ensureDir(process.env.DEMO_SHOTS);
-    await page.screenshot({ path: join(process.env.DEMO_SHOTS, `${String(markN++).padStart(2, '0')}-${name}.png`) });
+    await page.screenshot({ path: join(process.env.DEMO_SHOTS, `${String(markN++).padStart(2, '0')}-${name}.jpg`), type: 'jpeg', quality: 75 });
   }
   return { startTimeline: () => { captureStart = Date.now(); }, timeline, mark, wait, tap, tapXY, drag, type, scroll, scrollTo, center, moveTo };
 }

@@ -168,6 +168,13 @@ export interface HuiCallout extends HuiBase {
   tone: HuiTone;
   title?: string;
   text: string;
+  /** live-card patch (app/src/live): the changes to the live card `card`; old apps show the callout itself */
+  livePatch?: HuiLivePatch;
+}
+/** ops in the live-card vocabulary (live/model.ts `LiveOp`), validated by live/codec.ts */
+export interface HuiLivePatch {
+  card: string;
+  ops: Record<string, unknown>[];
 }
 
 export interface HuiStatItem {
@@ -424,6 +431,10 @@ export interface HuiChecklist extends HuiBase {
   editable?: boolean;
   /** max 200 */
   items: HuiChecklistItem[];
+  /** live card (app/src/live): Hermes keeps this list up to date under the same `id`; item ids are stable */
+  live?: boolean;
+  /** live card finished (read-only, leaves the tray); a later version without it reopens the card */
+  closed?: boolean;
 }
 
 // calc ──
@@ -509,6 +520,8 @@ export interface HuiRecipeIngredient {
   qty?: number;
   unit?: string;
   item: string;
+  /** plural of a unit-less item ("onions") for scaled amounts */
+  plural?: string;
   group?: string;
 }
 export interface HuiRecipeStep {
@@ -535,13 +548,22 @@ export interface HuiRecipe extends HuiBase {
 
 // tabs / accordion ──
 export interface HuiTab {
+  /** live trip only: the day's stable id */
+  id?: string;
   label: string;
+  /** a day tab of an agenda split by days (validate.ts agendaByDays) without a day name: shown as "Tag 2" / "Day 2" */
+  day?: number;
   children: HuiNode[];
 }
 export interface HuiTabs extends HuiBase {
   type: 'tabs';
   /** max 6 */
   tabs: HuiTab[];
+  /** live trip card (app/src/live): day tabs of `agenda` nodes (+ an optional `map` tab), kept up to date under `id` */
+  live?: boolean;
+  /** live trip only: the card's title */
+  title?: string;
+  closed?: boolean;
 }
 export interface HuiAccordionItem {
   title: string;
@@ -699,6 +721,9 @@ export interface HuiAgenda extends HuiBase {
   /** ≤ 30, sorted by start */
   blocks: HuiAgendaBlock[];
   editable?: boolean;
+  /** live trip card of one day (app/src/live) */
+  live?: boolean;
+  closed?: boolean;
 }
 
 // weather ──
@@ -921,6 +946,8 @@ export interface HuiProduct {
   offers?: HuiProductOffer[];
   /** absolute http(s) URL */
   url?: string;
+  /** the user's target price (watchlist), ≥ 0, in `currency`; only a price the user named */
+  target?: number;
 }
 export type HuiProductsLayout = 'carousel' | 'grid';
 export interface HuiProducts extends HuiBase, HuiProvenance {
@@ -934,6 +961,9 @@ export interface HuiProducts extends HuiBase, HuiProvenance {
   compare?: boolean;
   /** ranked top list (order = rank): vertical numbered rows instead of the carousel */
   ranked?: boolean;
+  /** live watchlist card (app/src/live): Hermes keeps prices up to date under `id` */
+  live?: boolean;
+  closed?: boolean;
 }
 
 // timer v2 (backward compatible: the v1 fields id/label/seconds/autostart keep their meaning) ──

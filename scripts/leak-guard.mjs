@@ -614,7 +614,7 @@ Private terms come from $HUI_PRIVATE_DIR/leak-denylist.txt (not in the repo). Se
 // that does not decompress is scanned raw, so nothing is skipped.
 const MAX_INFLATE = 512 * 1024 * 1024;
 const zipGlob = (name) => name.replace(/[\\[\]*?]/g, (c) => `\\${c}`); // unzip treats member names as patterns
-function fileEntries(full, rel) {
+export function fileEntries(full, rel) {
   const raw = { path: rel, read: () => readFileSync(full) };
   const inflate = (fn, tag) => ({
     path: `${rel}!${tag}`,

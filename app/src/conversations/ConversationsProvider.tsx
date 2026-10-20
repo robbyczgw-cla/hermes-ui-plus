@@ -56,6 +56,10 @@ export type ConversationsApi = {
   create: (profile: ProfileRef, opts?: { bot?: string }) => ConversationMeta;
   /** Hermes bot of an EMPTY chat (picker "Bot" section; ignored once it has messages) */
   setBot: (id: string, bot: string | undefined) => void;
+  /** a bot's "Bot Chat" (bots/core.ts): existing / adopted / new, activated unless `activate: false` */
+  openBotChat: ConversationController['openBotChat'];
+  /** server activity of a bot's Bot Chat (Bots tab refresh) */
+  botChatRemote: ConversationController['botChatRemote'];
   remove: (id: string) => void;
   rename: (id: string, title: string) => void;
   /** generated title (bridge auto-title): replaces only automatic titles; Hermes titles may replace it later */
@@ -371,6 +375,8 @@ export function useConversations(): ConversationsApi {
       setActiveId: controller.setActive,
       create: (profile: ProfileRef, opts?: { bot?: string }) => controller.create(profile, { bot: opts?.bot }),
       setBot: controller.setBot,
+      openBotChat: controller.openBotChat,
+      botChatRemote: controller.botChatRemote,
       remove: controller.remove,
       rename: controller.rename,
       setAutoTitle: controller.setAutoTitle,

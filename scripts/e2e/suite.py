@@ -37,9 +37,13 @@ ALWAYS = ('install', 'pair', 'logcat')
 GROUPS = {
     'core': ('version', 'bots_quick_hidden', 'stream_long', 'stop', 'bots_quick_visible', 'cold_start'),
     'net': ('drop_resume', 'drop_recover', 'airplane', 'force_stop', 'offline_retry', 'refused_retry', 'not_sent'),
-    'ui': ('checklist', 'share_image', 'table_font', 'dark', 'demo_wsp_card'),
+    'ui': ('checklist', 'share_image', 'table_font', 'dark', 'demo_wsp_card', 'demo_live', 'chip_text'),
     'bg': ('background',),
+    'bots': ('bots', 'bots_create', 'demo_bots'),
     'share': ('share_unpaired', 'share_link', 'share_in_image', 'share_pdf', 'share_cancel', 'share_recreate', 'share_offline'),
+    'cards': ('live_card', 'live_patch'),
+    'routines': ('routines', 'routines_off', 'routines_hidden'),
+    'reminders': ('reminder', 'reminder_delivered'),
 }
 LIVE_STAGE = 'live'
 # the optional live checks (--live, E2E_LIVE_EXTRA) belong to the live stage, not to a group
@@ -97,7 +101,10 @@ S = dict(
     new_chat='id:^header-new-chat$|desc:^New chat$',
     chats='id:^header-chats$|desc:^Chats$',
     model='id:^header-model$|desc:choose model$',
-    bot_section='id:^model-picker-bots$|text:(?i)^bot$',  # the title is upper-cased on screen
+    tab_bots='id:^drawer-tab-bots$',
+    chat_menu='desc:^Chat options$',
+    tab_chats='id:^drawer-tab-chats$',
+    bots_waiting='id:^bots-waiting$',
     stopped='id:^msg-stopped$|text:^Stopped$',
     recovering='id:^msg-recovering$|text:^Connection interrupted – loading the answer',
     recovered='id:^msg-recovered$|text:^loaded later$',
@@ -225,6 +232,7 @@ def send(text, hide=True):
             break
     if not shown:
         raise Fail('soft keyboard did not open on the composer')
+    mark_sent(text)
     d.type_text(text)
     if not d.wait('text:^' + re.escape(text) + '$', 6):
         raise Fail(f'typed text "{text}" not in the composer')
@@ -248,6 +256,15 @@ def transcripts():
         except ValueError:
             pass
     return res
+
+
+SENT_BEFORE = {}  # prompt -> {(conversation, message id)} of user messages with that text stored before the last send
+
+
+def mark_sent(prompt):
+    """call right before sending prompt: wait_answer then counts only the user messages stored after this point (another
+    check may have sent the same text in its own chat earlier, e.g. checklist and share_image)"""
+    SENT_BEFORE[prompt] = {(c, m.get('id')) for c, m, _ in answers_for(prompt)}
 
 
 def answers_for(prompt):
@@ -276,10 +293,11 @@ def first_diff(a, b):
 
 
 def wait_answer(prompt, expected, timeout):
-    """waits until the stored answer to prompt equals expected (status done); checks it exists exactly once"""
-    end, last = time.time() + timeout, None
+    """waits until the stored answer to prompt equals expected (status done); checks it exists exactly once among the
+    user messages stored since mark_sent(prompt)"""
+    end, last, old = time.time() + timeout, None, SENT_BEFORE.get(prompt, set())
     while True:
-        hits = answers_for(prompt)
+        hits = [h for h in answers_for(prompt) if (h[0], h[1].get('id')) not in old]
         last = hits
         done = [h for h in hits if h[2] and h[2].get('status') == 'done' and h[2].get('text', '').rstrip() == expected.rstrip()]
         if done:
@@ -440,6 +458,24 @@ def stored_user(pred):
     return [(c, m) for c, msgs in transcripts().items() for m in msgs if m.get('role') == 'user' and pred(m)]
 
 
+def user_ids():
+    """{(conversation, id)} of every stored user message: the snapshot for new_user_msgs, taken before a send"""
+    return {(c, m.get('id')) for c, m in stored_user(lambda m: True)}
+
+
+def new_user_msgs(pred, before, timeout, settle=3):
+    """[(conversation, user message)] matching pred that are not in before (user_ids() taken before the send): waits
+    for the first one, then looks settle more times (1 s apart), so a second copy stored a moment later is counted too"""
+    end, hits, extra = time.time() + timeout, [], None
+    while True:
+        hits = [(c, m) for c, m in stored_user(pred) if (c, m.get('id')) not in before]
+        if hits:
+            extra = settle if extra is None else extra - 1
+        if extra == 0 or (extra is None and time.time() > end):
+            return hits
+        time.sleep(1.0)
+
+
 def wait_upload(name, timeout=30):
     end = time.time() + timeout
     while time.time() < end:
@@ -465,6 +501,9 @@ def wait_reply(conv, msg_id, timeout=30):
 
 
 # ── checks ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+MAX_KEPT_SHOTS = int(os.environ.get('E2E_MAX_KEPT_SHOTS', '40'))
+
+
 class Suite:
     def __init__(self, args):
         global OUT
@@ -511,7 +550,7 @@ class Suite:
         shots = os.path.join(self.out, 'shots')
         art = {}
         try:
-            art['screenshot'] = os.path.relpath(d.screenshot_png(os.path.join(shots, f'{cid}.png')), self.out)
+            art['screenshot'] = os.path.relpath(d.screenshot_jpg(os.path.join(shots, f'{cid}.jpg')), self.out)
             with open(os.path.join(shots, f'{cid}-ui.txt'), 'w') as f:
                 f.write('\n'.join(repr(n) for n in d.dump() if n.text or n.desc or n.click or n.rid))
             art['ui'] = f'shots/{cid}-ui.txt'
@@ -648,19 +687,40 @@ class Suite:
         expect(d.wait(S['input'], 8) is not None, 'not back in the chat after closing Settings')
         return dict(label=label)
 
-    def _model_picker_has_bots(self):
-        n = d.tap(S['model'], 8)
-        if not n:
-            raise Fail('model picker not found in the header')
-        opened = d.wait(S['picker_open'], 8)
-        debug_dump('model-picker')
-        if not opened:
-            raise Fail('model picker did not open')
-        has = d.wait(S['bot_section'], 2) is not None
+    def _drawer_has_bots_tab(self, wait=6):
+        """opens the drawer: is there a "Chats | Bots" switch (bots/, only with a bot besides the default)? closes it"""
+        if not d.tap(S['chats'], 8):
+            raise Fail('Chats button not found')
+        has = d.wait(S['tab_bots'], wait) is not None
+        debug_dump('drawer-bots')
         d.sh('input keyevent 4')
         time.sleep(0.8)
         ensure_app()
         return has
+
+    def _open_bot(self, key, label, shot=None):
+        """drawer → Bots tab → the bot's row; back in its Bot Chat (header names the bot)"""
+        ensure_app()
+        expect(d.tap(S['chats'], 8), 'Chats button not found')
+        tab = None
+        for _ in range(3):  # the bot list arrives with GET /bridge/profiles: reopen once if the switch is not there yet
+            tab = d.wait(S['tab_bots'], 8)
+            if tab:
+                break
+            d.sh('input keyevent 4')
+            time.sleep(1.0)
+            d.tap(S['chats'], 8)
+        expect(tab, 'no "Chats | Bots" switch in the drawer')
+        d.tap_xy(tab.cx, tab.cy)
+        row = d.wait(f'id:^bot-row-{re.escape(key)}$', 8)
+        expect(row, f'no row for bot {key} in the Bots tab')
+        if shot:
+            self.shot(shot)
+        d.tap_xy(row.cx, row.cy)
+        head = d.wait('desc:^' + re.escape(label) + ', ', 15)
+        expect(head, f'the Bot Chat of {label} did not open (header)')
+        expect(d.wait(S['input'], 8), 'no composer in the Bot Chat')
+        return head
 
     def c_bots_quick_hidden(self):
         new_chat()
@@ -668,7 +728,7 @@ class Suite:
         ns = d.dump()
         expect(d.find(S['quick'], ns) is None, '⚡ quick toggle visible though the bridge has no quick answers')
         expect(d.find(S['quick_pill'], ns) is None, '"Quick question" pill on the start screen')
-        expect(not self._model_picker_has_bots(), 'Bot section in the model picker though the bridge lists only the default profile')
+        expect(not self._drawer_has_bots_tab(), '"Chats | Bots" switch in the drawer though the bridge lists only the default profile')
         reqs = mock('/__e2e/requests')
         n_prof = sum(q['path'] == '/bridge/profiles' for q in reqs)
         n_quick = sum(q['path'] == '/bridge/quick/config' for q in reqs)
@@ -819,7 +879,7 @@ class Suite:
         w, h = d.screen_size()
         bottom = inp.b[1] if inp else h
         expect(0 < r.b[1] and r.b[3] <= bottom + 4, f'Retry not visible above the composer (Retry {r.b}, composer top {bottom})')
-        shot = d.screenshot_png(os.path.join(self.out, 'shots', 'offline-failed.png'))
+        shot = d.screenshot_jpg(os.path.join(self.out, 'shots', 'offline-failed.jpg'))
         airplane(False)
         expect(wait_online(20), 'network did not come back')
         time.sleep(1.5)
@@ -910,11 +970,75 @@ class Suite:
         files = d.root_ls(NODESTATE_DIR)
         return dict(ticked=ticked, nodestate_files=len(files))
 
+    def c_live_card(self):
+        """live card (app/src/live): Hermes creates a live list → a row in the tray under the header; a tick stays on the
+        device ("1 change waiting", survives a force-stop) until the next message carries it to Hermes (the [hui:live]
+        trailer, checked at the mock); Hermes' next full version keeps it and the user bubble says it went along"""
+        new_chat()
+        first = 'Mach mir eine Einkaufsliste fuer Samstag.'  # adb input text cannot type umlauts
+        send(first)
+        wait_turn(first, lambda t: t['state'] == 'ended', 30, 'the live list answer')
+        expect(d.wait('desc:^Live card Einkauf Samstag, 0 of 8 ', 15), 'no live card row in the tray')
+        items = d.wait_stable('desc:^1 l Milch, open$', 10)
+        expect(items, 'live list item "1 l Milch" not shown')
+        d.tap_xy(items[0].cx, items[0].cy)
+        waiting = 'desc:^Live card Einkauf Samstag, 1 of 8 · 1 change waiting'
+        expect(d.wait(waiting, 6), 'the tray does not show the waiting tick')
+        debug_dump('live-card-1')
+        time.sleep(2.0)
+        force_stop()
+        launch()
+        expect(d.wait(waiting, 15), 'the waiting tick did not survive a force-stop')
+        second = 'Wir grillen doch am Samstag.'
+        send(second)
+        end, t = time.time() + 30, None
+        while time.time() < end:
+            t = next((x for x in reversed(mock('/__e2e/turns')) if x['text'].startswith(second)), None)
+            if t and t['state'] == 'ended':
+                break
+            time.sleep(0.3)
+        expect(t and t['state'] == 'ended', 'the grill update did not finish at the mock')
+        expect('[hui:live]{"einkauf":{"v":1,"ops":[{"check":"milch"}]' in t['text'], f'the tick did not ride along: {t["text"][-160:]!r}')
+        expect(d.wait('text:sent along$', 10), 'no "sent along" line under the user message')
+        expect(d.wait('desc:^Live card Einkauf Samstag, 1 of 10 · Hermes', 10), 'the tray does not show Hermes\' new version with the tick')
+        debug_dump('live-card-2')
+        return dict(trailer=t['text'][len(second):].strip()[:160])
+
+    def c_live_patch(self):
+        """live cards, phase 2 (app/src/live): a watchlist card from Hermes; its price update arrives as a PATCH (a callout
+        with livePatch) and renders as the card's receipt, not as the callout; a live trip opens on its day tabs"""
+        new_chat()
+        first = 'Leg mir eine Kopfhoerer-Watchlist an.'  # adb input text cannot type umlauts
+        send(first)
+        wait_turn(first, lambda t: t['state'] == 'ended', 30, 'the watchlist answer')
+        expect(d.wait('desc:^Live card Kopfhörer-Watchlist, 3 products', 15), 'no watchlist row in the tray')
+        second = 'Preise bitte.'
+        send(second)
+        wait_turn(second, lambda t: t['state'] == 'ended', 30, 'the price patch answer')
+        expect(d.wait('desc:^Open Kopfhörer-Watchlist, version 2$', 10), 'the patch did not render as the v2 receipt')
+        expect(not d.find('text:^Kopfhörer-Watchlist aktualisiert$'), 'the patch callout is shown instead of the receipt')
+        expect(d.wait('text:239', 6), 'the new price is not in the receipt')
+        debug_dump('live-patch-1')
+        third = 'Plane mir Rom.'
+        send(third)
+        wait_turn(third, lambda t: t['state'] == 'ended', 30, 'the trip answer')
+        row = d.wait('desc:^Live card Rom, 13.–15. November', 15)
+        expect(row, 'no trip row in the tray')
+        d.tap_xy(row.cx, row.cy)
+        # a new trip opens on its first day (no changes yet); the Colosseum is on Saturday
+        sat = d.wait('desc:^Sa 14\\.', 8)
+        expect(sat, 'the open trip card shows no day tabs')
+        d.tap_xy(sat.cx, sat.cy)
+        expect(d.wait('text:^Kolosseum$', 6), 'the open trip card shows no blocks on Saturday')
+        debug_dump('live-patch-2')
+        d.sh('input keyevent 4')
+        return dict(cards=3)
+
     def c_share_image(self):
         """answer action row → "Share as image": the sheet previews the PNG (with the ticked item), Share opens the
         system chooser; the PNG the app made is pulled from its cache (root) into OUT/share-image.png"""
         new_chat()
-        text = 'e2e checklist ticks'
+        text = 'e2e checklist share image'  # not checklist's prompt: each check finds its own chat by the text
         exp = expected_for(text)
         send(text)
         wait_answer(text, exp, 30)
@@ -961,7 +1085,7 @@ class Suite:
         expect(ready_s is not None, f'the sheet never showed its ready look in the samples (ready luma {ready_luma}, curve {curve[-3:]})')
         # past the capture deadline (shareModel SHARE_DEADLINE_MS = 5 s) something held the capture until it gave up
         expect(ready_s < 5.0, f'image ready only after {ready_s} s: the capture waited for its 5 s deadline')
-        sheet = d.screenshot_png(os.path.join(self.out, 'share-image-sheet.png'))
+        sheet = d.screenshot_jpg(os.path.join(self.out, 'share-image-sheet.jpg'))
         new = [f for f in d.root_ls(cache) if f not in before and f.endswith('.png')]
         expect(new, f'no PNG in the app cache after the capture (cache: {sorted(set(d.root_ls(cache)) - before)})')
         local = os.path.join(self.out, 'share-image.png')
@@ -977,7 +1101,7 @@ class Suite:
             time.sleep(0.5)
         expect(top and top != PKG, f'no system share sheet after "Share" (top activity: {top or "?"})')
         time.sleep(1.5)  # let the system sheet draw before the screenshot
-        chooser = d.screenshot_png(os.path.join(self.out, 'share-image-chooser.png'))
+        chooser = d.screenshot_jpg(os.path.join(self.out, 'share-image-chooser.jpg'))
         d.sh('input keyevent KEYCODE_BACK')
         time.sleep(1.0)
         ensure_app()
@@ -998,7 +1122,7 @@ class Suite:
             time.sleep(3)
             ensure_app()
             ns = d.dump()
-            shot = d.screenshot_png(os.path.join(self.out, 'shots', 'table-font-1.3.png'))
+            shot = d.screenshot_jpg(os.path.join(self.out, 'shots', 'table-font-1.3.jpg'))
             # the app keeps numbers together with NBSP / word joiners: compare without them
             plain = lambda s: s.replace('\u2060', '').replace('\xa0', ' ')  # noqa: E731
             years = {y: [n for n in ns if y in plain(n.text)] for y in ('1011–1021', '1590', '1665', '1931')}
@@ -1023,7 +1147,7 @@ class Suite:
             time.sleep(3)
             ensure_app()
             dark = d.screen_luma(region)
-            shot = d.screenshot_png(os.path.join(self.out, 'shots', 'dark.png'))
+            shot = d.screenshot_jpg(os.path.join(self.out, 'shots', 'dark.jpg'))
         finally:
             d.sh('cmd uimode night no')
         time.sleep(3)
@@ -1074,12 +1198,369 @@ class Suite:
             new_chat()
             q = d.wait(S['quick'], 20)
             expect(q, '⚡ quick toggle not shown though the bridge offers quick answers')
-            expect(self._model_picker_has_bots(), 'no Bot section in the model picker with two bridge profiles')
+            expect(self._drawer_has_bots_tab(wait=12), 'no "Chats | Bots" switch in the drawer with two bridge profiles')
             return dict(quick=q.desc or q.rid)
         finally:
             mock('/__e2e/config', {'profiles': False, 'quick': False})
             force_stop()
             launch()
+
+    def _set_routines(self, on):
+        """Settings → Chat → "Routines" (this device, default on; routines/enabled.ts), flipped the way a normal user does:
+        drawer → Settings, scroll until the switch shows, tap it, Done. The value survives force-stop (AsyncStorage)."""
+        ensure_app()
+        expect(d.tap(S['chats'], 8), 'Chats button not found')
+        expect(d.tap(S['settings'], 8), 'Settings entry not found in the drawer')
+        w, h = d.screen_size()
+        node, prev = None, None
+        for _ in range(25):
+            nodes = d.dump()
+            node = d.find('desc:^Routines$', nodes)
+            if node:
+                break
+            shown = [(n.text, n.b) for n in nodes if n.text]
+            if shown == prev:
+                break
+            prev = shown
+            d.swipe(w // 2, int(h * 0.7), w // 2, int(h * 0.35), 350)
+            time.sleep(0.5)
+        expect(node is not None, 'no "Routines" switch in Settings')
+        if node.checked != on:
+            d.tap_xy(node.cx, node.cy)
+            time.sleep(0.6)
+            node = d.wait('desc:^Routines$', 5)
+            expect(node is not None and node.checked == on, f'the "Routines" switch did not turn {"on" if on else "off"}')
+        d.tap(S['settings_done'], 5)
+        time.sleep(0.8)
+        ensure_app()
+
+    def _routines_via_about(self, shots, prefix, expect_job=None):
+        """the way a normal user reaches the Routines screen (no drawer row since Bots v2): the chat menu (⋯) of any Hermes
+        chat → "About Hermes" (model, "Does regularly") → its link to the Routines screen"""
+        ensure_app()
+        expect(d.tap(S['chat_menu'], 8), 'chat menu (⋯) not found or not tappable')
+        about = d.wait('text:^About Hermes$|desc:^About Hermes$', 8)
+        expect(about, 'no "About Hermes" in the chat menu')
+        d.tap_xy(about.cx, about.cy)
+        expect(d.wait('id:^bot-info$', 10), '"About Hermes" did not open')
+        more = d.wait('id:^bot-info-routines-more$', 20)
+        expect(more, 'no way to the routines in "About Hermes"')
+        if expect_job:
+            expect(d.wait(f'id:^bot-info-routine-{expect_job}$', 5), f'routine {expect_job} not listed in "About Hermes"')
+        d.screenshot_jpg(os.path.join(shots, f'{prefix}-about.jpg'))
+        d.tap_xy(more.cx, more.cy)
+
+    def c_routines(self):
+        """Routines slice 2 against the mock (config.routines): one unread result of the default bot, read-only device"""
+        mock('/__e2e/config', {'routines': True})
+        shots = os.path.join(self.out, 'routines')
+        os.makedirs(shots, exist_ok=True)
+        try:
+            force_stop()
+            launch()
+            self._set_routines(True)  # Settings → Chat → "Routines" (default on; an earlier check may have turned it off)
+            turns_before = len(mock('/__e2e/turns'))
+            self._routines_via_about(shots, 'on', expect_job='e2e000000001')  # the mock's one job (scripts/e2e/mock.mjs ROUTINE_JOB)
+            item = d.wait('id:^routines-item-ri_', 15)
+            expect(item, 'inbox opened without the unread result card')
+            expect(d.find('id:^routines-tab-inbox$'), 'no Inbox tab')
+            d.screenshot_jpg(os.path.join(shots, 'inbox.jpg'))
+            d.tap_xy(item.cx, item.cy)
+            expect(d.wait('id:^routine-result-body$', 15), 'result view did not render the answer')
+            expect(d.wait('text:\\[e2e routine result\\]', 8), 'result text not shown')
+            d.screenshot_jpg(os.path.join(shots, 'result.jpg'))
+            end = time.time() + 8
+            while not any(r['method'] == 'PATCH' and r['path'].startswith('/bridge/routines/inbox/ri_') for r in mock('/__e2e/requests')):
+                expect(time.time() < end, 'opening the result did not mark it read on the bridge')
+                time.sleep(0.4)
+            # read-only device: the schedule has no pause / resume / run
+            if d.tap('id:^routine-open-schedule$', 5):
+                expect(d.wait('text:(?i)weekdays|monday to friday', 10), 'schedule detail not shown')
+                expect(not d.find('id:^routine-(pause|resume|run)$'), 'controls shown although the device may only read')
+                d.screenshot_jpg(os.path.join(shots, 'schedule-read-only.jpg'))
+                expect(d.tap('id:^routines-back$', 5), 'Back not found on the schedule detail')
+                # Back returns to the result it came from, not to the schedules list
+                expect(d.wait('id:^routine-result-body$', 10), 'Back from the schedule did not return to the result')
+            expect(d.tap('id:^routine-continue$', 15), '"Continue in chat" not found')
+            expect(d.wait(S['input'], 15), 'no composer after "Continue in chat"')
+            time.sleep(1.0)
+            d.hide_keyboard()
+            d.screenshot_jpg(os.path.join(shots, 'continued-chat.jpg'))
+            seeded = [m for msgs in transcripts().values() for m in msgs if '[e2e routine result]' in (m.get('text') or '')]
+            expect(seeded, 'no stored chat carries the routine result')
+            users = [m for msgs in transcripts().values() if any('[e2e routine result]' in (x.get('text') or '') for x in msgs)
+                     for m in msgs if m.get('role') == 'user']
+            expect(users and 'E2E morning briefing' in users[0].get('text', ''), f'seeded user message without the routine title: {users[:1]}')
+            expect(len(mock('/__e2e/turns')) == turns_before, 'Continue in chat sent a turn on its own')
+            return dict(item=item.rid, seeded_messages=len(users) + len(seeded))
+        finally:
+            mock('/__e2e/config', {'routines': False})
+            force_stop()
+            launch()
+
+    def c_routines_off(self):
+        """Routines on a 0.2 bridge in its default state (no bot enabled, config.routines = 'off'), as a normal user finds
+        them: chat menu → "About Hermes" says they are off and links to the Routines screen, which explains how the owner
+        turns them on, and its chat button sends one question to Hermes"""
+        mock('/__e2e/config', {'routines': 'off'})
+        shots = os.path.join(self.out, 'routines')
+        os.makedirs(shots, exist_ok=True)
+        prompt = 'Which scheduled tasks do you have? A short list: when each one runs and what it does.'
+        try:
+            force_stop()
+            launch()
+            self._set_routines(True)
+            self._routines_via_about(shots, 'off')
+            expect(d.wait('id:^routines-off$', 15), 'the Routines screen shows no "off" explanation')
+            expect(d.wait('text:routines enable default', 5), 'the explanation does not name the owner\'s command')
+            d.screenshot_jpg(os.path.join(shots, 'off-screen.jpg'))
+            expect(d.tap('id:^routines-ask-chat$', 8), 'no chat route on the "off" screen')
+            # the question starts a NEW chat of this bot (library/askHermes.ts): never behind the [hui:context] seed of a
+            # chat continued from a routine result, which an earlier check may have left open
+            end, t = time.time() + 30, None
+            while time.time() < end:
+                t = next((x for x in reversed(mock('/__e2e/turns')) if x['text'].rstrip().endswith(prompt)), None)
+                if t and t['state'] in ('ended', 'done'):
+                    break
+                time.sleep(0.3)
+            expect(t and t['state'] in ('ended', 'done'), f'the question from the "off" screen did not reach Hermes (turn: {_brief(t) if t else "none"})')
+            expect('[hui:context]' not in t['text'], 'the question landed in the open continued chat instead of a new chat')
+            expect(d.wait(S['input'], 15), 'not back in the chat after asking')
+            return dict(route='chat menu > About Hermes', turn=t['state'])
+        finally:
+            mock('/__e2e/config', {'routines': False})
+            force_stop()
+            launch()
+
+    def c_routines_hidden(self):
+        """Settings → Chat → "Routines" off on a bridge that offers them (config.routines): "About Hermes" keeps name and
+        model but has no routines part, the app asks the job API nothing, and a deep link to the Routines screen shows the
+        short explanation whose "Turn on Routines" brings the screen back"""
+        mock('/__e2e/config', {'routines': True})
+        shots = os.path.join(self.out, 'routines')
+        os.makedirs(shots, exist_ok=True)
+        try:
+            force_stop()
+            launch()
+            self._set_routines(False)
+            since = time.time() * 1000
+            ensure_app()
+            expect(d.tap(S['chat_menu'], 8), 'chat menu (⋯) not found or not tappable')
+            about = d.wait('text:^About Hermes$|desc:^About Hermes$', 8)
+            expect(about, 'no "About Hermes" in the chat menu (it stays without routines)')
+            d.tap_xy(about.cx, about.cy)
+            expect(d.wait('id:^bot-info$', 10), '"About Hermes" did not open')
+            expect(d.wait('text:^Model$', 5), '"About Hermes" lost its model row')
+            time.sleep(2.0)  # what a list request would need to show up
+            expect(not d.find('id:^bot-info-routines(-more)?$|id:^bot-info-routine-|text:^Does regularly$'), 'routines part shown although Routines are off')
+            d.screenshot_jpg(os.path.join(shots, 'hidden-about.jpg'))
+            d.sh('input keyevent KEYCODE_BACK')  # close the sheet
+            time.sleep(0.6)
+            link = f'{SCHEME}://routines'
+            d.adb('shell', 'read l; am start -a android.intent.action.VIEW -d "$l" ' + PKG, inp=link + '\n', timeout=30)
+            expect(d.wait('id:^routines-hidden$', 15), 'the deep link to the Routines screen shows no explanation while Routines are off')
+            expect(not d.find('id:^routines-tab-inbox$|id:^routines-item-ri_'), 'Routines screen content shown although Routines are off')
+            d.screenshot_jpg(os.path.join(shots, 'hidden-screen.jpg'))
+            asked = [r for r in mock('/__e2e/requests') if r['t'] >= since and (r['path'].startswith('/api/jobs') or r['path'].startswith('/bridge/routines/'))]
+            expect(not asked, f'the app asked the routines API although Routines are off: {[r["path"] for r in asked][:5]}')
+            expect(d.tap('id:^routines-enable$', 8), 'no "Turn on Routines" on the explanation')
+            expect(d.wait('id:^routines-tab-inbox$|id:^routines-item-ri_', 20), '"Turn on Routines" did not bring the Routines screen back')
+            d.tap('id:^routines-done$', 5)
+            return dict(about='no routines part', deep_link='explanation', requests_while_off=len(asked))
+        finally:
+            mock('/__e2e/config', {'routines': False})
+            force_stop()
+            launch()
+            try:
+                self._set_routines(True)  # the default for the checks after this one
+            except Exception:
+                pass
+
+    def c_reminder(self):
+        """A reminder made by Hermes' cron tool (mock: the v0.22.2 wrapper rows, `deliver: bot-chat` as the skill asks): the
+        card says it was set and that it arrives in the chat "Hermes", and "Also remind me on this device" schedules a local notification whose state
+        the card reads back after a force-stop"""
+        shots = os.path.join(self.out, 'reminder')
+        os.makedirs(shots, exist_ok=True)
+        new_chat()
+        text = 'Remind me tomorrow at 9 to buy tea'
+        send(text)
+        wait_answer(text, expected_for(text), 30)
+        # the card comes from the stored tool detail, loaded after the turn
+        card = d.wait('desc:^Reminder set · ', 20)
+        expect(card, 'no reminder card after a successful cron create')
+        expect('It arrives as a message in the chat "Hermes".' in (card.desc or ''), f'the card does not say where the reminder goes: {card.desc!r}')
+        expect(d.find('text:^Change$') and d.find('text:^Delete$'), 'Change / Delete missing on the reminder card')
+        d.screenshot_jpg(os.path.join(shots, 'card.jpg'))
+        expect(d.tap('text:^Also remind me on this device$', 8), 'no "Also remind me on this device" on a one-shot reminder (Android)')
+        expect(d.wait('text:^This device reminds you too: ', 10), 'the device copy was not confirmed on the card')
+        expect(not d.find('text:^Also remind me on this device$'), 'the device button is still offered after it was set')
+        d.screenshot_jpg(os.path.join(shots, 'device-set.jpg'))
+        alarms = d.sh('dumpsys alarm') or ''
+        scheduled = PKG in alarms
+        force_stop()
+        launch()
+        again = d.wait('text:^This device reminds you too: ', 20)
+        if not again:
+            w, h = d.screen_size()
+            d.swipe(w // 2, int(h * 0.65), w // 2, int(h * 0.35))
+            again = d.wait('text:^This device reminds you too: ', 6)
+        expect(again, 'after force-stop the card no longer knows the device reminder (scheduled notification lost?)')
+        expect(not d.find('text:^Also remind me on this device$'), 'after force-stop the card offers the device reminder again (would set it twice)')
+        return dict(card=card.desc, alarm_listed=scheduled)
+
+    def c_bots(self):
+        """Bots as contacts (bots/, docs/BOTS-SERVER.md) against the mock with two profiles: Bots tab → Research → its
+        "Bot Chat" (created once, adopted afterwards) → a turn bound to that session → an approval that names the bot
+        (once / always / deny, no "for this task"), "Waiting for you" in the drawer while it waits, always-allow with
+        its confirm step → the answer; the Bot Chat never shows up under Chats"""
+        mock('/__e2e/config', {'profiles': True, 'quick': False})
+        shots = os.path.join(self.out, 'bots')
+        os.makedirs(shots, exist_ok=True)
+        hello, ask = 'e2e bots hello', 'e2e approval for the bot'
+        try:
+            force_stop()
+            launch()
+            self._open_bot('research', 'Research', shot='bots-drawer')
+            d.screenshot_jpg(os.path.join(shots, 'botchat-empty.jpg'))
+            expect(d.find(S['new_chat']) is None, '"New chat" in a bot chat (one thread per bot)')
+            creates = [q for q in mock('/__e2e/requests') if q['method'] == 'POST' and q['path'] == '/p/research/api/sessions']
+            expect(len(creates) == 1, f'{len(creates)} Bot Chat requests for one open')
+            bc = [x for x in mock('/__e2e/sessions') if x['title'] == 'Bot Chat' and x.get('profile') == 'research']
+            expect(len(bc) == 1, f'{len(bc)} Bot Chat sessions on the server')
+            sid = bc[0]['id']
+            send(hello)
+            t = wait_turn(hello, lambda t: t['state'] == 'ended', 30, 'the bot turn')
+            expect(t['profile'] == 'research' and t['sid'] == sid, f'turn went to profile {t["profile"]} / session {t["sid"]} (Bot Chat {sid})')
+            wait_answer(hello, expected_for(hello), 20)
+            # approval in the bot's chat
+            send(ask)
+            card = d.wait('text:^Research wants to run something$', 20)
+            expect(card, 'no approval card naming the bot')
+            ns = d.dump()
+            expect(d.find('desc:^Always allow similar commands for Research', ns), 'no per-bot "Always allow"')
+            expect(d.find('text:^For this task$', ns) is None, '"For this task" offered in a bot chat')
+            expect(d.find('text:^Research has been waiting for you since ', ns) or d.find('desc:^Research has been waiting for your answer', ns), 'no "waiting since" line')
+            d.screenshot_jpg(os.path.join(shots, 'approval.jpg'))
+            # "Waiting for you" in the drawer while Hermes waits
+            expect(d.tap(S['chats'], 8), 'Chats button not found')
+            w = d.wait(S['bots_waiting'], 8)
+            expect(w, 'no "Waiting for you" row in the Bots tab while the approval waits')
+            d.screenshot_jpg(os.path.join(shots, 'drawer-waiting.jpg'))
+            d.tap_xy(w.cx, w.cy)
+            expect(d.wait('text:^Research wants to run something$', 10), '"Waiting for you" did not bring back the card')
+            # always (this bot only): high risk → one confirm step
+            expect(d.tap('desc:^Always allow similar commands for Research', 8), 'Always allow not tappable')
+            yes = d.wait('text:^Yes, always allow for Research$|desc:^Yes, always allow for Research$', 6)
+            expect(yes, 'no confirm step for "always" at high risk')
+            d.tap_xy(yes.cx, yes.cy)
+            t2 = wait_turn(ask, lambda t: (t.get('approval') or {}).get('choice') is not None, 15, 'the approval answer')
+            expect(t2['approval']['choice'] == 'always', f'answered {t2["approval"]["choice"]!r} (expected always)')
+            wait_answer(ask, expected_for(ask), 30)
+            # the Bot Chat is not a chat in the Chats tab; opening the bot again is the same thread
+            expect(d.tap(S['chats'], 8), 'Chats button not found')
+            expect(d.tap(S['tab_chats'], 8), 'no Chats tab')
+            time.sleep(0.8)
+            # drawer rows carry "<title>, <source>" as their label; the chat behind the drawer only has the bubble text
+            expect(d.find('desc:^Bot Chat, ') is None and d.find('desc:^' + re.escape(hello) + ', ') is None, 'the Bot Chat is listed under Chats')
+            d.screenshot_jpg(os.path.join(shots, 'drawer-chats.jpg'))
+            d.sh('input keyevent 4')
+            time.sleep(0.8)
+            self._open_bot('research', 'Research')
+            creates = [q for q in mock('/__e2e/requests') if q['method'] == 'POST' and q['path'] == '/p/research/api/sessions']
+            expect(len(creates) == 1, f'opening the bot again asked the server again ({len(creates)} requests)')
+            expect(d.find('text:' + re.escape(expected_for(hello)[:30])), 'the earlier answer is not in the Bot Chat')
+            return dict(session=sid, approval=t2['approval']['choice'], shots=sorted(os.listdir(shots)))
+        finally:
+            mock('/__e2e/config', {'profiles': False, 'quick': False})
+            force_stop()
+            launch()
+
+    def c_bots_create(self):
+        """Creating a bot (bots/create, docs/BOTS-SERVER.md "Creating bots from the app") against the mock: the Bots tab
+        appears for a device that may create bots even with no bot yet, "New bot" → the role list → "Deals & prices"
+        with prefilled fields → one POST /bridge/bots → the new bot's Bot Chat opens with "Scout is ready" and the role's
+        starters; the bot is in the roster afterwards"""
+        mock('/__e2e/config', {'botsCreate': 'allowed', 'profiles': False})
+        shots = os.path.join(self.out, 'bots-create')
+        os.makedirs(shots, exist_ok=True)
+        try:
+            force_stop()
+            launch()
+            expect(d.tap(S['chats'], 8), 'Chats button not found')
+            tab = None
+            for _ in range(3):  # GET /bridge/bots answers after the drawer opened the first time
+                tab = d.wait(S['tab_bots'], 8)
+                if tab:
+                    break
+                d.sh('input keyevent 4')
+                time.sleep(1.0)
+                d.tap(S['chats'], 8)
+            expect(tab, 'no "Chats | Bots" switch for a device that may create bots')
+            d.tap_xy(tab.cx, tab.cy)
+            expect(d.wait('id:^bots-empty$', 8), 'no "Your own bots" box while only Hermes exists')
+            expect(d.tap('id:^bots-new$', 8), 'no "New bot" button')
+            expect(d.wait('id:^bot-create-role-deals$', 10), 'no role list')
+            d.screenshot_jpg(os.path.join(shots, 'roles.jpg'))
+            expect(d.find('id:^bot-create-blank$'), 'no "empty agent" link')
+            d.tap('id:^bot-create-role-deals$', 4)
+            name = d.wait('id:^bot-create-name$', 8)
+            expect(name and name.text == 'Scout', f'name field not prefilled with Scout ({name.text if name else None!r})')
+            d.screenshot_jpg(os.path.join(shots, 'form.jpg'))
+            btn = d.wait('id:^bot-create-submit$', 6)
+            if not btn:  # below the fold on a small screen
+                w, h = d.screen_size()
+                d.swipe(w // 2, int(h * 0.75), w // 2, int(h * 0.3))
+                btn = d.wait('id:^bot-create-submit$', 6)
+            expect(btn, 'no create button')
+            d.tap_xy(btn.cx, btn.cy)
+            ready = d.wait('text:^Scout is ready$', 20)
+            expect(ready, 'the new bot\'s chat did not open with "Scout is ready"')
+            expect(d.wait('text:^Compare three robot vacuums up to €400$', 6), 'no starter of the deals role')
+            d.screenshot_jpg(os.path.join(shots, 'ready.jpg'))
+            posts = [q for q in mock('/__e2e/requests') if q['method'] == 'POST' and q['path'] == '/bridge/bots']
+            expect(len(posts) == 1, f'{len(posts)} create requests for one tap')
+            chats = [q for q in mock('/__e2e/requests') if q['method'] == 'POST' and q['path'] == '/p/scout/api/sessions']
+            expect(len(chats) == 1, f'{len(chats)} Bot Chat requests for the new bot')
+            expect(d.tap(S['chats'], 8), 'Chats button not found')
+            expect(d.wait('id:^bot-row-scout$', 8), 'the new bot is not in the Bots tab')
+            d.screenshot_jpg(os.path.join(shots, 'roster.jpg'))
+            d.sh('input keyevent 4')
+            return dict(created='scout', shots=sorted(os.listdir(shots)))
+        finally:
+            mock('/__e2e/config', {'botsCreate': False})
+            force_stop()
+            launch()
+
+    def c_reminder_delivered(self):
+        """The normal-user answer to "remind me tomorrow at 9" (bots/, docs/BOTS-SERVER.md): the job fires into the default
+        bot's "Bot Chat" (mock /__e2e/fire-reminder, as Hermes does with `deliver: bot-chat`). Without extra bots the drawer
+        lists that thread as "Hermes"; opening it shows the reminder text under a quiet marker, never as the user's bubble"""
+        shots = os.path.join(self.out, 'reminder')
+        os.makedirs(shots, exist_ok=True)
+        fired = mock('/__e2e/fire-reminder', {'name': 'Buy tea', 'text': 'Time to buy tea.'})
+        ensure_app()
+        expect(d.tap(S['chats'], 8), 'Chats button not found')
+        expect(d.find(S['tab_bots']) is None, 'a Bots tab on the default bridge')
+        row = None
+        for _ in range(3):  # the drawer looks the thread up when it opens: reopen once if the first look was early
+            row = d.wait('desc:^Hermes, App$', 10)  # the row ("<title>, <source>"), not the header's "Hermes, choose model"
+            if row:
+                break
+            d.sh('input keyevent 4')  # closes the drawer
+            time.sleep(1.0)
+            ensure_app()  # never leave the app if the drawer was not open
+            d.tap(S['chats'], 8)
+        expect(row, 'the default bot\'s thread with the fired reminder is not in the drawer')
+        d.screenshot_jpg(os.path.join(shots, 'delivered-drawer.jpg'))
+        d.tap_xy(row.cx, row.cy)
+        # the marker is one accessible element: its label carries the text (Android does not expose the inner TextView)
+        text = d.wait('text:^Time to buy tea\\.$|desc:Time to buy tea\\.', 20)
+        expect(text, 'the reminder text is not shown in the thread')
+        expect(d.find('text:^\\[Cronjob') is None, 'the injected cron header is shown as a message')
+        expect(d.find('text:Buy tea|desc:Buy tea') is not None, 'no marker naming the reminder')
+        d.screenshot_jpg(os.path.join(shots, 'delivered-thread.jpg'))
+        return dict(session=fired['sessionId'])
 
     def c_cold_start(self):
         times = []
@@ -1145,7 +1626,261 @@ class Suite:
 
     def _shot(self, name):
         os.makedirs(os.path.join(self.out, 'share'), exist_ok=True)
-        return os.path.relpath(d.screenshot_png(os.path.join(self.out, 'share', f'{name}.png')), self.out)
+        return os.path.relpath(d.screenshot_jpg(os.path.join(self.out, 'share', f'{name}.jpg')), self.out)
+
+    def demo_start(self, steps):
+        """fresh install (pm clear before): first-start onboarding → "Try it first (demo)" → consent / later / start chat
+        until the composer shows; the taps go to `steps`"""
+        launch_any = d.sh(f'cmd package resolve-activity --brief -c android.intent.category.LAUNCHER {PKG}').strip().split('\n')[-1].strip()
+        d.sh(f'am start -n {launch_any}')
+        n = d.wait(S['look_around'], 30)
+        expect(n, 'first-start onboarding without "Try it first (demo)"')
+        d.tap_xy(n.cx, n.cy)
+        end = time.time() + 45
+        # the composer is in the tree while the onboarding (its last step "All set" / "Start an empty chat") still covers it:
+        # done only when no onboarding button is left (its "Back" sits where the drawer button is)
+        keys = ('consent', 'later', 'start_chat', 'look_around')
+        def covered(ns):
+            return not d.find(S['input'], ns) or any(d.find(S[k], ns) for k in keys)
+        while time.time() < end and covered(d.dump()):
+            ns = d.dump()
+            for key in ('consent', 'later', 'start_chat'):
+                b = d.find(S[key], ns)
+                if b and b.enabled:
+                    d.tap_xy(b.cx, b.cy)
+                    steps.append(key)
+                    time.sleep(1.0)
+                    break
+            else:
+                time.sleep(0.7)
+        expect(not covered(d.dump()), f'no composer after the demo onboarding, or the onboarding still covers it (steps {steps})')
+
+    def c_demo_live(self):
+        """offline demo, no Hermes (0.2): a fresh install shows no "New in this version" sheet; the live barbecue list is
+        pinned in the tray, a tick waits on the device and rides along with the follow-up, whose patch renders as the
+        v3 receipt (v2 is the tick; not the callout); "What do you remember about me?" lists the demo memory; the drawer has the
+        Skills & memory row. English, light. App data is cleared afterwards (fresh install for the pairing check)."""
+        steps, shots = [], []
+        force_stop()
+        d.sh(f'pm clear {PKG}')
+        d.sh(f'pm grant {PKG} android.permission.POST_NOTIFICATIONS')
+        d.sh(f'cmd locale set-app-locales {PKG} --locales en-US')
+        try:
+            self.demo_start(steps)
+            time.sleep(2.0)  # the sheet would open ~0.7 s after the chat settled
+            expect(not d.find('id:^whatsnew-dismiss$'), 'the "New in this version" sheet showed on a fresh install')
+            new_chat()
+            first = 'Keep a shopping list for the barbecue'  # adb input cannot type the apostrophe of the sample chip
+            send(first)
+            time.sleep(2)
+            expect(d.wait(S['stop'], 60, gone=True), 'the live list answer did not finish')
+            expect(d.wait('desc:^Live card Saturday barbecue, 0 of 7', 15), 'no live card row in the tray for the demo list')
+            self.shot('demo-live-1-list')
+            shots.append('shots/demo-live-1-list.jpg')
+            item = d.wait_stable('desc:Sausages, open$', 10)
+            expect(item, 'live list item "Sausages" not shown')
+            d.tap_xy(item[0].cx, item[0].cy)
+            expect(d.wait('desc:^Live card Saturday barbecue, 1 of 7 · 1 change waiting', 6), 'the tray does not show the waiting tick')
+            second = 'Add charcoal and halloumi, we already have tomatoes'
+            send(second)
+            time.sleep(2)
+            expect(d.wait(S['stop'], 60, gone=True), 'the live patch answer did not finish')
+            expect(d.wait('text:sent along$', 10), 'no "sent along" line under the follow-up (the tick did not go with it)')
+            expect(d.wait('desc:^Open Saturday barbecue, version 3$', 10), 'the patch did not render as the v3 receipt (v2 = the user\'s tick)')
+            expect(not d.find('text:^Saturday barbecue updated$'), 'the patch callout is shown instead of the receipt')
+            expect(d.wait('desc:^Live card Saturday barbecue, 2 of 9', 10), 'the tray does not show 2 of 9 (the tick kept, tomatoes ticked, 2 added)')
+            self.shot('demo-live-2-receipt')
+            shots.append('shots/demo-live-2-receipt.jpg')
+            new_chat()
+            send('What do you remember about me?')
+            time.sleep(2)
+            expect(d.wait(S['stop'], 60, gone=True), 'the memory answer did not finish')
+            expect(d.wait('text:Dislikes coriander', 10), 'the memory answer does not list the demo memory (generic demo text?)')
+            self.shot('demo-live-3-memory')
+            shots.append('shots/demo-live-3-memory.jpg')
+            expect(d.tap(S['chats'], 8), 'Chats button not found')
+            row = d.wait('id:^drawer-library$', 10)
+            expect(row, 'no Skills & memory row in the drawer for the demo connection')
+            d.tap_xy(row.cx, row.cy)
+            expect(d.wait('text:^meal-planner$', 15), 'the drawer row did not open Skills & memory with the demo skills')
+            self.shot('demo-live-4-library')
+            shots.append('shots/demo-live-4-library.jpg')
+            d.sh('input keyevent 4')
+            time.sleep(0.8)
+        except Fail:
+            os.makedirs(os.path.join(self.out, 'shots'), exist_ok=True)
+            self.shot('demo_live-fail')
+            with open(os.path.join(self.out, 'shots', 'demo_live-fail-ui.txt'), 'w') as f:
+                f.write('\n'.join(repr(n) for n in d.dump() if n.text or n.desc or n.click or n.rid))
+            raise
+        finally:
+            force_stop()
+            d.sh(f'pm clear {PKG}')
+            d.sh(f'pm grant {PKG} android.permission.POST_NOTIFICATIONS')
+            d.sh(f'cmd locale set-app-locales {PKG} --locales en-US')
+        return dict(steps=steps, shots=shots)
+
+    def c_demo_bots(self):
+        """offline demo, no Hermes (0.2): the bot mode (onboarding/demo/bots.ts). Drawer "Chats | Bots" → Hermes, Scout,
+        Atlas and Lumi with "Waiting for you" → Scout's chat: the delivered price check as a routine marker (never a user
+        bubble) and the waiting approval card naming Scout → "Allow once" ends honestly ("Nothing was deleted in the demo")
+        and "Waiting for you" is gone → "About Scout" lists its invented routines with the demo note → "New bot" →
+        Research role → "Lens is ready" with "On this device only · demo" → a starter gets Lens' own answer → Lens is in
+        the roster. English, light. App data is cleared afterwards (fresh install for the pairing check)."""
+        steps, shots = [], []
+        out = os.path.join(self.out, 'shots')
+        os.makedirs(out, exist_ok=True)
+        force_stop()
+        d.sh(f'pm clear {PKG}')
+        d.sh(f'pm grant {PKG} android.permission.POST_NOTIFICATIONS')
+        d.sh(f'cmd locale set-app-locales {PKG} --locales en-US')
+
+        def bots_tab():
+            expect(d.tap(S['chats'], 8), 'Chats button not found')
+            tab = d.wait(S['tab_bots'], 10)
+            if not tab:  # the tap landed while a sheet was still closing: once more
+                if not d.find(S['settings']):  # the drawer did not open
+                    d.tap(S['chats'], 8)
+                    tab = d.wait(S['tab_bots'], 10)
+            expect(tab, 'no "Chats | Bots" switch in the demo drawer')
+            d.tap_xy(tab.cx, tab.cy)
+            expect(d.wait('id:^bot-row-scout$', 10), 'no Scout row in the demo Bots tab')
+
+        def shot(name):
+            self.shot(name)
+            shots.append(f'shots/{name}.jpg')
+
+        try:
+            self.demo_start(steps)
+            time.sleep(2.0)
+            bots_tab()
+            ns = d.dump()
+            for key in ('default', 'scout', 'atlas', 'lumi'):
+                expect(d.find(f'id:^bot-row-{key}$', ns), f'no row for {key} in the demo Bots tab')
+            w = d.find(S['bots_waiting'], ns)
+            expect(w, 'no "Waiting for you" row for Scout\'s approval')
+            shot('demo-bots-1-roster')
+            d.tap_xy(w.cx, w.cy)
+            expect(d.wait('desc:^Scout, ', 15), 'Scout\'s chat did not open (header)')
+            expect(d.wait('text:^Scout wants to run something$', 15), 'no approval card naming Scout')
+            expect(d.find('text:^No server · sample answers$'), 'a demo bot\'s chat lost the demo strip')
+            shot('demo-bots-2-approval')
+            once = d.wait('desc:^Allow once|text:^Allow once$', 6)
+            expect(once, 'no "Allow once" on the demo approval card')
+            d.tap_xy(once.cx, once.cy)
+            expect(d.wait('text:Nothing was deleted in the demo', 30), 'the allowed demo command did not end with the honest note')
+            expect(d.wait(S['stop'], 30, gone=True), 'Scout\'s answer did not finish')
+            expect(not d.find('text:^Scout wants to run something$'), 'the approval card stayed after "Allow once"')
+            shot('demo-bots-3-allowed')
+            # the delivered price check further up: a routine marker, never the injected row as a bubble
+            marker = None
+            wd, ht = d.screen_size()
+            for _ in range(6):
+                ns = d.dump()
+                expect(d.find('text:^\\[Cronjob ', ns) is None, 'the injected cron row shows as a bubble')
+                marker = d.find('desc:^Routine Price check: Fjord Calm 5, ', ns)
+                if marker:
+                    break
+                d.swipe(wd // 2, int(ht * 0.35), wd // 2, int(ht * 0.75))
+                time.sleep(0.8)
+            expect(marker, 'the delivered price check is not a routine marker')
+            shot('demo-bots-3b-marker')
+            bots_tab()
+            time.sleep(0.8)
+            expect(not d.find(S['bots_waiting']), '"Waiting for you" stayed after the approval was answered')
+            row = d.find('id:^bot-row-scout$')
+            d.tap_xy(row.cx, row.cy)
+            head = d.wait('desc:^Scout, ', 15)
+            expect(head, 'Scout\'s chat did not open from its row')
+            d.tap_xy(head.cx, head.cy)
+            expect(d.wait('id:^bot-info$', 10), 'no "About Scout" sheet from the header')
+            expect(d.wait('id:^bot-info-routine-d0000000001a$', 10), '"About Scout" does not list its price check routine')
+            expect(d.find('id:^bot-info-demo$'), '"About Scout" has no demo note (invented routines)')
+            shot('demo-bots-4-about')
+            d.sh('input keyevent 4')
+            time.sleep(0.8)
+            bots_tab()
+            expect(d.tap('id:^bots-new$', 8), 'no "New bot" button in the demo')
+            expect(d.wait('id:^bot-create-role-research$', 10), 'no role list')
+            expect(d.find('text:^Demo: the bot stays on this device'), 'the role step does not say the bot stays on this device')
+            d.tap('id:^bot-create-role-research$', 4)
+            name = d.wait('id:^bot-create-name$', 8)
+            expect(name and name.text == 'Lens', f'name field not prefilled with Lens ({name.text if name else None!r})')
+            btn = d.wait('id:^bot-create-submit$', 6)
+            if not btn:  # below the fold on a small screen
+                wd, ht = d.screen_size()
+                d.swipe(wd // 2, int(ht * 0.75), wd // 2, int(ht * 0.3))
+                btn = d.wait('id:^bot-create-submit$', 6)
+            expect(btn, 'no create button')
+            d.tap_xy(btn.cx, btn.cy)
+            expect(d.wait('text:^Lens is ready$', 15), 'the new demo bot\'s chat did not open with "Lens is ready"')
+            expect(d.find('text:^On this device only · demo$'), 'the new demo bot does not say it is on this device only')
+            shot('demo-bots-5-ready')
+            starter = d.wait('text:^What is new with heat pumps\\?$', 6)
+            expect(starter, 'no research starter on the new bot\'s start screen')
+            d.tap_xy(starter.cx, starter.cy)
+            time.sleep(2)
+            expect(d.wait(S['stop'], 60, gone=True), 'Lens\' answer did not finish')
+            expect(d.wait('text:^Short first', 10), 'Lens did not answer in its role (research)')
+            shot('demo-bots-6-answer')
+            bots_tab()
+            expect(d.wait('id:^bot-row-lens$', 8), 'the new demo bot is not in the roster')
+            d.sh('input keyevent 4')
+            time.sleep(0.8)
+        except Fail:
+            self.shot('demo_bots-fail')
+            with open(os.path.join(out, 'demo_bots-fail-ui.txt'), 'w') as f:
+                f.write('\n'.join(repr(n) for n in d.dump() if n.text or n.desc or n.click or n.rid))
+            raise
+        finally:
+            force_stop()
+            d.sh(f'pm clear {PKG}')
+            d.sh(f'pm grant {PKG} android.permission.POST_NOTIFICATIONS')
+            d.sh(f'cmd locale set-app-locales {PKG} --locales en-US')
+        return dict(steps=steps, shots=shots)
+
+
+    def c_chip_text(self):
+        """offline demo, en/de/es: the short suggestion chip under the barbecue list answer ("What can you do?", "Was
+        kannst du alles?", "¿Qué sabes hacer?") is in view. Evidence per language: the chip's bounds and a shot
+        (shots/chip-<lang>.jpg) to check it is not cut (Android lost 0.1 dp on "What can you do?", ui/lib/chipText.ts).
+        A build that logs `[chip-probe]` lines (onTextLayout) adds them to the evidence. App data is cleared afterwards."""
+        prompts = {'en': 'Keep a shopping list for the barbecue', 'de': 'Einkaufsliste fuers Grillen am Samstag',
+                   'es': 'Lista de la compra para la barbacoa del sabado'}  # adb input types ASCII only; all route to liveList
+        chips = {'en': 'What can you do?', 'de': 'Was kannst du alles?', 'es': '¿Qué sabes hacer?'}
+        locales = {'en': 'en-US', 'de': 'de-DE', 'es': 'es-ES'}
+        steps, ev = [], {}
+        force_stop()
+        d.sh(f'pm clear {PKG}')
+        d.sh(f'pm grant {PKG} android.permission.POST_NOTIFICATIONS')
+        d.sh(f'cmd locale set-app-locales {PKG} --locales en-US')
+        try:
+            self.demo_start(steps)
+            for lang in ('en', 'de', 'es'):
+                d.sh(f'cmd locale set-app-locales {PKG} --locales {locales[lang]}')
+                force_stop()
+                d.adb('logcat', '-c', timeout=20)
+                launch()
+                new_chat()
+                send(prompts[lang])
+                time.sleep(2)
+                expect(d.wait(S['stop'], 60, gone=True), f'{lang}: the demo answer did not finish')
+                time.sleep(1.5)
+                chip = d.wait_stable('desc:' + re.escape(chips[lang]), 15)
+                node = chip[0] if chip else None
+                expect(node, f'{lang}: no suggestion chip "{chips[lang]}" in view')
+                self.shot(f'chip-{lang}')
+                log = d.adb('logcat', '-d', '-s', 'ReactNativeJS:I', timeout=30)
+                probe = [x.split('[chip-probe', 1)[1] for x in log.split('\n') if '[chip-probe' in x and chips[lang] in x]
+                ev[lang] = dict(bounds=node.b, desc=node.desc[:60], probe=probe[-4:])
+            return ev
+        finally:
+            # like demo_live: a fresh install for the pairing check, with the notification permission granted again (pm
+            # clear drops it, and its system dialog would cover the next checks)
+            force_stop()
+            d.sh(f'pm clear {PKG}')
+            d.sh(f'pm grant {PKG} android.permission.POST_NOTIFICATIONS')
+            d.sh(f'cmd locale set-app-locales {PKG} --locales en-US')
 
     def c_demo_wsp_card(self):
         """offline demo, no Hermes: the web research sample answer → its "Web search" timeline row opens the web result
@@ -1189,24 +1924,7 @@ class Suite:
         d.sh(f'pm grant {PKG} android.permission.POST_NOTIFICATIONS')
         d.sh(f'cmd locale set-app-locales {PKG} --locales en-US')
         try:
-            launch_any = d.sh(f'cmd package resolve-activity --brief -c android.intent.category.LAUNCHER {PKG}').strip().split('\n')[-1].strip()
-            d.sh(f'am start -n {launch_any}')
-            n = d.wait(S['look_around'], 30)
-            expect(n, 'first-start onboarding without "Try it first (demo)"')
-            d.tap_xy(n.cx, n.cy)
-            end = time.time() + 45
-            while time.time() < end and not d.find(S['input']):
-                ns = d.dump()
-                for key in ('consent', 'later', 'start_chat'):
-                    b = d.find(S[key], ns)
-                    if b and b.enabled:
-                        d.tap_xy(b.cx, b.cy)
-                        steps.append(key)
-                        time.sleep(1.0)
-                        break
-                else:
-                    time.sleep(0.7)
-            expect(d.find(S['input']), f'no composer after the demo onboarding (steps {steps})')
+            self.demo_start(steps)
             for lang, night in (('en', False), ('en', True), ('de', False), ('de', True)):
                 tag, L = f'{lang}-{"dark" if night else "light"}', rx[lang]
                 mark('start')
@@ -1260,7 +1978,7 @@ class Suite:
                 d.tap_xy(row.cx, row.cy)
                 expect(d.wait(L['read'], 10), f'{tag}: the pages-read card did not open')
                 self.shot(f'wsp-{tag}-card-pages')
-                shots[tag] = [f'shots/wsp-{tag}-{k}.png' for k in ('answer', 'card-search', 'card-search-scrolled', 'card-pages')]
+                shots[tag] = [f'shots/wsp-{tag}-{k}.jpg' for k in ('answer', 'card-search', 'card-search-scrolled', 'card-pages')]
                 d.sh('input keyevent 4')
                 time.sleep(0.8)
         except Fail:
@@ -1334,8 +2052,9 @@ class Suite:
         c = d.wait(S['share_summarize'], 3)
         expect(c and c.checked, 'Summarize chip not checked after the tap')
         shots['intent'] = self._shot('link-2-summarize')
-        d.tap(S['share_send'], 5)
         prompt = f'Summarize this briefly.\n\n{url}'
+        mark_sent(prompt)
+        d.tap(S['share_send'], 5)
         ev = wait_answer(prompt, expected_for(prompt), 40)
         expect(d.wait(S['share_send'], 3, gone=True), 'sheet still open after Send')
         shots['chat'] = self._shot('link-3-sent')
@@ -1351,12 +2070,10 @@ class Suite:
         expect(d.wait('desc:^e2e-share\\.png$', 5), 'image thumbnail not in the sheet')
         expect(d.find('text:^1 image$'), 'kind label "1 image" missing')
         shots = {'sheet': self._shot('image-1-sheet')}
+        before = user_ids()
         d.tap(S['share_send'], 5)
-        end, hits = time.time() + 30, []
-        while time.time() < end and not hits:
-            # prepared images are stored as JPEG (attachments/store.ts prepareImage): match the base name
-            hits = stored_user(lambda m: any(a.get('name', '').startswith('e2e-share.') and a.get('kind') == 'image' for a in m.get('attachments') or []))
-            time.sleep(1.0)
+        # prepared images are stored as JPEG (attachments/store.ts prepareImage): match the base name
+        hits = new_user_msgs(lambda m: any(a.get('name', '').startswith('e2e-share.') and a.get('kind') == 'image' for a in m.get('attachments') or []), before, 30)
         expect(len(hits) == 1, f'shared image stored in {len(hits)} user message(s)')
         conv, msg = hits[0]
         wait_reply(conv, msg.get('id'))
@@ -1384,13 +2101,11 @@ class Suite:
         last = d.find(S['share_last'])
         expect(last and last.checked, '"Last chat" not selected')
         shots = {'sheet': self._shot('pdf-1-sheet-last-chat')}
+        before = user_ids()
         d.tap(S['share_send'], 5)
         up = wait_upload('e2e-share.pdf')
         expect(up['mimeType'] == 'application/pdf' and up['head'].startswith('255044462d'), f'upload {up}')
-        end, hits = time.time() + 30, []
-        while time.time() < end and not hits:
-            hits = stored_user(lambda m: m.get('text', '').strip() == note)
-            time.sleep(1.0)
+        hits = new_user_msgs(lambda m: m.get('text', '').strip() == note, before, 30)
         expect(len(hits) == 1, f'instruction stored {len(hits)}×')
         conv, msg = hits[0]
         expect(any(a.get('name') == 'e2e-share.pdf' for a in msg.get('attachments') or []), 'PDF not attached to the message')
@@ -1490,9 +2205,9 @@ class Suite:
         return dict(pdf=outcome, shots=shots)
 
     def shot(self, name):
-        """screenshot of a state worth keeping (OUT/shots/<name>.png), also when the check passes"""
+        """screenshot of a state worth keeping (OUT/shots/<name>.jpg), also when the check passes"""
         try:
-            d.screenshot_png(os.path.join(self.out, 'shots', f'{name}.png'))
+            d.screenshot_jpg(os.path.join(self.out, 'shots', f'{name}.jpg'))
         except Exception as e:
             print('screenshot failed:', e)
 
@@ -1512,24 +2227,9 @@ class Suite:
             time.sleep(2)
         raise Fail(f'no finished answer to "{prompt[:40]}" after {timeout} s')
 
-    def _pick_bot(self, label):
-        expect(d.tap(S['model'], 8), 'model picker not found in the header')
-        expect(d.wait(S['picker_open'], 8), 'model picker did not open')
-        expect(d.wait(S['bot_section'], 5), 'no Bot section in the model picker')
-        chip = d.wait('desc:^' + re.escape(label) + '(,|$)', 5)
-        expect(chip, f'bot "{label}" not in the Bot section')
-        self.shot(f'picker-{label.lower()}')
-        d.tap_xy(chip.cx, chip.cy)
-        time.sleep(1.2)
-        if d.find(S['bot_section']):  # the sheet stays open on some builds
-            d.sh('input keyevent 4')
-            time.sleep(0.8)
-        ensure_app()
-
     def c_live_bots(self):
-        """bot chat: Bot section, the bot's personality in the answer, the chat stored for that bot, ⚡ hidden"""
-        new_chat()
-        self._pick_bot(LIVE_BOT_LABEL)
+        """bot chat: Bots tab → the bot's Bot Chat, its personality in the answer, stored for that bot, ⚡ hidden"""
+        self._open_bot(LIVE_BOT, LIVE_BOT_LABEL, shot=f'bots-{LIVE_BOT}')
         ns = d.dump()
         expect(d.find(S['quick'], ns) is None, '⚡ quick toggle shown in a bot chat')
         expect(d.find(S['quick_pill'], ns) is None, '"Quick question" pill shown in a bot chat')
@@ -1551,18 +2251,7 @@ class Suite:
 
     def c_live_quick(self):
         """⚡ in a default chat: a quick answer arrives, "Continue with Hermes" opens a Hermes chat that builds on it"""
-        new_chat()
-        if d.find(S['model']):  # make sure the new chat is a default-profile chat (a picked bot may carry over)
-            d.tap(S['model'], 8)
-            if d.wait(S['bot_section'], 5):
-                chip = d.find('desc:^Default(,|$)')
-                if chip:
-                    d.tap_xy(chip.cx, chip.cy)
-                    time.sleep(1.0)
-            if d.find(S['bot_section']):
-                d.sh('input keyevent 4')
-                time.sleep(0.8)
-            ensure_app()
+        new_chat()  # a new chat always starts on the default bot (bots have their own thread in the Bots tab)
         q = d.wait(S['quick'], 20)
         expect(q, '⚡ quick toggle not shown in a default chat')
         self.shot('quick-visible')
@@ -1653,6 +2342,9 @@ class Suite:
             r.meta['device'] = f'{d.sh("getprop ro.product.model").strip()} / Android {d.sh("getprop ro.build.version.release").strip()}'
             r.run('install', 'Clean install', self.c_install, on_fail=self.on_fail)
             self.check('demo_wsp_card', 'Offline demo: web research answer → web result card + pages-read card (en/de, light/dark)', self.c_demo_wsp_card, needs=('install',))
+            self.check('demo_live', 'Offline demo 0.2: no What\'s new on a fresh install, live list over two turns (tick rides along, v3 receipt), memory answer, drawer Skills & memory', self.c_demo_live, needs=('install',))
+            self.check('chip_text', 'Suggestion chips en/de/es: the short chip under the demo barbecue answer is shown whole (bounds, shot, line-break probe)', self.c_chip_text, needs=('install',))
+            self.check('demo_bots', 'Offline demo bot mode: Bots tab with Scout/Atlas/Lumi, "Waiting for you" → Scout\'s approval answered once, About Scout routines, New bot (Research) answers in its role', self.c_demo_bots, needs=('install',))
             self.check('share_unpaired', 'Share before pairing: waits behind onboarding, then "connect first" sheet keeps it', self.c_share_unpaired, needs=('install',))
             r.run('pair', 'Pairing via deep link (one-time code) to the mock', self.c_pair, on_fail=self.on_fail, needs=('install',))
             self.t_paired = time.time()
@@ -1663,7 +2355,7 @@ class Suite:
             self.check('share_recreate', 'A cold-start share is not offered again after an activity recreation', self.c_share_recreate)
             self.check('share_offline', 'Share offline: text and image stored with "Answer failed", PDF kept (composer or chat)', self.c_share_offline)
             self.check('version', 'Version label = versionName · Build versionCode (commit)', self.c_version)
-            self.check('bots_quick_hidden', 'No Bot section, no ⚡ when the bridge offers none; no request loop', self.c_bots_quick_hidden)
+            self.check('bots_quick_hidden', 'No Bots tab, no ⚡ when the bridge offers none; no request loop', self.c_bots_quick_hidden)
             self.check('stream_long', 'Long stream with cards: exact final text, once; gfxinfo', self.c_stream_long)
             self.check('stop', 'Stop mid-stream', self.c_stop)
             self.check('drop_resume', 'Connection cut mid-stream → byte resume, answer exactly once', self.c_drop_resume)
@@ -1674,17 +2366,26 @@ class Suite:
             self.check('refused_retry', 'Bridge refuses the send → double Retry → one answer', self.c_refused_retry)
             self.check('not_sent', 'Kill before confirmation → "Not sent" → double "Send again" → one answer', self.c_not_sent)
             self.check('checklist', 'Checklist ticks persist across force-stop', self.c_checklist)
+            self.check('live_card', 'Live card: tray, pending tick survives force-stop, rides along with the next message', self.c_live_card)
+            self.check('live_patch', 'Live cards phase 2: a watchlist price patch renders as its receipt, a trip opens on its day tabs', self.c_live_patch)
             self.check('share_image', 'Share as image: sheet preview → PNG → system share sheet', self.c_share_image)
             self.check('table_font', 'Table at font scale 1.3 (no wrapped year cells), reset', self.c_table_font)
             self.check('dark', 'Dark mode follows the system', self.c_dark)
+            self.check('routines', 'Routines: drawer badge → inbox → result read → read-only schedule → Continue in chat (nothing sent)', self.c_routines)
+            self.check('routines_off', 'Routines off on the default bridge: drawer row says Off, screen explains + asks Hermes in the chat', self.c_routines_off)
+            self.check('routines_hidden', 'Settings → Routines off: "About Hermes" without routines, no job API request, deep link explains + turns them back on', self.c_routines_hidden)
+            self.check('reminder', 'Reminder by the cron tool: card says it arrives in the chat "Hermes", device copy set and still known after force-stop', self.c_reminder)
+            self.check('reminder_delivered', 'A fired bot-chat reminder on the default bridge: drawer row "Hermes", the reminder text under a marker (no bubble)', self.c_reminder_delivered)
             self.check('background', 'Background: "… is answering" → "Answer ready"', self.c_background)
-            self.check('bots_quick_visible', 'Bot section + ⚡ when the bridge offers profiles + quick answers', self.c_bots_quick_visible)
+            self.check('bots_quick_visible', 'Bots tab + ⚡ when the bridge offers profiles + quick answers', self.c_bots_quick_visible)
+            self.check('bots', 'Bots: Bots tab → Bot Chat (once), turn on that session, bot approval card, "Waiting for you", always-allow, not under Chats', self.c_bots)
+            self.check('bots_create', 'New bot: Bots tab → "New bot" → role → prefilled fields → created once → its Bot Chat says "<Name> is ready" with the role\'s starters', self.c_bots_create)
             self.check('cold_start', 'Cold start ×3', self.c_cold_start)
             self.check('logcat', 'Logcat: no crash/ANR, no ReactNativeJS errors, Reanimated warnings', self.c_logcat, needs=('install',))
             if live_link:
                 r.run('live', 'Live bridge: 2 harmless turns, the chat deleted in Hermes afterwards', lambda: self.c_live(live_link), on_fail=self.on_fail, needs=('install',))
                 if 'bots' in LIVE_EXTRA:
-                    r.run('live_bots', f'Live bot "{LIVE_BOT}": Bot section, personality, stored per bot, no ⚡', self.c_live_bots, on_fail=self.on_fail, needs=('live',))
+                    r.run('live_bots', f'Live bot "{LIVE_BOT}": Bots tab, Bot Chat, personality, no ⚡', self.c_live_bots, on_fail=self.on_fail, needs=('live',))
                 if 'quick' in LIVE_EXTRA:
                     r.run('live_quick', 'Live ⚡: shown in a default chat, quick answer, "Continue with Hermes"', self.c_live_quick, on_fail=self.on_fail, needs=('live',))
         finally:
@@ -1694,6 +2395,9 @@ class Suite:
             except Exception as e:
                 print('mock log not saved:', e)
             self.restore_device()
+            # debug shots: keep the failed checks' shots plus the newest MAX_KEPT_SHOTS (Paseo previews every image)
+            for sub in ('shots', 'share'):
+                d.prune_shots(os.path.join(self.out, sub), MAX_KEPT_SHOTS, always=tuple(c['id'] for c in r.failed) + ('fail',))
             verdict = r.write()
         print(f'\n{verdict}: {len(r.failed)} failed · report {os.path.join(self.out, "report.md")}')
         return 0 if verdict == 'PASS' else 1

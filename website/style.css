@@ -224,14 +224,16 @@ img, video, svg { display: block; }
 .f-tools { grid-column: 7 / span 6; margin-top: 7rem; }
 .f-away { grid-column: 2 / span 5; }
 .f-answers { grid-column: 8 / span 5; margin-top: -3rem; }
-.f-local { grid-column: 1 / span 5; margin-top: 1rem; }
-.f-server { grid-column: 7 / span 5; margin-top: 5rem; }
+.f-live { grid-column: 1 / span 5; margin-top: 1rem; }
+.f-local { grid-column: 7 / span 5; margin-top: 5rem; }
+.f-server { grid-column: 2 / span 5; margin-top: -2rem; }
 
 .app { position: relative; font-family: var(--sans); background: var(--app-card); border: 1px solid var(--app-line); border-radius: 1.25rem; padding: 1.25rem; box-shadow: 0 1px 0 #fff inset, 0 28px 50px -30px rgba(60, 38, 8, 0.5), 0 3px 8px -4px rgba(21, 18, 14, 0.15); }
 .f-approve .app { transform: rotate(-1.6deg); }
 .f-tools .app { transform: rotate(1deg); }
 .f-away .app { transform: rotate(-0.8deg); }
 .f-answers .app { transform: rotate(1.4deg); }
+.f-live .app { transform: rotate(-0.9deg); }
 .f-local .app { transform: rotate(0.9deg); }
 .f-server .app { transform: rotate(-1.2deg); }
 
@@ -292,6 +294,7 @@ img, video, svg { display: block; }
 .pick-send { display: flex; justify-content: space-between; margin-top: 0.8rem; padding: 0.6rem 0.75rem; border-radius: 0.6rem; background: #e7ebf2; font-size: 0.85rem; color: #33476e; }
 
 .rows-head { font-weight: 700; }
+.rows-head .live-v { float: right; font: 500 0.8rem/1.6 var(--mono); color: var(--brass-ink); }
 .rows dl { margin: 0.8rem 0 0; }
 .rows dl div { display: flex; justify-content: space-between; gap: 1rem; padding: 0.7rem 0; border-top: 1px solid var(--app-line); font-size: 0.95rem; }
 .rows dt { color: var(--ink-2); }
@@ -666,7 +669,7 @@ img, video, svg { display: block; }
    has 23 videos and many rotated, shadowed plates). contain-intrinsic-size is the content box, so these are the measured
    section heights minus their padding; it is used until a section has rendered once, then the browser remembers the real size. */
 #features, #demos, #film, #platforms, #self-hosting, #agent-setup, #privacy, .foot { content-visibility: auto; }
-#features { contain-intrinsic-size: auto 1900px; }
+#features { contain-intrinsic-size: auto 2270px; }
 #demos { contain-intrinsic-size: auto 2775px; }
 #film { contain-intrinsic-size: auto 511px; }
 #platforms { contain-intrinsic-size: auto 872px; }

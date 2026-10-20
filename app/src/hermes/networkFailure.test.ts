@@ -88,3 +88,24 @@ test('Hermes fetch failures are stored without the host (message error, params.d
   assert.doesNotMatch(String(e.text?.params?.detail), /example\.com|192\.0\.2/);
   assert.equal(networkFailureKind(String(e.text?.params?.detail)), 'refused');
 });
+
+test('real-user round 3: the stored trip-turn failure ("health check timed out") reads as a timeout with details', () => {
+  // verbatim from the saved message (status error after 12 s, the upstream stream had broken)
+  const m = { error: 'Netzwerkfehler: health check timed out', errorText: { key: 'backends.hermes.errors.networkDetail' as const, params: { detail: 'health check timed out' } } };
+  const p = presentMessageError(m, de);
+  assert.equal(p.text, de('chat.message.network.timeout'));
+  assert.match(p.text, /Zeitüberschreitung/);
+  assert.equal(p.detail, 'health check timed out');
+});
+
+
+test('plain UI: Hermes transport failures without Tailscale / bridge wording; the full UI unchanged', () => {
+  const m = { error: 'x', errorText: { key: 'backends.hermes.errors.networkDetail' as const, params: { detail: 'ECONNREFUSED' } } };
+  for (const t of [de, en, es]) {
+    const p = presentMessageError(m, t, { plain: true });
+    assert.equal(p.text, t('chat.message.network.plain'));
+    assert.doesNotMatch(p.text, /Tailscale|Bridge|Hermes/i);
+    assert.equal(p.detail, 'ECONNREFUSED');
+    assert.equal(presentMessageError(m, t).text, t('chat.message.network.refused'));
+  }
+});

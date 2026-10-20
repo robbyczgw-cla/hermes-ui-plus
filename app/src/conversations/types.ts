@@ -32,6 +32,11 @@ export type ConversationMeta = {
    * profile. Fixed once the chat has messages (the session lives in that bot).
    */
   hermesProfile?: string;
+  /**
+   * the bot's one shared thread ("Bot Chat", bots/core.ts): opened from the Bots tab, never listed under Chats, never
+   * renamed on Hermes (Hermes Desktop finds it by that title), never a draft. `hermesSessionId` = that session.
+   */
+  botChat?: true;
   createdAt: number;
   updatedAt: number;
   pinned?: boolean;

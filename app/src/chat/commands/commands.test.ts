@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { JsonRequest } from '../../hermes/sessions.ts';
-import { fetchSkills, fetchUsage, forkSession, parseSessionUsage, parseSkills, requests, skillsError } from './api.ts';
-import { HermesError } from '../../hermes/stream.ts';
+import { fetchUsage, forkSession, parseSessionUsage, requests } from './api.ts';
 import { transcriptMarkdown } from './exportText.ts';
 import { rankCommands } from './fuzzy.ts';
 import { completeRow, paletteState, pickRow, submitSlash } from './palette.ts';
@@ -101,7 +100,7 @@ test('fuzzy: exact alias first, prefixes, subsequences, description fallback', (
 
 test('availability: Hermes direct, Hermes via bridge, other backends, no palette', () => {
   const direct = ids(ctx());
-  for (const id of ['new', 'title', 'model', 'reasoning', 'fast', 'retry', 'stop', 'approve', 'deny', 'search', 'skills', 'branch', 'usage', 'status', 'export', 'delete', 'help'] as const) {
+  for (const id of ['new', 'title', 'model', 'reasoning', 'fast', 'retry', 'stop', 'approve', 'deny', 'search', 'skills', 'memory', 'branch', 'usage', 'status', 'export', 'delete', 'help'] as const) {
     assert.ok(direct.includes(id), id);
   }
   // the bridge allow-list passes POST /api/sessions/{id}/fork (bridge 2026-10-12)
@@ -112,7 +111,9 @@ test('availability: Hermes direct, Hermes via bridge, other backends, no palette
   for (const id of ['branch', 'usage', 'status'] as const) assert.ok(!noApi.includes(id), id);
   for (const kind of ['demo'] as const) {
     const v = ids(ctx({ kind, options: null }));
-    assert.deepEqual(v, ['new', 'model', 'retry', 'stop', 'title', 'export', 'delete', 'help'], kind);
+    // the offline demo has Skills & memory demo data; other agents have neither
+    const library = kind === 'demo' ? ['skills', 'memory'] : [];
+    assert.deepEqual(v, ['new', 'model', 'retry', 'stop', 'title', ...library, 'export', 'delete', 'help'], kind);
   }
   assert.deepEqual(ids(ctx({ noPalette: true })), []);
 });
@@ -241,7 +242,6 @@ test('API builders: paths, methods, bodies', () => {
   assert.deepEqual(requests.fork('api_1'), { method: 'POST', path: '/api/sessions/api_1/fork', body: {} });
   assert.deepEqual(requests.fork('a b', 'T'), { method: 'POST', path: '/api/sessions/a%20b/fork', body: { title: 'T' } });
   assert.deepEqual(requests.session('hui_x:1'), { method: 'GET', path: '/api/sessions/hui_x%3A1' });
-  assert.deepEqual(requests.skills(), { method: 'GET', path: '/v1/skills' });
 });
 
 test('usage parser keeps tokens and drops cost fields', () => {
@@ -262,46 +262,27 @@ test('usage parser keeps tokens and drops cost fields', () => {
   assert.deepEqual(parseSessionUsage({ session: { id: 'x' } })?.tokens, {});
 });
 
-test('skills parser and fetchers use the injected transport', async () => {
-  assert.deepEqual(parseSkills({ object: 'list', data: [{ name: 'pdf', description: 'PDFs', category: 'docs' }, { description: 'no name' }, 'x', { name: 'git' }] }), [
-    { name: 'pdf', description: 'PDFs', category: 'docs' },
-    { name: 'git' },
-  ]);
-  assert.deepEqual(parseSkills(null), []);
+test('usage and fork use the injected transport', async () => {
   const calls: unknown[][] = [];
   const fake: JsonRequest = async (method, path, body) => {
     calls.push([method, path, body]);
-    if (path === '/v1/skills') return { data: [{ name: 'pdf' }] };
     if (path.endsWith('/fork')) return { object: 'hermes.session', session: { id: 'api_2', title: 'T #2', source: 'api_server' } };
     return { session: { id: 's1', input_tokens: 5, output_tokens: 6 } };
   };
-  assert.deepEqual(await fetchSkills(fake), [{ name: 'pdf' }]);
   assert.equal((await fetchUsage(fake, 's1'))?.tokens.total, 11);
   assert.equal((await forkSession(fake, 's1'))?.id, 'api_2');
   assert.deepEqual(calls, [
-    ['GET', '/v1/skills', undefined],
     ['GET', '/api/sessions/s1', undefined],
     ['POST', '/api/sessions/s1/fork', {}],
   ]);
 });
 
-test('skills errors: friendly headline kind, raw server text only as details', () => {
-  const e500 = new HermesError('server', 'Failed to enumerate skills', { status: 500, code: 'server_error' });
-  assert.deepEqual(skillsError(e500), { kind: 'hermesBug', details: 'HTTP 500 · server_error · Failed to enumerate skills' });
-  assert.deepEqual(skillsError(new HermesError('auth', 'Invalid API key', { status: 401 })), { kind: 'auth', details: 'HTTP 401 · Invalid API key' });
-  assert.deepEqual(skillsError(new HermesError('network', 'offline')), { kind: 'failed', details: 'offline' });
-  assert.deepEqual(skillsError(new TypeError('boom')), { kind: 'failed', details: 'boom' });
-  assert.deepEqual(skillsError('x'), { kind: 'failed', details: 'x' });
-});
-
-test('skills: no fallback endpoint behind the bridge allow-list (/api/skills is dashboard-only)', async () => {
-  const seen: string[] = [];
-  const failing: JsonRequest = async (_m, path) => {
-    seen.push(path);
-    throw new HermesError('server', 'Failed to enumerate skills', { status: 500 });
-  };
-  await assert.rejects(fetchSkills(failing), /Failed to enumerate skills/);
-  assert.deepEqual(seen, ['/v1/skills']);
+test('/skills and /memory open the Skills & memory screen (no sheet, no request from the palette)', () => {
+  assert.deepEqual(plan('skills'), { type: 'library', tab: 'skills' });
+  assert.deepEqual(plan('memory'), { type: 'library', tab: 'memory' });
+  assert.equal(resolveCommand('gedächtnis')?.id, 'memory');
+  assert.equal(resolveCommand('memoria')?.id, 'memory');
+  assert.deepEqual(availability('memory', ctx({ kind: 'demo', options: null })), { visible: true, enabled: true });
 });
 
 test('export: Markdown transcript', () => {
@@ -311,9 +292,24 @@ test('export: Markdown transcript', () => {
       { role: 'assistant', text: '' },
       { role: 'assistant', text: 'Hi!' },
     ],
-    { title: 'Chat', user: 'Du', assistant: 'Hermes', attachment: 'Anhang' },
+    { title: 'Chat', user: 'Du', assistant: 'Hermes', attachment: 'Anhang', toolNotice: 'N' },
   );
   assert.equal(md, '# Chat\n\n## Du\n\nHallo\n\n_Anhang: a.png_\n\n## Hermes\n\nHi!\n');
+});
+
+test('PC-07 export: raw tool-call markup in an answer is exported as the notice line, as the answer shows it', () => {
+  const notice = 'Tool call not available here: nothing was run.';
+  const labels = { title: 'Chat', user: 'Du', assistant: 'Hermes', attachment: 'Anhang', toolNotice: notice };
+  const pc02 =
+    'Ich richte die Erinnerung jetzt ein und prüfe, ob sie wirklich angelegt ist.\n' +
+    '<tool_call>{"name":"cronjob_manage","arguments":{"action":"create","schedule":"in 15h"}}</tool_call>';
+  const md = transcriptMarkdown([{ role: 'user', text: 'Erinnere mich in 15h' }, { role: 'assistant', text: pc02 }], labels);
+  assert.doesNotMatch(md, /cronjob_manage|\{"name"|tool_call/);
+  assert.ok(md.includes(`_${notice}_`));
+  assert.match(md, /## Hermes\n\nIch richte die Erinnerung jetzt ein/);
+  // without markup: unchanged; the user's own text is exported as written
+  const plain = transcriptMarkdown([{ role: 'user', text: '<tool_call>x</tool_call>' }, { role: 'assistant', text: 'Hi <b>!' }], labels);
+  assert.equal(plain, '# Chat\n\n## Du\n\n<tool_call>x</tool_call>\n\n## Hermes\n\nHi <b>!\n');
 });
 
 test('M6: a confirmed /approve only targets the request captured before the dialog, never the new head', () => {

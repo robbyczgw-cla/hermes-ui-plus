@@ -10,8 +10,9 @@ import { PERF, perfMark, perfNow, perfSpan } from '../perf/probe.ts';
 import { appendCapped, MAX_MESSAGE_TEXT } from './chatState.ts';
 import { mapApproval, mapFrame, parseJson } from './events.ts';
 import { answerBlocked, type RunStatus } from './approvals.ts';
-import { BOOTSTRAP_SYSTEM_MESSAGE } from './bootstrap.ts';
+import { BOOTSTRAP_SYSTEM_MESSAGE, HERMES_FEATURES_MESSAGE } from './bootstrap.ts';
 import { scrubHosts } from './networkFailure.ts';
+import { userTimeZoneMessage } from './timeZone.ts';
 import { botFromBaseUrl, serverRootOf } from './bots.ts';
 import { modelOptionsBody, splitProviderModel, type HermesChatOptions } from './capabilities.ts';
 import type { HermesContentPart } from '../attachments/encodeHermes.ts';
@@ -127,6 +128,10 @@ export type StreamChatParams = {
   followups?: boolean;
   /** `Idempotency-Key` of this send (bridge: no second turn on a retry, resumable stream) */
   idempotencyKey?: string;
+  /** this chat renders live cards: the capability line (HERMES_FEATURES_MESSAGE) goes along; constant per chat */
+  liveCards?: boolean;
+  /** the chat's open live cards for the bridge router (`X-HUI-Live`, live/focus.ts); bridge connections only */
+  liveHeader?: string;
   /** pauses before each resume attempt, the last one repeats (tests); default RESUME_DELAYS_MS */
   resumeDelaysMs?: readonly number[];
   /** how long a lost resumable stream keeps trying to re-attach (offline); default RESUME_WINDOW_MS */
@@ -191,7 +196,11 @@ export function buildRequest(
   sessionId: string,
   options?: HermesChatOptions,
   followups: boolean = true,
-  idempotencyKey?: string
+  idempotencyKey?: string,
+  liveCards: boolean = false,
+  liveHeader?: string,
+  /** `userTimeZoneMessage()` (timeZone.ts): the user's zone, so "9 Uhr" means the phone's 9:00; none when omitted */
+  userTime?: string
 ): { url: string; headers: Record<string, string>; body: string } {
   const modelOptions = modelOptionsBody(options);
   // a per-chat provider model (`provider::model`) goes out as `model` + `provider`
@@ -207,6 +216,8 @@ export function buildRequest(
       // one key per sent message (kept by a retry of a send that never reached Hermes): the UI bridge never runs it
       // twice and can resume the stream; Hermes itself only dedupes non-streaming requests (docs/HERMES-API.md)
       ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
+      // open live cards for the bridge router (never forwarded to Hermes); a direct Hermes would refuse it in CORS
+      ...(liveHeader && conn.bridge ? { 'X-HUI-Live': liveHeader } : {}),
     },
     body: JSON.stringify({
       model: picked.model,
@@ -216,7 +227,10 @@ export function buildRequest(
       messages: [
         // bridge connections: the bridge injects the bootstrap itself (and keeps client system messages)
         ...(conn.bootstrap === false ? [] : [{ role: 'system', content: BOOTSTRAP_SYSTEM_MESSAGE }]),
+        // capability line right after it (the bridge puts its own bootstrap + skill core in front of it)
+        ...(liveCards ? [{ role: 'system', content: HERMES_FEATURES_MESSAGE }] : []),
         ...(followups === false ? [{ role: 'system', content: FOLLOWUPS_OFF_MESSAGE }] : []),
+        ...(userTime ? [{ role: 'system', content: userTime }] : []),
         { role: 'user', content },
       ],
       ...(modelOptions ? { model_options: modelOptions } : {}),
@@ -354,7 +368,7 @@ export async function streamChatCore(
   const resumeWindow = params.resumeWindowMs ?? RESUME_WINDOW_MS;
   const probeAfter = params.headerProbeMs?.after ?? HEADER_PROBE_AFTER_MS;
   const probeEvery = params.headerProbeMs?.every ?? HEADER_PROBE_EVERY_MS;
-  const req = params.request ?? buildRequest(conn, params.content ?? text, sessionId, params.modelOptions, params.followups, params.idempotencyKey);
+  const req = params.request ?? buildRequest(conn, params.content ?? text, sessionId, params.modelOptions, params.followups, params.idempotencyKey, params.liveCards, params.liveHeader, userTimeZoneMessage());
   // a re-attach never needs the message again (the bridge ignores the body): without it, a bridge that does not
   // know the resume header (BRIDGE_RESUME=off) gets a request Hermes refuses (400) instead of asking it a second time
   const resumeBody = JSON.stringify({ model: splitProviderModel(conn.model || 'hermes-agent').model, stream: true, messages: [] });

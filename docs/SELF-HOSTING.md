@@ -75,6 +75,10 @@ The wizard above does all of this for you. By hand: create an env file. These ar
 | `BRIDGE_HERMES_PLUGIN_URL` / `BRIDGE_HERMES_PLUGIN_SECRET_FILE` | no | Schnellfrage (⚡) through the optional Hermes plugin `hermes-ui-plus` ([HERMES-PLUGIN.md](HERMES-PLUGIN.md)): its loopback URL (default `http://127.0.0.1:8646`) and the secret file the installer wrote (readable by the bridge user; the setup wizard fills it in when it finds the plugin, and a root install's hardened unit gets it through `LoadCredential=` instead). Without the plugin ⚡ is not shown. Enable the plugin in Hermes' `config.yaml` (`plugins.enabled`), not with `hermes plugins enable`. `BRIDGE_QUICK=off` disables it; limits `BRIDGE_QUICK_RATE` (per device and minute, default `20`), `BRIDGE_QUICK_DAILY` (default `300`) |
 | `BRIDGE_PUSH_PREVIEW` | no | `1` shows message text in push notifications. Default off. More push settings: section 6 |
 | `BRIDGE_PROFILES` | no | Hermes profiles ("bots") the app may use. Default `auto`: every profile in `HERMES_HOME/profiles/` (needs read access to the Hermes home; without it any valid name is passed on and Hermes decides). Or a comma list such as `research,work=Work bot`, or `off`. The generated system service cannot read your home directory (`ProtectHome`): the setup wizard writes the list for it (re-run it after adding a profile), or enter the bots in the app's connection settings. On Hermes v0.22 every profile's own `.env` needs the same `API_SERVER_KEY` as `HERMES_API_KEY` here, else its requests answer 401 |
+| `BRIDGE_ROUTINES` | no | Hermes cron jobs ("routines") in the app: `control` (default: list, pause, resume, run now), `read` (list only) or `off` (hidden). Creating, editing and deleting jobs is never possible through the bridge |
+| `BRIDGE_ROUTINES_BOTS` | no | Bots that offer routines at all: comma list (`default` = the main profile, `*` = every bot). Default none. More bots can be enabled with `hermes-ui-plus-bridge routines enable <bot>` (needs a state dir). The admin token manages routines; a paired device may only view them unless you run `routines grant <device-id> <bot> manage` (or `none` to hide them) |
+| `BRIDGE_BOTS_CREATE` | no | Creating bots from the app (needs multiplexing and the `hermes-ui-plus` plugin, docs/BOTS-SERVER.md "Creating bots from the app"): unset = off until `hermes-ui-plus-bridge bots enable`; `on` / `off` override that switch. The admin token may create and edit bots; a paired device only after `bots grant <device-id>` |
+| `BRIDGE_ROUTINES_POLL_MS` / `BRIDGE_ROUTINES_INBOX_DAYS` / `BRIDGE_ROUTINES_INBOX_MAX` | no | Routine results inbox: how often the bridge checks the enabled bots for finished runs (default `60000`, minimum `10000`), how long results are kept (default `30` days) and how many (default `300`). Stored in the state dir (`routines-inbox.json`); without one only in memory |
 | `BRIDGE_APPROVAL_TIMEOUT_S` | no | How long an approval request is treated as open (app banner, approval push) after Hermes asked. Default `300`; match Hermes' own approval timeout |
 | `BRIDGE_MAX_CONCURRENT_TURNS` / `BRIDGE_MAX_TURNS_TOTAL` | no | Chat turns running at the same time per device token / in total (a turn counts until Hermes finished it). Default `8` / `16` |
 | `BRIDGE_RESUME` | no | `off` disables idempotent send and stream resume for chat turns (docs/BRIDGE.md). Limits: `BRIDGE_RESUME_TURN_KB` (2048 per turn), `BRIDGE_RESUME_TOTAL_MB` (32 in total), `BRIDGE_RESUME_RETAIN_MS` (600000) |
@@ -229,6 +233,14 @@ npx hermes-ui-plus-bridge devices revoke <id>
 ```
 
 These read the env file the wizard wrote (`~/.config/hermes-ui-plus-bridge/env`, as root `/etc/hermes-ui-plus-bridge/env`). If yours lives elsewhere, add `--env-file <file>`.
+
+Routines (Hermes' scheduled jobs) are off until you enable a bot (`BRIDGE_ROUTINES_BOTS` in the env file, or the CLI). Paired devices may then view routines and their results; pausing, resuming and running them needs a grant. In the app they are an optional part of "About <Name>": each user can hide them on their device in Settings → Chat → Routines (no routines screen, no results inbox, no routine notifications there).
+
+```bash
+npx hermes-ui-plus-bridge routines enable default            # the main bot; a profile name for another bot
+npx hermes-ui-plus-bridge routines grant <device-id> default manage   # or read (the default) / none / default
+npx hermes-ui-plus-bridge routines status
+```
 
 The same operations exist over HTTP with the admin token: `GET /bridge/devices`, `POST /bridge/devices {"label": "..."}` (answers with the pair link, not a token), `DELETE /bridge/devices/<id>`. A revoked device is locked out within about two seconds; revoking a pending device also invalidates its pairing code.
 

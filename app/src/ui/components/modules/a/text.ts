@@ -81,6 +81,7 @@ export function makeS(t: TFn) {
     tabs: {
       a11yTab: (label: string, i: number, n: number) => t('ui.tabs.a11yTab', { label, i: i + 1, n }),
       emptyTab: t('ui.tabs.emptyTab'),
+      day: (n: number) => t('ui.tabs.day', { n }),
     },
     accordion: {
       expand: t('ui.accordion.expand'),
@@ -201,6 +202,8 @@ export function makeS(t: TFn) {
       decrease: t('ui.calc.decrease'),
       chartFallback: t('ui.calc.chartFallback'),
       formulaError: t('ui.calc.formulaError'),
+      notComputable: t('ui.calc.notComputable'),
+      formulaBroken: (n: number) => t('ui.calc.formulaBroken', { n }),
       empty: t('ui.calc.empty'),
       yes: t('ui.common.yes'),
       no: t('ui.common.no'),

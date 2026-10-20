@@ -34,7 +34,7 @@ function seed(mode) {
 const shots = [];
 async function shot(page, name, caption) {
   await page.waitForTimeout(350);
-  await page.screenshot({ path: join(OUT, `${name}.png`) });
+  await page.screenshot({ path: join(OUT, `${name}.jpg`), type: 'jpeg', quality: 75 });
   shots.push({ name, caption });
   console.log('  shot', name);
 }
@@ -165,7 +165,7 @@ async function main() {
 
 /** small static gallery (Bote palette, light/dark), screenshots at phone size with captions and the design notes */
 function gallery(list) {
-  const fig = (s) => `<figure><a href="${s.name}.png"><img src="${s.name}.png" width="300" alt=""></a><figcaption>${s.caption}</figcaption></figure>`;
+  const fig = (s) => `<figure><a href="${s.name}.jpg"><img src="${s.name}.jpg" width="300" alt=""></a><figcaption>${s.caption}</figcaption></figure>`;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Hermes UI+ · Schnellfrage v1</title><style>
 :root{--bg:#F8F6F1;--surface:#FFFEFB;--text:#161B26;--muted:#4E5463;--subtle:#656B79;--accent:#8A6419;--border:rgba(22,27,38,.1);color-scheme:light}

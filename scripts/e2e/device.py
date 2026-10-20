@@ -4,7 +4,7 @@ Selectors match a node by resource-id (= React Native `testID`), content-desc (=
 a regex; `sel('id:send|Send')` tries the testID first and the English label second, so the suite runs against builds
 with and without testIDs. The app is forced to en-US (smoke.sh), so labels are stable.
 """
-import os, re, struct, subprocess, time, xml.etree.ElementTree as ET
+import os, re, shutil, struct, subprocess, time, xml.etree.ElementTree as ET
 
 SERIAL = os.environ.get('ANDROID_SERIAL', 'emulator-5584')
 ADB = ['adb', '-s', SERIAL]
@@ -193,6 +193,37 @@ def screenshot_png(path):
     with open(path, 'wb') as f:
         f.write(data)
     return path
+
+
+def png_to_jpeg(png, jpg, max_w=1080, quality=60):
+    """review shots are JPEG q60, <= max_w wide (user rule): ImageMagick, else sips (macOS)"""
+    for cmd in (['convert', png, '-resize', f'{max_w}x>', '-quality', str(quality), jpg],
+                ['magick', png, '-resize', f'{max_w}x>', '-quality', str(quality), jpg],
+                ['sips', '-s', 'format', 'jpeg', '-s', 'formatOptions', str(quality), '--resampleWidth', str(max_w), png, '--out', jpg]):
+        if shutil.which(cmd[0]) and subprocess.run(cmd, capture_output=True).returncode == 0:
+            return jpg
+    raise RuntimeError('no ImageMagick (convert/magick) or sips to make a JPEG review shot')
+
+
+def screenshot_jpg(path):
+    """screencap -> JPEG q60 <= 1080 px wide at path (use a .jpg name); the temp PNG is removed"""
+    tmp = path + '.tmp.png'
+    screenshot_png(tmp)
+    try:
+        png_to_jpeg(tmp, path)
+    finally:
+        os.remove(tmp)
+    return path
+
+
+def prune_shots(dirpath, keep, always=('fail', 'failed')):
+    """keep the newest `keep` debug shots in dirpath (*.jpg); names containing one of `always` are never removed"""
+    files = sorted((os.path.join(dirpath, f) for f in os.listdir(dirpath) if f.endswith('.jpg')), key=os.path.getmtime) if os.path.isdir(dirpath) else []
+    keepable = [f for f in files if not any(a in os.path.basename(f) for a in always)]
+    removed = keepable[:max(0, len(keepable) - keep)]
+    for f in removed:
+        os.remove(f)
+    return removed
 
 
 def screen_luma(region=None):

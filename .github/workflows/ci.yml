@@ -2,8 +2,8 @@ name: ci
 
 # Tests and publish-safety checks on every pull request and on pushes to main. Needs NO secrets: pull requests from
 # forks run the same jobs with a read-only token (no pull_request_target, nothing is written back to the repository).
-#   app         tsc (app + tests), app unit tests, scripts/*.test.mjs + scripts/e2e/*.test.mjs (scripts/check.sh, plain mode
-#               because CI=true; includes the website tests and the leak-guard unit tests)
+#   app         tsc (app + tests), app unit tests, scripts/*.test.mjs + scripts/e2e/*.test.mjs, the bridge suite
+#               (scripts/check.sh all, plain mode because CI=true; includes the website tests and the leak-guard unit tests)
 #   services    bridge tests, push tests
 #   website     scripts/website.test.mjs on its own (generated pages equal the committed ones, no third-party requests)
 #   leak-guard  generic patterns over the tracked tree. The private denylist ($HUI_PRIVATE_DIR) is intentionally NOT
@@ -36,11 +36,16 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: app/package-lock.json
+          cache-dependency-path: |
+            app/package-lock.json
+            bridge/package-lock.json
       - name: npm ci (app)
         working-directory: app
         run: npm ci --no-audit --no-fund
-      - name: tsc, app unit tests, scripts tests
+      - name: npm ci (bridge)
+        working-directory: bridge
+        run: npm ci --no-audit --no-fund
+      - name: tsc, app unit tests, scripts tests, bridge tests
         run: scripts/check.sh all
 
   services:

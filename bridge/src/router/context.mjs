@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
+import { splitLiveTrailer } from './live.mjs';
 
-/** @typedef {{role: 'user'|'assistant', content: string}} Turn */
+/** @typedef {{role: 'user'|'assistant', content: string, liveFocus?: string}} Turn */
 
 export const MAX_TURNS = 4;
 export const DEFAULT_MAX_CHARS = 2000;
@@ -48,8 +49,10 @@ export function routingContext(messages, opts = {}) {
   const turns = [];
   for (const m of Array.isArray(messages) ? messages : []) {
     if (!m || (m.role !== 'user' && m.role !== 'assistant')) continue;
-    const text = contentText(m.content).trim();
-    if (text) turns.push({ role: m.role, content: text });
+    // live-card edits (router/live.mjs): not routed on; a focused card is kept for the deterministic `card=` hint
+    const live = m.role === 'user' ? splitLiveTrailer(contentText(m.content)) : { text: contentText(m.content) };
+    const text = live.text.trim();
+    if (text || live.focus) turns.push({ role: m.role, content: text, ...(live.focus ? { liveFocus: live.focus } : {}) });
   }
   let all = turns;
   // Session-continuation clients (X-Hermes-Session-Id) send only the new user message.
@@ -58,7 +61,8 @@ export function routingContext(messages, opts = {}) {
   }
   // Drop trailing assistant turns: we route the latest *user* request.
   while (all.length && all[all.length - 1].role !== 'user') all = all.slice(0, -1);
-  return all.slice(-maxTurns).map((t) => ({ role: t.role, content: truncate(t.content, maxChars) }));
+  // only the latest user turn may carry a focused card (the prior turns come from the bridge's memory)
+  return all.slice(-maxTurns).map((t, i, a) => ({ role: t.role, content: truncate(t.content, maxChars), ...(t.liveFocus && i === a.length - 1 ? { liveFocus: t.liveFocus } : {}) }));
 }
 
 /** Stable cache key for a routing input. */

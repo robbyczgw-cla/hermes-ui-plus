@@ -56,6 +56,8 @@ function optional(raw: Record<string, unknown>): Partial<ConversationMeta> {
   if (raw.historyTruncated === true) out.historyTruncated = true;
   const bot = typeof raw.hermesProfile === 'string' ? botOf(raw.hermesProfile) : undefined;
   if (bot) out.hermesProfile = bot;
+  // the offline demo's bots have Bot Chats too (onboarding/demo/bots.ts)
+  if (raw.botChat === true && (raw.profileKind === 'hermes' || raw.profileKind === 'demo') && typeof raw.hermesSessionId === 'string') out.botChat = true;
   if (typeof raw.branchSeed === 'number' && Number.isFinite(raw.branchSeed) && raw.branchSeed >= 1) out.branchSeed = Math.floor(raw.branchSeed);
   return out;
 }

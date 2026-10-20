@@ -43,7 +43,20 @@ export const PROMPTS = {
   mixed: { en: 'Create a mixed report for this week.', de: 'Erstelle einen gemischten Bericht für diese Woche.', es: 'Crea un informe mixto de esta semana.' },
   compare: { en: 'Compare two plans.', de: 'Mach einen Vergleich von zwei Tarifen.', es: 'Compara dos tarifas.' },
   loan: { en: 'Build me a loan calculator.', de: 'Bau mir einen Kreditrechner.', es: 'Constrúyeme una calculadora de préstamos.' },
+  multi: {
+    en: 'Should I rent a van or hire a moving company for my move?',
+    de: 'Soll ich für meinen Umzug einen Transporter mieten oder eine Umzugsfirma nehmen?',
+    es: '¿Alquilo una furgoneta o contrato una empresa de mudanzas para mi mudanza?',
+  },
   connect: { en: 'How do I connect my own Hermes?', de: 'Wie verbinde ich mein eigenes Hermes?', es: '¿Cómo conecto mi propio Hermes?' },
+  liveList: { en: "Keep a shopping list for Saturday's barbecue", de: 'Führ mir eine Einkaufsliste fürs Grillen am Samstag', es: 'Llévame una lista de la compra para la barbacoa del sábado' },
+  liveAdd: { en: 'Add charcoal and halloumi, we already have tomatoes', de: 'Setz noch Grillkohle und Halloumi drauf, Tomaten haben wir schon', es: 'Añade carbón y halloumi, tomates ya tenemos' },
+  memoryWhat: { en: 'What do you remember about me?', de: 'Was weißt du über mich?', es: '¿Qué recuerdas de mí?' },
+  // the default bot's Bot Chat starters (i18n bots.chat.starterLast)
+  lastDone: { en: 'What did you last do for me?', de: 'Was hast du zuletzt für mich erledigt?', es: '¿Qué hiciste por mí la última vez?' },
+  memoryForget: { en: 'Forget that I dislike coriander', de: 'Vergiss, dass ich keinen Koriander mag', es: 'Olvida que no me gusta el cilantro' },
+  skillsList: { en: 'Which skills do you have?', de: 'Welche Skills hast du?', es: '¿Qué skills tienes?' },
+  skillDoc: { en: 'Load the skill meal-planner and explain it', de: 'Lade den Skill meal-planner und erkläre ihn', es: 'Carga el skill meal-planner y explícalo' },
 } as const satisfies Record<string, DemoPrompt>;
 
 export type PromptKey = keyof typeof PROMPTS;
@@ -76,5 +89,13 @@ export const PROMPT_SCENARIO: Record<PromptKey, string> = {
   mixed: 'mixed',
   compare: 'compare',
   loan: 'loan',
+  multi: 'multi',
   connect: 'connect',
+  liveList: 'liveList',
+  liveAdd: 'liveAdd',
+  memoryWhat: 'memoryWhat',
+  lastDone: 'lastDone',
+  memoryForget: 'memoryForget',
+  skillsList: 'skillsList',
+  skillDoc: 'skillDoc',
 };

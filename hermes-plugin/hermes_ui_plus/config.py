@@ -13,7 +13,7 @@ PLUGIN_NAME = "hermes-ui-plus"
 AUX_TASK_KEY = "hui_quick"
 AUX_INHERIT_FROM = "title_generation"  # built-in fast slot; the user's auxiliary.hui_quick block still wins
 KILL_SWITCH_ENV = "HERMES_UI_PLUS_DISABLE"  # read once at plugin load: 1/true/yes/on = register nothing
-VERSION = "0.1.1"
+VERSION = "0.2.0"
 
 DEFAULT_PORT = 8646
 MAX_TURNS = 6
@@ -76,6 +76,10 @@ class Settings:
     allow_model_override: bool = True
     # "provider:model" or "provider:*"; [] = any (the bridge validates against GET /api/model/options first)
     allowed_models: list[str] = field(default_factory=list)
+    library_enabled: bool = True  # /library/*: skills list + SKILL.md (read-only)
+    library_expose_memory: bool = False  # /library/memory: MEMORY.md / USER.md of this profile (opt-in)
+    bots_enabled: bool = True  # /bots: list, create and edit bots (profiles); the bridge adds the owner's switch
+    bots_limit: int = 50  # bots (named profiles) at most
     warnings: tuple[str, ...] = ()
 
 
@@ -103,6 +107,10 @@ def load_settings(get: Callable[[str, Any], Any]) -> Settings:
         total_timeout=total,
         allow_model_override=_bool(get("quick.allow_model_override", True), True),
         allowed_models=_str_list(get("quick.allowed_models", [])),
+        library_enabled=_bool(get("library.enabled", True), True),
+        library_expose_memory=_bool(get("library.expose_memory", False), False),
+        bots_enabled=_bool(get("bots.enabled", True), True),
+        bots_limit=int(_num(get("bots.limit", 50), 50, 1, 200)),
         warnings=tuple(warnings),
     )
 

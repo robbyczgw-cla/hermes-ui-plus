@@ -95,6 +95,9 @@ test('notification kind approval: localized fixed title, command only with previ
   assert.equal(on.body, 'rm -rf ~/my_dir *.tmp `x`');
   assert.deepEqual([on.data.kind, on.data.requestId, on.data.runId, on.ttl], ['approval', 'r1', 'c1', 300]);
   assert.equal(buildNotification({ profileId: 'p', locale: 'en', preview: 'off' }, ev).title, 'Hermes is waiting for your approval');
+  // a bot's request names the bot (Bots v2), the text rules stay the same
+  assert.equal(buildNotification({ profileId: 'p', locale: 'de', preview: 'auto' }, { ...ev, botName: 'Scout' }).title, 'Scout wartet auf deine Freigabe');
+  assert.equal(buildNotification({ profileId: 'p', locale: 'en', preview: 'on' }, { ...ev, botName: 'x'.repeat(60) }).title, `${'x'.repeat(40)} is waiting for your approval`);
   assert.equal(buildNotification({ profileId: 'p', locale: 'de' }, { title: 'T', text: 'hi', threadKey: 'x', data: {} }).data.kind, 'message');
 });
 

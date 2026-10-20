@@ -30,7 +30,7 @@ const L = {
 const shots = [];
 async function shot(page, name, caption) {
   await page.waitForTimeout(450);
-  await page.screenshot({ path: join(OUT, `${name}.png`) });
+  await page.screenshot({ path: join(OUT, `${name}.jpg`), type: 'jpeg', quality: 75 });
   shots.push({ name, caption });
   console.log('  shot', name);
 }
@@ -114,7 +114,7 @@ async function main() {
     server.close();
   }
   writeFileSync(join(OUT, 'shots.json'), JSON.stringify(shots, null, 2));
-  const fig = (s) => `<figure><a href="${s.name}.png"><img src="${s.name}.png" alt=""></a><figcaption>${s.caption}</figcaption></figure>`;
+  const fig = (s) => `<figure><a href="${s.name}.jpg"><img src="${s.name}.jpg" alt=""></a><figcaption>${s.caption}</figcaption></figure>`;
   writeFileSync(
     join(OUT, 'index.html'),
     `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Let your agent set it up</title><style>body{font:15px system-ui;margin:32px;background:#F8F6F1;color:#161B26}main{display:flex;flex-wrap:wrap;gap:24px}figure{margin:0;width:300px}img{width:100%;border-radius:18px;box-shadow:0 8px 30px rgba(0,0,0,.15)}figcaption{font-size:13px;margin-top:8px}</style></head><body><h1>Let your agent set it up</h1><main>${shots.map(fig).join('\n')}</main></body></html>\n`,

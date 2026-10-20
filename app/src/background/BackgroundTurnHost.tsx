@@ -26,6 +26,7 @@ import { createKeepAliveController, createTaskSlot } from './keepAlive';
 import { KEEPALIVE_TASK, keepAliveModule } from './keepAliveNative';
 import { desktopNotify, desktopWindowFocused, isDesktopApp } from '../desktop/bridge';
 import { notificationBody, type NoticeEvent } from './notice';
+import { TOOL_MARKUP_NOTICE_KEY } from '../chat/toolMarkup';
 import { createNoticeDelivery, markRead, onAnswerReady, shellState, unreadStore } from './noticeState';
 import { turnRegistry } from './turnRegistry';
 
@@ -166,7 +167,7 @@ export function BackgroundTurnHost() {
         const preview = profile ? allPushSettings()[profile.id]?.preview !== 'off' : true;
         void presentAnswer(t, {
           title: t('chat.background.ready.notificationTitle', { name: profile?.name ?? 'Hermes' }),
-          body: notificationBody(ev.message, preview, t('chat.background.ready.generic')),
+          body: notificationBody(ev.message, preview, t('chat.background.ready.generic'), t(TOOL_MARKUP_NOTICE_KEY)),
           data: {
             src: 'turn',
             profileId: profile?.id ?? meta?.profileId ?? '',

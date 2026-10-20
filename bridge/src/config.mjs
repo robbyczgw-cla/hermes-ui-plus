@@ -3,6 +3,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadSkillInline } from './skillInline.mjs';
+import { parseRoutinesBots } from './routines-rights.mjs';
+import { bridgeCaps, withCaps } from './caps.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 // Source checkout: ../hermes-skill (wins, it is the source of truth); npm package: skill/ bundled by scripts/bundle-skill.mjs (prepack).
@@ -57,6 +59,12 @@ export function loadConfig(env = process.env, o = {}) {
   const thinking = (env.BRIDGE_ROUTER_THINKING || 'adaptive').toLowerCase();
   if (!['adaptive', 'disabled', 'between_tools'].includes(thinking)) throw new Error('BRIDGE_ROUTER_THINKING must be adaptive|disabled|between_tools');
 
+  // Hermes cron jobs ("routines", src/jobs.mjs): control = read + pause / resume / run, read = list / get only, off = 404
+  const routines = (env.BRIDGE_ROUTINES || 'control').toLowerCase();
+  if (!['control', 'read', 'off'].includes(routines)) throw new Error('BRIDGE_ROUTINES must be control|read|off');
+  // bots the owner opened for routines (src/routines-rights.mjs); devices.json can enable more
+  const routinesBots = parseRoutinesBots(env.BRIDGE_ROUTINES_BOTS);
+
   let extraBody;
   if (env.BRIDGE_ROUTER_EXTRA_BODY) {
     try { extraBody = JSON.parse(env.BRIDGE_ROUTER_EXTRA_BODY); } catch { throw new Error('BRIDGE_ROUTER_EXTRA_BODY must be JSON'); }
@@ -74,6 +82,11 @@ export function loadConfig(env = process.env, o = {}) {
     else if (env.BRIDGE_BOOTSTRAP_FILE) throw new Error(`BRIDGE_BOOTSTRAP_FILE not found: ${file}`);
     else bootstrapMissing = file;
   }
+  // Capabilities line (src/caps.mjs), e.g. `[hermes-ui-caps] image_search=off`, appended to the bootstrap once here:
+  // fixed for the process lifetime, so the injected message stays byte-identical on every turn (prompt cache).
+  // A client that sends its own bootstrap marker gets nothing injected, so no caps line either (= unknown, like before).
+  const caps = bridgeCaps(env);
+  bootstrap = withCaps(bootstrap, caps);
 
   return {
     host: env.BRIDGE_HOST || '127.0.0.1',
@@ -100,6 +113,14 @@ export function loadConfig(env = process.env, o = {}) {
       maxTurnBytes: Math.max(64 * 1024, num(env.BRIDGE_RESUME_TURN_KB, 2048) * 1024),
       maxTotalBytes: Math.max(1024 * 1024, num(env.BRIDGE_RESUME_TOTAL_MB, 32) * 1024 * 1024),
       retainMs: Math.max(0, num(env.BRIDGE_RESUME_RETAIN_MS, 10 * 60_000)),
+    },
+    routines: /** @type {'control'|'read'|'off'} */ (routines),
+    routinesBots,
+    // result inbox (src/routines-inbox.mjs): reconciler interval, retention by age and count
+    routinesInbox: {
+      pollMs: Math.max(10_000, num(env.BRIDGE_ROUTINES_POLL_MS, 60_000)),
+      retentionDays: Math.max(1, num(env.BRIDGE_ROUTINES_INBOX_DAYS, 30)),
+      maxItems: Math.max(1, Math.floor(num(env.BRIDGE_ROUTINES_INBOX_MAX, 300))),
     },
     drainMs: Math.max(1, num(env.BRIDGE_DRAIN_MS, 120_000)),
     logLevel: env.BRIDGE_LOG_LEVEL || 'info',
@@ -139,6 +160,7 @@ export function loadConfig(env = process.env, o = {}) {
     },
     bootstrap,
     bootstrapMissing,
+    caps,
     // skill core inline after the bootstrap on app turns (src/skillInline.mjs): skillInline, skillInlineFile, skillInlineMissing
     ...loadSkillInline(env, { bootstrap, bootstrapFile, candidates: o.skillFiles ?? DEFAULT_SKILL_FILES }),
     memory: {

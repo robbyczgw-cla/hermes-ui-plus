@@ -82,18 +82,69 @@ export function titleScore(title: string, query: string): number {
   return Math.max(1, Math.round(coverage * 60 + phrase - Math.min(extra, 8) * 2));
 }
 
-/** Best Wikipedia article for the query (title lookup or search results), or null. */
+/**
+ * Place-type words that name no particular place on their own ("Altstadt", "Old Town", "Casco Antiguo", "Dom",
+ * "Hauptbahnhof", "Beach" …), de/en/es, in normalizeText form. A query made only of these (plus stop words) has no
+ * subject: a search for "Altstadt (Zentrum)" returns the old town of Warsaw as its top hit.
+ */
+const GENERIC = new Set(
+  (
+    // de
+    'altstadt altstadtkern innenstadt zentrum stadtzentrum stadtmitte stadtkern city hauptbahnhof bahnhof hbf dom ' +
+    'kathedrale munster kirche marktplatz markt hauptplatz rathaus rathausplatz hafen strand museum park stadtpark ' +
+    'schloss burg festung garten altstadtgasse fussgangerzone promenade platz stadt viertel historisches historische ' +
+    'historischer alte alter altes flughafen zoo see ' +
+    // en
+    'old town oldtown center centre downtown midtown main square hall cathedral church harbour harbor port beach ' +
+    'station central railway train airport market castle palace garden gardens historic district quarter lake ' +
+    // es
+    'casco antiguo historico centro ciudad plaza mayor catedral iglesia ayuntamiento puerto playa museo parque ' +
+    'estacion mercado castillo palacio jardin barrio aeropuerto'
+  ).split(' '),
+);
+
+/** Query tokens that can identify a subject: not a stop word, not a generic place word. */
+export function specificTokens(query: string): string[] {
+  return tokens(query).filter((t) => !STOP.has(t) && !GENERIC.has(t));
+}
+
+/** Only generic place words ("Altstadt (Zentrum)", "Old Town", "Plaza Mayor"), nothing that names a place. */
+export function isGenericPlaceName(name: string): boolean {
+  return tokens(name).length > 0 && specificTokens(name).length === 0;
+}
+
+/**
+ * Does `title` mention at least one specific token of `query` (word, or ≥ 4 letters inside a longer word:
+ * "hamburg" in "Hamburger Hafen")? A query without specific tokens is never covered.
+ */
+export function coversSpecific(title: string, query: string): boolean {
+  const spec = specificTokens(query);
+  if (!spec.length) return false;
+  const tt = tokens(title);
+  return spec.some((q) => tt.includes(q) || (q.length >= 4 && tt.some((t) => t.length > q.length && t.includes(q))));
+}
+
+/**
+ * Best Wikipedia article for the query (title lookup or search results), or null.
+ * A query that names something specific ("Plaza Mayor Salamanca", "Mirabellgarten") only accepts titles that
+ * mention it: generic words alone ("Plaza Mayor (Madrid)", "Warschauer Altstadt") are not a match. A query of
+ * generic words only ("Altstadt") accepts nothing but the article of exactly that name (no "Warschauer Altstadt").
+ */
 export function pickWikiPage(pages: WikiPage[], query: string): WikiPage | null {
   let best: WikiPage | null = null;
   let bestScore = 0;
+  const hasSpecific = specificTokens(query).length > 0;
   for (const p of pages) {
     if (p.disambiguation || !p.file || !p.thumb) continue;
     if (!acceptableFile(p.file, query)) continue;
     // "Pantheon (Rom)" → compare without the parenthetical qualifier too
     const bare = p.title.replace(/\s*\([^)]*\)\s*$/, '');
+    const covers = coversSpecific(p.title, query);
+    if (hasSpecific ? !covers : normalizeText(p.title) !== normalizeText(query)) continue;
     const ts = Math.max(titleScore(p.title, query), bare !== p.title ? titleScore(bare, query) - 25 : 0);
-    // the top search hit (often a redirect target like "Hund" → "Haushund") gets some trust
-    const score = ts > 0 ? ts - (p.index - 1) * 4 : p.index === 1 ? 25 : 0;
+    // the top search hit (often a redirect target like "Hund" → "Haushund") gets some trust – only when it
+    // mentions what the query names
+    const score = ts > 0 ? ts - (p.index - 1) * 4 : p.index === 1 && covers ? 25 : 0;
     if (score > bestScore) {
       best = p;
       bestScore = score;
@@ -102,15 +153,17 @@ export function pickWikiPage(pages: WikiPage[], query: string): WikiPage | null 
   return best;
 }
 
-/** Best Commons file for the query, or null. */
+/** Best Commons file for the query, or null (same subject rule as pickWikiPage). */
 export function pickCommonsFile(files: WikiFile[], query: string): WikiFile | null {
   let best: WikiFile | null = null;
   let bestScore = 0;
+  const hasSpecific = specificTokens(query).length > 0;
   for (const f of files) {
     if (!isRasterMime(f.mime) || !f.thumb) continue;
     if (Math.min(f.width, f.height) < 240) continue;
     if (!acceptableFile(f.name, query)) continue;
     const title = f.name.replace(/\.[a-z0-9]+$/i, '');
+    if (hasSpecific ? !coversSpecific(title, query) : normalizeText(title) !== normalizeText(query)) continue;
     const ts = titleScore(title, query);
     if (ts <= 0) continue;
     const score = ts - (f.index - 1) * 3;

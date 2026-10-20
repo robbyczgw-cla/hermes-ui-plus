@@ -6,6 +6,7 @@
  */
 import { checklistReplyFor } from '../ui/components/modules/a/checklistModel.ts';
 import { readOptions } from '../ui/components/modules/a/misc.ts';
+import { listSeparator } from '../ui/components/modules/a/replies.ts';
 import { buildCalcReply, computeOutputs, normalizeCalc, valueOf, type CalcValue } from '../ui/components/modules/b/calcModel.ts';
 
 export const ASK_MAX_CHARS = 4000;
@@ -78,7 +79,7 @@ export function describeNode(nodeId: string, node: Rec | null, state: unknown): 
       if (items) return checklistReplyFor(nodeId, items as never);
       if (node && Array.isArray(node.items)) {
         const open = node.items.map((x) => (isObj(x) ? str(x.text) : str(x))).filter(Boolean);
-        return `[checklist:${nodeId}] offen: ${open.join(', ') || '–'}`;
+        return `[checklist:${nodeId}] offen: ${open.join(listSeparator(open as string[])) || '–'}`;
       }
       break;
     }

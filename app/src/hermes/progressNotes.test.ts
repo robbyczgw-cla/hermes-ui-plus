@@ -125,7 +125,7 @@ test('history: assistant rows with tool_calls give the same split (texts are sti
   ]);
   // drawer preview + notification: the final answer, not the first note
   assert.equal(previewOf([user, a]), 'Meine Empfehlung: Modell A.');
-  assert.equal(notificationBody(a, true, 'Antwort da'), 'Meine Empfehlung: Modell A.');
+  assert.equal(notificationBody(a, true, 'Antwort da', 'N'), 'Meine Empfehlung: Modell A.');
   assert.equal(answerText(a), 'Meine Empfehlung: Modell A.');
 });
 

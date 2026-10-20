@@ -23,6 +23,8 @@
 # Never for release / store builds: refuses HERMES_KEYSTORE and BUNDLE=1 (use scripts/build-apk.sh).
 #   HUI_FAST=0        always build in full          HUI_FAST_ONLY=1   fail (exit 4) instead of building in full
 #   HUI_FAST_BASES    base cache [~/builds/apk-bases]  FAST_MEM_MAX [4G]  FAST_MIN_AVAIL_GB [4]
+#   FAST_DIR / ANDROID_HOME  hermes: under HUI_ANDROID_STORE [/var/tmp, macOS /Users/Shared] (scripts/lib/android-store.sh)
+#   HUI_LANE_STAMP    remote lane: the stamp of the run's sync; the copy of app/ must carry it (scripts/lib/lane-stamp.sh)
 #   (MEM_MAX / MEM_HIGH / MIN_AVAIL_GB etc. go to scripts/build-apk.sh when it builds in full)
 set -Eeuo pipefail
 
@@ -39,6 +41,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$ROOT/scripts/lib/apk-guards.sh"
 # shellcheck source=lib/apkfast.sh
 . "$ROOT/scripts/lib/apkfast.sh"
+# shellcheck source=lib/android-store.sh
+. "$ROOT/scripts/lib/android-store.sh"
+# shellcheck source=lib/lane-stamp.sh
+. "$ROOT/scripts/lib/lane-stamp.sh"
 
 # --------------------------------------------------------------------------------------------
 # INNER MODE: runs inside a memory-capped systemd scope.
@@ -129,8 +135,9 @@ if [ "$FLAVOR" = personal ]; then
   export ANDROID_HOME="${ANDROID_HOME:-$HOME/android/sdk}"
   FAST_DIR="${FAST_DIR:-$HOME/builds/hermes-ui-fast}"; APK_BASE=hermes-ui; LATEST="latest-release"
 else
-  export ANDROID_HOME="${ANDROID_HOME:-/var/tmp/hiui-android-sdk}"
-  FAST_DIR="${FAST_DIR:-$([ "$(uname -s)" = Darwin ] && echo /private || true)/var/tmp/hiui-fast-hermes}";   # physical path on macOS: see BUILD_DIR in build-apk.sh
+  android_store_init
+  export ANDROID_HOME="${ANDROID_HOME:-$STORE_SDK}"
+  FAST_DIR="${FAST_DIR:-$STORE_FAST}";   # physical path on macOS: see BUILD_DIR in build-apk.sh
   APK_BASE="$BRAND_ARTIFACT"; LATEST="latest-hermes-release"
 fi
 if [ "$HOST_OS" = Darwin ]; then
@@ -160,7 +167,6 @@ full_build() {
 }
 
 [ "${HUI_FAST:-1}" = 0 ] && full_build "HUI_FAST=0"
-for t in zipalign apksigner; do [ -x "$BT/$t" ] || { echo "$BT/$t missing (Android build-tools 36.0.0)"; exit 1; }; done
 command -v python3 >/dev/null || { echo "python3 missing"; exit 1; }
 
 mkdir -p "$HOME/builds" "$FAST_DIR" "$ROOT/dist"
@@ -170,10 +176,13 @@ if [ "$HOST_OS" = Darwin ]; then
   . "$ROOT/scripts/lib/maclock.sh"
   maclock_acquire android-build "${HUI_MAC_LOCK_WAIT:-2700}" || exit 3
   trap 'maclock_release' EXIT
+  [ "$FLAVOR" = personal ] || android_store_migrate   # under the lock, like build-apk.sh
 else
   exec 8>"$HOME/builds/.hermes-fast-$FLAVOR.lock"
   if ! flock -n 8; then echo "another fast build ($FLAVOR) runs, waiting up to 20 min"; flock -w 1200 8 || { echo "still busy, giving up"; exit 1; }; fi
 fi
+android_sdk_require fast "$ANDROID_HOME" || exit 1
+for t in zipalign apksigner; do [ -x "$BT/$t" ] || { echo "$BT/$t missing (Android build-tools 36.0.0)"; exit 1; }; done
 
 if [ -n "${HUI_BUILD_SHA:-}" ]; then
   SHA="$HUI_BUILD_SHA"   # remote lane: the host's copy has no .git, the label (incl. -dirty) comes from the caller
@@ -206,6 +215,7 @@ rsync -a --delete \
   --exclude node_modules --exclude /.expo/ --exclude /android/ --exclude /ios/ \
   --exclude /refs/ --exclude /dist/ --exclude '*.keystore' --exclude '*.jks' --exclude .env --exclude '.env.*' \
   "$ROOT/app/" "$FAST_DIR/app/"
+lane_stamp_check "$FAST_DIR/app" || exit 1   # remote lane: this run's sources, or no APK at all
 
 step "node_modules + native fingerprint"
 rm -f "$FAST_DIR/key"
@@ -225,7 +235,7 @@ cp "$BASE_DIR/base.apk" "$BASE_DIR/debug.keystore" "$BASE_DIR/assets.json" "$WOR
   || full_build "base APK does not hold the bundle its meta.json names"
 
 step "JS bundle (export:embed + hermesc)"
-HUI_BUILD_NUMBER="$BASE_NUMBER" HUI_BUILD_SOURCE="${SHA%-dirty}" scope bundle
+HUI_BUILD_NUMBER="$BASE_NUMBER" HUI_BUILD_SOURCE="${LANE_STAMP_SOURCE:-${SHA%-dirty}}" scope bundle
 node "$ROOT/scripts/lib/apk-fast.mjs" assets "$FAST_DIR/out/res" > "$WORK/assets.new.json"
 cmp -s "$WORK/assets.json" "$WORK/assets.new.json" || {
   diff <(node -e 'for (const k of Object.keys(require(process.argv[1]))) console.log(k)' "$WORK/assets.json") \

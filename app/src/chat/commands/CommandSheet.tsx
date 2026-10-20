@@ -1,20 +1,19 @@
 /**
- * Result sheets of slash commands: /usage (tokens only, never costs), /status, /skills (tap → prompt in the
- * composer), /help (tap → command in the composer). Reuses the model picker's bottom-sheet chrome.
+ * Result sheets of slash commands: /usage (tokens only, never costs), /status, /help (tap → command in the composer).
+ * /skills and /memory open the Skills & memory screen (library/). Reuses the model picker's bottom-sheet chrome.
  */
-import { memo, useState, type ReactNode } from 'react';
+import { memo, type ReactNode } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Text } from '../../ui/primitives/Text';
 import { useLocale, useT, type TKey } from '../../i18n';
-import { Button, useTheme } from '../../ui';
+import { useTheme } from '../../ui';
 import { ModelSheet } from '../ModelPicker';
-import type { Skill, SessionUsage, SkillsError } from './api';
+import type { SessionUsage } from './api';
 import type { CommandDef } from './registry';
 import { a11yState } from '../../ui/lib/a11yState';
 
 export type SheetState =
   | { kind: 'usage' | 'status'; loading: boolean; error?: string; data?: SessionUsage | null; local: { backend: string; model: string; options?: string } }
-  | { kind: 'skills'; loading: boolean; error?: SkillsError; skills?: Skill[] }
   | { kind: 'help'; commands: readonly CommandDef[] };
 
 type Props = {
@@ -28,14 +27,12 @@ export const CommandSheet = memo(function CommandSheet({ state, onClose, onFill 
   const tr = useT();
   if (!state) return null;
   const title =
-    state.kind === 'usage' ? tr('slash.sheet.usageTitle') : state.kind === 'status' ? tr('slash.sheet.statusTitle') : state.kind === 'skills' ? tr('slash.sheet.skillsTitle') : tr('slash.sheet.helpTitle');
+    state.kind === 'usage' ? tr('slash.sheet.usageTitle') : state.kind === 'status' ? tr('slash.sheet.statusTitle') : tr('slash.sheet.helpTitle');
   return (
     <ModelSheet open onClose={onClose} title={title}>
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         {state.kind === 'help' ? (
           <Help commands={state.commands} onFill={onFill} />
-        ) : state.kind === 'skills' ? (
-          <Skills state={state} onFill={onFill} />
         ) : (
           <Usage state={state} />
         )}
@@ -56,31 +53,6 @@ function Loading({ loading, error }: { loading: boolean; error?: string }) {
     );
   if (error) return <Text style={[t.typography.caption, styles.note, { color: t.colors.danger }]}>{error}</Text>;
   return null;
-}
-
-/** friendly localized headline; the raw server message stays behind a "Details" toggle */
-function ErrorWithDetails({ error }: { error: SkillsError }) {
-  const t = useTheme();
-  const tr = useT();
-  const [open, setOpen] = useState(false);
-  return (
-    <>
-      <Text style={[t.typography.caption, styles.note, { color: t.colors.danger }]}>{error.kind === 'auth' ? tr('backends.hermes.errors.apiKeyInvalid') : error.kind === 'hermesBug' ? tr('slash.sheet.skillsHermesBug') : tr('slash.sheet.skillsError')}</Text>
-      <Button
-        label={open ? tr('slash.sheet.detailsHide') : tr('slash.sheet.detailsShow')}
-        variant="tertiary"
-        size="small"
-        onPress={() => setOpen((o) => !o)}
-        accessibilityState={{ expanded: open }}
-        style={{ alignSelf: 'flex-start' }}
-      />
-      {open ? (
-        <Text selectable style={[t.typography.caption, styles.note, { color: t.colors.muted, fontFamily: t.fonts.mono }]}>
-          {error.details}
-        </Text>
-      ) : null}
-    </>
-  );
 }
 
 function KV({ k, v, strong }: { k: string; v: ReactNode; strong?: boolean }) {
@@ -140,39 +112,6 @@ function Usage({ state }: { state: Extract<SheetState, { kind: 'usage' | 'status
           {tokens}
         </>
       ) : null}
-    </>
-  );
-}
-
-function Skills({ state, onFill }: { state: Extract<SheetState, { kind: 'skills' }>; onFill(text: string): void }) {
-  const t = useTheme();
-  const tr = useT();
-  const skills = state.skills ?? [];
-  return (
-    <>
-      <Loading loading={state.loading} />
-      {state.error ? <ErrorWithDetails error={state.error} /> : null}
-      {!state.loading && !state.error ? (
-        <Text style={[t.typography.caption, styles.note, { color: t.colors.muted }]}>{skills.length ? tr('slash.sheet.skillsHint') : tr('slash.sheet.skillsEmpty')}</Text>
-      ) : null}
-      {skills.map((s) => (
-        <Pressable
-          key={s.name}
-          onPress={() => onFill(tr('slash.skillPrompt', { name: s.name }))}
-          accessibilityRole="button"
-          style={({ pressed }) => [styles.item, { borderBottomColor: t.colors.border }, pressed && { backgroundColor: t.colors.surfacePressed }]}
-        >
-          <Text style={[t.typography.callout, styles.itemName, { color: t.colors.text, fontFamily: t.fonts.mono }]}>
-            {s.name}
-            {s.category ? <Text style={{ color: t.colors.subtle, fontFamily: t.fonts.sans }}>{`  ${s.category}`}</Text> : null}
-          </Text>
-          {s.description ? (
-            <Text style={[t.typography.caption, styles.itemDesc, { color: t.colors.muted }]} numberOfLines={2}>
-              {s.description}
-            </Text>
-          ) : null}
-        </Pressable>
-      ))}
     </>
   );
 }

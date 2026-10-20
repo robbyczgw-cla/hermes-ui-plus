@@ -101,7 +101,7 @@ for (const seed of SEEDS) {
       '/p/%77riter/v1/models', '/p/WRITER/v1/models', '/p/nope/v1/models', '/p/writer/p/reader/v1/models',
       '/p/writer/../api/jobs', '/p/writer/%2e%2e/api/jobs', '/p/writer%2freader/v1/models',
       '/p/writer/%252e%252e/api/jobs', '/p/writer/bridge/status', '/p/__proto__/v1/models',
-      '/p/constructor/v1/models', '/p/writer/v1/runs', '/p/writer/api/jobs', '/p//v1/models',
+      '/p/constructor/v1/models', '/p/writer/v1/runs', '/p/writer/api/jobs/nothex', '/p//v1/models',
     ];
     for (let i = 0; i < ROUNDS; i++) {
       const result = await request(rejected[next(rejected.length)]);

@@ -44,6 +44,7 @@ export const conversations = {
     code: 'Código',
     image: 'Imagen',
     file: 'Archivo',
+    tool: 'Llamada a herramienta',
     images: '{count} imágenes',
   },
   group: {

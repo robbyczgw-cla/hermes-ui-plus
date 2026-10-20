@@ -22,8 +22,11 @@ import {
   type UseConversation,
 } from '../conversations';
 import { HermesOptionsSheet, chatOptionsSummary, effectiveChatOptions, modelLocked, useHermesCapabilities, useHermesChat, useHermesModelLock } from '../hermes';
+import { sessionsSupported, subscribeSupport } from '../hermes/support';
+import { LiveProvider, type LiveController } from '../live/LiveProvider';
 import { withBot } from '../hermes/bots';
 import { useT } from '../i18n';
+import { setImageSettingsOpener } from '../images/settingsLink';
 import { isDesktopApp, onDesktopCommand, requestComposerFocus } from '../desktop/bridge';
 import { useWindowVibrancy } from '../desktop/chrome';
 import { deleteConversationState } from '../nodestate';
@@ -51,6 +54,11 @@ import { usePendingApprovalTarget } from '../approvals/usePendingApprovalTarget'
 import { quickConversationId } from '../quick/core';
 import { useQuickAvailability } from '../quick/hooks';
 import { closeQuick, useQuickOpen } from '../quick/nav';
+import { libraryApplies, libraryRoute } from '../library/source';
+import { useBotsTab } from '../bots/useBotsTab';
+import { setDrawerTab, useDrawerTab, useReportAttention, type DrawerTab } from '../bots/state';
+import { refreshBotChats } from '../bots/refresh';
+import { DEFAULT_BOT } from '../hermes/bots';
 
 // the quick thread (⚡) is its own lazy chunk: nothing of it loads until it is opened once
 const QuickSession = lazy(() => import('../quick/QuickSession'));
@@ -224,14 +232,30 @@ export function ChatScreen() {
     [profiles, active.id, setActive, convs],
   );
 
-  // a new chat stays on the Hermes bot of the open chat (picker "Bot" section, hermes/bots.ts)
-  const openBot = activeConv?.profileId === active.id ? activeConv.hermesProfile : undefined;
+  // bots have their own thread in the Bots tab, so a new chat always starts on the default bot (bots/)
   const newChat = useCallback(() => {
     closeQuick();
     stopSpeaking();
-    create(active, { bot: openBot }); // also sets it active; re-uses an empty draft of this profile
+    create(active); // also sets it active; re-uses an empty draft of this profile
     setDrawerOpen(false);
-  }, [create, active, openBot]);
+  }, [create, active]);
+
+  // Bots tab ("Chats | Bots", bots/): only when the active Hermes connection has a bot besides the default
+  const botsTab = useBotsTab(active, { enabled: connReady && convsReady, onOpen: openConversation });
+  const storedTab = useDrawerTab();
+  const convsRef = useRef(convs);
+  useLayoutEffect(() => {
+    convsRef.current = convs;
+  });
+  const drawerTab: DrawerTab = botsTab ? storedTab : 'chats';
+  const refreshBots = botsTab?.refresh;
+  const pickTab = useCallback(
+    (tab: DrawerTab) => {
+      setDrawerTab(tab);
+      if (tab === 'bots') refreshBots?.(true);
+    },
+    [refreshBots],
+  );
 
   // desktop app (Tauri): global shortcut / tray / ⌘N → fresh chat with the composer focused
   useEffect(
@@ -256,6 +280,19 @@ export function ChatScreen() {
     router.push('/settings');
   }, [router]);
 
+  // an image block without photos links to the setting that explains it (images/miss.ts): Settings, filtered to that row
+  const tr = useT();
+  useEffect(
+    () =>
+      setImageSettingsOpener(
+        (target) => {
+          setDrawerOpen(false);
+          router.push({ pathname: '/settings', params: { q: tr(target === 'loading' ? 'settings.media.images' : 'settings.media.imageSearch.label') } });
+        },
+      ),
+    [router, tr],
+  );
+
   // Error screen → "Verbindung wechseln": whatever is picked in settings, coming back must not land
   // in the crashed chat again (picking the same profile keeps the open chat) → start a new chat.
   const switchFromCrashed = useRef<string | null>(null);
@@ -277,12 +314,39 @@ export function ChatScreen() {
   }, []);
 
   const profileName = useCallback((id: string) => profiles.find((p) => p.id === id)?.name, [profiles]);
+  // bots' threads (bots/refresh.ts, throttled): every bot with a Bots tab, else the default bot's thread, which holds the
+  // reminders and routine results of a normal user and is then a row of the chat list
+  // `force`: the user opened the drawer (always look); after a list sync the lookup is throttled (30 s)
+  const lookUpBotChats = useCallback(
+    (force: boolean) => {
+      if (botsTab) refreshBots?.(force);
+      else if (active.kind === 'hermes' && active.bridge && active.apiKey) {
+        refreshBotChats({ id: active.id, kind: 'hermes', baseUrl: active.baseUrl, apiKey: active.apiKey }, DEFAULT_ONLY, () => convsRef.current, force);
+      }
+    },
+    [botsTab, refreshBots, active],
+  );
   const openDrawer = useCallback(() => {
     if (wide) setSidebarPrefs({ collapsed: false });
     else setDrawerOpen(true);
     void refreshSessions();
+    lookUpBotChats(true);
     setPrefetchKick((n) => n + 1);
-  }, [refreshSessions, wide]);
+  }, [refreshSessions, wide, lookUpBotChats]);
+  // also after every list sync (start, foreground): on wide windows the sidebar never "opens", and a reminder that fired
+  // while the app was closed must show up without a tap (the bridge's live event covers the time the app is open)
+  const lastSyncAt = sync.lastSyncAt;
+  useEffect(() => {
+    if (lastSyncAt) lookUpBotChats(false);
+  }, [lastSyncAt, lookUpBotChats]);
+
+  // Skills & memory (drawer row) of the open chat's bot; Settings keeps its row too
+  const openBot = activeConv?.profileId === active.id ? activeConv.hermesProfile : undefined;
+  const libraryShown = libraryApplies(active);
+  const openLibrary = useCallback(() => {
+    setDrawerOpen(false);
+    router.push(libraryRoute(openBot) as never);
+  }, [router, openBot]);
 
   // web / desktop app: ⌘/Ctrl+B sidebar, ⌘/Ctrl+K search, ⌘/Ctrl+N (or ⇧⌘O) new chat. Not while settings /
   // gallery are on top. The Tauri menu owns ⌘N there (its accelerator fires `new-chat` above).
@@ -319,10 +383,12 @@ export function ChatScreen() {
     onNewChat: newChat,
     onDeleted,
     onOpenSettings: openSettings,
+    onOpenLibrary: libraryShown ? openLibrary : undefined,
     profileName,
     remote,
     older: sync.older,
     searchFocus,
+    bots: botsTab ? { tab: botsTab, drawerTab, onTab: pickTab } : undefined,
   };
   // phone: slide-in drawer (also closes when the window grows past the breakpoint)
   const drawer = wide ? null : <ConversationDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} {...listProps} />;
@@ -510,6 +576,10 @@ function HermesSessionInner({ conv, transcript, profile, onNewChat, onOpenDrawer
     if (convId) setBranchSeed(convId, undefined);
   }, [convId, setBranchSeed]);
   const { prefs } = usePreferences();
+  // live cards need Hermes' session history as the shared truth: on while the server has (or may have) the session API
+  const liveCards = useSessionsSupported(botConn) !== false;
+  const liveRef = useRef<LiveController | null>(null);
+  const liveOutgoing = useCallback((text: string) => (liveCards ? (liveRef.current?.outgoing(text) ?? null) : null), [liveCards]);
   const chat = useHermesChat(conn, {
     ...sessionOptions(conv),
     modelOptions: effectiveChatOptions(modelOptions, modelCaps),
@@ -517,6 +587,8 @@ function HermesSessionInner({ conv, transcript, profile, onNewChat, onOpenDrawer
     approvalTimeoutSeconds: caps.caps?.approvalTimeoutSeconds,
     branchSeed: conv.meta?.branchSeed,
     onBranchSeedUsed,
+    liveCards,
+    liveOutgoing,
   });
   // Hermes v0.22: the chat's own model pick is locked on its Hermes session (survives restarts, other Hermes clients)
   useHermesModelLock({
@@ -532,6 +604,8 @@ function HermesSessionInner({ conv, transcript, profile, onNewChat, onOpenDrawer
   });
   // notification tap "Hermes braucht eine Freigabe" → openPendingApproval(conversationId, runId) (approvals/stackModel.ts)
   usePendingApprovalTarget(conv.meta?.id, chat.openApproval);
+  // pending approval cards → "Wartet auf dich" in the Bots tab (bots/), also while this chat runs in the background
+  useReportAttention(conv.meta?.id, profile.id, bot, chat.approvals);
   usePersistOnNewMessage(conv, chat.messages, { stop: chat.stop, label: profile.name, profileId: profile.id });
   const applyPending = useApplyRemoteTranscript(chat, transcript, conv);
   const historyPending = historyPendingFor({ settled: transcript.settled, applyPending });
@@ -572,7 +646,7 @@ function HermesSessionInner({ conv, transcript, profile, onNewChat, onOpenDrawer
     [supportsOptions, summary, tr, modelOptions, conv.setModelOptions, modelCaps.reasoning, modelCaps.fast, modelCaps.canDisableReasoning],
   );
 
-  return (
+  const view = (
     <>
       <ChatView
         chat={chat}
@@ -602,7 +676,22 @@ function HermesSessionInner({ conv, transcript, profile, onNewChat, onOpenDrawer
       ) : null}
     </>
   );
+  return liveCards && convId ? (
+    <LiveProvider conversationId={convId} messages={chat.messages} controllerRef={liveRef}>
+      {view}
+    </LiveProvider>
+  ) : (
+    view
+  );
 }
+
+/** Does this server offer Hermes' session API (undefined = not probed yet)? Re-renders when the probe answers. */
+function useSessionsSupported(conn: { baseUrl: string; apiKey: string }): boolean | undefined {
+  return useSyncExternalStore(subscribeSupport, () => sessionsSupported(conn), () => undefined);
+}
+
+/** the default bot only (bots/refresh.ts) */
+const DEFAULT_ONLY = [{ name: DEFAULT_BOT, default: true }];
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },

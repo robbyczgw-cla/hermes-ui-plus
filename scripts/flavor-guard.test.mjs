@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { gzipSync } from 'node:zlib';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -48,6 +49,30 @@ test('output with an overlay file, a denylisted term, the overlay path or a real
     } finally {
       f.done();
     }
+  }
+});
+
+test('output: compressed files are checked by their content, not their compressed bytes', () => {
+  // a gzip whose header comment holds the term: the raw bytes match by chance, the content is clean -> passes
+  const gz = gzipSync(Buffer.from('console.log("clean bundle");'));
+  gz[3] |= 0x10; // FCOMMENT
+  const chance = Buffer.concat([gz.subarray(0, 10), Buffer.from('secrethost\0'), gz.subarray(10)]);
+  let f = fixture();
+  try {
+    writeFileSync(join(f.out, 'app.js.gz'), chance);
+    const r = f.run('--output', f.out);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+  } finally {
+    f.done();
+  }
+  // the term inside the compressed content -> fails
+  f = fixture();
+  try {
+    writeFileSync(join(f.out, 'app.js.gz'), gzipSync(Buffer.from('const h = "https://secrethost:8790";')));
+    const r = f.run('--output', f.out);
+    assert.equal(r.status, 1, r.stdout);
+  } finally {
+    f.done();
   }
 });
 

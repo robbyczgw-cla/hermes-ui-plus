@@ -2,8 +2,9 @@
 
 First feature: quick answers. One-off questions are answered by a fast model through Hermes' own providers
 and credentials (auxiliary slot ``auxiliary.hui_quick``), without the agent: no tools, no memory, no
-session, a short prompt. The UI Bridge reaches them over a loopback listener protected by an
-installer-generated secret.
+session, a short prompt. Second feature (0.2.0): read-only skills/memory library routes for the app. Third (0.2.0): bots,
+i.e. Hermes profiles the app lists, creates and edits (bots.py). The UI Bridge reaches them over a loopback listener
+protected by an installer-generated secret.
 
 Plugin rules (ADR 0001): public ``PluginContext`` hooks only, feature-detected with ``hasattr``; stdlib
 only; the single Hermes import lives in ``hermes_adapter.py``; loopback only; fixed operations; nothing
@@ -65,6 +66,8 @@ def _register(ctx: Any) -> None:
         return
 
     from . import hermes_adapter
+    from .bots import BotsService
+    from .library import LibraryService, profile_name
     from .quick import QuickService
     from .runner import ListenerThread
     from .secret import default_secret_path, load_secret
@@ -79,10 +82,13 @@ def _register(ctx: Any) -> None:
         logger.warning("%s: unusable secret file (%s); listener off", PLUGIN_NAME, exc)
         return
 
-    backend = hermes_adapter.HermesAuxBackend(AUX_TASK_KEY, home=str(_hermes_home()))
+    home = str(_hermes_home())
+    backend = hermes_adapter.HermesAuxBackend(AUX_TASK_KEY, home=home)
+    library = LibraryService(settings, hermes_adapter.HermesLibrary(home), home)
+    bots = BotsService(settings, hermes_adapter.HermesBots(), profile_name(home))
     listener = ListenerThread(
         lambda: QuickService(settings, backend, task=AUX_TASK_KEY, inherit_from=AUX_INHERIT_FROM),
-        secret, host=settings.host, port=settings.port)
+        secret, host=settings.host, port=settings.port, library=library, bots=bots)
     listener.start()  # False = another process serves; this one stays passive and takes over if that one exits
     if hasattr(ctx, "on_unload"):
         ctx.on_unload(listener.stop)

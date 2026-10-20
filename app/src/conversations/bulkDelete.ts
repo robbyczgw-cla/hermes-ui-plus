@@ -84,7 +84,8 @@ export function selectableIds(items: readonly ConversationMeta[], isRunning: (id
 
 /** May this chat ever be deleted on Hermes? Only the app's own Hermes sessions – never foreign or non-Hermes chats. */
 export function remoteDeletable(m: ConversationMeta): boolean {
-  return m.profileKind === 'hermes' && !!m.hermesSessionId && isAppConversation(m);
+  // a bot's Bot Chat is shared with Hermes Desktop (bots/): never deleted from here
+  return m.profileKind === 'hermes' && !!m.hermesSessionId && isAppConversation(m) && !m.botChat;
 }
 
 export type PlanOptions = {
@@ -118,6 +119,8 @@ export function planDelete(candidates: readonly ConversationMeta[], o: PlanOptio
   let skippedRunning = 0;
   let skippedPinned = 0;
   for (const m of candidates) {
+    // a bot's Bot Chat is not a chat of the list (Bots tab): "delete all chats" leaves it alone
+    if (m.botChat) continue;
     if (o.isRunning(m.id)) {
       skippedRunning++;
       continue;

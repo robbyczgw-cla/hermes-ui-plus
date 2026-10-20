@@ -1,9 +1,11 @@
 /**
  * Pure helpers to turn live ChatMessages into what we persist.
  */
+import { cronDelivery } from '../bots/core.ts';
 import type { ChatMessage } from '../hermes/types.ts';
 import { compactDetails } from '../hermes/trace.ts';
 import { answerText } from '../hermes/progressNotes.ts';
+import { answerOutputText } from '../chat/toolMarkup.ts';
 import { queuedForStorage, withoutUnackedAnswers } from '../hermes/pendingSend.ts';
 import { MESSAGES_MAX_BYTES, MESSAGE_CAP, PREVIEW_MAX } from './types.ts';
 
@@ -174,12 +176,19 @@ export function messagesSignature(messages: ChatMessage[]): string {
   return `${messages.length}|${(a >>> 0).toString(36)}|${(b >>> 0).toString(36)}`;
 }
 
+/** stored (German) preview marker for raw tool-call markup in an answer (chat/toolMarkup.ts: the answer shows a notice) */
+const TOOL_MARKER = '[Werkzeug]';
+
 /** One-line preview of the conversation (last message with text). Fenced blocks (hui/html/code) become a short marker. */
 export function previewOf(messages: ChatMessage[], max: number = PREVIEW_MAX): string {
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     // agent turns: the final answer, not the first interim note ("Ich schaue kurz nach…")
-    const p = flattenHead(m.role === 'assistant' ? answerText(m) : m.text, 2 * max + 16) || attachmentMarker(m);
+    // a job's delivery into a Bot Chat reads "Preis-Check: 289 € bei Shop A", not the injected header (bots/core.ts)
+    const cron = m.role === 'user' ? cronDelivery(m.text) : null;
+    // raw tool-call markup of an answer → "[Werkzeug]", never the call's JSON (PC-07)
+    const src = cron ? `${cron.name}: ${cron.output}` : m.role === 'assistant' ? answerOutputText(answerText(m), TOOL_MARKER) : m.text;
+    const p = flattenHead(src, 2 * max + 16) || attachmentMarker(m);
     if (p) return truncate(p, max);
   }
   return '';
@@ -212,12 +221,12 @@ function flatten(text: string): string {
   return t.replace(/[`*_#>]+/g, '').replace(/\s+/g, ' ').trim();
 }
 
-/** flatten(m.text) per message object (searchTextOf runs on every save of a conversation) */
+/** flatten(m.text) per message object (searchTextOf runs on every save of a conversation); answers as they show */
 const flatTexts = new WeakMap<ChatMessage, string>();
 
 function flatText(m: ChatMessage): string {
   let f = flatTexts.get(m);
-  if (f === undefined) flatTexts.set(m, (f = flatten(m.text)));
+  if (f === undefined) flatTexts.set(m, (f = flatten(m.role === 'assistant' ? answerOutputText(m.text, '') : m.text)));
   return f;
 }
 
@@ -265,22 +274,23 @@ export function searchTextOf(messages: ChatMessage[], maxChars = 40_000): string
 }
 
 /** Stored (German) preview markers -> i18n key suffix under `conversations.marker.*`. */
-const MARKER_KEYS: Record<string, 'graphic' | 'component' | 'code' | 'image' | 'file'> = {
+const MARKER_KEYS: Record<string, 'graphic' | 'component' | 'code' | 'image' | 'file' | 'tool'> = {
   Grafik: 'graphic',
   Komponente: 'component',
   Code: 'code',
   Bild: 'image',
   Datei: 'file',
+  Werkzeug: 'tool',
 };
 
-type MarkerTr = (key: `conversations.marker.${'graphic' | 'component' | 'code' | 'image' | 'file' | 'images'}`, vars?: Record<string, string | number>) => string;
+type MarkerTr = (key: `conversations.marker.${'graphic' | 'component' | 'code' | 'image' | 'file' | 'tool' | 'images'}`, vars?: Record<string, string | number>) => string;
 
 /**
  * Display-time localization of the markers persisted in `ConversationMeta.preview`
- * ("[Komponente]", "[Bild]", "[3 Bilder]" ...). Stored data stays German and unchanged.
+ * ("[Komponente]", "[Bild]", "[3 Bilder]", "[Werkzeug]" ...). Stored data stays German and unchanged.
  */
 export function localizePreview(preview: string, tr: MarkerTr): string {
-  return preview.replace(/\[(Grafik|Komponente|Code|Bild|Datei|(\d+) Bilder)\]/g, (all, word: string, n?: string) => {
+  return preview.replace(/\[(Grafik|Komponente|Code|Bild|Datei|Werkzeug|(\d+) Bilder)\]/g, (all, word: string, n?: string) => {
     if (n) return `[${tr('conversations.marker.images', { count: Number(n) })}]`;
     const k = MARKER_KEYS[word];
     return k ? `[${tr(`conversations.marker.${k}`)}]` : all;

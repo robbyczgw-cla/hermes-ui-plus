@@ -46,6 +46,8 @@ export const setImageSearchMode = (m: ImageSearchMode) => {
   modeListeners.forEach((l) => l());
 };
 export const setOwnImageConfig = (c: OwnConfig | null) => ownImageSearch.setConfig(c);
+/** Settings → Medien → Bildersuche (read during render; `useWebImagesEnabled` re-renders on changes). */
+export const getImageSearchMode = (): ImageSearchMode => mode;
 
 const subscribe = (l: () => void) => {
   const offs = [webImageSearch.subscribe(l), ownImageSearch.subscribe(l)];

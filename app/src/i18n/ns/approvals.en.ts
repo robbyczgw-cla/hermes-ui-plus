@@ -5,6 +5,8 @@ export const approvals = {
   title: {
     blocked: 'Hermes was blocked',
     request: 'Hermes wants to run something',
+    blockedBot: '{name} was blocked',
+    requestBot: '{name} wants to run something',
   },
   risk: {
     flagged: 'Flagged as dangerous by Hermes',
@@ -37,6 +39,12 @@ export const approvals = {
       label: 'Deny',
       a11y: 'Deny this command',
     },
+    alwaysBot: {
+      label: 'Always allow',
+      hint: 'Only for {name}',
+      hintCategory: 'Only for {name} · covers every command of the kind "{category}"',
+      a11y: 'Always allow similar commands for {name}; other bots keep asking',
+    },
     retry: '{label} – try again',
     more: 'More options',
     less: 'Fewer options',
@@ -46,6 +54,8 @@ export const approvals = {
     body: 'The pattern is added permanently to Hermes\' global allowlist. Similar commands then run without asking – also in Telegram and cron jobs.',
     yes: 'Yes, always allow everywhere',
     back: 'Back',
+    bodyBot: 'The pattern goes into the allowlist of {name} for good. Similar commands then run for {name} without asking, also in routines. Other bots keep asking.',
+    yesBot: 'Yes, always allow for {name}',
   },
   error: {
     notPending: 'This request was already answered or has expired.',
@@ -65,6 +75,12 @@ export const approvals = {
   },
   reason: {
     label: 'Reason given by Hermes',
+    labelBot: 'Reason given by {name}',
+  },
+  waiting: {
+    since: '{name} has been waiting for you since {time}',
+    sinceA11y: '{name} has been waiting for your answer since {time}',
+    expired: 'Expired, nothing was run. Write to {name} if it should try again.',
   },
   stack: {
     position: 'Approval {index} of {total}',
@@ -80,6 +96,7 @@ export const approvals = {
     once: 'Allowed (once)',
     session: 'Allowed (for this task)',
     always: 'Always allowed (everywhere)',
+    alwaysBot: 'Always allowed (only for {name})',
     deny: 'Denied',
     expired: 'Expired – denied',
     cancelled: 'Not answered – run ended',

@@ -28,6 +28,10 @@ import { GROUP_KEYS, groupConversations } from './group';
 import { ConvIcon } from './icons';
 import { type ConversationMeta, type ProfileKind, type SearchHit } from './types';
 import { a11yState } from '../ui/lib/a11yState';
+import { BotRoster, DrawerTabs } from '../bots/BotRoster';
+import { isBotChatEntry } from '../bots/core';
+import type { DrawerTab } from '../bots/state';
+import type { BotsTab } from '../bots/useBotsTab';
 
 const KIND_KEYS: Record<ProfileKind, TKey> = {
   hermes: 'conversations.profileKind.hermes',
@@ -62,6 +66,8 @@ export type ConversationListProps = {
   safeArea?: boolean;
   /** shows an "Einstellungen" row at the bottom */
   onOpenSettings?: () => void;
+  /** Skills & memory of the open chat's bot (Hermes connections and the demo); undefined = no row */
+  onOpenLibrary?: () => void;
   /**
    * Hermes session sync (`useHermesSessionSync(...).remote`): source badges (Telegram/CLI/App),
    * rename → PATCH title, delete → "Nur aus Liste entfernen" / "In Hermes löschen". Omit = local only.
@@ -78,6 +84,11 @@ export type ConversationListProps = {
   header?: ReactNode;
   /** chats were archived (e.g. to leave the open one) */
   onArchived?: (ids: string[]) => void;
+  /**
+   * the connection has bots (bots/useBotsTab.ts): "Chats | Bots" switch on top, the Bots tab instead of the list.
+   * Omit = no switch, the drawer is exactly the chat list.
+   */
+  bots?: { tab: BotsTab; drawerTab: DrawerTab; onTab(tab: DrawerTab): void };
 };
 
 type Dialog =
@@ -85,7 +96,7 @@ type Dialog =
   | { kind: 'notice'; meta: ConversationMeta; text: string }
   | null;
 
-export function ConversationList({ onSelect, onNewChat, onDeleted, activeId, profileName, safeArea = true, onOpenSettings, remote, older, searchFocus, header, onArchived }: ConversationListProps) {
+export function ConversationList({ onSelect, onNewChat, onDeleted, activeId, profileName, safeArea = true, onOpenSettings, onOpenLibrary, remote, older, searchFocus, header, onArchived, bots }: ConversationListProps) {
   const t = useTheme();
   const tr = useT();
   const api = useConversations();
@@ -108,7 +119,10 @@ export function ConversationList({ onSelect, onNewChat, onDeleted, activeId, pro
   const running = useRunningIds();
   // what the drawer lists – list and search alike (drawerFilter.ts; the desktop menus use the same rule): this build's
   // kinds, Settings → Chat → "Chats" (chatScope.ts)
-  const view = useDrawerView();
+  const drawerView = useDrawerView();
+  // without a Bots tab the default bot's thread (reminders, routine results) is a row of the list (drawerFilter.ts)
+  const withBots = !!bots;
+  const view = useMemo(() => (withBots ? drawerView : { ...drawerView, defaultBotChat: true }), [drawerView, withBots]);
 
   // debounced async search (title + message text)
   const { search, list } = api;
@@ -126,8 +140,12 @@ export function ConversationList({ onSelect, onNewChat, onDeleted, activeId, pro
   }, [query, search, list]);
   const rawHits = query.trim() ? result : null;
   // chats of kinds this build hides (flavor.ts) stay on disk but are neither listed nor found
-  const filteredHits = useMemo(() => (rawHits ? rawHits.filter((h) => shownInDrawer(h.meta, view)) : rawHits), [rawHits, view]);
-  const allVisible = useMemo(() => filterDrawer(api.list, view), [api.list, view]);
+  // with a Bots tab, a bot's Bot Chat synced earlier as an ordinary chat (e.g. Hermes Desktop's) lives there, not here
+  const filteredHits = useMemo(() => (rawHits ? rawHits.filter((h) => shownInDrawer(h.meta, view) && !(withBots && isBotChatEntry(h.meta))) : rawHits), [rawHits, view, withBots]);
+  const allVisible = useMemo(() => {
+    const list = filterDrawer(api.list, view);
+    return withBots && list.some(isBotChatEntry) ? list.filter((c) => !isBotChatEntry(c)) : list;
+  }, [api.list, view, withBots]);
   // selection filters: "Älter als 7 Tage", "Nur dieses Profil" (= profile of the open chat)
   const activeProfileId = activeId ? api.get(activeId)?.profileId : undefined;
   const listFilter = useMemo(
@@ -144,7 +162,8 @@ export function ConversationList({ onSelect, onNewChat, onDeleted, activeId, pro
     () => (hits ? hits.map((h) => h.meta) : archiveOpen ? [...mainVisible, ...archivedVisible] : mainVisible),
     [hits, mainVisible, archivedVisible, archiveOpen],
   );
-  const selectable = useMemo(() => selectableIds(shown, (id) => running.has(id)), [shown, running]);
+  // a bot's thread is never part of a bulk action (bulkDelete.ts skips it as well)
+  const selectable = useMemo(() => selectableIds(shown.filter((c) => !c.botChat), (id) => running.has(id)), [shown, running]);
   const allSelected = selectable.length > 0 && selectable.every((id) => sel.selected.has(id));
 
   // ticks only for rows that are shown and not running (filter changed, deleted elsewhere, turn started)
@@ -163,7 +182,7 @@ export function ConversationList({ onSelect, onNewChat, onDeleted, activeId, pro
   }, [sel.active]);
 
   const toggle = (id: string) => {
-    if (running.has(id)) return;
+    if (running.has(id) || api.get(id)?.botChat) return;
     haptic('selection');
     dispatchSel({ type: 'toggle', id });
   };
@@ -204,9 +223,19 @@ export function ConversationList({ onSelect, onNewChat, onDeleted, activeId, pro
   // scrolled to the end (also: the list is shorter than the drawer) → next page; a failed attempt waits for a tap
   const onEndReached = pager && !pager.loading && !pager.error ? loadOlder : undefined;
 
+  const botsTab = bots && bots.drawerTab === 'bots' ? bots.tab : null;
+  const tabs = bots && !sel.active ? (
+    <View style={styles.tabsRow}>
+      <DrawerTabs tab={bots.drawerTab} onTab={bots.onTab} attention={bots.tab.rows.some((r) => r.badge === 'approval') || bots.tab.waiting.count > 0} />
+    </View>
+  ) : null;
+
   return (
     <Wrapper style={[styles.root, { backgroundColor: surfaceBg }]} edges={['top', 'bottom']}>
       {header}
+      {tabs}
+      {botsTab ? <BotRoster tab={botsTab} activeId={activeId} now={now} /> : null}
+      {botsTab ? null : (<>
       <View style={styles.top}>
         <View style={[styles.search, { backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.control }]}>
           <ConvIcon name="search" size={16} color={t.colors.subtle} />
@@ -278,8 +307,8 @@ export function ConversationList({ onSelect, onNewChat, onDeleted, activeId, pro
             onPress={() => (sel.active ? toggle(item.meta.id) : onSelect(item.meta))}
             // the finger is down: start reading the transcript now, the tap lands ~100 ms later
             onPressIn={sel.active ? undefined : () => api.prefetch(item.meta.id)}
-            onLongPress={() => (sel.active ? toggle(item.meta.id) : enterSelection(item.meta.id))}
-            onMenu={() => setDialog({ kind: 'menu', meta: item.meta })}
+            onLongPress={() => (sel.active ? toggle(item.meta.id) : item.meta.botChat ? onSelect(item.meta) : enterSelection(item.meta.id))}
+            onMenu={item.meta.botChat ? undefined : () => setDialog({ kind: 'menu', meta: item.meta })}
           />
         )}
         ListEmptyComponent={
@@ -310,6 +339,8 @@ export function ConversationList({ onSelect, onNewChat, onDeleted, activeId, pro
         />
       ) : null}
 
+      </>)}
+
       {bulkOpen ? (
         <BulkDeleteDialog
           mode="selection"
@@ -321,6 +352,21 @@ export function ConversationList({ onSelect, onNewChat, onDeleted, activeId, pro
             dispatchSel({ type: 'exit' });
           }}
         />
+      ) : null}
+
+      {onOpenLibrary && !sel.active ? (
+        <Pressable
+          onPress={onOpenLibrary}
+          testID="drawer-library"
+          accessibilityRole="button"
+          accessibilityLabel={tr('library.title')}
+          style={({ pressed }) => [styles.footer, { borderTopColor: t.colors.border }, pressed && { backgroundColor: t.colors.surfacePressed }]}
+        >
+          <ConvIcon name="library" size={18} color={t.colors.muted} />
+          <HText variant="callout" color="muted" style={{ flex: 1 }}>
+            {tr('library.title')}
+          </HText>
+        </Pressable>
       ) : null}
 
       {onOpenSettings && !sel.active ? (
@@ -439,11 +485,15 @@ function Row({
   onPress: () => void;
   onPressIn?: () => void;
   onLongPress: () => void;
-  onMenu: () => void;
+  /** undefined: no "⋯" (a bot's thread: nothing to rename, archive or delete) */
+  onMenu?: () => void;
 }) {
   const t = useTheme();
   const tr = useT();
-  const sub = localizePreview(snippet ?? meta.preview, tr);
+  // the default bot's thread before its transcript is here: what it holds instead of "…"
+  const sub = meta.botChat && meta.preview === '…' && !snippet ? tr('bots.roster.threadHint') : localizePreview(snippet ?? meta.preview, tr);
+  // the default bot's thread is "Hermes" (its Hermes title "Bot Chat" is a convention, not a name)
+  const title = meta.botChat ? tr('bots.roster.defaultName') : displayTitle(meta.title, tr('conversations.list.newChat'));
   // "neue Antwort" until the chat is opened (background/noticeState); "läuft" while its turn streams
   const unreadSet = useSyncExternalStore(unreadStore.subscribe, unreadStore.get, unreadStore.get);
   const unread = !active && unreadSet.has(meta.id);
@@ -464,7 +514,7 @@ function Row({
         accessibilityRole={selecting ? 'checkbox' : 'button'}
         {...a11yState(selecting ? { checked: !!selected, disabled: !!running } : undefined)}
         accessibilityLabel={tr('conversations.list.rowLabel', {
-          title: displayTitle(meta.title, tr('conversations.list.newChat')),
+          title,
           source: (source ?? kindLabel(tr, meta.profileKind)) + (meta.hermesProfile ? `, ${tr('bots.drawer.badgeA11y', { name: meta.hermesProfile })}` : ''),
         })}
         accessibilityHint={selecting ? (running ? tr('conversations.list.running') : tr('conversations.list.rowSelectHint')) : tr('conversations.list.rowHint')}
@@ -473,7 +523,7 @@ function Row({
         <View style={styles.titleLine}>
           {meta.pinned ? <ConvIcon name="pin" size={13} color={t.colors.subtle} /> : null}
           <HText variant="bodyStrong" numberOfLines={1} style={styles.flex}>
-            {displayTitle(meta.title, tr('conversations.list.newChat'))}
+            {title}
           </HText>
           {running ? (
             <View style={styles.liveTag} accessibilityLabel={tr('chat.background.running')}>
@@ -506,7 +556,7 @@ function Row({
           ) : null}
         </View>
       </Pressable>
-      {selecting ? null : (
+      {selecting || !onMenu ? null : (
         <Pressable onPress={onMenu} hitSlop={4} style={styles.more} accessibilityRole="button" accessibilityLabel={tr('conversations.list.moreActions')}>
           <ConvIcon name="more" size={18} color={t.colors.subtle} />
         </Pressable>
@@ -758,6 +808,7 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   flex: { flex: 1 },
   top: { paddingHorizontal: 12, paddingTop: 12, gap: 10 },
+  tabsRow: { paddingHorizontal: 12, paddingTop: 12 },
   search: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, height: 40 },
   input: { flex: 1, paddingVertical: 0, height: 40, ...noOutline },
   topRow: { flexDirection: 'row', gap: 8 },

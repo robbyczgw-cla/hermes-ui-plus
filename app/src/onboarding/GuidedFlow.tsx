@@ -142,6 +142,7 @@ export function GuidedFlow({ existingProfiles = [], onSaveConnection, onFinish, 
       // no back: the connection is saved already
       screen = (
         <ConsentStep
+          profile={saved}
           onAccept={() => {
             void acceptAiConsent();
             dispatch({ type: 'consented' });

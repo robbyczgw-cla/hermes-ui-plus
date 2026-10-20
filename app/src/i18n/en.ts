@@ -19,9 +19,14 @@ import { compliance as complianceNS } from './ns/compliance.en.ts';
 import { menus as menusNS } from './ns/menus.en.ts';
 import { desktop as desktopNS } from './ns/desktop.en.ts';
 import { bots as botsNS } from './ns/bots.en.ts';
+import { botCreate as botCreateNS } from './ns/botCreate.en.ts';
 import { quick as quickNS } from './ns/quick.en.ts';
 import { support as supportNS } from './ns/support.en.ts';
 import { share as shareNS } from './ns/share.en.ts';
+import { live as liveNS } from './ns/live.en.ts';
+import { routines as routinesNS } from './ns/routines.en.ts';
+import { library as libraryNS } from './ns/library.en.ts';
+import { whatsNew as whatsNewNS } from './ns/whatsNew.en.ts';
 
 type Dict = typeof de;
 
@@ -46,9 +51,14 @@ export const en = {
   menus: menusNS,
   desktop: desktopNS,
   bots: botsNS,
+  botCreate: botCreateNS,
   quick: quickNS,
   support: supportNS,
   share: shareNS,
+  live: liveNS,
+  routines: routinesNS,
+  library: libraryNS,
+  whatsNew: whatsNewNS,
   actions: {
     send: 'Send',
     cancel: 'Cancel',

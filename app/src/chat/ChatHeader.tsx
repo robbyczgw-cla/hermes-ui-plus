@@ -10,6 +10,10 @@ import { useChatLayout } from './ChatLayoutContext';
 import { headerDetail, type HeaderDetail } from './headerDetail';
 import { Icon } from './icons';
 import type { Health } from './useConnectionHealth';
+import { BotAvatar } from '../bots/BotAvatar';
+
+/** a bot's Bot Chat (bots/): avatar + name + one status line; `detail` = the calm line (description / model) */
+export type HeaderBot = { name: string; bot?: string; color?: string; status: 'idle' | 'working' | 'waiting'; detail?: string; /** name tap: "Über <Name>" (bots/BotInfoSheet.tsx) */ onInfo?: () => void };
 
 type Props = {
   topInset: number;
@@ -36,6 +40,8 @@ type Props = {
   options?: { label: string; active: boolean; onPress(): void };
   /** offline demo profile: "DEMO · Vorbereitete Antworten · Verbindung einrichten" strip under the title */
   demo?: { onConnect(): void };
+  /** a bot's Bot Chat: bot header, no "new chat" button (one thread per bot) */
+  bot?: HeaderBot;
   /** chat menu (phones: ⋯ button, wide: tap on the chat title); undefined = none */
   onChatMenu?(): void;
 };
@@ -61,12 +67,30 @@ export const ChatHeader = memo(function ChatHeader({
   options,
   demo,
   onChatMenu,
+  bot,
 }: Props) {
   const t = useTheme();
   const tr = useT();
   const layout = useChatLayout();
   // macOS app: the traffic lights sit at the left end of this row (desktop/chrome.ts)
   const titlebarInset = useTitlebarInset();
+  if (bot) {
+    return (
+      <BotHeader
+        topInset={topInset}
+        bot={bot}
+        offlineText={health === 'offline' ? (offlineLabel ?? tr('chat.header.status.unreachable')) : null}
+        profileName={profileName}
+        wide={layout.wide}
+        sidebarOpen={layout.sidebarOpen}
+        onMenu={onMenu}
+        onModel={onModel ?? onSettings}
+        onSettings={onSettings}
+        onChatMenu={onChatMenu}
+        demo={demo}
+      />
+    );
+  }
   // calm header (design review P3): healthy → just the title, plus the model / active options as a quiet
   // subtitle; the status (dot + text) appears only when the backend is not reachable.
   const offline = health === 'offline';
@@ -157,7 +181,7 @@ export const ChatHeader = memo(function ChatHeader({
         </View>
         {options ? <HeaderButton icon="settings" label={tr('chat.header.options.a11y', { label: options.label })} onPress={options.onPress} badge={options.active} /> : null}
         <HeaderButton icon="newChat" label={tr('chat.header.newChat')} onPress={onNewChat} disabled={!canReset} testID="header-new-chat" />
-        {onChatMenu ? <HeaderButton icon="more" label={tr('menus.chat.open')} onPress={onChatMenu} disabled={!canReset} /> : null}
+        {onChatMenu ? <HeaderButton icon="more" label={tr('menus.chat.open')} onPress={onChatMenu} /> : null}
       </View>
       {demo ? <DemoStrip onConnect={demo.onConnect} /> : null}
     </View>
@@ -216,7 +240,7 @@ function WideHeader({
           </View>
         )}
         <View style={[styles.wideColumn, { marginLeft: Math.max(colLeft, leftReserve), marginRight: Math.max(colLeft, rightReserve) }]}>
-          {onChatMenu && canReset ? (
+          {onChatMenu ? (
             // title menu (ChatGPT desktop): tap the chat title → chat menu
             <Pressable
               onPress={onChatMenu}
@@ -279,6 +303,89 @@ function WideHeader({
   );
 }
 
+
+/**
+ * Header of a bot's chat (bots/): [menu] [avatar · name ▾ / status] [⋯]. Status: orange "wartet auf dich" while an
+ * approval waits, a small green dot "arbeitet …" while a turn runs, else the bot's description or model. Name tap →
+ * "Über <Name>" (model, routines); no "new chat": one thread per bot.
+ */
+function BotHeader({
+  topInset,
+  bot,
+  offlineText,
+  profileName,
+  wide,
+  sidebarOpen,
+  onMenu,
+  onModel,
+  onSettings,
+  onChatMenu,
+  demo,
+}: {
+  topInset: number;
+  bot: HeaderBot;
+  offlineText: string | null;
+  profileName: string;
+  wide: boolean;
+  sidebarOpen: boolean;
+  onMenu(): void;
+  onModel(): void;
+  onSettings(): void;
+  onChatMenu?: () => void;
+  /** the offline demo's bots keep the demo strip (prepared answers, set up a connection) */
+  demo?: { onConnect(): void };
+}) {
+  const t = useTheme();
+  const tr = useT();
+  const inset = useTitlebarInset();
+  const titlebarInset = wide && sidebarOpen ? 0 : inset;
+  const status = offlineText
+    ? { color: t.colors.danger, dot: t.colors.danger, text: offlineText }
+    : bot.status === 'waiting'
+      ? { color: t.colors.warning, dot: t.colors.warning, text: tr('bots.status.waiting') }
+      : bot.status === 'working'
+        ? { color: t.colors.subtle, dot: t.colors.success, text: tr('bots.status.working') }
+        : { color: t.colors.subtle, dot: null, text: bot.detail ?? '' };
+  const hideMenu = wide && sidebarOpen;
+  return (
+    <View style={{ paddingTop: topInset, backgroundColor: t.colors.bg }}>
+      <View style={[styles.row, titlebarInset > 0 && { paddingLeft: titlebarInset - 8 }]}>
+        {hideMenu ? <View style={styles.btn} /> : <HeaderButton icon={wide ? 'sidebar' : 'menu'} label={wide ? tr('conversations.sidebar.show') : tr('chat.header.chats')} onPress={onMenu} testID="header-chats" />}
+        <View style={styles.center}>
+          <Pressable
+            onPress={bot.onInfo ?? onModel}
+            testID="header-model"
+            hitSlop={6}
+            accessibilityRole="button"
+            accessibilityLabel={tr('bots.chat.headerA11y', { name: bot.name, status: status.text || profileName })}
+            style={({ pressed }) => [styles.botTitle, { borderRadius: t.radii.control }, pressed && { backgroundColor: t.colors.surfacePressed }]}
+          >
+            <BotAvatar name={bot.name} bot={bot.bot} color={bot.color} size={30} />
+            <View style={styles.botText}>
+              <View style={styles.titleRow}>
+                <Text style={[t.typography.headline, styles.title, { color: t.colors.text }]} numberOfLines={1} maxFontSizeMultiplier={1.6}>
+                  {bot.name}
+                </Text>
+                <Icon name="chevronDown" size={14} color={t.colors.muted} strokeWidth={2.2} />
+              </View>
+              {status.text ? (
+                <View style={styles.detailRow}>
+                  {status.dot ? <View style={[styles.dot, { backgroundColor: status.dot }]} /> : null}
+                  <Text style={[t.typography.caption, styles.subtitle, { color: status.color }]} numberOfLines={1} maxFontSizeMultiplier={1.6}>
+                    {status.text}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+          </Pressable>
+          {offlineText ? <Pressable onPress={onSettings} accessibilityRole="button" accessibilityLabel={tr('chat.header.settings.a11y', { profile: profileName, status: offlineText })} style={StyleSheet.absoluteFill} /> : null}
+        </View>
+        {onChatMenu ? <HeaderButton icon="more" label={tr('menus.chat.open')} onPress={onChatMenu} /> : <View style={styles.btn} />}
+      </View>
+      {demo ? <DemoStrip onConnect={demo.onConnect} /> : null}
+    </View>
+  );
+}
 
 function DemoStrip({ onConnect }: { onConnect(): void }) {
   const t = useTheme();
@@ -381,4 +488,6 @@ const styles = StyleSheet.create({
   demoBadgeText: { fontWeight: '700' },
   demoText: { flexShrink: 1 },
   demoCta: { fontWeight: '600' },
+  botTitle: { flexDirection: 'row', alignItems: 'center', gap: 9, maxWidth: '100%', minHeight: 44, paddingHorizontal: 8, paddingVertical: 3 },
+  botText: { flexShrink: 1, minWidth: 0 },
 });

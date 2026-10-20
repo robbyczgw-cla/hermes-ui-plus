@@ -33,6 +33,8 @@ import { LangRetry } from './LangRetry';
 import { Button as SettingsButton, Footnote, Group, NavRow, SearchField, Segmented, SubLabel } from './ui';
 import type { ProfilesStorageState } from './storage';
 import { confirmAsync } from '../chat/commands/confirm';
+import { botOf } from '../hermes/bots';
+import { libraryApplies } from '../library/source';
 import { useQuickAvailability } from '../quick/hooks';
 import { QuickSettingsSection } from '../quick/QuickSettings';
 import { SupportRows, supportSearchTexts } from '../support/SupportRows';
@@ -216,6 +218,7 @@ export function SettingsScreen() {
               setTimeout(() => openOnboarding('welcome', { restart: true }), 350);
             }}
             onGallery={() => router.push('/gallery')}
+            onLibrary={(bot) => router.push(bot ? `/skills?bot=${encodeURIComponent(bot)}` : '/skills')}
           />
         )}
       </KeyboardAvoidingView>
@@ -234,6 +237,7 @@ function MainList({
   onCheck,
   onRestart,
   onGallery,
+  onLibrary,
 }: {
   profiles: ConnectionProfile[];
   activeId: string;
@@ -245,6 +249,8 @@ function MainList({
   onCheck(): void;
   onRestart(): void;
   onGallery(): void;
+  /** Skills & memory of the open chat's bot (library/) */
+  onLibrary(bot: string | undefined): void;
 }) {
   const t = useT();
   const { setting, setSetting } = useI18n();
@@ -252,13 +258,18 @@ function MainList({
   const active = profiles.find((p) => p.id === activeId);
   const voiceConn = useMemo(() => (active ? voiceConnFromProfile(active) : null), [active]);
   const version = versionLabel(Constants.expoConfig?.version, Constants.expoConfig?.extra);
-  const [query, setQuery] = useState('');
+  // `/settings?q=<text>` (image block note "Einstellungen", images/settingsLink.ts): opens filtered to that row
+  const { q: initialQuery } = useLocalSearchParams<{ q?: string }>();
+  const [query, setQuery] = useState(typeof initialQuery === 'string' ? initialQuery.slice(0, 80) : '');
   const custom = useCustomizationSections();
   const desktop = useDesktopSettingsSection(); // macOS app only
   const convs = useConversations();
   const [deleteAll, setDeleteAll] = useState(false);
   // Schnellfrage: only when the active connection offers quick answers (bridge + Hermes plugin, or the demo)
   const quickAvail = useQuickAvailability(active);
+  // Skills & memory: Hermes connections (and the demo); the bot of the open chat when it belongs to this connection
+  const openChat = convs.activeId ? convs.get(convs.activeId) : undefined;
+  const libraryBot = active && openChat?.profileId === active.id ? botOf(openChat.hermesProfile) : undefined;
 
   const langOpts: { value: LangSetting; label: string }[] = [
     { value: 'system', label: t('settings.appearance.system') },
@@ -273,7 +284,7 @@ function MainList({
     rows: [
       {
         key: 'profiles',
-        texts: [...profiles.map((p) => p.name), t('settings.connections.add'), t('settings.connections.addQr'), t('onboarding.diag.settings.row'), t('settings.connections.restart'), 'QR', t('settings.connections.keywords')],
+        texts: [...profiles.map((p) => p.name), t('settings.connections.add'), t('settings.connections.addQr'), t('onboarding.diag.settings.row'), t('library.settingsRow'), 'Skills', t('settings.connections.restart'), 'QR', t('settings.connections.keywords')],
         render: () => (
           <>
             {storageState !== 'ok' ? <StorageNotice state={storageState} onUnlock={unlockProfiles} /> : null}
@@ -285,6 +296,14 @@ function MainList({
             <Group>
               <NavRow title={t('settings.connections.add')} leading={<LeadIcon name="plus" />} tone="accent" onPress={onAdd} chevron={false} />
               <NavRow title={t('settings.connections.addQr')} subtitle={t('settings.connections.addQrSub')} leading={<LeadIcon name="share" />} tone="accent" onPress={onPair} chevron={false} />
+              {libraryApplies(active) ? (
+                <NavRow
+                  title={t('library.settingsRow')}
+                  subtitle={t('library.settingsRowSub', { bot: libraryBot ?? 'Hermes' })}
+                  leading={<LeadIcon name="book" />}
+                  onPress={() => onLibrary(libraryBot)}
+                />
+              ) : null}
               {active?.kind === 'hermes' ? <NavRow title={t('onboarding.diag.settings.row')} subtitle={t('onboarding.diag.settings.rowSub')} leading={<LeadIcon name="shield" />} onPress={onCheck} /> : null}
               <NavRow title={t('settings.connections.restart')} subtitle={t('settings.connections.restartSub')} leading={<LeadIcon name="retry" />} onPress={onRestart} last chevron={false} />
             </Group>
@@ -475,11 +494,11 @@ function StorageNotice({ state, onUnlock }: { state: Exclude<ProfilesStorageStat
   );
 }
 
-function LeadIcon({ name }: { name: 'plus' | 'share' | 'retry' | 'shield' }) {
+function LeadIcon({ name }: { name: 'plus' | 'share' | 'retry' | 'shield' | 'book' }) {
   const th = useTheme();
   return (
     <View style={{ width: 28, alignItems: 'center' }}>
-      <Icon name={name} size={19} color={name === 'retry' || name === 'shield' ? th.colors.muted : th.colors.accent} />
+      <Icon name={name} size={19} color={name === 'retry' || name === 'shield' || name === 'book' ? th.colors.muted : th.colors.accent} />
     </View>
   );
 }

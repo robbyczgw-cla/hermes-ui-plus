@@ -31,6 +31,8 @@ import {
   HUI_WORKOUT_KINDS,
   isInteractiveNodeType,
 } from './types.ts';
+import { hashItemId, MAX_PATCH_OPS } from '../live/model.ts';
+import { decodeOps } from '../live/codec.ts';
 
 export const MAX_TABLE_COLUMNS = 12;
 export const MAX_TABLE_ROWS = 200;
@@ -190,6 +192,61 @@ function block(x: unknown, max: number): string | undefined {
 
 function bool(x: unknown): boolean | undefined {
   return typeof x === 'boolean' ? x : undefined;
+}
+
+/** first value of `keys` that is set (not undefined/null/''): model variants name the same field differently */
+function pick(r: Rec, keys: readonly string[]): unknown {
+  for (const k of keys) {
+    const v = r[k];
+    if (v !== undefined && v !== null && v !== '') return v;
+  }
+  return undefined;
+}
+
+/** first non-empty array under one of `keys` */
+function pickList(r: Rec, keys: readonly string[]): unknown[] {
+  for (const k of keys) {
+    const v = r[k];
+    if (Array.isArray(v) && v.length > 0) return v;
+  }
+  return [];
+}
+
+const DURATION_UNIT_SEC: readonly [RegExp, number][] = [
+  [/^(h|hrs?|hours?|std|stunden?|horas?)$/, 3600],
+  [/^(m|mins?|minutes?|minuten?|minutos?)$/, 60],
+  [/^(s|secs?|seconds?|sek|sekunden?|segundos?)$/, 1],
+];
+
+/**
+ * A duration in seconds from a number (in `unitSec` units) or text as models write it: "45 Sekunden", "30 s",
+ * "2 Min", "1.5 min", "1:30" (m:ss), "1 h 20 min". Unparseable → undefined.
+ */
+export function parseDuration(x: unknown, unitSec = 1): number | undefined {
+  if (typeof x === 'number') return Number.isFinite(x) && x >= 0 ? x * unitSec : undefined;
+  if (typeof x !== 'string') return undefined;
+  const s = x.trim().toLowerCase().replace(/\.$/, '');
+  if (!s) return undefined;
+  let m = /^(\d{1,3}):(\d{2})$/.exec(s);
+  if (m) return Number(m[1]) * 60 + Number(m[2]);
+  const n = num(s);
+  if (n !== undefined) return n >= 0 ? n * unitSec : undefined;
+  let total = 0;
+  let found = false;
+  const re = /(\d+(?:[.,]\d+)?)\s*([a-zäöüé]+)/g;
+  while ((m = re.exec(s))) {
+    const unit = DURATION_UNIT_SEC.find(([u]) => u.test(m![2]));
+    if (!unit) continue;
+    total += Number(m[1].replace(',', '.')) * unit[1];
+    found = true;
+  }
+  return found ? total : undefined;
+}
+
+/** whole minutes (numbers are minutes, text like "25 Min" / "1 h") → 0..10080 */
+function minutes(x: unknown): number | undefined {
+  const sec = parseDuration(x, 60);
+  return sec === undefined ? undefined : Math.min(10080, Math.round(sec / 60));
 }
 
 /** rounded integer clamped into [min,max]; non-numbers → undefined */
@@ -596,6 +653,19 @@ function normalizeSeries(x: unknown, kind: HuiChartKind = 'bar'): HuiChartSeries
   return { name: str(x.name) ?? '', data };
 }
 
+const TAB_LIST_KEYS = ['tabs', 'items', 'sections', 'pages'] as const;
+
+/** The nodes of a tab / accordion section: `children`, or as models write it `blocks`/`content`/`nodes`, or one node. */
+function sectionChildren(t: Rec): unknown[] {
+  for (const k of ['children', 'blocks', 'content', 'nodes', 'components']) {
+    const v = t[k];
+    if (Array.isArray(v) && v.length) return v;
+    if (isRec(v) && typeof v.type === 'string') return [v];
+  }
+  for (const k of ['node', 'block', 'component']) if (isRec(t[k]) && typeof (t[k] as Rec).type === 'string') return [t[k]];
+  return [];
+}
+
 /** `path` = index path of the PARENT; a child's path is `<path>.<original index in the array>` */
 function children(x: unknown, depth: number, ctx: Ctx, path: string): HuiNode[] {
   if (depth >= MAX_DEPTH) return [];
@@ -608,10 +678,15 @@ function children(x: unknown, depth: number, ctx: Ctx, path: string): HuiNode[] 
   return out;
 }
 
+// model variants (seen with small models writing from memory): the list as `items`/`choices`, an option's text as
+// `title`/`text`/`name`, its detail as `detail`/`subtitle`
+const OPTION_LABEL_KEYS = ['label', 'title', 'text', 'name', 'value'] as const;
+const OPTION_DETAIL_KEYS = ['description', 'detail', 'subtitle', 'note'] as const;
+
 function normChoice(x: Rec, base: Rec): void {
   const used = new Set<string>();
-  put(base, 'question', block(x.question, 500));
-  const opts = arr(x.options);
+  put(base, 'question', block(x.question, 500) ?? block(x.title, 500) ?? block(x.prompt, 500));
+  const opts = pickList(x, ['options', 'items', 'choices']);
   const out: Rec[] = [];
   for (let i = 0; i < opts.length && out.length < MAX_CHOICE_OPTIONS; i++) {
     const o = opts[i];
@@ -619,12 +694,12 @@ function normChoice(x: Rec, base: Rec): void {
     let r: Rec = {};
     if (typeof o === 'string' || typeof o === 'number') label = line(o, 200);
     else if (isRec(o)) {
-      label = line(o.label, 200);
+      label = firstLine(o, OPTION_LABEL_KEYS, 200);
       r = o;
     }
     if (!label) continue;
     const item: Rec = { id: itemId(r.id, 'o', i, used), label };
-    put(item, 'description', line(r.description, 300));
+    put(item, 'description', firstLine(r, OPTION_DETAIL_KEYS, 300));
     put(item, 'icon', line(r.icon, 16));
     put(item, 'imageQuery', normalizeImageQuery(r.imageQuery));
     out.push(item);
@@ -689,8 +764,47 @@ function checklistEntries(x: Rec): { it: unknown; category?: string }[] {
   return out;
 }
 
+/** Live card / item ids (live/model.ts): short slugs that survive the trailer's id check. */
+const LIVE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$/;
+
+/**
+ * Item id of a live checklist: the explicit one when it is a usable slug, else `h<hash(text)>` (stable across
+ * versions as long as the text is), never `i<index>` (the index shifts when Hermes inserts an item).
+ */
+function liveItemId(explicit: unknown, text: string, used: Set<string>): string {
+  const e = typeof explicit === 'string' || typeof explicit === 'number' ? String(explicit).trim() : '';
+  if (e && LIVE_ID_RE.test(e) && !used.has(e) && !isProtoName(e)) {
+    used.add(e);
+    return e;
+  }
+  return uniq(hashItemId(text), used);
+}
+
+/**
+ * Live card (`"live":true` + its own explicit slug id, live/nodes.ts): `live`/`closed` are kept for the live-card
+ * fold; older apps drop the fields and render the plain node (design §15).
+ */
+function liveFlag(x: Rec, base: Rec): boolean {
+  const live = x.live === true && typeof base.id === 'string' && base.id === String(x.id ?? '').trim() && LIVE_ID_RE.test(base.id);
+  if (live) {
+    base.live = true;
+    put(base, 'closed', x.closed === true ? true : undefined);
+  }
+  return live;
+}
+
+/** `livePatch` of a callout (design §5.2): the changes of a live card; old apps show the callout's text instead. */
+function livePatch(x: unknown): Rec | undefined {
+  if (!isRec(x)) return undefined;
+  const card = typeof x.card === 'string' ? x.card.trim() : '';
+  if (!LIVE_ID_RE.test(card) || isProtoName(card)) return undefined;
+  const ops = decodeOps(x.ops, MAX_PATCH_OPS);
+  return ops.length ? { card, ops } : undefined;
+}
+
 function normChecklist(x: Rec, base: Rec): void {
   const used = new Set<string>();
+  const live = liveFlag(x, base);
   put(base, 'title', line(x.title, 200) ?? line(x.name, 200));
   put(base, 'kind', oneOf(x.kind, ['shopping', 'todo', 'packing', 'generic'] as const));
   put(base, 'groupBy', oneOf(x.groupBy, ['category', 'none'] as const));
@@ -707,13 +821,17 @@ function normChecklist(x: Rec, base: Rec): void {
       r = it;
     }
     if (!text) continue;
-    const o: Rec = { id: itemId(r.id, 'i', i, used), text };
-    const qty = typeof r.qty === 'number' ? (Number.isFinite(r.qty) ? r.qty : undefined) : line(r.qty, 20);
-    put(o, 'qty', qty ?? (typeof r.quantity === 'number' && Number.isFinite(r.quantity) ? r.quantity : line(r.quantity, 20)));
+    const o: Rec = { id: live ? liveItemId(r.id, text, used) : itemId(r.id, 'i', i, used), text };
+    const q = pick(r, ['qty', 'quantity', 'amount']);
+    put(o, 'qty', typeof q === 'number' ? (Number.isFinite(q) ? q : undefined) : line(q, 20));
     put(o, 'unit', line(r.unit, 20));
     put(o, 'category', line(r.category, 60) ?? line(r.group, 60) ?? line(r.section, 60) ?? category);
     put(o, 'checked', bool(r.checked) ?? bool(r.done) ?? bool(r.completed));
-    put(o, 'note', line(r.note, 300));
+    // `detail`/`description` often carry the amount ("250g") when there is no qty field; `trailing` (the list item's
+    // right-hand text) carries a watchlist's target price ("Ziel: 450€", real-user round 3): kept in the note
+    const note = firstLine(r, ['note', 'detail', 'description', 'subtitle', 'comment'], 300);
+    const trailing = line(r.trailing, 120);
+    put(o, 'note', note && trailing && note !== trailing ? `${note} · ${trailing}` : (note ?? trailing));
     out.push(o);
   }
   base.items = out;
@@ -770,7 +888,40 @@ function normCalcInput(r: Rec): Rec | null {
   return o;
 }
 
+/**
+ * Variant written from memory: one list (`expressions`/`fields`/`variables`) mixing inputs (`value`) and results
+ * (`formula`) → `inputs` + `outputs`. A percentage input becomes a 0-100 slider.
+ */
+function splitCalcList(x: Rec): Rec {
+  if (Array.isArray(x.inputs) || Array.isArray(x.outputs)) return x;
+  const mixed = pickList(x, ['expressions', 'fields', 'variables', 'values', 'items']).filter(isRec);
+  if (!mixed.length) return x;
+  const inputs: Rec[] = [];
+  const outputs: Rec[] = [];
+  const consts = new Map<string, number>();
+  for (const e of mixed) {
+    // the identifier may sit in `symbol`/`var` while `name` is the visible label ("Gewicht Kosten (%)")
+    const name = [e.symbol, e.var, e.key, e.id, e.name].map(ident).find(Boolean);
+    const label = line(e.label, 100) ?? (typeof e.name === 'string' && e.name !== name ? line(e.name, 100) : undefined);
+    const ex = pick(e, ['expr', 'formula', 'expression', 'compute']);
+    const value = num(pick(e, ['default', 'value']));
+    if (typeof ex === 'string') outputs.push({ name, label, expr: ex, unit: e.unit, format: e.format, decimals: e.decimals });
+    else if (value !== undefined && name && (e.readonly === true || e.constant === true)) consts.set(name, value);
+    else if (value !== undefined) {
+      const pctUnit = e.unit === '%' || /%/.test(label ?? '');
+      const slider = pctUnit || (e.min !== undefined && e.max !== undefined);
+      inputs.push({ name, label, kind: e.kind ?? (slider ? 'slider' : 'number'), min: e.min ?? (pctUnit ? 0 : undefined), max: e.max ?? (pctUnit ? 100 : undefined), step: e.step, unit: e.unit, default: value });
+    }
+  }
+  // read-only values are constants of the formulas, not inputs to fiddle with
+  if (consts.size) {
+    for (const o of outputs) o.expr = (o.expr as string).replace(/[A-Za-z_][A-Za-z0-9_]*/g, (w) => (consts.has(w) ? `(${consts.get(w)})` : w));
+  }
+  return { ...x, inputs, outputs };
+}
+
 function normCalc(x: Rec, base: Rec): void {
+  x = splitCalcList(x);
   put(base, 'title', line(x.title, 200));
   const inputs: Rec[] = [];
   const names = new Set<string>();
@@ -826,16 +977,51 @@ function normCalc(x: Rec, base: Rec): void {
   provenance(base, x);
 }
 
+/** a map list under another name (`places`, `locations` …), as models write it from memory */
+const MAP_LIST_KEYS = ['markers', 'places', 'locations', 'points', 'pins', 'stops', 'items'] as const;
+const PLACE_NAME_KEYS = ['title', 'name', 'label'] as const;
+
+/** lat/lng of a marker-like record: `lat`/`lng`, `latitude`/`longitude`, `lon`, `coordinates: [lat, lng]` or `{lat, lng}` */
+function markerLatLng(m: Rec): { lat: number; lng: number } | undefined {
+  const direct = latLng(pick(m, ['lat', 'latitude']), pick(m, ['lng', 'lon', 'long', 'longitude']));
+  if (direct) return direct;
+  const c = pick(m, ['coordinates', 'coords', 'position', 'location', 'latlng']);
+  if (Array.isArray(c) && c.length === 2) return latLng(num(c[0]), num(c[1]));
+  if (isRec(c)) return latLng(pick(c, ['lat', 'latitude']), pick(c, ['lng', 'lon', 'long', 'longitude']));
+  return undefined;
+}
+
+/**
+ * A `map` whose entries have names but no usable coordinates cannot draw pins: show them as a `places` list instead
+ * (name, address, note; its route button opens a maps search), never "no valid places".
+ */
+function mapWithoutCoords(x: Rec): Rec | null {
+  const list = pickList(x, MAP_LIST_KEYS).filter(isRec);
+  if (!list.length || list.some((m) => markerLatLng(m))) return null;
+  const places = list
+    .map((m) => ({
+      name: firstLine(m, PLACE_NAME_KEYS, 150),
+      address: line(m.address, 250),
+      note: firstLine(m, ['description', 'note', 'detail'], 300),
+      imageQuery: m.imageQuery,
+    }))
+    .filter((p) => p.name);
+  if (!places.length) return null;
+  return { type: 'places', ...(typeof x.id === 'string' ? { id: x.id } : {}), title: x.title, places };
+}
+
 function normMap(x: Rec, base: Rec): void {
   put(base, 'title', line(x.title, 200));
   const markers: Rec[] = [];
-  for (const m of arr(x.markers)) {
+  for (const m of pickList(x, MAP_LIST_KEYS)) {
     if (markers.length >= MAX_MAP_MARKERS) break;
     if (!isRec(m)) continue;
-    const ll = latLng(m.lat, m.lng);
+    const ll = markerLatLng(m);
     if (!ll) continue;
-    const o: Rec = { lat: ll.lat, lng: ll.lng, title: line(m.title, 200) ?? '' };
-    put(o, 'description', line(m.description, 500));
+    const o: Rec = { lat: ll.lat, lng: ll.lng, title: firstLine(m, PLACE_NAME_KEYS, 200) ?? '' };
+    // the address is the most useful description a model gives besides a note
+    const desc = [firstLine(m, ['description', 'note', 'detail'], 500), line(m.address, 250)].filter(Boolean).join(' · ');
+    put(o, 'description', desc ? desc.slice(0, 500) : undefined);
     put(o, 'number', int(m.number, 1, 999));
     put(o, 'imageQuery', normalizeImageQuery(m.imageQuery));
     markers.push(o);
@@ -853,14 +1039,16 @@ function normRecipe(x: Rec, base: Rec): void {
   put(base, 'imageQuery', normalizeImageQuery(x.imageQuery));
   const sv = num(x.servings);
   base.servings = sv !== undefined && sv > 0 && sv <= 100 ? sv : 4;
-  if (isRec(x.time)) {
-    const t: Rec = {};
-    for (const k of ['prep', 'cook', 'total']) {
-      const n = num((x.time as Rec)[k]);
-      if (n !== undefined && n >= 0) t[k] = Math.min(10080, Math.round(n));
-    }
-    if (Object.keys(t).length > 0) base.time = t;
-  }
+  // `time:{prep,cook,total}`; variants: `totalTime`/`prepTime`/`cookTime` (minutes or "25 Min"), `time: 25` = total
+  const tr = isRec(x.time) ? x.time : {};
+  const t: Rec = {};
+  const times: Record<string, unknown> = {
+    prep: pick(tr, ['prep', 'prepTime']) ?? pick(x, ['prepTime', 'prep_time', 'preparationTime']),
+    cook: pick(tr, ['cook', 'cookTime']) ?? pick(x, ['cookTime', 'cook_time', 'cookingTime']),
+    total: pick(tr, ['total', 'totalTime']) ?? pick(x, ['totalTime', 'total_time', 'duration']) ?? (isRec(x.time) ? undefined : x.time),
+  };
+  for (const [k, v] of Object.entries(times)) put(t, k, minutes(v));
+  if (Object.keys(t).length > 0) base.time = t;
   const ingredients: Rec[] = [];
   for (const it of arr(x.ingredients)) {
     if (ingredients.length >= MAX_RECIPE_INGREDIENTS) break;
@@ -868,39 +1056,45 @@ function normRecipe(x: Rec, base: Rec): void {
     let r: Rec = {};
     if (typeof it === 'string') item = line(it, 200);
     else if (isRec(it)) {
-      item = line(it.item, 200);
+      item = firstLine(it, ['item', 'name', 'ingredient', 'text', 'title'], 200);
       r = it;
     }
     if (!item) continue;
     const o: Rec = { item };
     let unit = line(r.unit, 40);
-    if (r.qty !== undefined && r.qty !== null && r.qty !== '') {
-      const q = parseQuantity(r.qty);
+    const qty = pick(r, ['qty', 'amount', 'quantity']);
+    if (qty !== undefined) {
+      const q = parseQuantity(qty);
       if (q !== undefined) o.qty = q;
-      else if (num(r.qty) === undefined) {
+      else if (num(qty) === undefined) {
         // free-text quantity ("eine Prise", "2-3"): keep it, but not scalable
-        const txt = line(r.qty, 40);
+        const txt = line(qty, 40);
         if (txt) unit = unit ? `${txt} ${unit}`.slice(0, 40) : txt;
       }
     }
     put(o, 'unit', unit);
+    put(o, 'plural', line(r.plural, 200));
     put(o, 'group', line(r.group, 60));
     ingredients.push(o);
   }
   base.ingredients = ingredients;
   const steps: Rec[] = [];
-  for (const it of arr(x.steps)) {
+  for (const it of pickList(x, ['steps', 'instructions', 'method', 'directions'])) {
     if (steps.length >= MAX_RECIPE_STEPS) break;
     let text: string | undefined;
     let r: Rec = {};
     if (typeof it === 'string') text = block(it, 1000);
     else if (isRec(it)) {
-      text = block(it.text, 1000);
       r = it;
+      // `{title, detail}` steps: keep both ("Cook the pasta: Boil until al dente")
+      const body = block(pick(it, ['text', 'detail', 'description', 'instruction', 'body', 'step', 'content']), 1000);
+      const title = line(it.title, 200);
+      text = title && body ? `${title}: ${body}`.slice(0, 1000) : (body ?? title);
     }
     if (!text) continue;
     const o: Rec = { text };
-    const ts = num(r.timerSeconds);
+    // a step's own wait: `timerSeconds`/`seconds`, or minutes as `time`/`minutes`/`duration` (2, "10 Min")
+    const ts = num(pick(r, ['timerSeconds', 'seconds'])) ?? parseDuration(pick(r, ['minutes', 'time', 'duration']), 60);
     if (ts !== undefined && ts >= 1) o.timerSeconds = Math.min(86400, Math.round(ts));
     steps.push(o);
   }
@@ -916,21 +1110,27 @@ function normRecipe(x: Rec, base: Rec): void {
 function normQuiz(x: Rec, base: Rec): void {
   put(base, 'title', line(x.title, 200));
   const questions: Rec[] = [];
-  for (const r of arr(x.questions)) {
+  // variants: the list as `items`, the question as `question`/`text`, options as objects (`{text, correct:true}`),
+  // the answer as `correct`/`correctAnswer` and as the option's text instead of its index
+  for (const r of pickList(x, ['questions', 'items', 'quiz'])) {
     if (questions.length >= MAX_QUIZ_QUESTIONS) break;
     if (!isRec(r)) continue;
-    const q = block(r.q, 500);
+    const q = block(pick(r, ['q', 'question', 'text', 'prompt', 'title']), 500);
     if (!q) continue;
-    const rawOpts = arr(r.options).slice(0, MAX_QUIZ_OPTIONS);
-    const options = rawOpts.map((v) => line(v, 200));
+    const rawOpts = pickList(r, ['options', 'choices', 'answers']).slice(0, MAX_QUIZ_OPTIONS);
+    const options = rawOpts.map((v) => (isRec(v) ? firstLine(v, OPTION_LABEL_KEYS, 200) : line(v, 200)));
     // positional: one unusable option would shift the answer index -> drop the question
     if (options.length < 2 || !options.every((o): o is string => o !== undefined)) continue;
-    const rawAns = Array.isArray(r.answer) ? r.answer : [r.answer];
+    const flagged = rawOpts.flatMap((v, i) => (isRec(v) && (v.correct === true || v.isCorrect === true) ? [i] : []));
+    const ans = pick(r, ['answer', 'correct', 'correctAnswer', 'correct_answer', 'answerIndex', 'correctIndex', 'solution']);
+    const rawAns = flagged.length && ans === undefined ? flagged : Array.isArray(ans) ? ans : [ans];
     const idx: number[] = [];
     let ok = rawAns.length > 0 && rawAns.length <= MAX_QUIZ_OPTIONS;
     for (const a of rawAns) {
       let n: number | undefined;
-      if (typeof a === 'string' && /^[A-Ja-j]$/.test(a.trim())) n = a.trim().toUpperCase().charCodeAt(0) - 65;
+      const byText = typeof a === 'string' ? options.findIndex((o) => o.toLowerCase() === a.trim().toLowerCase()) : -1;
+      if (byText >= 0) n = byText;
+      else if (typeof a === 'string' && /^[A-Ja-j]$/.test(a.trim())) n = a.trim().toUpperCase().charCodeAt(0) - 65;
       else {
         const v = num(a);
         n = v !== undefined && Number.isInteger(v) ? v : undefined;
@@ -1038,10 +1238,38 @@ function langText(x: unknown): Rec | undefined {
   }
   if (!isRec(x)) return undefined;
   const text = block(x.text, 2000);
-  return text ? { lang: normalizeLangCode(x.lang), text } : undefined;
+  return text ? { lang: langCode(x.lang), text } : undefined;
+}
+
+/** language names models write instead of a code ("English", "Englisch", "español") → code */
+const LANG_NAMES: Readonly<Record<string, string>> = {
+  english: 'en', englisch: 'en', inglés: 'en', ingles: 'en', anglais: 'en',
+  german: 'de', deutsch: 'de', alemán: 'de', aleman: 'de', allemand: 'de',
+  spanish: 'es', spanisch: 'es', español: 'es', espanol: 'es', espagnol: 'es',
+  french: 'fr', französisch: 'fr', francés: 'fr', frances: 'fr', français: 'fr', francais: 'fr',
+  italian: 'it', italienisch: 'it', italiano: 'it', italien: 'it',
+  portuguese: 'pt', portugiesisch: 'pt', portugués: 'pt', português: 'pt',
+  dutch: 'nl', niederländisch: 'nl', polish: 'pl', polnisch: 'pl', turkish: 'tr', türkisch: 'tr',
+  russian: 'ru', russisch: 'ru', japanese: 'ja', japanisch: 'ja', chinese: 'zh', chinesisch: 'zh',
+  korean: 'ko', koreanisch: 'ko', arabic: 'ar', arabisch: 'ar', greek: 'el', griechisch: 'el',
+};
+
+function langCode(x: unknown): string {
+  const code = normalizeLangCode(x);
+  if (code !== 'und' || typeof x !== 'string') return code;
+  return LANG_NAMES[x.trim().toLowerCase()] ?? 'und';
 }
 
 function normTranslation(x: Rec, base: Rec): void {
+  // variant written from memory: {language, original, translated} (one target, `language` = the target's language)
+  if (!isRec(x.source) && !Array.isArray(x.targets) && pick(x, ['translated', 'translation', 'target']) !== undefined) {
+    const text = block(pick(x, ['translated', 'translation', 'target']), 2000);
+    x = {
+      ...x,
+      source: { lang: langCode(pick(x, ['sourceLanguage', 'from', 'sourceLang'])), text: block(pick(x, ['original', 'source', 'text']), 2000) ?? '' },
+      targets: text ? [{ lang: langCode(pick(x, ['language', 'targetLanguage', 'to', 'targetLang', 'lang'])), text }] : [],
+    };
+  }
   // while streaming, source.text may still be missing: keep an (empty) source so the renderer has its slot
   const src = langText(x.source);
   base.source = src ?? { lang: isRec(x.source) ? normalizeLangCode(x.source.lang) : 'und', text: '' };
@@ -1113,26 +1341,219 @@ function fmtClock(min: number): string {
   return `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
 }
 
+const AGENDA_LIST_KEYS = ['blocks', 'items', 'events', 'schedule', 'entries'] as const;
+const AGENDA_START_KEYS = ['start', 'time', 'startTime', 'from'] as const;
+const AGENDA_TITLE_KEYS = ['title', 'name', 'label', 'activity'] as const;
+const AGENDA_NOTE_KEYS = ['note', 'detail', 'description'] as const;
+const CLOCK_RANGE_RE = /^(\d{1,2}:\d{2})\s*(?:-|–|—|bis|to)\s*(\d{1,2}:\d{2})$/i;
+
+/**
+ * start (and end) minutes of an agenda entry: `start`/`time` as "09:00" or a range "09:00–11:00"; without an end, a
+ * `duration`/`durationMin`/`minutes` gives it (else the caller falls back to one hour).
+ */
+function agendaClock(r: Rec): { start?: number; end?: number } {
+  const v = pick(r, AGENDA_START_KEYS);
+  const m = typeof v === 'string' ? CLOCK_RANGE_RE.exec(v.trim()) : null;
+  if (m) return { start: parseClock(m[1]), end: parseClock(m[2]) };
+  const start = parseClock(v);
+  let end = parseClock(pick(r, ['end', 'endTime', 'to', 'until']));
+  if (end === undefined && start !== undefined) {
+    // numbers are minutes, text like "30 Min" / "1 h"
+    const d = minutes(pick(r, ['duration', 'durationMin', 'durationMinutes', 'minutes', 'mins']));
+    if (d !== undefined && d > 0 && d <= 24 * 60) end = Math.min(start + d, 23 * 60 + 59);
+  }
+  return { start, end };
+}
+
+/**
+ * An `agenda` is ONE day on a clock. When most entries have no plain clock time ("Montag", "Samstag 09:00", a week
+ * plan) they cannot be placed on it: show them in order as a `timeline` (time label as written) instead of dropping them.
+ */
+function agendaAsTimeline(x: Rec): Rec | null {
+  const list = pickList(x, AGENDA_LIST_KEYS).filter(isRec);
+  const titled = list.filter((r) => firstLine(r, AGENDA_TITLE_KEYS, 200));
+  // mostly real clock times: stay an agenda (the odd broken time is dropped as before)
+  if (!titled.length || titled.filter((r) => agendaClock(r).start !== undefined).length * 2 >= titled.length) return null;
+  const items = titled.map((r) => {
+    const time = [line(pick(r, ['day', 'date']), 40), line(pick(r, AGENDA_START_KEYS), 60)].filter(Boolean).join(' ');
+    const detail = [firstLine(r, AGENDA_NOTE_KEYS, 500), line(r.location, 200)].filter(Boolean).join(' · ');
+    return { time, title: firstLine(r, AGENDA_TITLE_KEYS, 200), ...(detail ? { detail } : {}), ...(r.imageQuery ? { imageQuery: r.imageQuery } : {}) };
+  });
+  const title = line(x.title, 200);
+  const timeline = { type: 'timeline', items };
+  return title ? { type: 'stack', children: [{ type: 'text', text: title, variant: 'title' }, timeline] } : timeline;
+}
+
+// a day named at the start of an entry's title: "FREITAG: Anreise", "Samstag – Museen", "Tag 2: Wien", "Day 3 - Rome"
+const DAY_WORDS = 'montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag|monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo';
+const DAY_PREFIX_RE = new RegExp(`^\\s*((?:${DAY_WORDS})|(?:tag|day|día|dia)\\s*\\d{1,2})\\s*[:\\-–—|,.]\\s*(.+)$`, 'i');
+
+const titleCase = (s: string) => s.toLowerCase().replace(/(^|\s)(\p{L})/gu, (_, a: string, b: string) => a + b.toUpperCase());
+const sameBlock = (a: Rec, b: Rec) => {
+  const ca = agendaClock(a);
+  const cb = agendaClock(b);
+  return ca.start !== undefined && ca.start === cb.start && ca.end === cb.end && firstLine(a, AGENDA_TITLE_KEYS, 200) === firstLine(b, AGENDA_TITLE_KEYS, 200);
+};
+
+/**
+ * An `agenda` is ONE day. A model that puts a whole trip or week into one agenda ("FREITAG: Anreise" 14:00, "SAMSTAG:
+ * Museum" 09:00 …, or Mon/Wed/Fri as three identical 09:00 blocks) gets one overlapping mixed day. Split it into one
+ * agenda per day under day `tabs` (a live agenda stays live: tabs of agendas are the live trip shape). Only with clear
+ * day markers in the titles (at least two different days) or with exact repeats of the same block; else null.
+ */
+function agendaByDays(x: Rec): Rec | null {
+  const list = pickList(x, AGENDA_LIST_KEYS).filter(isRec);
+  if (list.length < 2) return null;
+  const days: { label?: string; blocks: Rec[] }[] = [];
+  const marked = list.map((r) => DAY_PREFIX_RE.exec(firstLine(r, AGENDA_TITLE_KEYS, 200) ?? ''));
+  const names = new Set(marked.filter(Boolean).map((m) => m![1].toLowerCase().replace(/\s+/g, ' ')));
+  if (names.size >= 2) {
+    list.forEach((r, i) => {
+      const m = marked[i];
+      if (m) {
+        const block = { ...r };
+        for (const k of AGENDA_TITLE_KEYS) if (typeof block[k] === 'string') { block[k] = m[2]; break; }
+        const label = titleCase(m[1]);
+        // the same day named twice in a row stays one day
+        if (days.length && days[days.length - 1].label === label) days[days.length - 1].blocks.push(block);
+        else days.push({ label, blocks: [block] });
+      } else if (days.length) days[days.length - 1].blocks.push(r);
+      else days.push({ blocks: [r] });
+    });
+    // entries before the first named day belong to it
+    if (days.length > 1 && days[0].label === undefined) {
+      const [lead, ...rest] = days;
+      rest[0].blocks.unshift(...lead.blocks);
+      days.splice(0, days.length, ...rest);
+    }
+  } else if (list.every((r, i) => i === 0 || sameBlock(r, list[0]))) {
+    for (const r of list) days.push({ blocks: [r] });
+  } else return null;
+  if (days.length < 2 || days.length > MAX_TABS) return null;
+  const id = typeof x.id === 'string' && x.id.trim() ? x.id.trim() : undefined;
+  const used = new Set<string>();
+  // a live trip's blocks need stable ids across versions (the inner agendas are no live nodes themselves)
+  const blockIds = new Set<string>();
+  if (x.live === true) for (const d of days) d.blocks = d.blocks.map((b) => ({ ...b, id: liveItemId(b.id, firstLine(b, AGENDA_TITLE_KEYS, 200) ?? '', blockIds) }));
+  const tabs = days.map((d, i) => {
+    const slug = (d.label ?? `${i + 1}`).toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || `d${i + 1}`;
+    let tid = slug;
+    for (let n = 2; used.has(tid); n++) tid = `${slug}-${n}`;
+    used.add(tid);
+    const agenda: Rec = { type: 'agenda', blocks: d.blocks, ...(id ? { id: `${id}-${tid}` } : {}) };
+    return { id: tid, ...(d.label ? { label: d.label } : { day: i + 1 }), children: [agenda] };
+  });
+  const out: Rec = { type: 'tabs', tabs };
+  if (id) out.id = id;
+  if (typeof x.title === 'string') out.title = x.title;
+  if (x.live === true) out.live = true;
+  if (x.closed === true) out.closed = true;
+  return out;
+}
+
+const CORRECT_RE = /^(?:(?:das|dies|this|that|it|eso|esto)(?:'s| ist| is| es| wäre)? )?(?:ganz |völlig |absolut |genau )?(?:richtig|korrekt|genau so|stimmt|correct|right[!.]|exactly|yes[!,.]|correcto|exacto|cierto|s[ií][!,.])/i;
+const WRONG_RE = /^(?:(?:das|dies|this|that|it|eso|esto)(?:'s| ist| is| es| wäre)? )?(?:leider |sadly |unfortunately )?(?:(?:noch )?(?:falsch|nicht (?:richtig|korrekt|ganz))|nein\b|wrong|incorrect|not (?:quite|right|correct)|nope|no[!,.]|incorrecto|falso|no es (?:correcto|así))/i;
+const GRADE_LEAD_RE = /^(?:(?:das|dies|this|that|it|eso|esto)(?:'s| ist| is| es| wäre)? )?(?:ganz |völlig |absolut |genau )?(?:richtig|korrekt|stimmt|correct|right|exactly|yes|correcto|exacto|cierto|sí|si)\s*[!.,:–—-]*\s*/i;
+
+/**
+ * A `choice` written as a quiz question: the option descriptions grade the answers ("Richtig! …", "Das ist falsch
+ * herum.", "Nein, …") and show the solution before anything is tapped. Exactly one option graded right and at least one
+ * graded wrong → a one-question `quiz` (answer = that option, its description without "Richtig!" as the explanation,
+ * shown after the tap). Else null.
+ */
+function gradedChoiceAsQuiz(x: Rec): Rec | null {
+  if (x.multiple === true) return null;
+  const opts = pickList(x, ['options', 'items', 'choices']).filter(isRec);
+  if (opts.length < 2) return null;
+  const grade = (o: Rec) => {
+    const d = (firstLine(o, OPTION_DETAIL_KEYS, 300) ?? '').replace(/^[^\p{L}]+/u, '');
+    return CORRECT_RE.test(d) ? 'right' : WRONG_RE.test(d) ? 'wrong' : undefined;
+  };
+  const grades = opts.map(grade);
+  const right = grades.flatMap((g, i) => (g === 'right' ? [i] : []));
+  if (right.length !== 1 || !grades.includes('wrong')) return null;
+  const options = opts.map((o) => firstLine(o, OPTION_LABEL_KEYS, 200));
+  if (!options.every(Boolean)) return null;
+  const q = block(x.question, 500) ?? block(x.title, 500) ?? block(x.prompt, 500);
+  if (!q) return null;
+  const why = (firstLine(opts[right[0]], OPTION_DETAIL_KEYS, 300) ?? '').replace(/^[^\p{L}]+/u, '').replace(GRADE_LEAD_RE, '').trim();
+  const question: Rec = { q, options, answer: right[0], ...(why ? { explanation: why.charAt(0).toUpperCase() + why.slice(1) } : {}) };
+  return { type: 'quiz', ...(typeof x.id === 'string' ? { id: x.id } : {}), questions: [question] };
+}
+
+/** `{"type":"live",…}`: a live card written as its own node type (the skill says: the normal node + `"live":true`) */
+const LIVE_WRAPPER_TYPES: ReadonlySet<string> = new Set(['live', 'live-card', 'livecard', 'live-list', 'live-checklist', 'live-plan', 'live-trip', 'live-watchlist']);
+const LIVE_INNER_TYPES: ReadonlySet<string> = new Set(['checklist', 'agenda', 'tabs', 'products']);
+
+/**
+ * The node a `live` wrapper means, with `"live":true` and the wrapper's `id`/`title` (seen with Haiku:
+ * `{"type":"live","id":"salzburg_plan","blocks":[{"type":"agenda",…}]}`, `{"type":"live","id":"filmabend-watchlist",
+ * "style":"checklist","items":[{"title":"Arrival","subtitle":"…","checked":false}]}`): a wrapped live-capable node, several
+ * day agendas → day `tabs`, else the type named in `style`/`kind`/`card`, else by its list (`items` → checklist,
+ * `products` → products, agenda blocks → agenda). null = not readable as a live card (→ the readable fallback).
+ */
+function liveWrapper(x: Rec): Rec | null {
+  const id = typeof x.id === 'string' && x.id.trim() ? x.id.trim() : undefined;
+  const title = line(x.title, 200) ?? line(x.name, 200);
+  const mark = (n: Rec): Rec => ({
+    ...n,
+    live: true,
+    ...(n.id === undefined && id ? { id } : {}),
+    ...(n.title === undefined && title ? { title } : {}),
+    ...(x.closed === true ? { closed: true } : {}),
+  });
+  const typed = (v: unknown): Rec | undefined => (isRec(v) && typeof v.type === 'string' ? withCanonicalType(v) : undefined);
+  for (const k of ['node', 'card', 'component', 'content', 'block', 'data']) {
+    const n = typed(x[k]);
+    if (n && LIVE_INNER_TYPES.has(n.type as string)) return mark(n);
+  }
+  for (const k of ['blocks', 'children', 'nodes', 'content', 'days']) {
+    const list = arr(x[k]);
+    const nodes = list.map(typed).filter((n): n is Rec => !!n && LIVE_INNER_TYPES.has(n.type as string));
+    if (nodes.length === 1) return mark(nodes[0]);
+    if (nodes.length > 1 && nodes.length <= MAX_TABS && nodes.every((n) => n.type === 'agenda')) {
+      return mark({
+        type: 'tabs',
+        tabs: nodes.map((a, i) => ({ label: line(a.title, 40) ?? line(a.label, 40) ?? line(a.date, 40) ?? `${i + 1}`, children: [a] })),
+      });
+    }
+    // agenda entries directly under the wrapper
+    if (!nodes.length && list.some((r) => isRec(r) && agendaClock(r).start !== undefined)) return mark({ type: 'agenda', blocks: list });
+  }
+  const named = [x.style, x.kind, x.card, x.format, x.of].map((v) => (typeof v === 'string' ? canonicalType(v) : '')).find((t) => LIVE_INNER_TYPES.has(t));
+  const rest: Rec = { ...x };
+  for (const k of ['type', 'style', 'format', 'card', 'of', 'live']) delete rest[k];
+  // `kind` is a checklist field too (shopping/todo/packing): keep it when it is one of those
+  if (rest.kind === named) delete rest.kind;
+  if (named) return mark({ ...rest, type: named });
+  if (pickList(x, ['products']).length) return mark({ ...rest, type: 'products' });
+  if (pickList(x, ['tabs']).length) return mark({ ...rest, type: 'tabs' });
+  if (pickList(x, CHECKLIST_LIST_KEYS).length) return mark({ ...rest, type: 'checklist' });
+  return null;
+}
+
 function normAgenda(x: Rec, base: Rec): void {
   const used = new Set<string>();
+  const live = liveFlag(x, base);
   const iso = parseIso(x.date);
   if (iso) base.date = iso.value.slice(0, 10);
   put(base, 'title', line(x.title, 200));
-  const raw = arr(x.blocks);
+  const raw = pickList(x, AGENDA_LIST_KEYS);
   const blocks: { s: number; o: Rec }[] = [];
   for (let i = 0; i < raw.length && blocks.length < MAX_AGENDA_BLOCKS; i++) {
     const r = raw[i];
     if (!isRec(r)) continue;
-    const start = parseClock(r.start);
-    const title = line(r.title, 200);
+    const clock = agendaClock(r);
+    const start = clock.start;
+    const title = firstLine(r, AGENDA_TITLE_KEYS, 200);
     if (start === undefined || !title) continue;
-    let end = parseClock(r.end);
+    let end = clock.end;
     if (end === undefined || end <= start) end = Math.min(start + 60, 23 * 60 + 59);
     if (end <= start) continue; // 23:59 start: no room for a block
-    const o: Rec = { id: itemId(r.id, 'b', i, used), start: fmtClock(start), end: fmtClock(end), title };
+    const o: Rec = { id: live ? liveItemId(r.id, title, used) : itemId(r.id, 'b', i, used), start: fmtClock(start), end: fmtClock(end), title };
     put(o, 'location', line(r.location, 200));
     put(o, 'kind', oneOf(r.kind, HUI_AGENDA_KINDS));
-    put(o, 'note', line(r.note, 300));
+    put(o, 'note', firstLine(r, AGENDA_NOTE_KEYS, 300));
     blocks.push({ s: start, o });
   }
   blocks.sort((a, b) => a.s - b.s); // stable
@@ -1465,7 +1886,40 @@ function productPrice(x: unknown): { price?: number; currency?: string; text?: s
   return { text: line(x, 100) };
 }
 
+/** "Zielpreis", "Ziel: 450 €", "target price", "Wunschpreis" … as a product note: the user's target, not a remark. */
+const TARGET_NOTE_RE = /^\s*(?:ziel(?:preis)?|wunschpreis|preisziel|target(?: price)?|wish price|precio (?:objetivo|deseado)|objetivo)\s*[:=–-]?\s*(.*)$/i;
+
+/**
+ * A watchlist's target price (`target`/`targetPrice`, real-user rounds 2 and 3) and the product's free `note`. Models
+ * also write the target as the price with a note saying so (`"price":600,"note":"Zielpreis"`): that number is the
+ * user's target, never shown as a current price. Any other note is kept visible (price note, else verdict).
+ */
+function productTargetAndNote(r: Rec, o: Rec): void {
+  const t = productPrice(pick(r, ['target', 'targetPrice', 'wishPrice']));
+  if (t.price !== undefined) o.target = t.price;
+  const note = firstLine(r, ['note', 'description', 'detail'], 160);
+  if (!note) return;
+  const m = TARGET_NOTE_RE.exec(note);
+  if (m) {
+    const rest = m[1].trim();
+    const inNote: ReturnType<typeof productPrice> = rest ? productPrice(rest) : {};
+    if (o.target === undefined && inNote.price !== undefined) {
+      o.target = inNote.price;
+      if (o.currency === undefined && inNote.currency) o.currency = inNote.currency;
+      return;
+    }
+    if (!rest && typeof o.price === 'number') {
+      if (o.target === undefined) o.target = o.price;
+      delete o.price;
+      return;
+    }
+  }
+  if (o.priceNote === undefined && note.length <= 60) o.priceNote = note;
+  else if (o.verdict === undefined) o.verdict = note;
+}
+
 function normProducts(x: Rec, base: Rec): void {
+  const live = liveFlag(x, base);
   put(base, 'title', line(x.title, 200));
   put(base, 'layout', oneOf(x.layout, ['carousel', 'grid'] as const));
   put(base, 'compare', bool(x.compare));
@@ -1479,7 +1933,7 @@ function normProducts(x: Rec, base: Rec): void {
     if (!isRec(r)) continue;
     const name = line(r.name, 200) ?? line(r.title, 200) ?? line(r.label, 200);
     if (!name) continue;
-    const o: Rec = { id: itemId(r.id, 'p', i, used), name };
+    const o: Rec = { id: live ? liveItemId(r.id, name, used) : itemId(r.id, 'p', i, used), name };
     put(o, 'brand', line(r.brand, 80));
     put(o, 'imageQuery', normalizeImageQuery(r.imageQuery));
     put(o, 'image', imageUrl(r.image));
@@ -1492,6 +1946,7 @@ function normProducts(x: Rec, base: Rec): void {
     put(o, 'reviews', count(r.reviews));
     put(o, 'badge', line(r.badge, 40));
     put(o, 'verdict', line(r.verdict, 160));
+    productTargetAndNote(r, o);
     if (r.scores !== undefined) {
       const scores = normProductScores(r.scores);
       if (scores.length) o.scores = scores;
@@ -1586,28 +2041,71 @@ function normReps(x: unknown): number | string | undefined {
   return s;
 }
 
+const WARMUP_RE = /warm|aufwärm|einwärm|calentamiento|échauffement|riscaldamento/i;
+const COOLDOWN_RE = /cool|abkühl|dehn|stretch|cool-down|enfriamiento|estiramiento|retour au calme|defaticamento/i;
+
+/** warm-up / cool-down as text: a string, a list of moves, or `{duration, exercises:[…]}` */
+function phaseText(x: unknown): string | undefined {
+  if (typeof x === 'string' || typeof x === 'number') return block(x, 500);
+  const move = (e: unknown) => {
+    if (!isRec(e)) return line(e, 200);
+    const amount = pick(e, ['reps', 'duration', 'time', 'seconds']);
+    const name = firstLine(e, ['name', 'title', 'text'], 150);
+    return name && amount !== undefined ? `${name} ${typeof amount === 'number' ? `${amount} s` : line(amount, 30) ?? ''}`.trim() : name;
+  };
+  const list = (v: unknown) => arr(v).map(move).filter(Boolean).join('; ');
+  if (Array.isArray(x)) return block(list(x), 500);
+  if (!isRec(x)) return undefined;
+  const moves = list(pickList(x, ['exercises', 'items', 'moves', 'steps']));
+  // a numeric phase duration: seconds when large (180), else minutes (3)
+  const d = pick(x, ['duration', 'time']);
+  const dur = typeof d === 'number' ? (d > 20 ? (d % 60 === 0 ? `${d / 60} min` : `${d} s`) : `${d} min`) : line(d, 40);
+  const text = [dur, moves || firstLine(x, ['text', 'description', 'note'], 400)].filter(Boolean).join(': ');
+  return block(text, 500);
+}
+
 function normWorkout(x: Rec, base: Rec): void {
-  base.title = line(x.title, 200) ?? '';
+  // variants written from memory: exercises as `main`/`circuit`, `rounds` for every exercise, durations as text
+  // ("45 Sekunden"), rest as `rest`, the tip as `tip`, no title (→ duration · level)
+  base.title = line(x.title, 200) ?? line(x.name, 200) ?? ([line(x.duration, 40), line(x.level, 40)].filter(Boolean).join(' · ') || '');
   put(base, 'kind', oneOf(x.kind, HUI_WORKOUT_KINDS));
-  put(base, 'warmup', block(x.warmup, 500));
-  put(base, 'cooldown', block(x.cooldown, 500));
+  put(base, 'warmup', phaseText(x.warmup));
+  put(base, 'cooldown', phaseText(x.cooldown));
   const used = new Set<string>();
   const exercises: Rec[] = [];
-  const raw = arr(x.exercises);
+  // the session as phases (`blocks`/`phases`/`sections` with their own exercises and rounds): warm-up and cool-down
+  // phases become the text fields, the exercises of the others the list
+  const raw: { r: unknown; rounds?: number }[] = pickList(x, ['exercises', 'main', 'circuit', 'workout', 'items']).map((r) => ({ r, rounds: num(pick(x, ['rounds', 'circuits', 'sets'])) }));
+  if (!raw.length) {
+    for (const ph of pickList(x, ['blocks', 'phases', 'sections', 'parts', 'stages']).filter(isRec)) {
+      const label = firstLine(ph, ['name', 'title', 'label', 'phase'], 100) ?? '';
+      const moves = pickList(ph, ['exercises', 'items', 'moves']);
+      if (WARMUP_RE.test(label) && base.warmup === undefined) put(base, 'warmup', phaseText(ph));
+      else if (COOLDOWN_RE.test(label) && base.cooldown === undefined) put(base, 'cooldown', phaseText(ph));
+      else for (const r of moves) raw.push({ r, rounds: num(pick(ph, ['rounds', 'circuits', 'sets'])) });
+    }
+  }
   for (let i = 0; i < raw.length && exercises.length < MAX_WORKOUT_EXERCISES; i++) {
-    const r = raw[i];
+    const { r, rounds } = raw[i];
     if (!isRec(r)) continue;
-    const name = line(r.name, 150);
+    const name = firstLine(r, ['name', 'exercise', 'title', 'label'], 150);
     if (!name) continue;
     const o: Rec = { id: itemId(r.id, 'e', i, used), name };
-    const sets = num(r.sets);
+    const sets = num(pick(r, ['sets', 'rounds'])) ?? rounds;
     if (sets !== undefined && sets >= 1) o.sets = Math.min(50, Math.round(sets));
-    put(o, 'reps', normReps(r.reps));
-    const sec = num(r.seconds);
+    // reps written as a time ("30 Sekunden") are the set's duration
+    const repsTime = typeof r.reps === 'string' && !/^\s*\d+\s*$/.test(r.reps) ? parseDuration(r.reps) : undefined;
+    const sec = num(r.seconds) ?? parseDuration(pick(r, ['duration', 'time', 'work', 'hold'])) ?? repsTime;
     if (sec !== undefined && sec >= 1) o.seconds = Math.min(86400, Math.round(sec));
+    const reps = repsTime !== undefined ? undefined : normReps(r.reps);
+    // a timed set with prose reps ("as many as possible", "hold"): the time is the measure, the words go to the note
+    const proseReps = typeof reps === 'string' && o.seconds !== undefined && !/^\d+\s*[-–]\s*\d+$/.test(reps) ? reps : undefined;
+    put(o, 'reps', proseReps ? undefined : reps);
     put(o, 'weight', line(r.weight, 30));
-    put(o, 'restSeconds', int(r.restSeconds, 0, 3600));
-    put(o, 'note', line(r.note, 300));
+    const rest = num(r.restSeconds) ?? parseDuration(pick(r, ['rest', 'restTime', 'pause']));
+    put(o, 'restSeconds', rest === undefined ? undefined : Math.min(3600, Math.max(0, Math.round(rest))));
+    const note = firstLine(r, ['note', 'tip', 'notes', 'description', 'cue'], 300);
+    put(o, 'note', proseReps ? (note ? `${proseReps}. ${note}` : proseReps).slice(0, 300) : note);
     put(o, 'imageQuery', normalizeImageQuery(r.imageQuery));
     exercises.push(o);
   }
@@ -1661,17 +2159,18 @@ function normStudyPlan(x: Rec, base: Rec): void {
 
 function normVocab(x: Rec, base: Rec): void {
   put(base, 'title', line(x.title, 200));
-  base.from = normalizeLangCode(x.from);
-  base.to = normalizeLangCode(x.to);
+  // variants: `language` for the language of the terms, items as `words`, a term as `word`/`front`
+  base.from = langCode(pick(x, ['from', 'language', 'sourceLanguage', 'lang']));
+  base.to = langCode(pick(x, ['to', 'targetLanguage', 'translationLanguage']));
   put(base, 'mode', oneOf(x.mode, ['cards', 'quiz', 'type'] as const));
   const used = new Set<string>();
   const items: Rec[] = [];
-  const raw = arr(x.items);
+  const raw = pickList(x, ['items', 'words', 'vocab', 'vocabulary', 'cards', 'entries']);
   for (let i = 0; i < raw.length && items.length < MAX_VOCAB_ITEMS; i++) {
     const r = raw[i];
     if (!isRec(r)) continue;
-    const term = line(r.term, 200);
-    const translation = line(r.translation, 200);
+    const term = firstLine(r, ['term', 'word', 'front', 'phrase'], 200);
+    const translation = firstLine(r, ['translation', 'meaning', 'back', 'definition'], 200);
     if (!term || !translation) continue;
     const o: Rec = { id: itemId(r.id, 'v', i, used), term, translation };
     put(o, 'example', line(r.example, 300));
@@ -2109,6 +2608,23 @@ function norm(x: unknown, depth: number, ctx: Ctx, path: string): HuiNode | null
   if (++ctx.nodes > MAX_TREE_NODES) return null;
   x = withCanonicalType(x);
   if (!isRec(x) || typeof x.type !== 'string') return null;
+  if (LIVE_WRAPPER_TYPES.has(normTypeKey(x.type))) {
+    const inner = liveWrapper(x);
+    if (inner) {
+      ctx.nodes--;
+      return norm(inner, depth, ctx, path);
+    }
+  }
+  // shapes the node's component cannot show become the component that can: an agenda without clock times → timeline,
+  // an agenda over several days → day tabs, a map without coordinates → places list, a choice that grades its options
+  // → quiz. Decided on the entries seen so far (while streaming a later entry could
+  // still flip it; models keep one shape within a list)
+  const other =
+    x.type === 'agenda' ? (agendaAsTimeline(x) ?? agendaByDays(x)) : x.type === 'map' ? mapWithoutCoords(x) : x.type === 'choice' ? gradedChoiceAsQuiz(x) : null;
+  if (other) {
+    ctx.nodes--;
+    return norm(other, depth, ctx, path);
+  }
   const base: Rec = { type: x.type };
   if (isInteractiveNodeType(x.type)) {
     // always a usable, per-tree-unique id (explicit or `<type>-<path>`)
@@ -2138,6 +2654,7 @@ function norm(x: unknown, depth: number, ctx: Ctx, path: string): HuiNode | null
       base.tone = oneOf(x.tone, ['info', 'success', 'warning', 'danger'] as const) ?? 'info';
       put(base, 'title', str(x.title));
       base.text = str(x.text) ?? '';
+      put(base, 'livePatch', livePatch(x.livePatch));
       break;
     case 'stats':
       base.items = arr(x.items).slice(0, MAX_LIST_ITEMS).flatMap((it) => {
@@ -2309,9 +2826,13 @@ function norm(x: unknown, depth: number, ctx: Ctx, path: string): HuiNode | null
     case 'buttons':
       base.items = arr(x.items).slice(0, MAX_LIST_ITEMS).flatMap((it) => {
         if (!isRec(it)) return [];
-        const action = normalizeAction(it.action);
+        // `action` as a plain string (written from memory): a link opens, anything else sends what the button says
+        const label = str(it.label) ?? str(it.text) ?? str(it.title);
+        const plain = typeof it.action === 'string' ? it.action.trim() : '';
+        const url = plain ? safeHttpUrl(plain) : undefined;
+        const action = normalizeAction(it.action) ?? (url ? { type: 'open_url', url } : plain ? { type: 'send', text: label?.trim() || plain } : null);
         if (!action) return [];
-        const o: Rec = { label: str(it.label) ?? '', action };
+        const o: Rec = { label: label ?? '', action };
         put(o, 'style', oneOf(it.style, ['primary', 'secondary'] as const));
         return [o];
       });
@@ -2341,12 +2862,20 @@ function norm(x: unknown, depth: number, ctx: Ctx, path: string): HuiNode | null
       normRecipe(x, base);
       break;
     case 'tabs': {
+      // a live trip (live/nodes.ts): the tabs are its days and keep stable ids
+      const live = liveFlag(x, base);
+      if (live) put(base, 'title', line(x.title, 200));
+      const tabUsed = new Set<string>();
       const tabs: Rec[] = [];
-      const raw = arr(x.tabs);
+      // models write tabs as `items`/`sections` with `title` and `blocks`/`content` (seen with Haiku): same thing
+      const raw = pickList(x, TAB_LIST_KEYS);
       for (let i = 0; i < raw.length && tabs.length < MAX_TABS; i++) {
         const t = raw[i];
         if (!isRec(t)) continue;
-        tabs.push({ label: line(t.label, 40) ?? `Tab ${i + 1}`, children: children(t.children, depth, ctx, `${path}.${i}`) });
+        // a day tab of a split agenda (agendaByDays) without a day name: the renderer labels it "Tag 2" / "Day 2"
+        const day = t.label === undefined && t.title === undefined ? int(t.day, 1, MAX_TABS) : undefined;
+        const label = firstLine(t, ['label', 'title', 'name'], 40) ?? (day ? '' : `Tab ${i + 1}`);
+        tabs.push({ ...(live ? { id: liveItemId(t.id, label || `d${day}`, tabUsed) } : {}), label, ...(day ? { day } : {}), children: children(sectionChildren(t), depth, ctx, `${path}.${i}`) });
       }
       base.tabs = tabs;
       break;
@@ -2357,7 +2886,7 @@ function norm(x: unknown, depth: number, ctx: Ctx, path: string): HuiNode | null
       for (let i = 0; i < raw.length && items.length < MAX_ACCORDION_ITEMS; i++) {
         const t = raw[i];
         if (!isRec(t)) continue;
-        items.push({ title: line(t.title, 200) ?? `Abschnitt ${i + 1}`, children: children(t.children, depth, ctx, `${path}.${i}`) });
+        items.push({ title: firstLine(t, ['title', 'label', 'name'], 200) ?? `Abschnitt ${i + 1}`, children: children(sectionChildren(t), depth, ctx, `${path}.${i}`) });
       }
       base.items = items;
       const open = num(x.open);
@@ -2671,29 +3200,57 @@ export function coerceRoot(x: unknown, depth = 0): unknown {
   return x;
 }
 
-/** the list a list-like node exists to show (an empty one renders as an empty card) */
-const COLLECTION_FIELD: Readonly<Record<string, string>> = {
-  checklist: 'items',
-  steps: 'items',
-  timeline: 'items',
-  list: 'items',
-  stats: 'items',
-  sources: 'items',
-  gallery: 'items',
-  paths: 'items',
-  compare: 'columns',
-  blocks: 'columns',
-  products: 'products',
-  places: 'places',
-  quiz: 'questions',
-  flashcards: 'cards',
+/**
+ * The list(s) a list-like node exists to show; all of them empty = nothing to render (an empty card, "no entries",
+ * or nothing at all), although the model's block may have carried the content under other names.
+ */
+const COLLECTION_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  checklist: ['items'],
+  steps: ['items'],
+  timeline: ['items'],
+  list: ['items'],
+  stats: ['items'],
+  sources: ['items'],
+  gallery: ['items'],
+  paths: ['items'],
+  compare: ['columns'],
+  blocks: ['columns'],
+  products: ['products'],
+  places: ['places'],
+  quiz: ['questions'],
+  flashcards: ['cards'],
+  choice: ['options'],
+  poll: ['options'],
+  rank: ['items'],
+  decision: ['options'],
+  agenda: ['blocks'],
+  workout: ['exercises'],
+  vocab: ['items'],
+  map: ['markers'],
+  recipe: ['ingredients', 'steps'],
+  guide: ['steps'],
+  translation: ['targets'],
+  slots: ['slots'],
 };
 
 /** a list-like node whose list came out empty (`checklist` with no items, `products` with no products …) */
 export function isEmptyCollection(node: unknown): boolean {
   if (!isRec(node) || typeof node.type !== 'string') return false;
-  const f = COLLECTION_FIELD[node.type];
-  return f !== undefined && Array.isArray(node[f]) && node[f].length === 0;
+  const fs = COLLECTION_FIELDS[node.type];
+  return fs !== undefined && fs.every((f) => Array.isArray(node[f]) && (node[f] as unknown[]).length === 0);
+}
+
+/** keys that only label or configure a node: shown by the "no data" line itself (emptyNode.ts) or not content at all */
+const NON_CONTENT_KEYS: ReadonlySet<string> = new Set([
+  'title', 'question', 'prompt', 'location', 'caption', 'kind', 'layout', 'style', 'variant', 'mode', 'basis', 'source',
+  'unit', 'lang', 'language', 'from', 'to', 'editable', 'multiple', 'open', 'current', 'ranked', 'compare', 'aspect',
+  'autostart', 'servings', 'date', 'status', 'min', 'max', 'step', 'allowOther', 'submitLabel', 'groupBy', 'route', 'animate', 'zoom',
+]);
+
+/** the raw value has readable content besides its labels and settings (`{"type":"callout","message":"Hi"}`) */
+export function hasReadableContent(x: unknown): boolean {
+  if (!isRec(x)) return false;
+  return Object.entries(x).some(([k, v]) => !SKIP_KEYS.has(k) && !NON_CONTENT_KEYS.has(k) && valueText(v) !== undefined);
 }
 
 /** the raw value carries readable list content somewhere (an array with a readable entry, depth ≤ 3) */
@@ -2746,10 +3303,20 @@ function humanKey(k: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+/** solution fields of a question with options: a readable fallback must not give the answer away before it is tried */
+const ANSWER_KEYS: ReadonlySet<string> = new Set(['answer', 'answers', 'correct', 'correctAnswer', 'correct_answer', 'answerIndex', 'correctIndex', 'solution', 'explanation']);
+
+function isQuestion(r: Rec): boolean {
+  return ['options', 'choices', 'answers'].some((k) => Array.isArray(r[k])) && ['question', 'q', 'prompt'].some((k) => typeof r[k] === 'string');
+}
+
 function fieldNodes(r: Rec, skip: string | undefined): Rec[] {
   const out: Rec[] = [];
+  const question = isQuestion(r);
   for (const [k, v] of Object.entries(r)) {
     if (k === skip || SKIP_KEYS.has(k)) continue;
+    // keep the options (`answers` as the option list) but drop the solution
+    if (question && ANSWER_KEYS.has(k) && !(k === 'answers' && !Array.isArray(r.options) && !Array.isArray(r.choices))) continue;
     const t = valueText(v);
     if (!t) continue;
     const url = typeof v === 'string' ? safeHttpUrl(v) : undefined;

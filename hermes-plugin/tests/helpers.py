@@ -12,7 +12,9 @@ from typing import Any, Iterator, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from hermes_ui_plus.bots import BotsService  # noqa: E402
 from hermes_ui_plus.config import settings_from_mapping  # noqa: E402
+from hermes_ui_plus.library import LibraryService  # noqa: E402
 from hermes_ui_plus.quick import QuickService  # noqa: E402
 from hermes_ui_plus.runner import ListenerThread  # noqa: E402
 
@@ -60,11 +62,15 @@ class FakeBackend:
 
 
 class Running:
-    def __init__(self, backend, settings: Optional[dict] = None):
+    def __init__(self, backend, settings: Optional[dict] = None, library_source=None, home: str = "/nonexistent/home",
+                 bots_source=None, bots_profile: str = "default"):
         self.settings = settings_from_mapping(settings or {})
         self.backend = backend
+        library = LibraryService(self.settings, library_source, home) if library_source is not None else None
+        bots = BotsService(self.settings, bots_source, bots_profile, now=lambda: 1_790_000_000.0) \
+            if bots_source is not None else None
         self.listener = ListenerThread(lambda: QuickService(self.settings, backend, today=lambda: "2026-01-02"),
-                                       SECRET, host="127.0.0.1", port=0)
+                                       SECRET, host="127.0.0.1", port=0, library=library, bots=bots)
         assert self.listener.start(), self.listener.error
         self.port = self.listener.port
 

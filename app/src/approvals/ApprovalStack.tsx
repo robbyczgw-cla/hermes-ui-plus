@@ -3,7 +3,7 @@ import { AccessibilityInfo, Pressable, ScrollView, StyleSheet, View, type StyleP
 import type { ApprovalChoice, ApprovalRequest } from '../hermes/types';
 import { useT } from '../i18n';
 import { HText, Icon, PressableScale, haptic, useTheme } from '../ui';
-import { ApprovalSheet } from './ApprovalSheet';
+import { ApprovalSheet, type BotContext } from './ApprovalSheet';
 import { stackKey } from './stackModel';
 
 export type ApprovalStackProps = {
@@ -15,6 +15,8 @@ export type ApprovalStackProps = {
   onClose?: (approval: ApprovalRequest) => void;
   /** notification tap (openPendingApproval): reveal the stack and show this run's card */
   focus?: { runId?: string; at: number } | null;
+  /** the chat is a bot's Bot Chat (bots/): cards name the bot, see ApprovalSheet `bot` */
+  bot?: BotContext;
   style?: StyleProp<ViewStyle>;
 };
 
@@ -23,7 +25,7 @@ export type ApprovalStackProps = {
  * each card is answered independently (own request id, own double-tap lock). Hidden → a chip with the count re-opens it.
  * A new request reveals the stack again and is announced to screen readers.
  */
-export const ApprovalStack = memo(function ApprovalStack({ approvals, onRespond, onClose, focus, style }: ApprovalStackProps) {
+export const ApprovalStack = memo(function ApprovalStack({ approvals, onRespond, onClose, focus, bot, style }: ApprovalStackProps) {
   const t = useTheme();
   const tr = useT();
   const keys = useMemo(() => approvals.map(stackKey), [approvals]);
@@ -107,6 +109,7 @@ export const ApprovalStack = memo(function ApprovalStack({ approvals, onRespond,
           onRespond={(choice) => onRespond(ap, choice)}
           onDismiss={() => setHidden(true)}
           onClose={onClose ? () => onClose(ap) : () => setHidden(true)}
+          bot={bot}
         />
       </ScrollView>
     </View>

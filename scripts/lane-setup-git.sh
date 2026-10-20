@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One-time setup of the git sources of a lane host (the build Mac), so that `build-apk.sh --host` / lane_sync
 # (scripts/lib/lane-sync.sh) lets the host FETCH the commit itself instead of receiving a bundle over a slow link:
-#   1. Forgejo (private, reachable from the host over the LAN / tailnet)   2. the private GitHub origin
+#   1. Forgejo (private, reachable from the host over the LAN / tailnet)   2. the private GitHub mirror
 #   (3. the git bundle remains the last resort)
 # Credentials are READ-ONLY deploy keys: one ed25519 key is generated ON the host (~/<lane>/git-sources.d/*.key, mode 600,
 # outside any repo, never printed or copied here), only its public half travels, and it is registered as a read-only
@@ -10,11 +10,11 @@
 #
 #   scripts/lane-setup-git.sh [--host mac|<ssh host>] [--forgejo REMOTE] [--github REMOTE]
 #     --forgejo REMOTE   local git remote of the Forgejo repo (default: forgejo; skipped when it does not exist)
-#     --github REMOTE    local git remote of the GitHub repo (default: origin when it points to github.com)
+#     --github REMOTE    local git remote of the GitHub repo (default: github, else origin when it points to github.com)
 # Env: HUI_LANE_HOME [hui-lane]. Idempotent: an existing key / registration is reused.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-HOST=mac FORGEJO_REMOTE=forgejo GITHUB_REMOTE=origin
+HOST=mac FORGEJO_REMOTE=forgejo GITHUB_REMOTE=
 while [ $# -gt 0 ]; do
   case "$1" in
     --host) HOST=$2; shift 2 ;;
@@ -23,6 +23,9 @@ while [ $# -gt 0 ]; do
     *) echo "usage: $0 [--host mac|<ssh host>] [--forgejo REMOTE] [--github REMOTE]" >&2; exit 2 ;;
   esac
 done
+if [ -z "$GITHUB_REMOTE" ]; then
+  if git -C "$ROOT" remote get-url github >/dev/null 2>&1; then GITHUB_REMOTE=github; else GITHUB_REMOTE=origin; fi
+fi
 LANE="${HUI_LANE_HOME:-hui-lane}"
 case "$LANE" in /*|*..*|*[!A-Za-z0-9._/-]*) echo "HUI_LANE_HOME must be a plain relative path" >&2; exit 2 ;; esac
 if [ "$HOST" = mac ]; then

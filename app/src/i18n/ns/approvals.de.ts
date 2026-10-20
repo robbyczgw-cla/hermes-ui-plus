@@ -3,6 +3,8 @@ export const approvals = {
   title: {
     blocked: 'Hermes wurde blockiert',
     request: 'Hermes möchte etwas ausführen',
+    blockedBot: '{name} wurde blockiert',
+    requestBot: '{name} möchte etwas ausführen',
   },
   risk: {
     flagged: 'Von Hermes als gefährlich eingestuft',
@@ -35,6 +37,12 @@ export const approvals = {
       label: 'Ablehnen',
       a11y: 'Befehl ablehnen',
     },
+    alwaysBot: {
+      label: 'Immer erlauben',
+      hint: 'Nur für {name}',
+      hintCategory: 'Nur für {name} · gilt für alle Befehle der Art „{category}“',
+      a11y: 'Gleichartige Befehle für {name} dauerhaft erlauben, andere Bots fragen weiter',
+    },
     retry: '{label} – erneut versuchen',
     more: 'Weitere Optionen',
     less: 'Weniger Optionen',
@@ -44,6 +52,8 @@ export const approvals = {
     body: 'Das Muster wird dauerhaft in die globale Freigabeliste von Hermes eingetragen. Gleichartige Befehle laufen dann ohne Nachfrage – auch in Telegram und bei Cron-Jobs.',
     yes: 'Ja, überall immer erlauben',
     back: 'Zurück',
+    bodyBot: 'Das Muster wird dauerhaft in die Freigabeliste von {name} eingetragen. Gleichartige Befehle laufen bei {name} dann ohne Nachfrage, auch in Routinen. Andere Bots fragen weiter.',
+    yesBot: 'Ja, für {name} immer erlauben',
   },
   error: {
     notPending: 'Diese Anfrage wurde schon beantwortet oder ist abgelaufen.',
@@ -63,6 +73,12 @@ export const approvals = {
   },
   reason: {
     label: 'Grund laut Hermes',
+    labelBot: 'Grund laut {name}',
+  },
+  waiting: {
+    since: '{name} wartet auf dich, seit {time}',
+    sinceA11y: '{name} wartet seit {time} auf deine Antwort',
+    expired: 'Abgelaufen, nichts wurde ausgeführt. Schreib {name}, wenn es nochmal versucht werden soll.',
   },
   stack: {
     position: 'Freigabe {index} von {total}',
@@ -78,6 +94,7 @@ export const approvals = {
     once: 'Erlaubt (einmal)',
     session: 'Erlaubt (für diesen Auftrag)',
     always: 'Immer erlaubt (überall)',
+    alwaysBot: 'Immer erlaubt (nur für {name})',
     deny: 'Abgelehnt',
     expired: 'Abgelaufen – abgelehnt',
     cancelled: 'Nicht beantwortet – Lauf beendet',

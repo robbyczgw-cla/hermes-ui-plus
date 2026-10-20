@@ -26,6 +26,7 @@ import {
   buildCompareTable,
   cheapestOffer,
   displayPrice,
+  targetText,
   formatCount,
   formatPrice,
   formatRating,
@@ -46,12 +47,20 @@ import { ImageSlotGroup } from '../../imageSlot';
 import { productImageFit, type SlotMode } from '../../../../images/slot';
 import { CardImage, DetailSheet, HeaderPill, InfoRow, Rail, RatingRow, SNAP_START, SectionLabel, SkeletonCard, railLayout, starColor, type RailLayout } from './parts';
 import { useCaptureMode } from '../../../lib/capture';
+import { LiveNode, useLiveHandOver } from '../../../../live/ui/LiveNode';
 
 type ProductsState = { compare: string[]; comparing?: boolean; onlyDiff?: boolean; pick?: string };
 const INITIAL: ProductsState = { compare: [] };
 const IMG = 150;
 
 export function Products({ node }: { node: Partial<HuiProducts> }) {
+  // a live watchlist (`"live":true`) in a chat that folds live cards: receipt / inline card / snapshot
+  const live = useLiveHandOver(node);
+  if (live) return <LiveNode node={node} {...live} type="products" />;
+  return <PlainProducts node={node} />;
+}
+
+function PlainProducts({ node }: { node: Partial<HuiProducts> }) {
   const t = useTheme();
   const tr = useT();
   const { lang } = useLocale();
@@ -274,9 +283,10 @@ function PriceText({ p, lang, align }: { p: ProductItem; lang: NumLang; align?: 
       </HText>
     );
   }
-  return p.priceNote ? (
+  const note = p.priceNote ?? targetText(p, tr, lang);
+  return note ? (
     <HText variant="callout" weight="600" align={align} aria-hidden>
-      {p.priceNote}
+      {note}
     </HText>
   ) : null;
 }
@@ -370,11 +380,14 @@ function PickedNote({ t, grow }: { t: Theme; grow?: boolean }) {
 function PriceLine({ p, lang, big }: { p: ProductItem; lang: NumLang; big?: boolean }) {
   const tr = useT();
   const dp = displayPrice(p);
+  const target = targetText(p, tr, lang);
   if (!dp) {
-    // display-only price text ("ca. 229–244 USD") without a numeric price
-    return p.priceNote ? (
+    // display-only price text ("ca. 229–244 USD") without a numeric price; a watchlist product without a price yet
+    // shows the user's target price
+    const note = [p.priceNote, target].filter(Boolean).join(' · ');
+    return note ? (
       <HText variant={big ? 'headline' : 'callout'} weight="600">
-        {p.priceNote}
+        {note}
       </HText>
     ) : null;
   }
@@ -384,9 +397,9 @@ function PriceLine({ p, lang, big }: { p: ProductItem; lang: NumLang; big?: bool
       <HText variant={big ? 'stat' : 'headline'} weight="700" tabular>
         {dp.from ? tr('ui.products.from', { price: text }) : text}
       </HText>
-      {p.priceNote ? (
+      {p.priceNote || target ? (
         <HText variant="caption" color="muted" style={s.shrink}>
-          {p.priceNote}
+          {[p.priceNote, target].filter(Boolean).join(' · ')}
         </HText>
       ) : null}
     </View>
@@ -477,7 +490,7 @@ function RankedRow({ t, p, rank, lang, wide, selecting, selected, picked, onPres
   const noImg = imgMode === 'collapse';
   const scores = p.scores.map((sc) => ({ label: sc.label, value: formatScore(sc.value, lang) }));
   const facts = scores.length ? <FactsTable t={t} facts={scores} cols={wide ? 1 : 2} /> : null;
-  const hasPrice = !!displayPrice(p) || !!p.priceNote;
+  const hasPrice = !!displayPrice(p) || !!p.priceNote || p.target !== undefined;
   const hasBody = !!p.verdict || (!wide && !!facts) || p.pros.length > 0 || p.cons.length > 0;
   const quiet = { onPress, haptic: 'selection' as const, scaleTo: 1, pressedStyle: s.pressed, accessible: false, focusable: false, importantForAccessibility: 'no-hide-descendants' as const, accessibilityElementsHidden: true, 'aria-hidden': true };
 

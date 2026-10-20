@@ -52,6 +52,7 @@ import {
   type AgendaBlock,
 } from './agendaModel.ts';
 import { a11yState } from '../../../lib/a11yState';
+import { LiveNode, useLiveHandOver } from '../../../../live/ui/LiveNode';
 
 const HOUR_PX = 60;
 const SNAP_PX = (HOUR_PX * SNAP_MIN) / 60;
@@ -72,6 +73,13 @@ function useNow(active: boolean): Date {
 }
 
 export function Agenda({ node }: { node: Partial<HuiAgenda> }) {
+  // a live one-day trip (`"live":true`) in a chat that folds live cards: receipt / inline card / snapshot
+  const live = useLiveHandOver(node);
+  if (live) return <LiveNode node={node} {...live} type="trip" />;
+  return <PlainAgenda node={node} />;
+}
+
+function PlainAgenda({ node }: { node: Partial<HuiAgenda> }) {
   const t = useTheme();
   const tr = useT();
   const { locale, lang, formatDate } = useLocale();

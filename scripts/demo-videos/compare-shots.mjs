@@ -43,13 +43,13 @@ try {
   const first = page.getByText('Aurel QX7', { exact: true }).last();
   await a.scrollTo(first, { band: 0.3 });
   await a.wait(4500); // photo lookups + the 3 s slot cap for the column without a photo
-  await page.screenshot({ path: join(OUT, 'compare-thumbs-1.png') });
+  await page.screenshot({ path: join(OUT, 'compare-thumbs-1.jpg'), type: 'jpeg', quality: 75 });
   // the remaining columns of the horizontal rail
   const last = page.getByText('Lumo L5', { exact: true }).last();
   await last.scrollIntoViewIfNeeded();
   await a.wait(1500);
-  await page.screenshot({ path: join(OUT, 'compare-thumbs-2.png') });
-  console.log(`wrote ${OUT}/compare-thumbs-{1,2}.png`);
+  await page.screenshot({ path: join(OUT, 'compare-thumbs-2.jpg'), type: 'jpeg', quality: 75 });
+  console.log(`wrote ${OUT}/compare-thumbs-{1,2}.jpg`);
 } finally {
   await browser.close();
   mock.kill();

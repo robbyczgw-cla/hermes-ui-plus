@@ -21,6 +21,15 @@ plugin. When the plugin is absent, disabled, unreachable or crashing, `/bridge/q
 `404 feature_off`, `/bridge/quick/config` answers `{available: false, reason}`, and every other route is unaffected.
 `bridge/test/quick.test.mjs` tests this with seven failure modes.
 
+## Library routes (0.2.0)
+
+Besides quick answers the plugin serves read-only `GET /library/{config,skills,skills/content,memory}` on the same
+listener and secret, for the plugin's own profile only (contract: [SKILLS-MEMORY.md](SKILLS-MEMORY.md)). The code is
+`library.py` (pure) plus `HermesLibrary` in `hermes_adapter.py` (the only Hermes imports: skill catalog, disabled
+list, provenance sets, `_find_skill`, `load_config`), run in a worker thread inside the profile scope. Memory files
+are read straight from `<HERMES_HOME>/memories/`. Missing Hermes internals give `hermes_unsupported`, never a 500.
+Memory is off unless `library.expose_memory: true`. The plugin never writes, and the client cannot pass a path.
+
 ## Hermes surfaces used (v0.21.x)
 
 | Surface | Kind | Use |

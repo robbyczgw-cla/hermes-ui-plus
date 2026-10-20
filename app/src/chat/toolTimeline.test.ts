@@ -264,3 +264,13 @@ test('technical details label exists in de, en and es', () => {
   assert.equal(en.t('chat.toolTimeline.technical'), 'Technical details');
   assert.equal(makeT('es', 'es-ES')('chat.toolTimeline.technical'), 'Detalles técnicos');
 });
+
+test("hermes timeline: Hermes' English session-lock lines read in the UI language (real-user round 3, retried turn)", () => {
+  let m = createAssistantMessage(10_000);
+  m = applyEvent(m, { type: 'status', kind: 'lifecycle', text: '⏳ Another Hermes process is using this session; waiting for it to finish before starting your turn...' }, 10_300);
+  m = applyEvent(m, { type: 'status', kind: 'lifecycle', text: 'Session is free; loading the latest transcript...' }, 19_300);
+  m = applyEvent(m, { type: 'status', kind: 'lifecycle', text: 'Warte auf Provider (1/3)' }, 19_400);
+  const summaries = (t: typeof de.t) => buildTimeline(m, t, 20_000).filter((r) => r.kind === 'status').map((r) => r.summary);
+  assert.deepEqual(summaries(de.t), ['Hermes beendet noch einen anderen Durchlauf in diesem Chat, deine Nachricht startet danach …', 'Bereit, der Verlauf wird geladen …', 'Warte auf Provider (1/3)']);
+  assert.equal(summaries(en.t)[1], 'Ready, loading the conversation …');
+});

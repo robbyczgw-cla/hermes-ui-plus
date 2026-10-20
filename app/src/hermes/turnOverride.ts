@@ -13,6 +13,7 @@
  * (sessionMapping.userTextCore), so the synced turn still lines up with the local message.
  */
 import type { ChatMessage } from './types.ts';
+import { splitLiveTrailer, type LiveBatches } from '../live/trailer.ts';
 
 export type TurnOverride = {
   /** model for this one turn (picked in "Mit anderem Modell…"); the chat's own model stays */
@@ -50,8 +51,11 @@ export type TurnExtras = { note?: true; context?: true };
  * The typed text without a leading context block / trailing note, and which of the two were there (a compact chip
  * on the bubble, chat/TurnExtrasChip). Unterminated blocks stay as they are.
  */
-export function splitTurnExtras(text: string): { text: string; extras?: TurnExtras } {
-  let s = text;
+export function splitTurnExtras(text: string): { text: string; extras?: TurnExtras; live?: LiveBatches } {
+  // live-card edits ride at the very end (after a note): cut first; they get their own line, not the chip
+  const trailer = splitLiveTrailer(text);
+  let s = trailer.text;
+  const live = trailer.batches;
   const extras: TurnExtras = {};
   if (s.startsWith(CONTEXT_OPEN)) {
     const end = s.indexOf(CONTEXT_CLOSE);
@@ -65,7 +69,7 @@ export function splitTurnExtras(text: string): { text: string; extras?: TurnExtr
     extras.note = true;
     s = noteless;
   }
-  return extras.note || extras.context ? { text: s, extras } : { text: s };
+  return { text: s, ...(extras.note || extras.context ? { extras } : {}), ...(live ? { live } : {}) };
 }
 
 /** the typed user text without a leading context block / trailing note (transcript matching) */

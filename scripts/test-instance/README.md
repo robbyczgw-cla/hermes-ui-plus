@@ -20,6 +20,11 @@ inside the image) or when its host already runs the emulator you test with. Both
 (12 PASS, 0 FAIL, 1 SKIP). The Mac is a build machine (16 GB, fanless): start it only for a test, stop it right
 after, and never next to the Android lane (the scripts refuse).
 
+The setup also copies the `hermes-ui` skill into the default profile's skills folder (as `hermes-skill/INSTALL.md`
+does on a real Hermes), so `skill_view` finds its references. `setup --force-config --web ddgs` (native only) adds
+keyless web search for API clients (Hermes' `ddgs` backend; search only, no extract backend), so product questions in
+the conversation test get real tool data.
+
 Profiles on both: **default** (`claude-haiku-5-5`) and **writer** ("Quill": short, dry, signs every answer with
 `— Quill`, `claude-haiku-4-5-20251001`). Both get the `todo` toolset only through the API: no terminal, files, code,
 browser, web or memory, so no approval can be triggered. ⚡ uses `auxiliary.hui_quick` = `claude-haiku-5-5`, at most 400
@@ -48,21 +53,23 @@ Run on **your machine**, against either host:
 
 | Script | |
 |---|---|
-| `ti.sh --host mac\|linux\|<ssh alias> COMMAND …` | one entry point: `sync`, `copy-key --from HOST`, `setup`, `start`, `stop`, `status`, `session`, `api-test`, `quick-off-test`, `pair`, `lock`, `remove`, `tunnel start\|stop\|status\|print` |
+| `ti.sh --host mac\|linux\|<ssh alias> COMMAND …` | one entry point: `sync`, `copy-key --from HOST`, `setup`, `start`, `stop`, `status`, `session`, `api-test`, `quick-off-test`, `conversation-test`, `pair`, `lock`, `remove`, `tunnel start\|stop\|status\|print` |
 | `sync.sh [--host H]` | copies `bridge/`, `hermes-plugin/`, `hermes-skill/`, `scripts/test-instance/`, `scripts/e2e/` to `<TI_DIR>/repo` on the host |
+| `conversation-test.sh [--host H] [--out DIR]` | live multi-turn chats (`bridge/eval/conversations/run.mjs`, every answer checked with the app's parser) run HERE against the instance, which runs inside a session on the host, through an own ssh tunnel; the bridge token goes to a temp file (600), never printed. Report default `$HUI_PRIVATE_DIR/reports/conversations/<time>/`. Pre-release step (docs/RELEASING.md); `ti.sh … conversation-test` calls it |
 | `host.sh` | sourced helper: `mac` = `MAC_HOST`, `linux` = `TI_HOST` (environment, then `$HUI_PRIVATE_DIR/test-instance.env` / `build.env`); any other name is used as ssh alias |
 
 Run **on the host** (through `ti.sh`, or directly from `<TI_DIR>/repo/scripts/test-instance/`):
 
 | Script | |
 |---|---|
-| `setup.sh [--force-config]` | one-time setup, re-runnable (keeps keys, data and sessions; `--force-config` rewrites the config files it owns). Native: clones the pinned commit, builds the venv, installs the extras `anthropic,cron,pty,mcp,uvloop` + `aiohttp` |
+| `setup.sh [--force-config] [--web ddgs]` | one-time setup, re-runnable (keeps keys, data and sessions; `--force-config` rewrites the config files it owns; `--web ddgs` see above). Native: clones the pinned commit, builds the venv, installs the extras `anthropic,cron,pty,mcp,uvloop` + `aiohttp` |
 | `start.sh` / `stop.sh` / `status.sh` | start, stop, show what runs and listens. `stop.sh` exits non-zero if anything is left and refuses while a `session.sh` holds the instance (`--force`) |
 | `session.sh [--wait S] [--label N] -- CMD …` | **the safe way**: take the locks, `start.sh`, run CMD, `stop.sh`, release; the instance is stopped on every exit path (CMD fails, Ctrl-C, ssh drops). Exit 3 = lock not free within `--wait`, 4 = start failed, 5 = stop left something |
 | `lock.sh status\|take\|release` | the instance lock for hand-driven sessions (`take` is a 2 h lease) |
 | `remove.sh [--yes] [--keep-image]` | stop, delete `TI_DIR` (docker: and the image) |
 | `pair.sh [FILE] [LABEL]` | one-time pairing link (device token, works once, 1 hour) into `FILE` (mode 600, default `<TI_DIR>/pair-link.txt`) |
 | `api-test.mjs [--phase on\|off] [--only a,b]` | scripted API checks, report in `<TI_DIR>/reports/…/api-report.md` |
+| `bots-test.sh [--approval]` / `bots-test.mjs` | Bots v2 (docs/BOTS-SERVER.md): the bridge's Bot Chat route (other titles refused, created once, adopted after), two turns bound to it (history, title kept), the default bot's own Bot Chat; `--approval` gives `writer` the terminal toolset + manual approvals for the run (config backed up, restored, sha1 checked) and checks that "always" lands in writer's config only. Report `<TI_DIR>/reports/bots-…/bots-report.json`. `ti.sh … bots-test` runs it in a session |
 | `quick-off-test.sh` | takes the plugin out of `plugins.enabled`, restarts the gateway, runs `api-test.mjs --phase off`, enables it again |
 | `watchdog.sh` | native only: the RSS cap, started and stopped by `start.sh` / `stop.sh` |
 

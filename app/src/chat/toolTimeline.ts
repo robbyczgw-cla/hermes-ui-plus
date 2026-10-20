@@ -9,7 +9,7 @@ import { splitProgressNotes, type ProgressNote } from '../hermes/progressNotes.t
 import { domainOf, inputSummary } from './toolInput.ts';
 import { formatNumber, type TFn, type TKey } from '../i18n/core.ts';
 import { toolEmoji } from './format.ts';
-import { describeTool, hasOwnSummary, isCompactedStatus, parseTodos, toolIconName } from './hermesTools.ts';
+import { describeTool, hasOwnSummary, isCompactedStatus, parseTodos, sessionStatusKey, toolIconName } from './hermesTools.ts';
 import type { IconName } from './icons.tsx';
 import { modelLabel } from './models.ts';
 import { withoutSecurityNotice } from '../hermes/webResults.ts';
@@ -210,12 +210,13 @@ function stepRow(msg: ChatMessage, s: TraceStep, next: TraceStep | undefined, st
     case 'status': {
       const kind = (s.data as { kind?: string } | undefined)?.kind;
       const compacted = isCompactedStatus(kind, s.text);
+      const session = sessionStatusKey(s.text);
       return {
         ...base,
         icon: compacted ? '🗜️' : '⏳',
         ...(compacted ? { iconName: 'compress' as const } : {}),
         title: compacted ? t('chat.toolTimeline.contextCompacted') : t('chat.toolTimeline.status'),
-        summary: s.text,
+        summary: session ? t(`chat.toolTimeline.session.${session}`) : s.text,
         sub: kind && !compacted ? kind : undefined,
         state: 'info',
       };

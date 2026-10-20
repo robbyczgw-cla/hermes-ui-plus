@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { brotliCompressSync, crc32, gzipSync } from 'node:zlib';
@@ -674,4 +674,45 @@ test('CLI --path: .gz / .br are scanned decompressed, .zip entry by entry; a bro
   assert.match(r.err, /app\.zip!inner\.txt/, 'finding inside the zip entry');
   assert.match(r.err, /broken\.gz!gunzip/, 'a file that does not decompress is still scanned (raw)');
   assert.doesNotMatch(r.err, /bundle\.js\.br/, 'clean brotli content has no finding');
+});
+
+// --- gitleaks on Hermes bytecode: scan-artifact.sh gives gitleaks the decoded strings, one per line ----------------
+const GITLEAKS = [...(process.env.PATH ?? '').split(':'), join(process.env.HOME ?? '', '.local/bin')].map((d) => join(d, 'gitleaks')).find((p) => existsSync(p));
+
+test('scan-artifact.sh + gitleaks: glued neighbour strings in Hermes bytecode are not a token, a real key in it still is', { skip: !GITLEAKS && 'gitleaks not installed' }, () => {
+  const sh = fileURLToPath(new URL('./scan-artifact.sh', import.meta.url));
+  const neighbours = ['LONG_TOKEN_LEAD_MS', 'Samstag 18:00', 'IFrame', '1280x720', '19.2.3.x - 2.4.x', 'GestureHandlerRootView', 'RCTImageView_v2'];
+  const bundle = (strings) => { const d = tmp(); mkdirSync(join(d, 'assets')); writeFileSync(join(d, 'assets/index.android.bundle'), synthHbc({ strings })); return d; };
+  const gate = (dir) => {
+    const r = spawnSync('bash', [sh, '--public', dir], { encoding: 'utf8', env: { PATH: `${dirname(GITLEAKS)}:${process.env.PATH}`, HOME: tmp(), HUI_PRIVATE_DIR: tmp() } });
+    return { code: r.status, all: r.stdout + r.stderr };
+  };
+  const clean = gate(bundle(['api_key', 'token', ...neighbours]));
+  assert.equal(clean.code, 0, clean.all);
+  assert.match(clean.all, /1 Hermes bytecode file\(s\) replaced/);
+  // a real (fake-valued) key among the same neighbours must still be caught
+  const key = `sk_${'test'}_${'Zq8vK2mXp4Rt7Lw9Yb3Nc5Hd1'}`; // runtime-built Stripe-shaped fake key, so this file stays clean
+  const leaky = gate(bundle(['api_key', ...neighbours, key, 'token']));
+  assert.equal(leaky.code, 1, leaky.all);
+  assert.match(leaky.all, /RuleID:\s+stripe-access-token/);
+  assert.match(leaky.all, /scan-artifact: FAILED/);
+});
+
+test('hermes-strings-dump: one escaped string per line, other files copied unchanged, broken bytecode is an error', () => {
+  const dump = fileURLToPath(new URL('./hermes-strings-dump.mjs', import.meta.url));
+  const src = tmp();
+  mkdirSync(join(src, 'assets'));
+  writeFileSync(join(src, 'assets/index.android.bundle'), synthHbc({ strings: ['zorblax', 'two\nlines', 'back\\slash', { text: 'Qüxel', utf16: true }] }));
+  writeFileSync(join(src, 'assets/app.config'), '{"a":1}\n');
+  const out = join(tmp(), 'out');
+  const ok = spawnSync('node', [dump, src, out], { encoding: 'utf8' });
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.equal(readFileSync(join(out, 'assets/index.android.bundle.hermes-strings.txt'), 'utf8'), 'zorblax\ntwo\\nlines\nback\\\\slash\nQüxel\n');
+  assert.equal(existsSync(join(out, 'assets/index.android.bundle')), false, 'raw bytecode is not handed to gitleaks');
+  assert.equal(readFileSync(join(out, 'assets/app.config'), 'utf8'), '{"a":1}\n');
+  const bad = synthHbc({ strings: ['a'] });
+  bad.writeUInt32LE(bad.readUInt32LE(52) + 1, 52);
+  writeFileSync(join(src, 'assets/index.android.bundle'), bad);
+  const err = spawnSync('node', [dump, src, join(tmp(), 'out2')], { encoding: 'utf8' });
+  assert.equal(err.status, 2);
 });

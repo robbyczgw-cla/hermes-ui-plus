@@ -78,6 +78,7 @@ test('featureSummary reports optional features', () => {
   assert.match(f.meta, /^on/); assert.match(f.uploads, /^on/);
   assert.match(f.images, /^proxy on/); // the image proxy is no provider: on by default, not in "direct providers"
   assert.match(Object.fromEntries(featureSummary(config, { BRIDGE_IMAGE_PROXY: 'off' })).images, /BRIDGE_IMAGE_PROXY=off/);
+  assert.match(f.routines, /^control, bots none from BRIDGE_ROUTINES_BOTS/);
   assert.match(Object.fromEntries(featureSummary(config, { ANTHROPIC_API_KEY: 'y' })).meta, /^off \(opt-in/); // a key alone: off
 });
 
@@ -123,7 +124,8 @@ test('missing bootstrap message: loud startup warning and a feature line; off on
   const file = join(tmp(), 'bootstrap-system-message.txt');
   writeFileSync(file, 'UI bootstrap\n');
   const on = createServer({ HERMES_BASE_URL: 'http://h', BRIDGE_TOKEN: 't' }, { logger, defaultBootstrapFile: file }).config;
-  assert.deepEqual([on.bootstrap, on.bootstrapMissing, lines.length], ['UI bootstrap', '', 0]);
+  // the capability line (src/caps.mjs) is appended once at startup; no image search key here
+  assert.deepEqual([on.bootstrap, on.bootstrapMissing, lines.length], ['UI bootstrap\n[hermes-ui-caps] image_search=off', '', 0]);
 });
 
 test('Docker image ships the bundled skill (bootstrap message) and the build context does not exclude it', () => {

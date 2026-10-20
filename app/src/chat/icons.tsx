@@ -58,7 +58,11 @@ export type IconName =
   | 'branch'
   | 'pin'
   | 'lock'
-  | 'chevronLeft';
+  | 'chevronLeft'
+  | 'cloud'
+  | 'cloudCheck'
+  | 'phone'
+  | 'laptop';
 
 type Props = { name: IconName; size?: number; color: string; strokeWidth?: number };
 
@@ -330,6 +334,29 @@ function render(name: IconName, p: object, color: string) {
           <Circle cx={7} cy={18.5} r={2} {...p} />
           <Circle cx={17} cy={8.5} r={2} {...p} />
           <Path d="M7 7.5v9M17 10.5c0 4-10 2.5-10 6" {...p} />
+        </>
+      );
+    case 'cloud':
+      return <Path d="M7 18.5h10a4 4 0 0 0 .6-7.96A5.5 5.5 0 0 0 7.06 9.6 4.5 4.5 0 0 0 7 18.5z" {...p} />;
+    case 'cloudCheck':
+      return (
+        <>
+          <Path d="M7 18.5h10a4 4 0 0 0 .6-7.96A5.5 5.5 0 0 0 7.06 9.6 4.5 4.5 0 0 0 7 18.5z" {...p} />
+          <Path d="m9.5 13.8 1.8 1.8 3.4-3.4" {...p} />
+        </>
+      );
+    case 'phone':
+      return (
+        <>
+          <Rect x="7" y="3.5" width="10" height="17" rx="2.5" {...p} />
+          <Path d="M11 17.5h2" {...p} />
+        </>
+      );
+    case 'laptop':
+      return (
+        <>
+          <Rect x="5" y="5.5" width="14" height="9.5" rx="1.5" {...p} />
+          <Path d="M3 18.5h18" {...p} />
         </>
       );
     case 'pin':

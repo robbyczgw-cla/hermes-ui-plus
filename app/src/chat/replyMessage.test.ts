@@ -40,6 +40,23 @@ test('checklist / quiz / slot / confirm summaries are localized', () => {
   assert.equal(one(confirmReply('k', false)), 'nein');
 });
 
+// 0.2 real-user round 2, R2-09: the pasta shopping list of 11 items showed "1 von 12 erledigt" because one item
+// ("Parmesan, gerieben") has a comma of its own; the sent line must count what the card counts (1/11)
+test('R2-09 checklist reply: an item with a comma is one item (real J02 list)', () => {
+  const done = ['400 g Penne oder Fettuccine'];
+  const open = ['300 g Zucchini', '250 g Champignons', '1 Rote Paprika', '4 Zehen Knoblauch', '200 ml Sahne', '200 ml Gemüsebrühe', '150 g Getrocknete Tomaten in Öl', '1 TL Italienische Kräuter', 'Pfeffer', '50 g Parmesan, gerieben'];
+  const msg = checklistReply('pasta-einkauf', done, open);
+  assert.match(msg, /offen: 300 g Zucchini; 250 g Champignons; .*; 50 g Parmesan, gerieben$/);
+  assert.equal(one(msg), '1 von 11 erledigt');
+  assert.equal(one(checklistReply('l', [], ['Brot', 'Käse, gerieben']), en), '0 of 2 done');
+  // without commas in items the protocol line is unchanged
+  assert.equal(checklistReply('l', ['Milch'], ['Brot', 'Eier']), '[checklist:l] erledigt: Milch · offen: Brot, Eier');
+  // a decimal comma is no separator
+  assert.equal(one(checklistReply('l', ['2 l Milch'], ['Brot', '0,25 kg Butter'])), '1 von 3 erledigt');
+  // the "offen:"-only form (chat/ask.ts) counts the same way
+  assert.equal(one('[checklist:l] offen: Brot; Käse, gerieben'), '0 von 2 erledigt');
+});
+
 test('poll / decision / calc / rank / scale / agenda', () => {
   assert.equal(one('[poll:p] Pizza 3 · Sushi 1 (4 Stimmen) — Anna: Pizza'), 'Pizza 3 · Sushi 1');
   assert.equal(one('[poll:p] Pizza 3 · Sushi 2 (5 Stimmen · 3 Personen)'), 'Pizza 3 · Sushi 2');

@@ -52,7 +52,8 @@ test('probe on: one turn record with marks, commits, commit lag and spans', () =
   assert.equal(t.spans['md.parse'].n, 1);
   assert.equal(t.spans['answer.render+commit'].n, 2, 'streaming commits only');
   assert.equal(t.note, undefined);
-  assert.ok(t.marks.request <= 2 && t.marks.headers >= 15 && t.marks.headers <= t.firstDelta, JSON.stringify(t.marks));
+  // order and the 20 ms wait between the marks, never absolute times: a loaded host may delay the first mark by tens of ms
+  assert.ok(t.marks.request < t.marks.headers && t.marks.headers >= 15 && t.marks.headers <= t.firstDelta, JSON.stringify(t.marks));
 });
 
 test('probe on: a turn without a final commit still reports (after 3 s), marked', () => {
