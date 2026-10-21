@@ -232,3 +232,73 @@ test('session: on the Linux host a plain flock user and a session exclude each o
   assert.equal(ok.status, 0, ok.stderr);
   s.done();
 });
+
+function holdRig(s) {
+  const r = sessionRig(s);
+  const inst = s.env.TI_DIR;
+  mkdirSync(join(inst, 'data', 'sessions'), { recursive: true });
+  writeFileSync(join(inst, 'data', 'state.db'), 'original state');
+  writeFileSync(join(inst, 'data', 'sessions', 'a.json'), '{"a":1}');
+  writeFileSync(join(inst, 'secret.env'), 'K=1\n');
+  chmodSync(join(inst, 'secret.env'), 0o600);
+  return { ...r, inst, env: { ...r.env, TI_FLOCK_FILE: '' } };
+}
+const proofOf = (dir) => spawnSync('python3', [sh('tree-proof.py'), 'digest', dir], { encoding: 'utf8' }).stdout.trim();
+
+test('hold: whatever CMD does to the instance directory, it is back exactly as before (proved), exit status of CMD, lock free', () => {
+  const s = scratch(); const r = holdRig(s);
+  const before = proofOf(r.inst);
+  const cmd = `echo changed > "${r.inst}/data/state.db"; rm "${r.inst}/data/sessions/a.json"; echo new > "${r.inst}/data/new.log"; chmod 644 "${r.inst}/secret.env"; exit 9`;
+  const out = run('hold.sh', ['--label', 'unit', '--', 'bash', '-c', cmd], r.env);
+  assert.equal(out.status, 9, out.stderr);
+  assert.match(out.stderr, /restored: .*identical to the backup/);
+  assert.equal(proofOf(r.inst), before);
+  assert.equal(readFileSync(join(r.inst, 'data', 'state.db'), 'utf8'), 'original state');
+  assert.equal(existsSync(`${r.inst}.hold-backup`) || existsSync(`${r.inst}.hold-after`), false, 'no leftovers');
+  assert.equal(run('lock.sh', ['status'], s.env).stdout.trim(), 'free');
+  assert.deepEqual(r.calls(), ['stop owned=1', 'stop owned=1'], 'stopped before the backup and before the restore');
+  s.done();
+});
+
+test('hold: a restore that does not match the backup exits 6 and keeps both trees', () => {
+  const s = scratch(); const r = holdRig(s);
+  // the backup is damaged while CMD runs: the restored tree (= backup) cannot match its own manifest
+  const out = run('hold.sh', ['--', 'bash', '-c', `echo damaged > "${r.inst}.hold-backup/data/state.db"`], r.env);
+  assert.equal(out.status, 6);
+  assert.match(out.stderr, /restored tree differs/);
+  assert.match(out.stderr, /changed data\/state\.db/);
+  assert.equal(existsSync(`${r.inst}.hold-after`), true);
+  assert.equal(run('lock.sh', ['status'], s.env).stdout.trim(), 'free');
+  s.done();
+});
+
+test('hold: refuses a stale backup directory and a held lock without touching the instance', async () => {
+  const s = scratch(); const r = holdRig(s);
+  mkdirSync(`${r.inst}.hold-backup`);
+  const stale = run('hold.sh', ['--', 'true'], r.env);
+  assert.notEqual(stale.status, 0);
+  assert.match(stale.stderr, /exists from an earlier run/);
+  rmSync(`${r.inst}.hold-backup`, { recursive: true });
+  const holder = await holdSession(s, 20);
+  try {
+    const busy = run('hold.sh', ['--wait', '0', '--', 'true'], r.env);
+    assert.equal(busy.status, 3);
+    assert.equal(existsSync(`${r.inst}.hold-backup`), false);
+  } finally { holder.kill(); }
+  s.done();
+});
+
+test('tree-proof: content, mode and names count; mtimes do not', () => {
+  const s = scratch(); const r = holdRig(s);
+  const base = proofOf(r.inst);
+  const later = new Date(Date.now() + 5000);
+  spawnSync('touch', ['-d', later.toISOString(), join(r.inst, 'data', 'state.db'), join(r.inst, 'data')]);
+  assert.equal(proofOf(r.inst), base, 'mtime only');
+  writeFileSync(join(r.inst, 'data', 'state.db'), 'original statf'); // same size, other content
+  assert.notEqual(proofOf(r.inst), base);
+  writeFileSync(join(r.inst, 'data', 'state.db'), 'original state');
+  assert.equal(proofOf(r.inst), base);
+  chmodSync(join(r.inst, 'secret.env'), 0o644);
+  assert.notEqual(proofOf(r.inst), base, 'mode');
+  s.done();
+});

@@ -2,7 +2,7 @@
 # One entry point for both test instances, run from YOUR machine (everything else runs on the test host over ssh).
 #   scripts/test-instance/ti.sh --host mac|linux|<ssh alias> COMMAND [ARGS...]
 #
-#   sync                         copy the repo parts to the host (do this after every change of bridge/plugin/scripts)
+#   sync [--force]               copy the repo parts to the host (do this after every change of bridge/plugin/scripts)
 #   copy-key --from HOST         copy the model key file from another instance; the key is never printed
 #   setup [--force-config]       one-time setup on the host (re-runnable)
 #   start | stop | status        manual control (stop when idle!)
@@ -13,6 +13,7 @@
 #   bots-create-test [all|snapshot|check|cleanup]  Bots v2 slice 3: create / edit bots via bridge + plugin (session for `all`)
 #   conversation-test [--out D]  live multi-turn chats through the bridge, every answer checked with the app's parser
 #                                (bridge/eval/conversations/run.mjs, runs here), instance inside a session; pre-release step
+#   hold [--start] -- CMD        lock, back up the instance dir, CMD, stop, restore and prove it identical (README)
 #   pair | lock | remove         see README
 #   tunnel start|stop|status|print           ssh tunnel to the host's 127.0.0.1 ports (same local port numbers)
 set -euo pipefail
@@ -22,7 +23,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 name=""
 if [ "${1:-}" = "--host" ]; then name="${2:?--host needs mac|linux|<alias>}"; shift 2; fi
 cmd="${1:-}"; [ $# -gt 0 ] && shift
-[ -n "$cmd" ] || { sed -n 2,15p "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+[ -n "$cmd" ] || { sed -n 2,16p "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 host="$(ti_resolve_host "$name")"
 rel="$(ti_remote_rel "$host")"
 rdir="\$HOME/$rel/repo/scripts/test-instance"
@@ -37,8 +38,8 @@ ports() { ti_ssh "$host" "bash -c '. \"\$0/lib.sh\"; echo \$TI_API_PORT \$TI_PLU
 sock="${TMPDIR:-/tmp}/hui-ti-tunnel-$(printf '%s' "${name:-default}" | tr -c 'A-Za-z0-9' _).sock"
 
 case "$cmd" in
-  sync) exec "$here/sync.sh" --host "${name:-$host}" ;;
-  setup|start|stop|status|remove|pair|lock) remote_script "$cmd.sh" "$@" ;;
+  sync) exec "$here/sync.sh" --host "${name:-$host}" "$@" ;;
+  setup|start|stop|status|remove|pair|lock|hold) remote_script "$cmd.sh" "$@" ;;
   quick-off-test)
     ti_ssh "$host" "bash $rdir/session.sh --wait 600 --label quick-off-test -- bash $rdir/quick-off-test.sh$(quoted "$@")" ;;
   session) remote_script session.sh "$@" ;;

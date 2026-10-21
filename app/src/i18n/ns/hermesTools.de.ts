@@ -144,5 +144,13 @@ export const hermesTools = {
     device: 'Auch auf diesem Gerät erinnern',
     deviceMove: 'Gerät-Erinnerung verschieben',
     deviceSet: 'Dieses Gerät erinnert dich auch: {when}',
+    fate: {
+      removed: 'Erinnerung wurde in Hermes gelöscht.',
+      removedDevice: 'Erinnerung wurde in Hermes gelöscht – auch auf dem Gerät entfernt.',
+      paused: 'Erinnerung ist in Hermes pausiert.',
+      pausedDevice: 'Erinnerung ist in Hermes pausiert – auf dem Gerät entfernt.',
+      moved: 'In Hermes auf {when} verschoben – das Gerät erinnert dich dann.',
+      deviceStopped: 'In Hermes geändert – die Erinnerung auf dem Gerät wurde entfernt.',
+    },
   },
 };

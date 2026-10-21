@@ -311,7 +311,10 @@ export function createSessionsClient(fetchImpl: FetchLike, conn: ApiConn, timeou
 
 export type SessionsClient = ReturnType<typeof createSessionsClient>;
 
-/** German message for session API failures (drawer notices). */
+/**
+ * Message for session API failures (drawer notices, sync banners) in the app's language: pass the app's `t`. The German
+ * default is only for callers without one (sessionErrorText.test.ts makes sure the app's callers pass it).
+ */
 export function sessionErrorText(e: unknown, t: TFn = deT): string {
   if (e instanceof HermesError) {
     if (e.code === 'session_active_turn') return t('backends.hermes.errors.sessionActiveTurn');

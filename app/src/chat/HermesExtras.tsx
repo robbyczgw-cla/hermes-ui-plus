@@ -4,12 +4,13 @@
  * - <MemoryNotes/>      "gemerkt" chip per memory write; a tap opens Skills & memory on the Memory tab of the chat's bot
  * - <MediaFiles/>       `MEDIA:<path>` tags as file chips / inline images (bridge GET /bridge/media)
  * - <ReminderCards/>    "Erinnerung gesetzt · morgen 08:00 · …" with where Hermes posts it, Ändern / Löschen (chat-native)
- *                        and, for a one-shot reminder on a phone, "Auch auf diesem Gerät erinnern" (deviceReminder.ts)
- * Pure logic: hermesTools.ts, mediaTags.ts, reminder.ts, deviceReminder.ts.
+ *                        and, for a one-shot reminder on a phone, "Auch auf diesem Gerät erinnern" (deviceReminder.ts);
+ *                        a job deleted / paused / moved later says so, and its device copy follows (reminderSync.ts)
+ * Pure logic: hermesTools.ts, mediaTags.ts, reminder.ts, deviceReminder.ts, reminderSync.ts.
  */
 import { useRouter } from 'expo-router';
 import { memo, useEffect, useState } from 'react';
-import { Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { Text } from '../ui/primitives/Text';
 import { formatBytes } from '../attachments/mime';
 import { useI18n } from '../i18n';
@@ -24,9 +25,10 @@ import type { MemoryNote } from './hermesTools';
 import { Icon, type IconName } from './icons';
 import { fetchMedia, MediaUnavailable, openLocalMedia, probeMedia, type MediaConn } from './mediaFetch';
 import type { MediaKind, MediaRef } from './mediaTags';
-import { cancelLocalNotification, listLocalNotifications, scheduleLocalNotification } from '../actions/notifications';
-import { clearDeviceReminder, deviceReminderOf, setDeviceReminder, type DeviceNotifier } from './deviceReminder';
+import { clearDeviceReminder, deviceReminderOf, setDeviceReminder } from './deviceReminder';
 import { deviceReminderAt, reminderChangePrefill, reminderDeleteMessage, reminderDelivery, reminderWhen, type Reminder, type ReminderDelivery } from './reminder';
+import { fateNote, type FateNote } from './reminderSync';
+import { DEVICE_REMINDERS, deviceNotifier, deviceOrigin, useDeviceCopiesVersion, useReminderFate } from './reminderSyncStore';
 import { useToast } from './Toast';
 import { useTurnActions } from './turnActions';
 
@@ -245,10 +247,6 @@ export const ReminderCards = memo(function ReminderCards({ reminders }: { remind
   );
 });
 
-const deviceNotifier: DeviceNotifier = { list: listLocalNotifications, schedule: scheduleLocalNotification, cancel: cancelLocalNotification };
-// local notifications exist on the phone apps only (actions/notifications.ts); web and desktop never offer the copy
-const DEVICE_REMINDERS = Platform.OS === 'ios' || Platform.OS === 'android';
-
 /**
  * `here`: the card sits in the bot's own thread (bots/), so a `bot-chat` delivery arrives in this chat; elsewhere it
  * arrives in the thread of the chat's bot, which is "Hermes" for the default bot (a row of the chat list / the Bots tab).
@@ -264,6 +262,15 @@ function deliveryText(tr: ReturnType<typeof useI18n>['t'], d: ReminderDelivery |
   return tr('hermesTools.reminder.deliver.targets', { targets: d.targets.join(', ') });
 }
 
+/** What happened to the job after this card (a later turn, another chat, the Hermes dashboard). */
+function fateText(tr: ReturnType<typeof useI18n>['t'], locale: string, n: FateNote | null): string | null {
+  if (!n) return null;
+  if (n.kind === 'moved') return tr('hermesTools.reminder.fate.moved', { when: reminderWhen(tr, locale, { nextRun: n.at }) });
+  if (n.kind === 'deviceStopped') return tr('hermesTools.reminder.fate.deviceStopped');
+  if (n.kind === 'removed') return tr(n.device ? 'hermesTools.reminder.fate.removedDevice' : 'hermesTools.reminder.fate.removed');
+  return tr(n.device ? 'hermesTools.reminder.fate.pausedDevice' : 'hermesTools.reminder.fate.paused');
+}
+
 function ReminderCard({ r }: { r: Reminder }) {
   const t = useTheme();
   const { t: tr, locale } = useI18n();
@@ -277,12 +284,19 @@ function ReminderCard({ r }: { r: Reminder }) {
   const showSchedule = !!r.schedule && r.recurring && r.schedule !== when;
   const shell = useChatShell();
   const meta = useConversations().get(shell?.conversationId ?? '');
+  const { profiles } = useConnection();
   const delivery = deliveryText(tr, reminderDelivery(r.deliver), { here: !!meta?.botChat, bot: meta?.hermesProfile });
+  // the job after this card: deleted / paused in Hermes → no buttons that act on it, a short note instead
+  const fate = useReminderFate(r.jobId);
+  const note = fateNote(fate, r);
+  const fateLine = fateText(tr, locale, note);
+  const gone = fate?.status === 'removed';
   // device copy: tagged with the Hermes job, so the state survives a restart and a moved reminder replaces it
   const deviceKey = r.jobId ?? r.id;
-  const deviceAt = DEVICE_REMINDERS ? deviceReminderAt(r) : null;
+  const deviceAt = DEVICE_REMINDERS && (fate?.status ?? 'active') === 'active' && fate?.device !== 'removed' ? deviceReminderAt(r) : null;
   const [device, setDevice] = useState<{ at: number | null } | null>(null);
   const [deviceBusy, setDeviceBusy] = useState(false);
+  const copiesVersion = useDeviceCopiesVersion();
   useEffect(() => {
     if (!DEVICE_REMINDERS) return;
     let alive = true;
@@ -290,14 +304,16 @@ function ReminderCard({ r }: { r: Reminder }) {
     return () => {
       alive = false;
     };
-  }, [deviceKey]);
+  }, [deviceKey, copiesVersion]);
   const deviceMatches = device?.at != null && deviceAt !== null && Math.abs(device.at - deviceAt) < 60_000;
   // an older card of a moved reminder stays quiet once the device copy follows the newer time
   const offerDevice = deviceAt !== null && device !== null && !deviceMatches && (device.at === null || r.action === 'update');
   const setOnDevice = async () => {
     if (deviceAt === null || deviceBusy) return;
     setDeviceBusy(true);
-    const res = await setDeviceReminder(deviceNotifier, { key: deviceKey, title: tr('actionRunner.notify.reminderTitle'), body: r.text, at: deviceAt });
+    const profile = profiles.find((p) => p.id === meta?.profileId);
+    const origin = { name: r.name, ...deviceOrigin(profile, meta?.hermesProfile) };
+    const res = await setDeviceReminder(deviceNotifier, { key: deviceKey, title: tr('actionRunner.notify.reminderTitle'), body: r.text, at: deviceAt, origin });
     setDeviceBusy(false);
     if (res.ok) {
       setDevice({ at: deviceAt });
@@ -320,7 +336,7 @@ function ReminderCard({ r }: { r: Reminder }) {
       accessible={false}
       testID="reminder-card"
     >
-      <View style={styles.cardHead} accessible accessibilityLabel={[head, delivery].filter(Boolean).join('. ')}>
+      <View style={styles.cardHead} accessible accessibilityLabel={[head, delivery, fateLine].filter(Boolean).join('. ')}>
         <Icon name="bell" size={18} color={t.colors.accent} />
         <View style={{ flex: 1 }}>
           <Text style={[t.typography.callout, { color: t.colors.text }]} numberOfLines={3}>
@@ -331,9 +347,14 @@ function ReminderCard({ r }: { r: Reminder }) {
           {showSchedule ? <Text style={[t.typography.caption, styles.cardSub, { color: t.colors.muted }]}>{r.schedule}</Text> : null}
           {delivery ? <Text style={[t.typography.caption, styles.cardSub, { color: t.colors.muted }]}>{delivery}</Text> : null}
           {deviceMatches ? <Text style={[t.typography.caption, styles.cardSub, { color: t.colors.muted }]}>{tr('hermesTools.reminder.deviceSet', { when })}</Text> : null}
+          {fateLine ? (
+            <Text style={[t.typography.caption, styles.cardSub, { color: t.colors.muted }]} testID="reminder-fate">
+              {fateLine}
+            </Text>
+          ) : null}
         </View>
       </View>
-      {sent ? null : asking ? (
+      {sent || gone ? null : asking ? (
         <View style={styles.cardButtons}>
           <Text style={[t.typography.caption, styles.cardAsk, { color: t.colors.muted }]}>{tr('hermesTools.reminder.deleteAsk')}</Text>
           <Button label={tr('hermesTools.reminder.cancel')} variant="tertiary" size="small" onPress={() => setAsking(false)} />

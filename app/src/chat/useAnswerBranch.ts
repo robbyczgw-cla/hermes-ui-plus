@@ -59,7 +59,7 @@ export function useAnswerBranch(opts: {
           fork = await forkSession(request, sid);
         } catch (e) {
           // fork refused (old server, bridge allow-list, offline): a fresh session with the copied turns still works
-          if (__DEV__) console.warn('[branch] fork failed, seeding a fresh session', sessionErrorText(e));
+          if (__DEV__) console.warn('[branch] fork failed, seeding a fresh session', sessionErrorText(e, tr));
         }
         if (!fork) mode = 'seed';
       }

@@ -3,6 +3,7 @@
 // like with Hermes: `liveOutgoing` hands over this device's card edits, which the scripted answer gets as `live`.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Attachment } from '../../attachments/types';
+import { resolveRunApprovals } from '../../hermes/approvals';
 import { applyEvent, createAssistantMessage, createUserMessage, errorTextOf, finalize, newId } from '../../hermes/chatState';
 import { createThrottle, streamIntervalFor } from '../../hermes/throttle';
 import type { ApprovalChoice, ApprovalRequest, ChatMessage, ChatStatus } from '../../hermes/types';
@@ -205,6 +206,8 @@ export function useDemoChat(
     if (!pending) return;
     approvalRef.current = null;
     setApproval(null);
+    // the receipt shows the choice, not "run ended" (finalize only closes what is still open)
+    updateLast((m) => resolveRunApprovals(m, pending.runId, choice, Date.now()));
     pending.resolve(choice);
   }, []);
 

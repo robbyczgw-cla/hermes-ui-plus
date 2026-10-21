@@ -26,6 +26,8 @@
 //   GET  /__e2e/uploads                  every POST /bridge/uploads (name, mimeType, size, first bytes as hex)
 //   GET  /__e2e/expected?text=…          the answer a text gets
 //   POST /__e2e/fire-reminder {profile?, name?, text?, comment?}  a `deliver: bot-chat` job fired into that bot's Bot Chat
+//   POST /__e2e/remove-job {id?}         a reminder job deleted elsewhere (Hermes dashboard, another chat): gone from the
+//                                        job list; without `id` the newest one
 //   POST /__e2e/live-turn {sid, text}     another device's turn in session `sid` (user row + the live-list answer, no
 //                                        stream): the app sees it on its next transcript sync (live cards, two devices)
 // Live cards (app/src/live): "Einkaufsliste für Samstag" creates a live shopping list (`"live":true`), "Wir grillen"
@@ -41,6 +43,9 @@
 // Reminders: "remind me" runs Hermes' cron tool the way v0.22.2 does with lazy tool discovery (tool_describe, then
 // tool_call → cronjob_manage create for tomorrow 09:00, `deliver: local`): `hermes.tool.progress` events in the stream,
 // the assistant tool_calls + tool result rows in the session, so the app shows its reminder card from the stored detail.
+// Every such turn makes its own job (e2e0000000aa, …ab, …), which the job list (config.routines) shows until it is
+// deleted. "Delete this reminder" (also the card's "Please delete the reminder …") removes the newest job made in that
+// chat with a `cronjob_manage remove` stored as Hermes does (`removed_job`), or fails with "Job not found".
 import http from 'node:http';
 import { SCENARIOS } from '../demo-videos/scenarios.mjs';
 import { createReplayStore, idempotencyKey, resumeOffset, RESUMABLE_HEADER } from '../../bridge/src/replay.mjs';
@@ -260,7 +265,7 @@ function liveScenario(s, userText) {
 
 /** "remind me …": one cron create through the lazy-discovery wrapper (rows as Hermes v0.22.2 stores them, 2026-10-20) */
 export const REMINDER_JOB = 'e2e0000000aa';
-function reminderScenario() {
+function reminderScenario(jobId = REMINDER_JOB) {
   const at = new Date();
   at.setDate(at.getDate() + 1);
   at.setHours(9, 0, 0, 0);
@@ -271,17 +276,49 @@ function reminderScenario() {
   // the skill asks for `deliver: "bot-chat"`: the fired reminder lands in the bot's thread (POST /__e2e/fire-reminder)
   const args = { action: 'create', schedule: local, prompt: 'Reminder: buy tea. Write the user one short line.', name: 'Buy tea', repeat: 1, deliver: 'bot-chat' };
   const result = {
-    success: true, job_id: REMINDER_JOB, name: 'Buy tea', skill: null, skills: [], schedule: `once at ${local.replace('T', ' ').slice(0, 16)}`,
+    success: true, job_id: jobId, name: 'Buy tea', skill: null, skills: [], schedule: `once at ${local.replace('T', ' ').slice(0, 16)}`,
     repeat: 'once', deliver: 'bot-chat', next_run_at: iso,
     message: "Cron job 'Buy tea' created.",
   };
   return {
     name: 'reminder', ms: [20, 30],
+    job: { id: jobId, name: 'Buy tea', schedule: result.schedule, runAt: iso },
     text: "Done: I'll remind you tomorrow at 9:00 to buy tea.",
     tools: [
       { id: 'toolu_e2e_describe', name: 'tool_describe', label: 'Reading tool details · 1 tool', emoji: '⚡', args: { names: ['cronjob_manage'] }, result: { tools: { cronjob_manage: { description: 'Manage scheduled cron jobs (mock)' } } } },
       { id: 'toolu_e2e_cron', name: 'cronjob_manage', label: 'create', emoji: '⏰', wrapped: true, args, result },
     ],
+  };
+}
+
+/** reminder jobs the "remind me" turns made, by id (creation order): {id, sid, name, schedule, runAt} */
+const reminderJobs = new Map();
+let reminderSeq = 0;
+let removeSeq = 0;
+
+/** A reminder turn gets its own job; "delete this reminder" removes the newest job of chat `sid`. */
+function bindReminder(sc, sid) {
+  if (sc.name === 'reminder') {
+    const s = reminderScenario('e2e' + (0xaa + reminderSeq++).toString(16).padStart(9, '0'));
+    reminderJobs.set(s.job.id, { ...s.job, sid });
+    return s;
+  }
+  if (sc.name !== 'reminder-delete') return sc;
+  const job = [...reminderJobs.values()].filter((j) => j.sid === sid).pop();
+  if (job) reminderJobs.delete(job.id);
+  const args = { action: 'remove', job_id: job?.id ?? REMINDER_JOB };
+  const result = job
+    ? { success: true, message: `Cron job '${job.name}' removed.`, removed_job: { id: job.id, name: job.name, schedule: job.schedule } }
+    : { success: false, error: `Job with ID '${args.job_id}' not found. Use cronjob(action='list') to inspect jobs.` };
+  return { ...sc, tools: [{ id: `toolu_e2e_cron_rm${++removeSeq}`, name: 'cronjob_manage', label: 'remove', emoji: '⏰', wrapped: true, args, result }] };
+}
+
+/** a reminder job as Hermes' job list shows it (one-shot, `deliver: bot-chat`) */
+function reminderJobRecord(j) {
+  return {
+    id: j.id, name: j.name, prompt: 'Reminder: buy tea. Write the user one short line.', skills: [],
+    schedule: { kind: 'once', run_at: j.runAt, display: j.schedule }, schedule_display: j.schedule,
+    enabled: true, state: 'scheduled', next_run_at: j.runAt, repeat: { times: 1, completed: 0 }, deliver_kind: 'bot-chat', origin_platform: 'api_server',
   };
 }
 
@@ -301,6 +338,8 @@ export function scenarioFor(userText) {
   if (/exactly the word pong/.test(t)) return { name: 'live-pong', text: 'pong', ms: [20, 30] };
   if (/2 plus 3/.test(t)) return { name: 'live-sum', text: '5', ms: [20, 30] };
   if (/\bremind me\b/.test(t)) return reminderScenario();
+  // which job goes is the chat's newest reminder (bindReminder, at turn time)
+  if (/\bdelete\b.*\breminder\b/.test(t)) return { name: 'reminder-delete', text: 'Done, the reminder is deleted.', ms: [20, 30], tools: [] };
   if (/\be2e approval\b/.test(t)) return { name: 'approval', text: 'Approval answered, the E2E folder check is done.', ms: [20, 30] };
   return { name: 'short', text: SHORT(userText.trim()), ms: [20, 30] };
 }
@@ -391,7 +430,7 @@ async function routines(req, res, path, url) {
     if (req.method !== 'GET') await readBody(req);
     return apiError(res, 404, 'Routines are disabled for this bot', 'routines_off');
   }
-  if (path === '/api/jobs') return json(res, 200, { jobs: [routineJob()], hui: { routines: 'read', rights: 'read' } });
+  if (path === '/api/jobs') return json(res, 200, { jobs: [routineJob(), ...[...reminderJobs.values()].map(reminderJobRecord)], hui: { routines: 'read', rights: 'read' } });
   if (path === `/api/jobs/${ROUTINE_JOB}`) return json(res, 200, { job: routineJob(), hui: { routines: 'read', rights: 'read' } });
   if (path.startsWith('/api/jobs/')) {
     await readBody(req);
@@ -599,7 +638,7 @@ async function chat(req, res, path, profile, token, log) {
   // live list state lives on the session; a turn that never runs (held + dropped) must not create one
   const prev = sessions.get(sid);
   const liveHolder = { live: prev?.live ? structuredClone(prev.live) : null, trip: prev?.trip ? structuredClone(prev.trip) : null, watch: prev?.watch ? structuredClone(prev.watch) : null };
-  const sc = liveScenario(liveHolder, userText) ?? scenarioFor(userText);
+  const sc = liveScenario(liveHolder, userText) ?? bindReminder(scenarioFor(userText), sid);
   const t = {
     n: turns.length + 1, text: userText, scenario: sc.name, ms: sc.ms, expected: sc.text, tools: sc.tools, streamed: '', sid: sid || `api-e2e-${turns.length + 1}`,
     profile, key, scope, state: 'pending', completionId: `chatcmpl-e2e-${turns.length + 1}`, attaches: [], drops: 0, receivedAt: Date.now(),
@@ -655,7 +694,7 @@ function sessionList(profile, url) {
 
 // ── control + routing ───────────────────────────────────────────────────────────────────────────────────────────────
 async function control(req, res, path, url) {
-  if (path === '/__e2e/state') return json(res, 200, { config, fault, turns: turns.length, requests: requests.length, sessions: sessions.size, replay: replay.stats() });
+  if (path === '/__e2e/state') return json(res, 200, { config, fault, turns: turns.length, requests: requests.length, sessions: sessions.size, replay: replay.stats(), reminderJobs: [...reminderJobs.keys()] });
   if (path === '/__e2e/turns') return json(res, 200, turns.map(({ stop: _s, scope: _c, ...t }) => t));
   if (path === '/__e2e/requests') return json(res, 200, requests);
   if (path === '/__e2e/uploads') return json(res, 200, uploads);
@@ -699,6 +738,11 @@ async function control(req, res, path, url) {
     addRow(s, 'user', `[Cronjob "${name}" output — scheduled job, not the user. Review it, act on anything that needs action, and summarize for the chat.]\n\n${b.text ?? 'Time to buy tea.'}`);
     addRow(s, 'assistant', b.comment ?? 'The reminder ran, nothing else to do.');
     return json(res, 200, { sessionId: s.id, rows: s.rows.length });
+  }
+  if (path === '/__e2e/remove-job') {
+    const id = typeof body.id === 'string' ? body.id : [...reminderJobs.keys()].pop();
+    const removed = !!id && reminderJobs.delete(id);
+    return json(res, removed ? 200 : 404, { removed: removed ? id : null, reminderJobs: [...reminderJobs.keys()] });
   }
   if (path === '/__e2e/live-turn') {
     const s = sessions.get(String(body.sid || ''));

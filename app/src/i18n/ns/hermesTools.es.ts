@@ -145,5 +145,13 @@ export const hermesTools = {
     device: 'Recordármelo también en este dispositivo',
     deviceMove: 'Mover el aviso del dispositivo',
     deviceSet: 'Este dispositivo también te lo recordará: {when}',
+    fate: {
+      removed: 'Este recordatorio se eliminó en Hermes.',
+      removedDevice: 'Este recordatorio se eliminó en Hermes; también se quitó de este dispositivo.',
+      paused: 'Este recordatorio está en pausa en Hermes.',
+      pausedDevice: 'Este recordatorio está en pausa en Hermes; se quitó de este dispositivo.',
+      moved: 'Movido en Hermes a {when}; este dispositivo te avisará entonces.',
+      deviceStopped: 'Cambiado en Hermes; se quitó el aviso de este dispositivo.',
+    },
   },
 } satisfies typeof de;

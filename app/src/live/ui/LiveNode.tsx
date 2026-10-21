@@ -25,6 +25,7 @@ import { cardLevelChange, type LiveCardModel } from '../derive.ts';
 import { diffStates, stateAt, type ItemChange, type LiveCardType, type LiveDay, type MessageMark } from '../model.ts';
 import { dayBlocks, tripChangeDetail, tripDays } from '../trip.ts';
 import { watchChangeDetail, watchCounts } from '../watch.ts';
+import { CHANGE_SIGN } from '../changeSign.ts';
 import { LiveChecklistBody } from './LiveChecklistBody';
 import { ListTile, LiveSeal, VersionChip } from './parts';
 
@@ -267,6 +268,11 @@ function Receipt({ t, model, mark }: { t: Theme; model: LiveCardModel; mark: Mes
           ) : null}
         </View>
       )}
+      {mark.withheld?.length ? (
+        <HText variant="caption" color="muted" style={{ paddingHorizontal: t.spacing.l, paddingBottom: t.spacing.m }}>
+          {tr('live.receipt.withheld', { items: mark.withheld.join(', ') })}
+        </HText>
+      ) : null}
       <SyncLine t={t} model={model} />
     </View>
   );
@@ -318,7 +324,7 @@ export function ChangeLine({ t, c, tinted, type = 'checklist', days }: { t: Them
   const detail = useLineDetail(c, type, days);
   const item = { ...c.item, checked: !!c.item.checked } as CItem;
   const qty = type === 'checklist' ? formatQty(item) : '';
-  const sign = c.kind === 'added' ? '+' : c.kind === 'removed' ? '−' : c.kind === 'changed' ? '~' : '✓';
+  const sign = CHANGE_SIGN[c.kind];
   const signColor = c.kind === 'added' ? t.colors.success : c.kind === 'removed' ? t.colors.danger : c.kind === 'changed' ? t.colors.accent : t.colors.muted;
   const bg = !tinted ? 'transparent' : c.kind === 'added' ? t.colors.successSoft : c.kind === 'removed' ? t.colors.dangerSoft : 'transparent';
   const struck = c.kind === 'removed' ? { textDecorationLine: 'line-through' as const, color: t.colors.danger } : null;

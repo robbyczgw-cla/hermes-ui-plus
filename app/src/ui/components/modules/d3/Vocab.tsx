@@ -39,6 +39,7 @@ import {
   summarize,
   syncRun,
   vocabReply,
+  vocabRoute,
   type VocabItem,
   type VocabModel,
   type VocabState,
@@ -92,7 +93,8 @@ export function Vocab({ node }: { node: Partial<HuiVocab> }) {
 
   const run = st.run!;
   const ui = lang as UiLang;
-  const route = `${model.from.split('-')[0].toUpperCase()} → ${model.to.split('-')[0].toUpperCase()}`;
+  const { label: route, codes: routeCodes } = vocabRoute(model.from, model.to);
+  const routeA11y = routeCodes.map((c) => languageName(c, ui)).join(' → ');
 
   const setMode = (m: HuiVocabMode) => {
     haptic('selection');
@@ -104,9 +106,11 @@ export function Vocab({ node }: { node: Partial<HuiVocab> }) {
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s }}>
         <View style={{ flex: 1, gap: 2 }}>
           <InlineText variant="headline" text={model.title || tr('ui.vocab.title')} accessibilityRole="header" />
-          <HText variant="caption" weight="600" color="muted" accessibilityLabel={`${languageName(model.from, ui)} → ${languageName(model.to, ui)}`}>
-            {route}
-          </HText>
+          {route ? (
+            <HText variant="caption" weight="600" color="muted" accessibilityLabel={routeA11y}>
+              {route}
+            </HText>
+          ) : null}
         </View>
         <Boxes t={t} counts={boxCounts(items, st)} />
       </View>

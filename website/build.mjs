@@ -278,7 +278,8 @@ function jpegSize(file) {
   }
   throw new Error(`${file}: no JPEG frame header`);
 }
-const HERO = jpegSize('media/hero-loop.jpg');
+const HERO_NAME = 'hero-loop-03'; // new name per changed clip: /media is cached for 30 days (website/README.md)
+const HERO = jpegSize(`media/${HERO_NAME}.jpg`);
 
 // The one canonical "set up with your agent" prompt lives in docs/SETUP-WITH-AGENT.md between these markers; the README
 // carries a verbatim copy (scripts/website.test.mjs), and the page below shows it, so the three cannot drift.
@@ -387,9 +388,9 @@ const indexBody = `<section class="hero frame" aria-labelledby="h-title">
 ${featherLine('wl-hero')}
 <div class="phone">
 <div class="screen">
-<img src="/media/hero-loop.webp" alt="" width="${HERO[0]}" height="${HERO[1]}">
-<video autoplay muted loop playsinline preload="metadata" poster="/media/hero-loop.webp" width="${HERO[0]}" height="${HERO[1]}" aria-label="The app on a phone: approvals, quick answers, bots and interactive answers. No sound.">
-<source src="${esc(MEDIA)}hero-loop.mp4" type="video/mp4">
+<img src="/media/${HERO_NAME}.webp" alt="" width="${HERO[0]}" height="${HERO[1]}">
+<video autoplay muted loop playsinline preload="metadata" poster="/media/${HERO_NAME}.webp" width="${HERO[0]}" height="${HERO[1]}" aria-label="The app on a phone: approvals, quick answers, bots and interactive answers. No sound.">
+<source src="${esc(MEDIA)}${HERO_NAME}.mp4" type="video/mp4">
 </video>
 </div>
 </div>

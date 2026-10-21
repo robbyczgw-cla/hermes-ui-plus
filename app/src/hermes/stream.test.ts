@@ -425,19 +425,21 @@ test('resume refused (409 resume_unavailable) → the original transport error, 
   assert.equal(err.accepted, true);
 });
 
-test('resume while still offline: attempts until the window ran out, then the transport error (no refusal code)', async () => {
+test('resume while still offline: attempts until the window ran out, then the transport error (no refusal code)', async (t) => {
   const bytes = fixture('02-tool.sse');
+  // virtual clock: every failed attempt "takes" 20 ms, so the 80 ms window holds exactly four attempts however loaded the host is
+  let clock = 1_000_000;
+  t.mock.method(Date, 'now', () => clock);
   let n = 0;
   const fn = async (url: string, init: Call['init']) => {
     if (n++ === 0) return brokenResponse(bytes, 300, RESUMABLE) as never;
     void url;
     void init;
+    clock += 20;
     throw new TypeError('Network request failed');
   };
-  const t0 = Date.now();
   const err = await streamChatCore(fn as never, { conn, text: 'x', sessionId: 's', idempotencyKey: 'k', resumeDelaysMs: [5], resumeWindowMs: 80, onEvent: () => {} }).catch((e) => e);
-  assert.ok(n > 3, `several attempts (${n})`);
-  assert.ok(Date.now() - t0 < 2000);
+  assert.equal(n, 1 + 4, 'the request, then one attempt per 20 ms of the 80 ms window');
   assert.equal(err.kind, 'network');
   assert.equal(err.accepted, true);
   assert.equal(err.resumeCode, undefined, 'not refused: recovery may still re-attach later');

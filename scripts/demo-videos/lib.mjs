@@ -9,11 +9,18 @@ import { fileURLToPath } from 'node:url';
 export const APP_URL = process.env.DEMO_APP_URL || 'http://localhost:8109/';
 export const MOCK_PORT = Number(process.env.DEMO_MOCK_PORT || 8790);
 export const VIEWPORT = { width: 390, height: 844 };
-/** device pixel ratio of the recording (3 = iPhone-class; the encoder downsamples, which keeps text crisp) */
+/** device pixel ratio of screenshots (3 = iPhone-class) */
 export const DSF = Number(process.env.DEMO_DSF || 3);
+/**
+ * device pixel ratio of RECORDINGS (CDP screencast). 2 = the encoder's raw size (ffutil RAW) at a true 60 fps; at 3 the screencast
+ * drops to about 30 fps (JPEG encoding). It must also be passed to the browser as --force-device-scale-factor:
+ * the screencast frames come from the compositor, which ignores the context's deviceScaleFactor emulation, so without
+ * the flag every "3x" recording was a 1x capture that got upscaled.
+ */
+export const REC_DSF = Number(process.env.DEMO_REC_DSF || process.env.DEMO_DSF || 2);
 /** fake host name the browser maps to the local mock (so no localhost:port shows up in the UI) */
 export const DEMO_HOST = 'hermes.local';
-export const BROWSER_ARGS = [`--host-resolver-rules=MAP ${DEMO_HOST} 127.0.0.1:${MOCK_PORT}`, '--force-color-profile=srgb', '--hide-scrollbars'];
+export const BROWSER_ARGS = [`--host-resolver-rules=MAP ${DEMO_HOST} 127.0.0.1:${MOCK_PORT}`, '--force-color-profile=srgb', '--hide-scrollbars', `--force-device-scale-factor=${REC_DSF}`];
 
 /** playwright-core: own node_modules first, then $PLAYWRIGHT_CORE, then a few known checkouts on this box. */
 export async function loadPlaywright() {
@@ -86,7 +93,7 @@ function touchOverlay() {
 }
 
 export async function newClipPage(browser, { theme, mode, lang, prefs, locale = 'en-US', imageDelay = 0, bindFetch = false } = {}) {
-  const ctx = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: DSF, locale, colorScheme: mode || 'light', hasTouch: false, isMobile: false });
+  const ctx = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: REC_DSF, locale, colorScheme: mode || 'light', hasTouch: false, isMobile: false });
   await ctx.addInitScript((s) => {
     try {
       if (!localStorage.getItem('__demo_seeded')) {
@@ -147,7 +154,7 @@ export async function startCapture(page, dir) {
     frames.push({ file, t: f.metadata.timestamp });
     cdp.send('Page.screencastFrameAck', { sessionId: f.sessionId }).catch(() => {});
   });
-  await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 92, maxWidth: VIEWPORT.width * DSF, maxHeight: VIEWPORT.height * DSF, everyNthFrame: 1 });
+  await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 92, maxWidth: VIEWPORT.width * REC_DSF, maxHeight: VIEWPORT.height * REC_DSF, everyNthFrame: 1 });
   const t0 = Date.now() / 1000;
   return {
     async stop() {

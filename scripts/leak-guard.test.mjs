@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { brotliCompressSync, crc32, gzipSync } from 'node:zlib';
+import { brotliCompressSync, crc32, deflateSync, gzipSync } from 'node:zlib';
 
 import { dmgSignatureRange, hermesStrings, isBinary, isHermesBytecode, isSignaturePath, isTestPath, loadAllowList, machoSignatureRanges, makeScanner, mask, parseDenylist } from './leak-guard.mjs';
 
@@ -133,7 +133,7 @@ test('isTestPath', () => {
   for (const p of ['a/latest/b.ts', 'a/testing.ts', 'a/contest.mjs']) assert.ok(!isTestPath(p), p);
 });
 
-test('MP4: isolated four-byte compressed noise is filtered, metadata and readable payloads still scan', () => {
+test('MP4: the compressed payload is never scanned, metadata still is', () => {
   const box = (type, payload) => {
     const header = Buffer.alloc(8);
     header.writeUInt32BE(payload.length + 8);
@@ -163,8 +163,9 @@ test('MP4: isolated four-byte compressed noise is filtered, metadata and readabl
   const found = scanner.scanContent('clip.mp4', metadata);
   assert.equal(found.length, 1, 'short metadata is not filtered');
   assert.equal(found[0].offset, metadata.indexOf(Buffer.from(word)), 'binary offsets refer to the original bytes');
-  assert.equal(scanner.scanContent('clip.mp4', movie(Buffer.from(`\0Readable text: ${word}\0`))).length, 1);
-  assert.equal(scanner.scanContent('clip.mp4', movie(Buffer.from(`\0${word}\0`, 'utf16le'))).length, 1);
+  // the payload (mdat) is compressed A/V: readable-looking text in it is chance or encoder boilerplate, not metadata
+  assert.equal(scanner.scanContent('clip.mp4', movie(Buffer.from(`\0Readable text: ${word}\0`))).length, 0);
+  assert.equal(scanner.scanContent('clip.mp4', movie(Buffer.from(`\0${word}\0`, 'utf16le'))).length, 0);
   assert.equal(scanner.scanContent('clip.mp4', movie(noise, { codecs: [['tx3g', 'text']] })).length, 1, 'subtitles scan fully');
   assert.equal(scanner.scanContent('clip.mp4', movie(noise, { codecs: [['fake', 'vide']] })).length, 1, 'unknown codecs scan fully');
   assert.equal(scanner.scanContent(`${word}.mp4`, movie(noise)).length, 1, 'filenames scan fully');
@@ -715,4 +716,139 @@ test('hermes-strings-dump: one escaped string per line, other files copied uncha
   writeFileSync(join(src, 'assets/index.android.bundle'), bad);
   const err = spawnSync('node', [dump, src, join(tmp(), 'out2')], { encoding: 'utf8' });
   assert.equal(err.status, 2);
+});
+
+// ---- media containers: metadata/text atoms only, never the compressed payload ------------------------------------------
+// Synthetic containers around a payload of "random" bytes that contains a short fake denylist term (bounded by
+// non-alphanumerics, as a 4-letter word inside an H.264 stream is), plus a real ffmpeg-made H.264/AAC file.
+const MEDIA_TERM = 'zqxv'; // obviously fake
+const termScanner = () => makeScanner({ denylist: parseDenylist(MEDIA_TERM), signature: true });
+const noisy = () => Buffer.concat([Buffer.from([0x00, 0xfe, 0x9a]), Buffer.from(`#${MEDIA_TERM}!`), Buffer.from([0x81, 0x00, 0xff])]);
+const be32 = (n) => { const b = Buffer.alloc(4); b.writeUInt32BE(n); return b; };
+const hits = (name, buf) => termScanner().scanContent(name, buf).length;
+const withPayload = (name, make) => {
+  assert.equal(hits(name, make(noisy(), Buffer.alloc(0))), 0, `${name}: noise in the payload is ignored`);
+  assert.equal(hits(name, make(noisy(), Buffer.from(`text ${MEDIA_TERM} text`))), 1, `${name}: the same word in metadata is found`);
+  assert.equal(hits(`${MEDIA_TERM}-clip.${name.split('.').pop()}`, make(noisy(), Buffer.alloc(0))), 1, `${name}: the file name is scanned`);
+};
+
+test('media: a real H.264/AAC mp4 (ffmpeg): a short word inside a 6-byte printable run of the stream is not a finding', () => {
+  const file = readFileSync(new URL('./fixtures/media/noise.mp4', import.meta.url));
+  const word = 'zeue'; // sits in the run "T(zeue" of the video payload
+  assert.ok(file.indexOf(Buffer.from(`(${word}`)) > 0 && file.indexOf(Buffer.from(`(${word}`)) < file.indexOf(Buffer.from('moov')), 'fixture still has the stream bytes');
+  const s = makeScanner({ denylist: parseDenylist(word), signature: true });
+  assert.equal(s.scanContent('noise.mp4', file).length, 0, 'payload ignored');
+  assert.equal(s.scanContent('noise.bin', file).length, 1, 'the same bytes under a non-media name are still scanned (this was the false positive)');
+  const title = makeScanner({ denylist: parseDenylist('Fixture'), signature: true }).scanContent('noise.mp4', file);
+  assert.equal(title.length, 1, 'the title tag (udta/meta) is a true positive');
+});
+
+test('media: MP4 with XMP uuid box and ilst tags; fragmented boxes and sample tables are payload', () => {
+  const box = (type, payload) => Buffer.concat([be32(payload.length + 8), Buffer.from(type, 'latin1'), payload]);
+  const mk = (payload, meta) => {
+    const hdlr = Buffer.alloc(12); hdlr.write('vide', 8, 4);
+    const stsd = box('stsd', Buffer.concat([Buffer.from([0, 0, 0, 0, 0, 0, 0, 1]), box('avc1', Buffer.alloc(78))]));
+    const trak = box('trak', box('mdia', Buffer.concat([box('hdlr', hdlr), box('minf', box('stbl', Buffer.concat([stsd, box('stco', payload)])))])));
+    return Buffer.concat([box('ftyp', Buffer.from('isom\0\0\0\0isom')), box('moov', Buffer.concat([trak, box('udta', meta)])), box('mdat', payload), box('uuid', meta)]);
+  };
+  // the uuid box always carries the metadata argument, so test with and without it
+  assert.equal(hits('a.mp4', mk(noisy(), Buffer.alloc(0)).subarray(0, -8)), 0);
+  assert.equal(hits('a.mov', mk(noisy(), Buffer.from(`<x:xmpmeta>${MEDIA_TERM}</x:xmpmeta>`))), 1);
+  assert.equal(hits('a.m4a', mk(noisy(), Buffer.alloc(0))), 0, 'noise in stbl and mdat');
+});
+
+test('media: PNG (text chunks and inflated zTXt/iTXt are scanned, IDAT is not)', () => {
+  const chunk = (type, data) => Buffer.concat([be32(data.length), Buffer.from(type, 'latin1'), data, be32(crc32(Buffer.concat([Buffer.from(type, 'latin1'), data])))]);
+  const sig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const png = (idat, extra = []) => Buffer.concat([sig, chunk('IHDR', Buffer.alloc(13)), ...extra, chunk('IDAT', idat), chunk('IEND', Buffer.alloc(0))]);
+  withPayload('a.png', (noise, meta) => png(noise, meta.length ? [chunk('tEXt', Buffer.concat([Buffer.from('Comment\0'), meta]))] : []));
+  const z = chunk('zTXt', Buffer.concat([Buffer.from('Comment\0\0'), deflateSync(Buffer.from(`made by ${MEDIA_TERM}`))]));
+  assert.equal(hits('a.png', png(noisy(), [z])), 1, 'compressed text chunk is inflated and scanned');
+  const it = chunk('iTXt', Buffer.concat([Buffer.from('XML:com.adobe.xmp\0\x01\0\0\0'), deflateSync(Buffer.from(`<x>${MEDIA_TERM}</x>`))]));
+  assert.equal(hits('a.png', png(noisy(), [it])), 1);
+  assert.equal(hits('a.png', png(noisy()).subarray(0, -6)), 1, 'truncated: full scan');
+  assert.equal(hits('a.png', Buffer.concat([sig, noisy()])), 1, 'no chunk structure: full scan');
+});
+
+test('media: JPEG (COM/APPn/EXIF are scanned, entropy-coded scan data is not)', () => {
+  const seg = (m, data) => Buffer.concat([Buffer.from([0xff, m]), Buffer.from([(data.length + 2) >> 8, (data.length + 2) & 255]), data]);
+  const jpg = (scan, metaSeg) => Buffer.concat([Buffer.from([0xff, 0xd8]), ...(metaSeg ? [metaSeg] : []), seg(0xdb, Buffer.alloc(65)), seg(0xda, Buffer.alloc(10)), scan, Buffer.from([0xff, 0xd9])]);
+  assert.equal(hits('a.jpg', jpg(noisy())), 0);
+  assert.equal(hits('a.jpeg', jpg(noisy(), seg(0xfe, Buffer.from(`by ${MEDIA_TERM}`)))), 1);
+  assert.equal(hits('a.jpg', jpg(noisy(), seg(0xe1, Buffer.from(`Exif\0\0 ${MEDIA_TERM} `)))), 1);
+  assert.equal(hits('a.jpg', jpg(Buffer.concat([noisy().subarray(0, -1), Buffer.from([0xff, 0x00, 0xff, 0xd0]), noisy().subarray(0, -1)]))), 0, 'stuffed bytes and restart markers stay in the scan data');
+  assert.equal(hits('a.jpg', Buffer.concat([jpg(noisy()), Buffer.from(`trailer ${MEDIA_TERM}`)])), 1, 'data after EOI is scanned');
+  assert.equal(hits('a.jpg', jpg(noisy()).subarray(0, -2)), 1, 'no EOI: full scan');
+});
+
+test('media: WebP (EXIF/XMP chunks are scanned, VP8 data is not)', () => {
+  const chunk = (t, data) => { const h = Buffer.alloc(8); h.write(t, 0, 4, 'latin1'); h.writeUInt32LE(data.length, 4); return Buffer.concat([h, data, data.length & 1 ? Buffer.alloc(1) : Buffer.alloc(0)]); };
+  const webp = (vp8, extra) => { const body = Buffer.concat([Buffer.from('WEBP'), chunk('VP8 ', vp8), ...extra]); const h = Buffer.alloc(8); h.write('RIFF', 0, 4); h.writeUInt32LE(body.length, 4); return Buffer.concat([h, body]); };
+  assert.equal(hits('a.webp', webp(noisy(), [])), 0);
+  assert.equal(hits('a.webp', webp(noisy(), [chunk('EXIF', Buffer.from(`Exif\0\0${MEDIA_TERM} `))])), 1);
+  assert.equal(hits('a.webp', webp(noisy(), [chunk('XMP ', Buffer.from(`<x>${MEDIA_TERM}</x>`))])), 1);
+  assert.equal(hits('a.webp', webp(noisy(), []).subarray(0, -3)), 1, 'truncated: full scan');
+});
+
+test('media: MP3 (ID3v2 and the trailer tags are scanned, audio frames are not)', () => {
+  const id3 = (text) => { const body = Buffer.concat([Buffer.from('TIT2'), be32(text.length + 1), Buffer.from([0, 0, 0]), Buffer.from(text)]); const h = Buffer.from([0x49, 0x44, 0x33, 3, 0, 0, 0, 0, (body.length >> 7) & 127, body.length & 127]); return Buffer.concat([h, body]); };
+  const frames = (n) => Buffer.concat([Buffer.from([0xff, 0xfb, 0x90, 0x00]), n, Buffer.alloc(3000, 0x41)]);
+  assert.equal(hits('a.mp3', Buffer.concat([id3('Song'), frames(noisy())])), 0);
+  assert.equal(hits('a.mp3', Buffer.concat([id3(`Song ${MEDIA_TERM}`), frames(noisy())])), 1);
+  assert.equal(hits('a.mp3', Buffer.concat([frames(noisy()), Buffer.from(`TAG ${MEDIA_TERM} `), Buffer.alloc(100)])), 1, 'ID3v1 trailer');
+  assert.equal(hits('a.mp3', Buffer.concat([Buffer.from('not mp3 '), noisy()])), 1, 'not an MP3 stream: full scan');
+});
+
+test('media: WebM (Info/Tags are scanned, clusters are not; live streams scan fully)', () => {
+  const el = (id, data, unknown = false) => Buffer.concat([Buffer.from(id), unknown ? Buffer.from([0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]) : Buffer.from([0x40 | (data.length >> 8), data.length & 255]), data]);
+  const hex = (h) => Buffer.from(h, 'hex');
+  const webm = (cluster, tag, unknownCluster) => {
+    const info = el(hex('1549a966'), el(hex('7ba9'), Buffer.from(tag || 'Title')));
+    const seg = Buffer.concat([info, el(hex('1f43b675'), cluster, unknownCluster)]);
+    return Buffer.concat([el(hex('1a45dfa3'), Buffer.from([0x42, 0x82, 0x84, 0x77, 0x65, 0x62, 0x6d])), el(hex('18538067'), seg)]);
+  };
+  assert.equal(hits('a.webm', webm(noisy())), 0);
+  assert.equal(hits('a.webm', webm(noisy(), `Title ${MEDIA_TERM}`)), 1);
+  assert.equal(hits('a.webm', webm(noisy(), '', true)), 1, 'unknown-size cluster: full scan');
+});
+
+test('media: an unknown or unproven container never switches filtering on; other files are untouched', () => {
+  assert.equal(hits('a.mp4', noisy()), 1);
+  assert.equal(hits('a.webm', noisy()), 1);
+  assert.equal(hits('a.mp3', Buffer.concat([Buffer.from('xx'), noisy()])), 1);
+  assert.equal(hits('a.dex', noisy()), 1);
+  assert.equal(hits('a.js', Buffer.from(`const x = "${MEDIA_TERM}"`)), 1);
+});
+
+test('scan-artifact.sh: a single mp4 is scanned by its metadata (stream noise is clean, a tag is a finding); a single dmg-like file is scanned; unknown extensions are refused', () => {
+  const sh = fileURLToPath(new URL('./scan-artifact.sh', import.meta.url));
+  const bin = tmp();
+  writeFileSync(join(bin, 'gitleaks'), '#!/bin/sh\nexit 0\n');
+  chmodSync(join(bin, 'gitleaks'), 0o755);
+  const fixture = readFileSync(new URL('./fixtures/media/noise.mp4', import.meta.url));
+  const go = (name, content, term) => {
+    const p = join(tmp(), name); writeFileSync(p, content);
+    const pd = tmp(); writeFileSync(join(pd, 'leak-denylist.txt'), `${term}\n`);
+    const r = spawnSync('bash', [sh, p], { encoding: 'utf8', env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp(), HUI_PRIVATE_DIR: pd } });
+    return { code: r.status, all: r.stdout + r.stderr };
+  };
+  const stream = go('trailer.mp4', fixture, 'zeue');
+  assert.equal(stream.code, 0, stream.all);
+  assert.equal(go('trailer.mp4', fixture, 'Fixture').code, 1, 'the title tag is found');
+  assert.equal(go('trailer.bin.dmg', Buffer.from('plain bytes with zeue inside\n'), 'zeue').code, 1, 'a dmg is scanned as it is');
+  const odd = go('thing.xyz', Buffer.from('x'), 'zeue');
+  assert.equal(odd.code, 2); assert.match(odd.all, /don't know how to unpack/);
+});
+
+test('hermes-strings-dump: media get their payload zeroed for gitleaks, other files are copied unchanged', async () => {
+  const { dumpTree } = await import('./hermes-strings-dump.mjs');
+  const src = tmp(); const out = join(tmp(), 'o');
+  const mp4 = readFileSync(new URL('./fixtures/media/noise.mp4', import.meta.url));
+  writeFileSync(join(src, 'v.mp4'), mp4); writeFileSync(join(src, 'a.txt'), 'hello\n');
+  dumpTree(src, out);
+  assert.equal(readFileSync(join(out, 'a.txt'), 'utf8'), 'hello\n');
+  const masked = readFileSync(join(out, 'v.mp4'));
+  assert.equal(masked.length, mp4.length);
+  assert.ok(mp4.indexOf('x264 - core') > 0 && masked.indexOf('x264 - core') < 0, 'stream bytes are gone');
+  assert.ok(masked.indexOf('Fixture clip') > 0, 'metadata is kept');
 });

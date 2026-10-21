@@ -50,6 +50,7 @@ import { effectiveModel, modelLabel, overrideFor } from './models';
 import { useModelFallback } from './useModelFallback';
 import { useConnectionHealth } from './useConnectionHealth';
 import { sessionOptions, usePersistOnNewMessage } from './useSessionPersistence';
+import { useReminderSync } from './reminderSyncStore';
 import { usePendingApprovalTarget } from '../approvals/usePendingApprovalTarget';
 import { quickConversationId } from '../quick/core';
 import { useQuickAvailability } from '../quick/hooks';
@@ -606,6 +607,8 @@ function HermesSessionInner({ conv, transcript, profile, onNewChat, onOpenDrawer
   usePendingApprovalTarget(conv.meta?.id, chat.openApproval);
   // pending approval cards → "Wartet auf dich" in the Bots tab (bots/), also while this chat runs in the background
   useReportAttention(conv.meta?.id, profile.id, bot, chat.approvals);
+  // reminders: a turn that deletes / pauses / moves a job takes its device copy along; on open the copies are checked
+  useReminderSync(chat.messages, profile, bot);
   usePersistOnNewMessage(conv, chat.messages, { stop: chat.stop, label: profile.name, profileId: profile.id });
   const applyPending = useApplyRemoteTranscript(chat, transcript, conv);
   const historyPending = historyPendingFor({ settled: transcript.settled, applyPending });

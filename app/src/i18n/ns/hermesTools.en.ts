@@ -145,5 +145,13 @@ export const hermesTools = {
     device: 'Also remind me on this device',
     deviceMove: 'Move the device reminder',
     deviceSet: 'This device reminds you too: {when}',
+    fate: {
+      removed: 'This reminder was deleted in Hermes.',
+      removedDevice: 'This reminder was deleted in Hermes – removed from this device too.',
+      paused: 'This reminder is paused in Hermes.',
+      pausedDevice: 'This reminder is paused in Hermes – removed from this device.',
+      moved: 'Moved in Hermes to {when} – this device reminds you then.',
+      deviceStopped: 'Changed in Hermes – the reminder on this device was removed.',
+    },
   },
 } satisfies typeof de;

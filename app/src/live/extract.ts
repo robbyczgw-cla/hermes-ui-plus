@@ -77,12 +77,14 @@ export function liveEventsOf(messages: readonly ChatMessage[], parse: ParseSegme
       continue;
     }
     const excerpt = excerptOf(m.text);
-    const ex = excerpt ? { excerpt } : {};
+    // the answer's own words outside its blocks (an item it lists again only comes back when it names it, diffFull)
+    const said = m.text.replace(/```[\s\S]*?(?:```|$)/g, ' ').trim();
+    const ex = { ...(excerpt ? { excerpt } : {}), ...(said ? { said } : {}) };
     for (const b of blocks) {
       if (b.kind === 'full') {
         out.push({ kind: 'hermes', key: m.id, at: m.createdAt, full: b.full, ...(turn.text ? { turn } : {}), ...ex });
         anyCard = true;
-      } else if (b.kind === 'patch') out.push({ kind: 'patch', key: m.id, at: m.createdAt, card: b.card, ops: b.ops, ...ex });
+      } else if (b.kind === 'patch') out.push({ kind: 'patch', key: m.id, at: m.createdAt, card: b.card, ops: b.ops, ...(excerpt ? { excerpt } : {}) });
       else out.push({ kind: 'plain', key: m.id, at: m.createdAt, node: b.node, full: b.full, turn, ...ex });
     }
   }

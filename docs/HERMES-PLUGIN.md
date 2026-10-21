@@ -221,7 +221,9 @@ Try it on a throwaway instance first (`scripts/test-instance/` sets one up, in D
 1. Back up `config.yaml`, `.env` **and `installs/`** of the Hermes home (Hermes' package manager keeps its
    environments and the `facts.json` that selects one there).
 2. Run `python3 hermes-plugin/install.py --hermes-home <home> [--group-readable-secret]` (`--copy` when Hermes runs
-   in a container).
+   in a container). Re-running it after a release **updates** a copied plugin (old copy saved under
+   `<home>/hermes-ui-plus/backup-<version>`, message `updated plugin 0.1.1 → 0.2.0`; same version = no-op; a newer
+   one is kept without `--force`; a symlink is never touched). It still never edits `config.yaml`.
 3. Enable it in `config.yaml`: add `hermes-ui-plus` to `plugins.enabled`. **Not** `hermes plugins enable`: on
    v0.22 that can make the package manager build a new environment under `installs/` and start the gateway from
    it, without the extras the gateway needs (a live attempt lost the API server for 10 minutes that way).

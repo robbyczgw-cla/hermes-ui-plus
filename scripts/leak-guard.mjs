@@ -34,6 +34,7 @@ import { homedir } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { brotliDecompressSync, gunzipSync } from 'node:zlib';
+import { maskMediaPayload } from './lib/media-metadata.mjs';
 
 const ALLOW_MARKER = 'leak-guard:allow';
 const MAX_FILE_BYTES = 256 * 1024 * 1024;
@@ -344,62 +345,6 @@ export function hermesStrings(buf) {
 
 const BINARY_EMAIL_RE = /^[a-z0-9._%+-]{2,}@[a-z0-9-]{2,}(?:\.[a-z0-9-]{2,})*\.[a-z]{2,24}$/;
 const NON_ASCII = /[^\x00-\x7f]/;
-const MP4_VIDEO_CODECS = new Set(['avc1', 'avc3', 'hvc1', 'hev1', 'av01', 'vp08', 'vp09', 'mp4v']);
-const MP4_AUDIO_CODECS = new Set(['mp4a', 'ac-3', 'ec-3', 'Opus']);
-
-/** Bounded ISO BMFF boxes; malformed/truncated containers never receive noise filtering. */
-function mp4Boxes(buf, start = 0, end = buf.length) {
-  const boxes = [];
-  for (let p = start; p < end;) {
-    if (p + 8 > end) return null;
-    let size = buf.readUInt32BE(p), header = 8;
-    if (size === 1) {
-      if (p + 16 > end) return null;
-      const wide = buf.readBigUInt64BE(p + 8);
-      if (wide > BigInt(Number.MAX_SAFE_INTEGER)) return null;
-      size = Number(wide);
-      header = 16;
-    } else if (size === 0) size = end - p;
-    if (size < header || size > end - p) return null;
-    boxes.push({ type: buf.toString('latin1', p + 4, p + 8), start: p, data: p + header, end: p + size });
-    p += size;
-  }
-  return boxes;
-}
-
-/** Only proven compressed A/V tracks qualify; text/subtitle, unknown and malformed tracks scan normally. */
-function mp4CompressedRanges(buf) {
-  const top = mp4Boxes(buf);
-  if (!top?.some((b) => b.type === 'ftyp' && b.end - b.data >= 8)) return [];
-  const movies = top.filter((b) => b.type === 'moov');
-  if (movies.length !== 1) return [];
-  const children = (b) => b && mp4Boxes(buf, b.data, b.end);
-  const only = (boxes, type) => {
-    const matches = boxes?.filter((b) => b.type === type);
-    return matches?.length === 1 ? matches[0] : null;
-  };
-  const movie = children(movies[0]);
-  const tracks = movie?.filter((b) => b.type === 'trak');
-  if (!tracks?.length) return [];
-  for (const track of tracks) {
-    const media = children(only(children(track), 'mdia'));
-    const handlerBox = only(media, 'hdlr');
-    if (!handlerBox || handlerBox.data + 12 > handlerBox.end) return [];
-    const handler = buf.toString('ascii', handlerBox.data + 8, handlerBox.data + 12);
-    if (handler !== 'vide' && handler !== 'soun') return [];
-    const table = children(only(children(only(media, 'minf')), 'stbl'));
-    const descriptions = only(table, 'stsd');
-    if (!descriptions || descriptions.data + 8 > descriptions.end) return [];
-    if (buf.readUInt32BE(descriptions.data) !== 0) return []; // unsupported version/flags
-    const count = buf.readUInt32BE(descriptions.data + 4);
-    const entries = mp4Boxes(buf, descriptions.data + 8, descriptions.end);
-    if (!count || entries?.length !== count) return [];
-    const codecs = handler === 'vide' ? MP4_VIDEO_CODECS : MP4_AUDIO_CODECS;
-    if (entries.some((e) => !codecs.has(e.type) || e.end - e.data < (handler === 'vide' ? 78 : 28))) return [];
-  }
-  return top.filter((b) => b.type === 'mdat').map((b) => [b.data, b.end]);
-}
-
 export const isBinary = (buf) => {
   const n = Math.min(buf.length, 8000);
   for (let i = 0; i < n; i++) if (buf[i] === 0) return true;
@@ -455,11 +400,20 @@ export function makeScanner({ denylist = [], allow = [], signature = false, inli
     const findings = [];
     if (signature && isSignaturePath(path)) return findings;
     if (signature) buf = maskSignatures(buf).buf;
+    // media containers: only metadata/text parts are content (docs/LEAK-GUARD.md); the compressed payload is random bytes
+    const media = maskMediaPayload(path, buf);
+    if (media) buf = media.buf;
     const ctx = { test: isTestPath(path), lockfile: LOCKFILE.test(path.split(sep).join('/')), media: MEDIA.test(path), binary: false };
     // path name itself
     scanLine(path.split(sep).join('/'), { ...ctx, test: false, binary: false, media: false }, (rule, text) =>
       findings.push({ path, line: null, col: null, rule, text, where: 'path' }),
     );
+    // text stored compressed inside the container (PNG zTXt/iTXt), decoded
+    for (const text of media?.extra ?? []) {
+      text.toString('utf8').split(/\r?\n|\0/).forEach((line, i) =>
+        scanLine(line, { ...ctx, binary: false, media: false }, (rule, found, idx) => findings.push({ path, line: i + 1, col: idx + 1, rule, text: found, where: 'media-text' })),
+      );
+    }
     if (buf.length > MAX_FILE_BYTES) {
       findings.push({ path, line: null, col: null, rule: 'scan-error', text: `file too large to scan (${buf.length} bytes)`, error: true });
       return findings;
@@ -498,11 +452,7 @@ export function makeScanner({ denylist = [], allow = [], signature = false, inli
       for (const s of decoded.strings) scanLine(s.text, strCtx, (rule, text, idx) => push('hermes')(rule, text, s.offset + idx));
     }
     const latin1 = buf.toString('latin1');
-    const compressed = /\.(mp4|m4v|mov|m4a)$/i.test(path) ? mp4CompressedRanges(buf) : [];
     for (const m of latin1.matchAll(/[\x20-\x7e]{4,}/g)) {
-      // Isolated four-byte words occur by chance in encoded media. Keep all metadata, longer readable
-      // payloads and UTF-16 strings; never filter unknown codecs, subtitles or malformed containers.
-      if (m[0].length === 4 && compressed.some(([s, e]) => m.index >= s && m.index + 4 <= e)) continue;
       scanLine(m[0], ctx, (rule, text, idx) => push('latin1')(rule, text, m.index + idx));
     }
     // UTF-16LE strings (resources.arsc, compiled XML): ASCII char + NUL pairs, either alignment.

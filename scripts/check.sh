@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Shared checks: app typecheck (tsc), app unit tests, scripts' tests, the bridge suite, the push module,
 # and the Hermes plugin.
+# tsc steps first remove the stale generated app/.expo/types (scripts/lib/clean-route-types.sh); a green `all` on a clean
+# tree leaves a stamp keyed by the tree hash (scripts/lib/gate-stamp.sh) that release.sh reuses.
 # Usage: scripts/check.sh tsc | tsc-test | test [node --test args...] | leak | scripts | bridge | bridge-security | all
 #                         | quick [--base REF] | all --host HOST [--worktree|--committed]
 #   all --host  the full gate on another Linux machine over ssh (scripts/lib/check-remote.sh): ships the committed tree
@@ -43,6 +45,7 @@ fi
 ms() { local t=${1//[.,]/}; echo $((10#$t / 1000)); }   # $EPOCHREALTIME -> ms
 secs() { local d=$(($1 / 100)); echo "$((d / 10)).$((d % 10))s"; }   # ms -> 1.2s
 q_tsc() { # app and/or test project, incremental (the build info lives outside the repo and node_modules)
+  ../scripts/lib/clean-route-types.sh >&2
   if [ "$Q_TSC_APP" = 1 ]; then npx tsc --noEmit --incremental --tsBuildInfoFile "$Q_CACHE/app.tsbuildinfo" || return; fi
   if [ "$Q_TSC_TEST" = 1 ]; then npx tsc --noEmit -p tsconfig.test.json --incremental --tsBuildInfoFile "$Q_CACHE/test.tsbuildinfo"; fi
 }
@@ -136,6 +139,7 @@ all() {
     echo "usage: $0 all [--host HOST [--worktree|--committed]]" >&2; exit 2
   fi
   A_SUM=() A_FAILED=() A_LOCKOUT=0
+  ../scripts/lib/clean-route-types.sh >&2   # stale generated expo-router types fail tsc; Expo rewrites them on demand
   a_step tsc tsc npx tsc --noEmit
   [ $A_LOCKOUT = 1 ] || a_step tsc-test tsc npx tsc --noEmit -p tsconfig.test.json
   [ $A_LOCKOUT = 1 ] || a_step 'app tests' node npm test --silent
@@ -156,10 +160,14 @@ all() {
   echo "check: $sum - $([ ${#A_FAILED[@]} = 0 ] && echo 'all green' || echo "FAILED: ${A_FAILED[*]}") in $((SECONDS / 60))m$((SECONDS % 60))s"
   [ $A_LOCKOUT = 1 ] && exit 75
   [ ${#A_FAILED[@]} = 0 ] || exit 1
+  # green: remember the tree (clean checkouts only) so release.sh can reuse the result for the very same tree
+  if [ -z "$(git status --porcelain --untracked-files=no)" ]; then
+    . ../scripts/lib/gate-stamp.sh; gate_stamp_write "$(git rev-parse 'HEAD^{tree}')" || true
+  fi
 }
 case "${1:-all}" in
-  tsc)      run npx tsc --noEmit ;;
-  tsc-test) run npx tsc --noEmit -p tsconfig.test.json ;;
+  tsc)      ../scripts/lib/clean-route-types.sh >&2; run npx tsc --noEmit ;;
+  tsc-test) ../scripts/lib/clean-route-types.sh >&2; run npx tsc --noEmit -p tsconfig.test.json ;;
   test)     shift; if [ $# -gt 0 ]; then run node --test "$@"; else run npm test --silent; fi ;;
   leak)     run node --test ../scripts/leak-guard.test.mjs ;;
   scripts)  run node --test ../scripts/*.test.mjs ../scripts/e2e/*.test.mjs ;;

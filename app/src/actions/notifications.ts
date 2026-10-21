@@ -98,11 +98,16 @@ export async function scheduleLocalNotification(o: { title: string; body?: strin
 }
 
 /** Pending local notifications of this app with their `data` tags; [] where there are none (web, no module, error). */
-export async function listLocalNotifications(): Promise<{ id: string; data: Record<string, unknown> }[]> {
+export async function listLocalNotifications(): Promise<{ id: string; data: Record<string, unknown>; title?: string; body?: string }[]> {
   const N = await loadModule();
   if (!N) return [];
   try {
-    return (await N.getAllScheduledNotificationsAsync()).map((n) => ({ id: n.identifier, data: (n.content.data ?? {}) as Record<string, unknown> }));
+    return (await N.getAllScheduledNotificationsAsync()).map((n) => ({
+      id: n.identifier,
+      data: (n.content.data ?? {}) as Record<string, unknown>,
+      title: n.content.title ?? undefined,
+      body: n.content.body ?? undefined,
+    }));
   } catch {
     return [];
   }

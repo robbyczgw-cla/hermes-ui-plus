@@ -9,6 +9,7 @@ import type { HuiTabs } from '../../types';
 import { useChildRenderer } from './a/shared';
 import { useS } from './useS';
 import { TabsSkeleton } from '../../skeletons';
+import { dayLabelForDate } from '../../../live/dayLabel';
 import { LiveNode, useLiveHandOver } from '../../../live/ui/LiveNode';
 
 /**
@@ -20,6 +21,12 @@ export function Tabs({ node }: { node: Partial<HuiTabs> }) {
   const live = useLiveHandOver(node);
   if (live) return <LiveNode node={node} {...live} type="trip" />;
   return <PlainTabs node={node} />;
+}
+
+/** ISO date of the agenda a tab holds (a day tab), if it has one */
+function dayDateOf(tb: { children?: unknown }): string | undefined {
+  const a = asObjects(tb.children).find((c) => c.type === 'agenda');
+  return typeof a?.date === 'string' ? a.date : undefined;
 }
 
 function PlainTabs({ node }: { node: Partial<HuiTabs> }) {
@@ -44,7 +51,7 @@ function PlainTabs({ node }: { node: Partial<HuiTabs> }) {
     <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.control, padding: 3, gap: 3, ...(fits ? {} : { alignSelf: 'flex-start' }) }}>
       {tabs.map((tb, i) => {
         const on = i === idx;
-        const label = asString(tb.label) || (typeof tb.day === 'number' ? S.tabs.day(tb.day) : `${i + 1}`);
+        const label = dayLabelForDate(asString(tb.label), dayDateOf(tb)) || (typeof tb.day === 'number' ? S.tabs.day(tb.day) : `${i + 1}`);
         return (
           <PressableScale
             key={i}

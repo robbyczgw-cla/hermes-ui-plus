@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Release gate: scan a built artifact for private content and secrets BEFORE it is published or shared.
-#   scripts/scan-artifact.sh <app-release.apk | .aab | .ipa | .zip | directory (dist/web, unzipped APK) | Foo.app>
+#   scripts/scan-artifact.sh <app-release.apk | .aab | .ipa | .zip | directory (dist/web, unzipped APK) | Foo.app | single file>
+# A single file (.dmg .AppImage .deb .gz, mp4/mov/m4a/mp3/webm/png/jpg/webp, .md/.txt/.json) is scanned as it is; the copy keeps
+# its file name, which is scanned too. Media containers: only their metadata/text parts, never the compressed stream.
 # Runs leak-guard --path (denylist REQUIRED + generic patterns) and gitleaks dir on the unpacked content.
 # A JS bundle (index.android.bundle / main.jsbundle) must decode as Hermes bytecode, so every string of its string
 # table is scanned with its real boundaries (leak-guard --expect-hermes). AAB and IPA are release-only and must contain
@@ -37,7 +39,12 @@ else
       work="$(mktemp -d "${TMPDIR:-/tmp}/hui-scan.XXXXXX")"
       unzip -q -o "$target" -d "$work" || { echo "scan-artifact: could not unpack $target" >&2; exit 2; }
       scan_dir="$work" ;;
-    *) echo "scan-artifact: don't know how to unpack $target (give an apk/aab/ipa/zip or a directory)" >&2; exit 2 ;;
+    # a single file that is not an archive: scanned as it is (media containers: metadata only, see docs/LEAK-GUARD.md)
+    *.dmg|*.AppImage|*.deb|*.rpm|*.tar.gz|*.tgz|*.gz|*.mp4|*.m4v|*.mov|*.m4a|*.mp3|*.webm|*.png|*.jpg|*.jpeg|*.webp|*.md|*.txt|*.json|*.sha256)
+      work="$(mktemp -d "${TMPDIR:-/tmp}/hui-scan.XXXXXX")"
+      cp -- "$target" "$work/" || { echo "scan-artifact: could not copy $target" >&2; exit 2; }
+      scan_dir="$work" ;;
+    *) echo "scan-artifact: don't know how to unpack $target (give an apk/aab/ipa/zip, a directory, or a single dmg/AppImage/deb/gz/media/text file)" >&2; exit 2 ;;
   esac
 fi
 if [ -n "$(find "$scan_dir" -type f \( -name index.android.bundle -o -name main.jsbundle \) -print -quit)" ]; then

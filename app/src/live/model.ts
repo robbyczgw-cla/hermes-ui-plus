@@ -14,7 +14,7 @@
  * later one in the transcript wins.
  */
 import type { HuiChecklistKind } from '../protocol/types.ts';
-import { editTarget, removalAsked } from './focus.ts';
+import { editTarget, mentions, removalAsked } from './focus.ts';
 
 export type LiveCardType = 'checklist' | 'trip' | 'products';
 export const LIVE_CARD_TYPES: readonly LiveCardType[] = ['checklist', 'trip', 'products'];
@@ -400,8 +400,15 @@ function uniqueId(id: string, used: Set<string>): string {
  * Hafermilch und Äpfel"), a tick is the user's. It goes only when the turn's user message (`turnText`) asked to take it
  * off (focus.ts `removalAsked`) or by an explicit `del` (a patch, the user's own edit).
  * `authoritative` (a user snapshot): the version states everything, missing user fields and ticked items are removed too.
+ * `removed`: items the card had and lost before (id → name). A full version that lists one again (models copy an old
+ * version: real-user round 4, a patch removed the raincoat, the next full version had it back) does not bring it back
+ * unless the turn's user message or the answer's own text (`said`) names it; it lands in `withheld` instead.
  */
-export function diffFull(base: LiveCardState, full: { type?: LiveCardType; meta?: LiveMeta; closed?: boolean; items: FullItem[] } & LiveMeta, opts: { authoritative?: boolean; turnText?: string } = {}): LiveOp[] {
+export function diffFull(
+  base: LiveCardState,
+  full: { type?: LiveCardType; meta?: LiveMeta; closed?: boolean; items: FullItem[] } & LiveMeta,
+  opts: { authoritative?: boolean; turnText?: string; removed?: ReadonlyMap<string, string>; said?: string; withheld?: string[] } = {},
+): LiveOp[] {
   const type = full.type ?? 'checklist';
   const meta: LiveMeta = full.meta ?? full;
   const userFields = opts.authoritative ? [] : USER_FIELDS[type];
@@ -435,6 +442,12 @@ export function diffFull(base: LiveCardState, full: { type?: LiveCardType; meta?
   for (const b of left) if (!kept.has(b.id)) ops.push({ del: b.id });
   const used = new Set(base.items.filter((b) => claimed.has(b.id) || kept.has(b.id)).map((b) => b.id));
   const order: string[] = [];
+  const goneTexts = opts.removed ? new Set(Array.from(opts.removed.values(), normText)) : undefined;
+  const revived = (it: FullItem) =>
+    !!opts.removed && ((!!it.id && opts.removed.has(it.id)) || goneTexts!.has(normText(it.text))) && !askedBack(it.text);
+  // named in the user's message or the answer's text, and not as something to take off ("Hafermilch statt Milch, Milch raus")
+  const askedBack = (text: string) =>
+    [opts.turnText ?? '', opts.said ?? ''].some((t) => mentions(t, text) && !removalAsked(t, [{ id: 'x', text }]).size);
   incoming.forEach((it, i) => {
     const b = match[i];
     if (b) {
@@ -452,6 +465,10 @@ export function diffFull(base: LiveCardState, full: { type?: LiveCardType; meta?
       if (changed) ops.push({ set: b.id, ...patch });
       if (it.checked === true && !b.checked) ops.push({ check: b.id });
       if (it.checked === false && b.checked) ops.push({ uncheck: b.id });
+      return;
+    }
+    if (revived(it)) {
+      opts.withheld?.push(str(it.text).trim());
       return;
     }
     const id = uniqueId(it.id || hashItemId(it.text), used);
@@ -521,7 +538,7 @@ export interface LiveTurn {
 /** A live node of an answer in the fold's terms (live/nodes.ts `fullFromNode`). */
 export type LiveEvent =
   /** `turn`: the user message before the answer (a ticked item it asked to remove may go, diffFull) */
-  | { kind: 'hermes'; key: string; at: number; full: LiveFull; turn?: LiveTurn; excerpt?: string }
+  | { kind: 'hermes'; key: string; at: number; full: LiveFull; turn?: LiveTurn; excerpt?: string; said?: string }
   | { kind: 'patch'; key: string; at: number; card: string; ops: LiveOp[]; excerpt?: string }
   | { kind: 'user'; key: string; at: number; card: string; batch: UserBatch }
   /**
@@ -529,7 +546,7 @@ export type LiveEvent =
    * The fold applies it as a full version of the card it clearly continues (`continuationOf`), else marks it
    * `unapplied` when the turn was about a card of that type. `node` = the node's id ('' without one).
    */
-  | { kind: 'plain'; key: string; at: number; node: string; full: LiveFull; turn: LiveTurn; excerpt?: string }
+  | { kind: 'plain'; key: string; at: number; node: string; full: LiveFull; turn: LiveTurn; excerpt?: string; said?: string }
   /** a finished answer without any card block after a turn about a card: "„Einkauf“ wurde nicht geändert" */
   | { kind: 'quiet'; key: string; at: number; turn: LiveTurn };
 
@@ -576,6 +593,8 @@ export interface MessageMark {
   unapplied?: true;
   /** a Hermes patch whose ops all failed (unknown item ids): "nicht übernommen" instead of "unverändert" */
   failed?: true;
+  /** items a Hermes full version listed again after the card had removed them, not brought back (diffFull `removed`) */
+  withheld?: string[];
   /** an answer without a block after a turn about this card: the card stayed as it was */
   quiet?: true;
 }
@@ -635,13 +654,15 @@ export function foldLive(events: readonly LiveEvent[]): LiveFold {
         continue;
       }
       const head = headOf(card);
-      const { state, applied } = applyOps(head.state, diffFull(head.state, ev.full, { turnText: ev.turn?.text }));
+      const withheld: string[] = [];
+      const { state, applied } = applyOps(head.state, diffFull(head.state, ev.full, { turnText: ev.turn?.text, removed: removedItems(card), said: ev.said, withheld }));
+      const held = withheld.length ? { withheld } : {};
       if (!applied.length) {
-        mark(ev.key, { card: id, n: head.n, unchanged: true, ...nodeId });
+        mark(ev.key, { card: id, n: head.n, unchanged: true, ...nodeId, ...held });
         continue;
       }
       const n = push(card, { key: ev.key, author: 'hermes', at: ev.at, ops: applied, state, ...(ev.excerpt ? { excerpt: ev.excerpt } : {}) });
-      mark(ev.key, { card: id, n, ...nodeId });
+      mark(ev.key, { card: id, n, ...nodeId, ...held });
       continue;
     }
     if (ev.kind === 'patch') {
@@ -652,10 +673,11 @@ export function foldLive(events: readonly LiveEvent[]): LiveFold {
         continue;
       }
       const head = headOf(card);
-      const { state, applied } = applyOps(head.state, ev.ops.slice(0, MAX_PATCH_OPS));
+      const ops = resolvePatchIds(head.state, ev.ops.slice(0, MAX_PATCH_OPS));
+      const { state, applied } = applyOps(head.state, ops);
       if (!applied.length) {
         // ops on items the card does not have (or no change at all): say which of the two it was
-        const failed = ev.ops.some((op) => !applyOp(head.state, op).applied && !opIsNoop(head.state, op));
+        const failed = ops.some((op) => !applyOp(head.state, op).applied && !opIsNoop(head.state, op));
         mark(ev.key, { card: card.id, n: head.n, unchanged: true, ...(failed ? { failed: true as const } : {}) });
         continue;
       }
@@ -673,13 +695,15 @@ export function foldLive(events: readonly LiveEvent[]): LiveFold {
         continue;
       }
       if (ev.node && ev.node !== card.id) (aliases.get(card.id) ?? aliases.set(card.id, new Set()).get(card.id)!).add(ev.node);
-      const { state, applied } = applyOps(head.state, diffFull(head.state, { ...ev.full, type: card.type }, { turnText: ev.turn.text }));
+      const withheld: string[] = [];
+      const { state, applied } = applyOps(head.state, diffFull(head.state, { ...ev.full, type: card.type }, { turnText: ev.turn.text, removed: removedItems(card), said: ev.said, withheld }));
+      const held = withheld.length ? { withheld } : {};
       if (!applied.length) {
-        mark(ev.key, { card: card.id, n: head.n, unchanged: true, adopted: ev.node });
+        mark(ev.key, { card: card.id, n: head.n, unchanged: true, adopted: ev.node, ...held });
         continue;
       }
       const n = push(card, { key: ev.key, author: 'hermes', at: ev.at, ops: applied, state, ...(ev.excerpt ? { excerpt: ev.excerpt } : {}) });
-      mark(ev.key, { card: card.id, n, adopted: ev.node });
+      mark(ev.key, { card: card.id, n, adopted: ev.node, ...held });
       continue;
     }
     if (ev.kind === 'quiet') {
@@ -714,12 +738,50 @@ export function foldLive(events: readonly LiveEvent[]): LiveFold {
   return { cards, marks, bids };
 }
 
+/** Items the card had in an earlier version and does not have now (id → name), by id and by name. */
+export function removedItems(card: LiveCard): Map<string, string> {
+  const head = headOf(card).state.items;
+  const ids = new Set(head.map((it) => it.id));
+  const names = new Set(head.map((it) => normText(it.text)));
+  const out = new Map<string, string>();
+  for (const v of card.versions) for (const it of v.state.items) if (!ids.has(it.id) && !names.has(normText(it.text))) out.set(it.id, it.text);
+  return out;
+}
+
 /** A user snapshot as ops: the user's state wins everything, including unticks and their own fields. */
 export function snapshotOps(base: LiveCardState, target: LiveCardState, type: LiveCardType = 'checklist'): LiveOp[] {
   const items = target.items.map((it) => ({ ...it, checked: !!it.checked }));
   const meta: LiveMeta = {};
   for (const k of ALL_META_KEYS) if (target[k] !== undefined) (meta as Record<string, unknown>)[k] = target[k];
   return diffFull(base, { type, meta, items, closed: target.closed }, { authoritative: true });
+}
+
+/**
+ * A Hermes patch names items by id, but a card whose first version came without ids only has hashed ones (`h1x2y3`),
+ * which Hermes never saw: it makes ids up from the names (real-user round 4: `{"del":"iphone16"}` for "iPhone 16").
+ * An unknown id that equals exactly one item's name (letters and digits only, or as a slug) means that item. Anything
+ * else stays unknown (the receipt says "nicht übernommen"). Only from the transcript, so every device resolves alike.
+ */
+export function resolvePatchIds(state: LiveCardState, ops: readonly LiveOp[]): LiveOp[] {
+  const ids = new Set(state.items.map((it) => it.id));
+  const byName = (id: string): string | undefined => {
+    const n = normText(id);
+    if (!n) return undefined;
+    const hits = state.items.filter((it) => normText(it.text) === n || slugId(it.text) === id);
+    return hits.length === 1 ? hits[0].id : undefined;
+  };
+  let out: LiveOp[] | null = null;
+  ops.forEach((op, i) => {
+    if ('add' in op) return;
+    const id = opTarget(op);
+    if (id === undefined || ids.has(id)) return;
+    const hit = byName(id);
+    if (!hit) return;
+    out ??= ops.slice();
+    const key = 'set' in op ? 'set' : 'del' in op ? 'del' : 'check' in op ? 'check' : 'uncheck' in op ? 'uncheck' : 'move';
+    out[i] = { ...op, [key]: hit } as LiveOp;
+  });
+  return out ?? ops.slice();
 }
 
 // ---- plain nodes that continue a card --------------------------------------------------------------------------

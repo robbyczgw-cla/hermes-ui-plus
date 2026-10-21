@@ -14,7 +14,7 @@
  * Call end() when the stream is finished (flushes an unterminated last line and
  * finalizes unclosed blocks).
  */
-import type { HuiNode, Segment } from './types.ts';
+import { isKnownNodeType, type HuiNode, type Segment } from './types.ts';
 import { createPartialJsonParser, parseLenientJson, parsePartialJson, prunePartialItems } from './partialJson.ts';
 import { collectInteractiveIds, hasListContent, hasReadableContent, isEmptyCollection, isPartialTypeName, normalizeNode, readableFallback } from './validate.ts';
 import { isEmptyNode } from './emptyNode.ts';
@@ -123,6 +123,26 @@ function mayBecomeOpener(line: string): boolean {
   if (name === '') return ws === '';
   // trailing whitespace ends the name: only a complete opener name may continue
   return ws === '' ? OPENER_NAME_PREFIXES.has(name) : OPENER_NAME_SET.has(name);
+}
+
+/**
+ * A line that is one complete component object outside any fence: `{"type":"suggestions","items":[…]}` (a model that
+ * dropped the fence; the direct-Claude live check saw it after a `_suggestions` marker line). Drawn as the component,
+ * never as raw JSON text. Only known node types and only JSON that parses as an object on that one line.
+ */
+const BARE_NODE_RE = /^ {0,3}\{\s*"type"\s*:\s*"([a-z][a-z0-9_-]*)"/;
+/** while streaming, a line that may still become such an object is held back (like a fence opener) */
+const BARE_START_RE = /^ {0,3}\{\s*(?:"(?:t(?:y(?:p(?:e(?:"\s*(?::\s*"?[a-z0-9_-]*)?)?)?)?)?)?)?$|^ {0,3}\{\s*"type"\s*:\s*"[a-z]/;
+
+function bareNodeType(line: string): string | null {
+  const m = BARE_NODE_RE.exec(line);
+  if (!m || !isKnownNodeType(m[1]) || !line.trimEnd().endsWith('}')) return null;
+  try {
+    const v: unknown = JSON.parse(line);
+    return v && typeof v === 'object' && !Array.isArray(v) ? m[1] : null;
+  } catch {
+    return null;
+  }
 }
 
 /** first non-whitespace char of `s` ('' if none) */
@@ -254,7 +274,7 @@ export function createStreamParser(opts: StreamParserOptions = {}): StreamParser
     if (p.charCodeAt(p.length - 1) === 13) p = p.slice(0, -1);
     if (ended) return p;
     if (mode === 'md') {
-      return !mdFence && mayBecomeOpener(p) ? '' : p;
+      return !mdFence && (mayBecomeOpener(p) || BARE_START_RE.test(p)) ? '' : p;
     }
     // undecided typed fence: nothing of it shows yet
     if (mode === 'typed') return '';
@@ -373,6 +393,21 @@ export function createStreamParser(opts: StreamParserOptions = {}): StreamParser
         blockFenceLen = m[1].length;
         blockBuf = '';
         fenceType = undefined;
+        return;
+      }
+      const bare = bareNodeType(line);
+      // only as a block of its own: after a blank line, the start, or the marker line of the lost fence
+      // ("_suggestions", "hui", "json"), which goes with it; never inside a paragraph or after indented code
+      const body = mdText.endsWith('\n') ? mdText.slice(0, -1) : mdText;
+      const cut = body.lastIndexOf('\n') + 1;
+      const prevLine = body.slice(cut);
+      const marker = !!bare && new RegExp(`^ {0,3}[_*]*(?:hui|json|${bare})[_*:]*[ \\t]*$`, 'i').test(prevLine);
+      if (bare && (marker || prevLine.trim() === '')) {
+        if (marker) mdText = mdText.slice(0, cut);
+        closeMarkdown();
+        const seg = buildHui(nextKey(), line.trim(), true, usedIds);
+        committed.push(seg);
+        if (seg.kind === 'hui' && seg.node) collectInteractiveIds(seg.node, usedIds);
         return;
       }
       const tf = TYPED_OPEN_RE.exec(line);

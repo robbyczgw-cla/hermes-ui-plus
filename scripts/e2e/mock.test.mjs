@@ -300,6 +300,48 @@ test('"remind me": cron tool progress in the stream, wrapper rows in the session
   assert.equal(scenarioFor('remind me later').name, 'reminder');
 });
 
+test('"delete this reminder": removes the chat\'s newest job as Hermes stores it, the job list follows, the app reads a removal', async () => {
+  const { parseMessages } = await import('../../app/src/hermes/sessions.ts');
+  const { mapRemoteMessages } = await import('../../app/src/hermes/sessionMapping.ts');
+  const { parseReminders } = await import('../../app/src/chat/reminder.ts');
+  const { parseCronChanges } = await import('../../app/src/chat/reminderSync.ts');
+  const token = await pair();
+  const auth = { headers: { authorization: `Bearer ${token}` } };
+  const answers = async (sid) => {
+    const rows = await fetch(`${base}/api/sessions/${sid}/messages`, auth).then((r) => r.json());
+    return mapRemoteMessages(parseMessages(rows, sid).messages).filter((m) => m.role === 'assistant');
+  };
+  const listed = async () => (await fetch(`${base}/api/jobs?include_disabled=true`, auth).then((r) => r.json())).jobs.map((j) => j.id);
+  await ctl('/__e2e/config', { routines: true });
+  try {
+    await (await send(token, 'Remind me tomorrow at 9 to buy tea', { sid: 'hui-remind-del' })).text();
+    await (await send(token, 'Remind me tomorrow at 9 to buy tea', { sid: 'hui-remind-other' })).text();
+    const [mine] = parseReminders((await answers('hui-remind-del'))[0].tools ?? []);
+    const [other] = parseReminders((await answers('hui-remind-other'))[0].tools ?? []);
+    assert.match(mine.jobId, /^[a-f0-9]{12}$/);
+    assert.notEqual(mine.jobId, other.jobId); // every create its own job
+    assert.ok((await listed()).includes(mine.jobId));
+
+    assert.match(sse(await (await send(token, 'Delete this reminder', { sid: 'hui-remind-del' })).text()), /reminder is deleted/);
+    const del = (await answers('hui-remind-del')).at(-1);
+    assert.deepEqual(parseCronChanges(del.tools ?? [], del.createdAt).map((c) => [c.jobId, c.kind]), [[mine.jobId, 'removed']]);
+    assert.deepEqual(parseReminders(del.tools ?? []), []); // no new "reminder set" card for a removal
+    const jobs = await listed();
+    assert.ok(!jobs.includes(mine.jobId) && jobs.includes(other.jobId), 'only the chat\'s own job goes');
+
+    // nothing left in this chat: a failed remove, which changes nothing
+    await (await send(token, 'Delete this reminder', { sid: 'hui-remind-del' })).text();
+    const again = (await answers('hui-remind-del')).at(-1);
+    assert.deepEqual(parseCronChanges(again.tools ?? [], again.createdAt), []);
+
+    // deleted elsewhere (dashboard): gone from the list
+    assert.equal((await ctl('/__e2e/remove-job', { id: other.jobId })).removed, other.jobId);
+    assert.ok(!(await listed()).includes(other.jobId));
+  } finally {
+    await ctl('/__e2e/config', { routines: false });
+  }
+});
+
 test('creating bots: off by default, allowed → a new bot is listed and served under /p/<name>/, a taken name is refused', async () => {
   const token = await pair();
   const call = (path, init = {}) => fetch(base + path, { ...init, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' } });

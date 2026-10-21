@@ -83,6 +83,7 @@ export const live = {
     openA11y: '{title} öffnen, Version {n}',
     unchanged: 'Keine Änderung',
     failed: 'Nicht übernommen: Diese Einträge gibt es in der Karte nicht.',
+    withheld: 'Nicht wieder aufgenommen, war schon entfernt: {items}',
     card: { order: 'Reihenfolge geändert', meta: 'Angaben der Karte geändert', closed: 'Abgeschlossen', reopened: 'Wieder geöffnet', other: 'Keine Änderung an den Einträgen' },
     more: '{count, plural, one {und eine weitere Änderung} other {und # weitere Änderungen}}',
     updating: 'Wird aktualisiert …',

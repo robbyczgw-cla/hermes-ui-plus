@@ -39,7 +39,7 @@ function fixture() {
   const dir = mkdtempSync(join(tmpdir(), 'check-remote-test-'));
   const repo = join(dir, 'repo'); const home = join(dir, 'home'); const bin = join(dir, 'bin'); const log = join(dir, 'calls.log');
   mkdirSync(home); mkdirSync(bin);
-  for (const f of ['scripts/lib/check-remote.sh', 'scripts/lib/check-remote-run.sh', 'scripts/lib/heavy.sh']) {
+  for (const f of ['scripts/lib/check-remote.sh', 'scripts/lib/check-remote-run.sh', 'scripts/lib/heavy.sh', 'scripts/lib/gate-stamp.sh', 'scripts/lib/clean-route-types.sh']) {
     mkdirSync(dirname(join(repo, f)), { recursive: true });
     copyFileSync(join(ROOT, f), join(repo, f));
   }
@@ -135,7 +135,7 @@ test('check.sh all --host: green run ships the tree once, caches node_modules, c
     const head = f.git('rev-parse', '--short=12', 'HEAD').stdout.trim();
     const tree = f.git('rev-parse', 'HEAD^{tree}').stdout.trim();
     assert.match(r.stdout, /sending \d+ git objects \(first run on this host: the whole tree\)/);
-    assert.match(r.stdout, /fake check in src: 7 files, head [0-9a-f]+/);
+    assert.match(r.stdout, /fake check in src: 9 files, head [0-9a-f]+/);
     assert.match(r.stdout, /app node_modules: installed/);
     const last = r.stdout.trim().split('\n').at(-1);
     assert.match(last, new RegExp(`^check --host ${HOST.replace(/\./g, '\\.')}: ${head} tsc ok, app tests 3 pass/0 fail - all green in 0m1s \\| setup node host node v[0-9.]+, app npm ci \\d+s in \\d+s \\| exit 0 \\(green\\) in \\d+m\\d+s$`));
@@ -195,7 +195,7 @@ test('check.sh all --host: --worktree ships uncommitted files, --committed warns
     const w = runRemote(f, ['--host', HOST, '--worktree']);
     assert.equal(w.status, 0, w.stdout + w.stderr);
     assert.match(w.stdout, /marker: uncommitted/);
-    assert.match(w.stdout, /fake check in src: 8 files/);
+    assert.match(w.stdout, /fake check in src: 10 files/);
     assert.match(w.stdout.trim().split('\n').at(-1), /: [0-9a-f]{12}\+worktree tsc ok/);
     assert.equal(f.git('status', '--porcelain').stdout, '?? marker.txt\n', 'the real index is untouched');
     const c = runRemote(f, ['--host', HOST, '--committed']);
@@ -292,6 +292,7 @@ function allFixture() {
   const dir = mkdtempSync(join(tmpdir(), 'check-all-test-'));
   const bin = join(dir, 'bin');
   write(join(dir, 'tree/scripts/check.sh'), readFileSync(join(ROOT, 'scripts/check.sh'), 'utf8'), 0o755);
+  for (const f of ['gate-stamp.sh', 'clean-route-types.sh']) write(join(dir, 'tree/scripts/lib', f), readFileSync(join(ROOT, 'scripts/lib', f), 'utf8'), 0o755);
   for (const d of ['app', 'push', 'hermes-plugin', 'bridge/test', 'bridge/node_modules']) mkdirSync(join(dir, 'tree', d), { recursive: true });
   write(join(bin, 'npx'), `#!/bin/bash
 [ "$*" = "tsc --noEmit" ] && [ -n "$FAIL_TSC" ] && { echo "src/a.ts(1,1): error TS2322: no"; echo "src/b.ts(2,2): error TS2345: no"; exit 2; }

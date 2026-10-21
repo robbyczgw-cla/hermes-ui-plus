@@ -68,6 +68,13 @@ python3 hermes-plugin/install.py --hermes-home ~/.hermes            # symlink + 
 #   --group-readable-secret   0640 secret + 0750 dir, for a bridge user in the file's group
 ```
 
+**Upgrading:** pull/download the new release and run the same command again. A copied plugin (`--copy`) is compared
+with the new one by manifest version and file contents: an older or changed copy is replaced (the old one is kept as
+`<hermes-home>/hermes-ui-plus/backup-<old version>`, never under `plugins/`) and the installer prints
+`updated plugin 0.1.1 → 0.2.0`; the same version is a no-op; a newer installed version is kept unless you pass
+`--force`. A symlinked install is left alone (it follows the repo; `git pull`). The secret is never regenerated.
+Restart the gateway afterwards so it loads the new code. `config.yaml` and `plugins.enabled` stay untouched.
+
 Enable it in `config.yaml` (back up `config.yaml`, `.env` and `installs/` first), then restart the gateway:
 
 ```yaml

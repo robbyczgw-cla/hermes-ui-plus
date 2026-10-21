@@ -46,11 +46,11 @@ check registered in `Suite.run()` is in no group.
 | `bots` | `bots`, `bots_create`, `demo_bots` | Bots as contacts (docs/BOTS-SERVER.md): needs the mock with two bots; creating a bot in the app; the bot mode of the offline demo |
 | `share` | `share_unpaired`, `share_link`, `share_in_image`, `share_pdf`, `share_cancel`, `share_recreate`, `share_offline` | "Share to HUI+" (docs/SHARE-TARGET.md): intake, sheet, targets, offline; `share_unpaired` runs before pairing |
 | `routines` | `routines`, `routines_off`, `routines_hidden` | Routines inbox against the mock's job list and result inbox (read-only device); Routines off on a default bridge; Routines switched off in the app's Settings |
-| `reminders` | `reminder`, `reminder_delivered` | A reminder created by Hermes' cron tool: the chat's reminder card and its device copy; the fired reminder in the default bot's thread |
+| `reminders` | `reminder`, `reminder_delete`, `reminder_gone`, `reminder_delivered` | A reminder created by Hermes' cron tool: the chat's reminder card and its device copy; deleted by a chat message (routines off) or elsewhere while the app was closed (job list on start): the copy is cancelled and the card says so; the fired reminder in the default bot's thread |
 | `cards` | `live_card`, `live_patch` | live cards (app/src/live): tray, waiting tick, `[hui:live]` trailer, patch receipt, trip day tabs |
 
 Which to run: streaming, transport or retry code -> `net` (plus `core`); blocks, Markdown, theme or layout -> `ui`;
-background, notification or keep-alive code -> `bg`; Routines screen, inbox or the Settings switch -> `routines`; reminder card (chat/reminder.ts, deviceReminder.ts) -> `reminders`; live cards -> `cards`; Bots tab, Bot Chat or bot approvals -> `bots`; anything else or unsure -> `all`. The full suite stays the gate
+background, notification or keep-alive code -> `bg`; Routines screen, inbox or the Settings switch -> `routines`; reminder card (chat/reminder.ts, deviceReminder.ts, reminderSync.ts) -> `reminders`; live cards -> `cards`; Bots tab, Bot Chat or bot approvals -> `bots`; anything else or unsure -> `all`. The full suite stays the gate
 before a merge that touches app code; groups are for the loop while working. Several groups: `--group net,bg`.
 
 A partial run says so: `report.md` starts with `# E2E smoke: PASS (subset: group core)` and lists the checks that did

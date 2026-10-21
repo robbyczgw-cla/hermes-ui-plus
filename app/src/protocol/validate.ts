@@ -685,7 +685,10 @@ const OPTION_DETAIL_KEYS = ['description', 'detail', 'subtitle', 'note'] as cons
 
 function normChoice(x: Rec, base: Rec): void {
   const used = new Set<string>();
-  put(base, 'question', block(x.question, 500) ?? block(x.title, 500) ?? block(x.prompt, 500));
+  // a heading plus the actual question under it ({title: "Wien – Graz mit dem Zug", subtitle: "Wann möchtest du fahren?"})
+  const head = block(x.title, 300);
+  const sub = block(x.subtitle, 300) ?? block(x.description, 300);
+  put(base, 'question', block(x.question, 500) ?? (head && sub ? `${head}\n${sub}` : undefined) ?? head ?? block(x.prompt, 500) ?? sub);
   const opts = pickList(x, ['options', 'items', 'choices']);
   const out: Rec[] = [];
   for (let i = 0; i < opts.length && out.length < MAX_CHOICE_OPTIONS; i++) {
@@ -2069,6 +2072,10 @@ function normWorkout(x: Rec, base: Rec): void {
   // ("45 Sekunden"), rest as `rest`, the tip as `tip`, no title (→ duration · level)
   base.title = line(x.title, 200) ?? line(x.name, 200) ?? ([line(x.duration, 40), line(x.level, 40)].filter(Boolean).join(' · ') || '');
   put(base, 'kind', oneOf(x.kind, HUI_WORKOUT_KINDS));
+  // session-wide instructions ("3 Durchgänge à 6 Minuten + 1 Minute Pause"), equipment and place: one note line
+  const how = firstLine(x, ['note', 'notes', 'instructions', 'description', 'tip'], 300);
+  const kit = [line(x.equipment, 60), line(x.location, 60)].filter(Boolean).join(' · ');
+  put(base, 'note', [how, kit].filter(Boolean).join(' · ').slice(0, 400) || undefined);
   put(base, 'warmup', phaseText(x.warmup));
   put(base, 'cooldown', phaseText(x.cooldown));
   const used = new Set<string>();
@@ -2808,6 +2815,7 @@ function norm(x: unknown, depth: number, ctx: Ctx, path: string): HuiNode | null
           return [o];
         })
         .slice(0, MAX_GALLERY_ITEMS);
+      put(base, 'title', line(x.title, 200));
       const aspect = num(x.aspect);
       if (aspect !== undefined && aspect > 0) base.aspect = aspect;
       put(base, 'lang', normalizeWikiLang(x.lang));
@@ -3283,10 +3291,14 @@ function valueText(v: unknown, depth = 0): string | undefined {
     return parts.length ? parts.join(' · ') : undefined;
   }
   if (isRec(v)) {
-    // {label, value} pairs read naturally as "label: value"
+    // {label, value} pairs read naturally as "label: value", with their unit and detail ("Zug – Kosten: 40 € (30–50€, 2 Pers.)")
     const lv = scalarText(v.label) ?? scalarText(v.name);
     const vv = valueText(v.value, depth + 1);
-    if (lv && vv) return `${lv}: ${vv}`;
+    if (lv && vv) {
+      const unit = scalarText(v.unit);
+      const more = ['detail', 'note', 'description', 'subtitle', 'hint'].map((k) => scalarText(v[k])).filter(Boolean);
+      return `${lv}: ${vv}${unit && !vv.endsWith(unit) ? ` ${unit}` : ''}${more.length ? ` (${more.join('; ')})` : ''}`;
+    }
     const parts: string[] = [];
     for (const [k, x] of Object.entries(v)) {
       if (SKIP_KEYS.has(k)) continue;
@@ -3366,7 +3378,9 @@ export function readableFallback(x: unknown, opts?: NormalizeOptions): HuiNode |
         return { title: title ?? `${i + 1}.`, children: children.length ? children : [{ type: 'text', text: valueText(r) ?? '–' }] };
       });
       const acc = { type: 'accordion', items, open: 0 };
-      raw = top.title ? { type: 'stack', children: [{ type: 'text', text: top.title, variant: 'title' }, acc] } : acc;
+      // the block's own readable fields beside the list ("description": "Verschieb die Gewichte …")
+      const own = isRec(x) ? fieldNodes(Object.fromEntries(Object.entries(x).filter(([k, v]) => !NON_CONTENT_KEYS.has(k) && !Array.isArray(v) && !isRec(v))), top.key) : [];
+      raw = top.title || own.length ? { type: 'stack', children: [...(top.title ? [{ type: 'text', text: top.title, variant: 'title' }] : []), ...own, acc] } : acc;
     } else if (isRec(x)) {
       const children = fieldNodes(x, top.key);
       if (children.length) raw = { type: 'card', title: top.title, children };

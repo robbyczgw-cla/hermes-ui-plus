@@ -43,7 +43,7 @@ GROUPS = {
     'share': ('share_unpaired', 'share_link', 'share_in_image', 'share_pdf', 'share_cancel', 'share_recreate', 'share_offline'),
     'cards': ('live_card', 'live_patch'),
     'routines': ('routines', 'routines_off', 'routines_hidden'),
-    'reminders': ('reminder', 'reminder_delivered'),
+    'reminders': ('reminder', 'reminder_delete', 'reminder_gone', 'reminder_delivered'),
 }
 LIVE_STAGE = 'live'
 # the optional live checks (--live, E2E_LIVE_EXTRA) belong to the live stage, not to a group
@@ -1409,6 +1409,83 @@ class Suite:
         expect(not d.find('text:^Also remind me on this device$'), 'after force-stop the card offers the device reminder again (would set it twice)')
         return dict(card=card.desc, alarm_listed=scheduled)
 
+    def _reminder_with_device_copy(self, shots):
+        """new chat → "Remind me …" → the card → "Also remind me on this device"; returns the number of the app's
+        lines in `dumpsys alarm` before and after the copy was set"""
+        new_chat()
+        text = 'Remind me tomorrow at 9 to buy tea'
+        send(text)
+        wait_answer(text, expected_for(text), 30)
+        expect(d.wait('desc:^Reminder set · ', 20), 'no reminder card after a successful cron create')
+        before = (d.sh('dumpsys alarm') or '').count(PKG)
+        expect(d.tap('text:^Also remind me on this device$', 8), 'no "Also remind me on this device" on a one-shot reminder (Android)')
+        expect(d.wait('text:^This device reminds you too: ', 10), 'the device copy was not confirmed on the card')
+        d.screenshot_jpg(os.path.join(shots, 'device-set.jpg'))
+        return before, (d.sh('dumpsys alarm') or '').count(PKG)
+
+    def _expect_deleted_card(self, shots, name, alarms_set, alarms_before):
+        """the card says the job is gone and so is its device copy; no buttons that act on the job; the alarm is gone"""
+        fate = d.wait('id:^reminder-fate$', 20)
+        expect(fate, 'the reminder card does not say that the job was deleted in Hermes')
+        expect(fate.text == 'This reminder was deleted in Hermes – removed from this device too.', f'unexpected card note: {fate.text!r}')
+        expect(not d.find('text:^This device reminds you too: '), 'the card still says the device reminds you (QA round 4 bug)')
+        expect(not d.find('text:^Change$') and not d.find('text:^Delete$'), 'Change / Delete still offered for a deleted job')
+        expect(not d.find('text:^Also remind me on this device$'), 'the card offers a device copy of a deleted job')
+        d.screenshot_jpg(os.path.join(shots, f'{name}.jpg'))
+        end = time.time() + 10
+        alarms = (d.sh('dumpsys alarm') or '').count(PKG)
+        while alarms_set > alarms_before and alarms >= alarms_set and time.time() < end:
+            time.sleep(1)
+            alarms = (d.sh('dumpsys alarm') or '').count(PKG)
+        if alarms_set > alarms_before:
+            expect(alarms < alarms_set, f'the app\'s alarm is still scheduled after the delete ({alarms_set} → {alarms} lines in dumpsys alarm)')
+        return alarms
+
+    def c_reminder_delete(self):
+        """QA round 4: the user deletes a reminder by writing "Delete this reminder" in the chat (not the card's button).
+        Default bridge, routines off (the job list answers 404): the turn's `cronjob_manage remove` alone takes the
+        device copy along, the card says so and keeps saying it after a force-stop"""
+        shots = os.path.join(self.out, 'reminder')
+        os.makedirs(shots, exist_ok=True)
+        before, alarms_set = self._reminder_with_device_copy(shots)
+        text = 'Delete this reminder'
+        send(text)
+        wait_answer(text, expected_for(text), 30)
+        alarms = self._expect_deleted_card(shots, 'deleted-in-chat', alarms_set, before)
+        force_stop()
+        launch()
+        fate = d.wait('id:^reminder-fate$', 20)
+        if not fate:
+            w, h = d.screen_size()
+            d.swipe(w // 2, int(h * 0.35), w // 2, int(h * 0.65))
+            fate = d.wait('id:^reminder-fate$', 6)
+        expect(fate, 'after force-stop the card forgot that its job was deleted')
+        expect(not d.find('text:^Also remind me on this device$'), 'after force-stop the card offers a device copy of a deleted job')
+        return dict(alarms=[before, alarms_set, alarms])
+
+    def c_reminder_gone(self):
+        """The job is deleted elsewhere (Hermes dashboard, another chat; mock /__e2e/remove-job) while the app is closed.
+        With routines on (the job list answers), the next start checks the device copies against the list: the copy is
+        cancelled and the card says so. Jobs that are still listed keep their copies"""
+        mock('/__e2e/config', {'routines': True})
+        shots = os.path.join(self.out, 'reminder')
+        os.makedirs(shots, exist_ok=True)
+        try:
+            before, alarms_set = self._reminder_with_device_copy(shots)
+            force_stop()
+            gone = mock('/__e2e/remove-job', {})
+            expect(gone.get('removed'), f'the mock had no reminder job to remove: {gone}')
+            launch()
+            alarms = self._expect_deleted_card(shots, 'deleted-elsewhere', alarms_set, before)
+            lists = [r for r in mock('/__e2e/requests') if r['path'].startswith('/api/jobs')]
+            expect(lists, 'the app never asked for the job list')
+            return dict(removed=gone['removed'], alarms=[before, alarms_set, alarms], list_requests=len(lists))
+        finally:
+            try:
+                mock('/__e2e/config', {'routines': False})
+            except Exception:
+                pass
+
     def c_bots(self):
         """Bots as contacts (bots/, docs/BOTS-SERVER.md) against the mock with two profiles: Bots tab → Research → its
         "Bot Chat" (created once, adopted afterwards) → a turn bound to that session → an approval that names the bot
@@ -1901,12 +1978,41 @@ class Suite:
 
         w, h = d.screen_size()
 
+        actions_sheet = 'desc:^(Answer actions|Aktionen zur Antwort)$'
+
+        def unstick():
+            """puts the screen back to the chat if something got in the way. On a loaded emulator a slow swipe is taken for a
+            long press (the answer's actions sheet covers the chat), the app can be sent home by a system gesture or an "isn't
+            responding" dialog covers it. Each of these is recorded in the trace, so a recovery stays visible in the report."""
+            if d.top_activity() != PKG:
+                mark('app not in front, relaunching')
+                ensure_app()
+            elif d.find(actions_sheet):
+                mark('answer actions sheet in the way, Back')
+                d.sh('input keyevent 4')
+                time.sleep(0.8)
+            else:
+                d.dismiss_anr()
+
+        def open_card(spec, what, opens, tries=3):
+            """taps the row `spec` until the card with the marker `opens` is up; a tap that landed while the list was still
+            settling (or got swallowed by an overlay) is repeated after unstick() instead of failing the run"""
+            for _ in range(tries):
+                row = reveal(spec, what)
+                d.tap_xy(row.cx, row.cy)
+                if d.wait(opens, 10):
+                    return row
+                mark(f'{what}: card not open after the tap')
+                unstick()
+            raise Fail(f'{what}: the card did not open')
+
         def reveal(spec, what, tries=10, min_h=90):
             """the node for spec once it is fully inside the visible list: clear of the header / demo banner on top and of the
             composer at the bottom (a row cut off there has bounds, but a tap on its centre hits the banner). Scrolls the list
             by a moderate swipe in the middle of the screen until it is. A node cut off at the list's edge is a sliver (the
             panel and the rows are 100-200 px tall), so it must also be at least min_h high."""
             for _ in range(tries):
+                unstick()
                 hits = d.wait_stable(spec, 4)
                 n = d.find(spec, hits) if hits else None
                 banner = [x.b[3] for x in d.dump() if x.text == 'DEMO']
@@ -1944,10 +2050,8 @@ class Suite:
                 mark(f'panel at {panel.b}')
                 d.tap_xy(panel.cx, panel.cy)
                 time.sleep(0.8)
-                row = reveal(L['search'], f'{tag}: web search row')
+                row = open_card(L['search'], f'{tag}: web search row', L['how'])
                 mark(f'search row at {row.b}')
-                d.tap_xy(row.cx, row.cy)
-                expect(d.wait(L['how'], 10), f'{tag}: the web result card did not open')
                 mark('card open')
                 expect(d.find(L['cited']), f'{tag}: no "cited in the answer" line on the card')
                 expect(d.find('desc:^(Provider|Anbieter): Brave · |text:^Brave · '), f'{tag}: provider line missing')
@@ -1974,9 +2078,7 @@ class Suite:
                 self.shot(f'wsp-{tag}-card-technical')
                 d.sh('input keyevent 4')
                 expect(d.wait(L['how'], 8, gone=True) and d.find(S['input']), f'{tag}: Back did not close the card (or left the app)')
-                row = reveal(L['pages'], f'{tag}: pages row')
-                d.tap_xy(row.cx, row.cy)
-                expect(d.wait(L['read'], 10), f'{tag}: the pages-read card did not open')
+                open_card(L['pages'], f'{tag}: pages row', L['read'])
                 self.shot(f'wsp-{tag}-card-pages')
                 shots[tag] = [f'shots/wsp-{tag}-{k}.jpg' for k in ('answer', 'card-search', 'card-search-scrolled', 'card-pages')]
                 d.sh('input keyevent 4')
@@ -2375,6 +2477,8 @@ class Suite:
             self.check('routines_off', 'Routines off on the default bridge: drawer row says Off, screen explains + asks Hermes in the chat', self.c_routines_off)
             self.check('routines_hidden', 'Settings → Routines off: "About Hermes" without routines, no job API request, deep link explains + turns them back on', self.c_routines_hidden)
             self.check('reminder', 'Reminder by the cron tool: card says it arrives in the chat "Hermes", device copy set and still known after force-stop', self.c_reminder)
+            self.check('reminder_delete', 'Reminder deleted by a chat message (QA round 4): device copy cancelled, card says so, also after force-stop', self.c_reminder_delete)
+            self.check('reminder_gone', 'Reminder deleted elsewhere while the app was closed: on start the job list cancels the device copy, card says so', self.c_reminder_gone)
             self.check('reminder_delivered', 'A fired bot-chat reminder on the default bridge: drawer row "Hermes", the reminder text under a marker (no bubble)', self.c_reminder_delivered)
             self.check('background', 'Background: "… is answering" → "Answer ready"', self.c_background)
             self.check('bots_quick_visible', 'Bots tab + ⚡ when the bridge offers profiles + quick answers', self.c_bots_quick_visible)

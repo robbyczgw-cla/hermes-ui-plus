@@ -22,6 +22,7 @@ import { PushHost } from '../push';
 import { AppearanceProvider } from '../settings/Appearance';
 import { ConnectionProvider } from '../settings/ConnectionProvider';
 import { UpdateHost } from '../support/UpdateHost';
+import { ReminderSyncHost } from '../chat/reminderSyncStore';
 import { useTheme } from '../ui';
 import { whatsNewForLaunch } from '../whatsnew/storage';
 import { installWebA11y, setFocusColor } from '../ui/lib/webA11y';
@@ -99,6 +100,8 @@ function ThemedRoot() {
                     <BackgroundTurnHost />
                     {/* daily update check on foreground + one chat toast per new version (support/) */}
                     <UpdateHost />
+                    {/* device copies of Hermes reminders vs. Hermes' job list on start + foreground (chat/reminderSyncStore.ts) */}
+                    <ReminderSyncHost />
                     {/* macOS desktop app: menus, keys, dock, notification actions, files, lock (no-op elsewhere) */}
                     <DesktopHost />
                     {/* reopens Settings & co. after an Android activity recreation (system font size change) */}

@@ -7,6 +7,7 @@
  * Nodes come validated (protocol/validate.ts keeps `live` only with an explicit slug id and gives live items stable
  * ids). Pure, no React.
  */
+import { dayLabelForDate } from './dayLabel.ts';
 import type { HuiAgenda, HuiAgendaBlock, HuiChecklist, HuiMap, HuiNode, HuiProduct, HuiProducts, HuiTabs } from '../protocol/types.ts';
 import type { FullItem, LiveCardType, LiveDay, LiveFull, LiveMap, LiveMeta } from './model.ts';
 
@@ -90,7 +91,7 @@ export function fullFromNode(node: Partial<LiveNodeShape> | null | undefined): L
     const map = kids.find((c) => c.type === 'map') as Partial<HuiMap> | undefined;
     if (agenda) {
       const id = dayId(tab, agenda, i);
-      days.push({ id, label: tab.label, ...(agenda.date ? { date: agenda.date } : {}) });
+      days.push({ id, label: dayLabelForDate(tab.label, agenda.date), ...(agenda.date ? { date: agenda.date } : {}) });
       for (const b of agenda.blocks ?? []) items.push(blockItem(b, id));
     } else if (map && !meta.map) {
       const m = mapOf(map);
@@ -117,8 +118,13 @@ export function fullFromPlainNode(node: Partial<LiveNodeShape> | null | undefine
   return { ...full, id: typeof node.id === 'string' ? node.id : '', items: full.items.map(({ id: _id, ...it }) => it) };
 }
 
-/** Cheap pre-check: an answer that may hold a plain live-capable node (checked only in chats with live cards). */
+/**
+ * Cheap pre-check: an answer that may hold a plain live-capable node (checked only in chats with live cards). Models
+ * also write the node type as the fence name (```checklist, protocol/streamParser.ts TYPED_FENCE_TYPES): the renderer
+ * shows those as components, so the fold must see them too (real-user round 4: the card never moved).
+ */
 export function mayCarryPlainNode(text: string): boolean {
+  if (text.includes('```checklist') || text.includes('```agenda') || text.includes('```products')) return true;
   return text.includes('```hui') && (text.includes('checklist') || text.includes('agenda') || text.includes('products') || text.includes('"tabs"') || text.includes('items'));
 }
 

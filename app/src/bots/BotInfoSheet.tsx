@@ -136,7 +136,7 @@ export function BotInfoSheet({
   })();
 
   return (
-    <SheetModal visible={open} onClose={onClose} closeLabel={tr('actions.close')} label={tr('bots.info.title', { name })} maxWidth={560} style={styles.sheet}>
+    <SheetModal visible={open} onClose={onClose} closeLabel={tr('actions.close')} label={tr('bots.info.title', { name })} maxWidth={560} maxHeight="88%" style={styles.sheet}>
       <SheetGrabber />
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content} testID="bot-info">
         <View style={styles.head}>
@@ -207,7 +207,8 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   shrink: { flexShrink: 1 },
   sheet: { paddingHorizontal: 18 },
-  scroll: { flexGrow: 0 },
+  // capped at 88 % of the screen (many routines, a small phone or large text make it taller): the content scrolls inside
+  scroll: { flexGrow: 0, flexShrink: 1 },
   content: { gap: 14, paddingBottom: 24 },
   head: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   modelRow: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 48, paddingHorizontal: 14, borderWidth: StyleSheet.hairlineWidth },

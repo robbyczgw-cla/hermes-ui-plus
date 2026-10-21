@@ -84,6 +84,7 @@ export const live = {
     openA11y: 'Abrir {title}, versión {n}',
     unchanged: 'Sin cambios',
     failed: 'No aplicado: estos elementos no están en la tarjeta.',
+    withheld: 'No se volvió a añadir, ya se había quitado: {items}',
     card: { order: 'Orden cambiado', meta: 'Datos de la tarjeta cambiados', closed: 'Cerrada', reopened: 'Reabierta', other: 'Sin cambios en los elementos' },
     more: '{count, plural, one {y un cambio más} other {y # cambios más}}',
     updating: 'Actualizando …',

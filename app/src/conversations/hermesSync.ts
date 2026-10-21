@@ -129,6 +129,9 @@ function useSupportVersion(): number {
 export function useHermesSessionSync(profiles: SyncProfile[], options: SessionSyncOptions = {}): HermesSessionSync {
   const { controller, ready, remoteActionsRef } = useConversationsInternals();
   const tr = useT();
+  // the app language for sync error banners, read by callbacks that must not change identity when it changes
+  const trRef = useRef(tr);
+  trRef.current = tr;
   const [status, setStatus] = useState<SyncStatus>('idle');
   const [error, setError] = useState<string | undefined>();
   const [lastSyncAt, setLastSyncAt] = useState<number | undefined>();
@@ -229,7 +232,7 @@ export function useHermesSessionSync(profiles: SyncProfile[], options: SessionSy
               setSessionsSupported(conn, true);
             } catch (e) {
               if (isUnsupportedError(e)) setSessionsSupported(conn, false);
-              else failure = sessionErrorText(e);
+              else failure = sessionErrorText(e, trRef.current);
               if (!bot) break; // the server itself failed: its bots would too
               continue;
             }
@@ -283,7 +286,7 @@ export function useHermesSessionSync(profiles: SyncProfile[], options: SessionSy
             if (r.added > 0) break outer;
           } catch (e) {
             if (isUnsupportedError(e)) setSessionsSupported(conn, false);
-            else failure = sessionErrorText(e);
+            else failure = sessionErrorText(e, trRef.current);
           }
         }
       }
@@ -342,7 +345,7 @@ export function useHermesSessionSync(profiles: SyncProfile[], options: SessionSy
           if (isNotFoundError(e)) return; // never reached the server (no message sent yet)
           // keep the server's error code (`invalid_title` = title taken → the auto title retries a variant)
           const code = (e as { code?: unknown } | null)?.code;
-          throw Object.assign(new Error(sessionErrorText(e)), typeof code === 'string' ? { code } : {});
+          throw Object.assign(new Error(sessionErrorText(e, tr)), typeof code === 'string' ? { code } : {});
         }
       },
       canDeleteRemote: (meta) => !!profileFor(meta) && isAppConversation(meta) && !meta.botChat,
@@ -355,7 +358,7 @@ export function useHermesSessionSync(profiles: SyncProfile[], options: SessionSy
           await hermesSessions(withBot(p, meta.hermesProfile)).remove(meta.hermesSessionId);
         } catch (e) {
           // never reached the server (nothing sent yet) / already deleted elsewhere: gone either way
-          if (!isNotFoundError(e)) throw new Error(sessionErrorText(e));
+          if (!isNotFoundError(e)) throw new Error(sessionErrorText(e, tr));
         }
         controller.hideRemote(meta.id);
       },
@@ -461,7 +464,7 @@ export function useRemoteTranscript(conversationId: string | undefined, profile:
       setS((p) => (p.id === id ? { ...p, loading: false, error: undefined, done: true, remote, ack, revision: p.revision + 1 } : p));
     } catch (e) {
       if (isUnsupportedError(e)) setSessionsSupported(profile, false);
-      const error = isNotFoundError(e) ? tr('conversations.sync.sessionGone') : sessionErrorText(e);
+      const error = isNotFoundError(e) ? tr('conversations.sync.sessionGone') : sessionErrorText(e, tr);
       if (isNotFoundError(e)) controller.markRemoteLoaded(id, Date.now());
       setS((p) => (p.id === id ? { ...p, loading: false, error, done: true } : p));
     } finally {

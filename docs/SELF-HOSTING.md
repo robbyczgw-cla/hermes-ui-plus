@@ -330,6 +330,7 @@ gets them there; otherwise as a push notification. All settings are optional:
 - **npx:** run `npx hermes-ui-plus-bridge@latest ...`, or update your global install.
 - **Docker:** `git pull && npm run bundle-skill && docker compose up -d --build`. State is kept in the volume.
 - **Skill:** `hermes skills update`, or re-copy `hermes-skill/hermes-ui/`. New conversations pick it up; running ones keep the old text.
+- **Plugin (`hermes-ui-plus`, optional):** re-run `python3 hermes-plugin/install.py --hermes-home <home> --copy` from the new release; it replaces an older copy (backup under `<home>/hermes-ui-plus/backup-<version>`) and prints `updated plugin 0.1.1 → 0.2.0`. Then restart the Hermes gateway. A symlinked install follows the repo (`git pull`). See [HERMES-PLUGIN.md](HERMES-PLUGIN.md).
 - **Apps:** Obtainium updates the Android APK; web and desktop builds are rebuilt from the repo.
 
 Update the bridge and the skill together when the release notes say so, since new answer components need both. Read [../CHANGELOG.md](../CHANGELOG.md) first.

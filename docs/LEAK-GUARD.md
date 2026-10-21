@@ -82,6 +82,18 @@ real key inside the bundle is found (test: a runtime-built `sk_test_...` key amo
 Everything else is copied unchanged and a bytecode file that does not decode fails the gate. We chose this over a path
 plus regex allow-list because an allow-list would also hide real findings in the bundle; no `.gitleaks.toml` change.
 `scan-artifact.sh` always uses the repository's `.leak-guard-allow`, whatever directory it is called from. Compressed media skips the e-mail check (random bytes look like addresses).
+
+**Media containers** (mp4/m4v/mov/m4a, webm/mkv, mp3, png, jpeg, webp) are scanned by their metadata and text parts only, plus the file name:
+the compressed stream is random bytes in which a short denylist term turns up by chance (a four-letter host name matched
+inside an H.264 stream twice in one day, and re-rendering does not help because the encoder is deterministic). What is scanned: MP4/MOV
+everything except `mdat`, fragment boxes and the sample tables (so `udta`/`meta`/`ilst` tags and XMP `uuid` boxes count),
+Matroska everything except clusters and cues, MP3 the ID3v2 tag and the last 2 KB (ID3v1/APE), PNG all chunks except the
+image data (`zTXt`/`iTXt` are inflated and scanned), JPEG all segments except the entropy-coded scan data and
+quantisation/Huffman tables (COM, EXIF, XMP, IPTC count; data after EOI too), WebP the `EXIF`/`XMP ` chunks. The filter only
+switches on when the container is proven well-formed (`scripts/lib/media-metadata.mjs`); a truncated or malformed file, an
+unknown extension, or a movie with a subtitle/text/unknown track (their text lives in the payload) is scanned completely as
+before. gitleaks gets the same view (`hermes-strings-dump.mjs`). `scan-artifact.sh` also takes a single file (media, `.dmg`,
+`.AppImage`, `.deb`, `.gz`, text). Text burned into frames or audio is not detectable by a byte scan; review videos by eye.
 For structurally valid MP4 A/V files with recognized compressed codecs, isolated four-byte ASCII runs inside
 `mdat` are treated as compression noise. Metadata, longer readable payloads and UTF-16 strings still scan.
 Subtitle tracks, unknown codecs and malformed/truncated containers receive the full scan. This is format-aware

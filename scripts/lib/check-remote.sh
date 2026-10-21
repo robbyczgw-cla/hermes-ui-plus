@@ -155,4 +155,6 @@ CHECK=$(sed -n 's/^check: //p' "$LOG" | tail -n 1)
 SETUP=$(sed -n 's/^check-remote: setup //p' "$LOG" | tail -n 1)
 case $RC in 0) VERDICT=green ;; 255) VERDICT="ssh failed" ;; 75) VERDICT="lock timeout" ;; *) VERDICT=FAILED ;; esac
 echo "check --host $HOST: $LABEL ${CHECK:-no check summary (see the output above)}${SETUP:+ | setup $SETUP} | exit $RC ($VERDICT) in $((SECONDS / 60))m$((SECONDS % 60))s"
+# a green run leaves the stamp release.sh looks for (keyed by the tree that was really checked)
+if [ "$RC" = 0 ]; then . "$ROOT/scripts/lib/gate-stamp.sh"; gate_stamp_write "$TREE" || true; fi
 exit "$RC"

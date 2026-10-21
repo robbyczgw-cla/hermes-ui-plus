@@ -24,7 +24,7 @@ export type Exercise = {
   imageQuery?: string;
 };
 
-export type WorkoutModel = { title: string; kind?: WorkoutKind; warmup?: string; cooldown?: string; exercises: Exercise[] };
+export type WorkoutModel = { title: string; kind?: WorkoutKind; note?: string; warmup?: string; cooldown?: string; exercises: Exercise[] };
 
 /** Per-set state. `reps`/`weight` override the plan values when edited. */
 export type SetEntry = { done?: boolean; reps?: string; weight?: string };
@@ -61,6 +61,8 @@ export function normalizeWorkout(node: Record<string, unknown>): WorkoutModel {
   }
   const m: WorkoutModel = { title: str(node.title).slice(0, 120), exercises };
   if (node.kind === 'strength' || node.kind === 'cardio' || node.kind === 'mobility' || node.kind === 'mixed') m.kind = node.kind;
+  const note = typeof node.note === 'string' ? node.note.trim().slice(0, 400) : '';
+  if (note) m.note = note;
   const warm = typeof node.warmup === 'string' ? node.warmup.trim().slice(0, 600) : '';
   if (warm) m.warmup = warm;
   const cool = typeof node.cooldown === 'string' ? node.cooldown.trim().slice(0, 600) : '';

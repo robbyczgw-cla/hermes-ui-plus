@@ -83,8 +83,8 @@ async function fakeHermes() {
   return { ...h, seen };
 }
 
-async function startBridge(env) {
-  const { server } = createServer({ BRIDGE_TOKEN: TOKEN, BRIDGE_DEVICE_TOKENS: 'off', BRIDGE_BOOTSTRAP: 'off', ROUTER_BACKEND: 'heuristic', ...env }, { logger: silentLogger });
+async function startBridge(env, o = {}) {
+  const { server } = createServer({ BRIDGE_TOKEN: TOKEN, BRIDGE_DEVICE_TOKENS: 'off', BRIDGE_BOOTSTRAP: 'off', ROUTER_BACKEND: 'heuristic', ...env }, { logger: silentLogger, ...o });
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -138,13 +138,24 @@ test('model overrides are validated against Hermes /api/model/options', async (t
 
 test('per-device rate limit (minute)', async (t) => {
   const plugin = await fakePlugin(); const hermes = await fakeHermes();
-  const b = await startBridge({ HERMES_BASE_URL: hermes.url, BRIDGE_HERMES_PLUGIN_URL: plugin.url, BRIDGE_HERMES_PLUGIN_SECRET_FILE: secretFile, BRIDGE_QUICK_RATE: '2' });
+  const b = await startBridge({ HERMES_BASE_URL: hermes.url, BRIDGE_HERMES_PLUGIN_URL: plugin.url, BRIDGE_HERMES_PLUGIN_SECRET_FILE: secretFile, BRIDGE_QUICK_RATE: '2' }, { now: () => 1_700_000_010_000 }); // frozen clock: the fixed minute window cannot roll over mid-test
   t.after(() => { b.close(); plugin.close(); hermes.close(); });
   assert.equal((await b.call('/bridge/quick', post(Q))).status, 200);
   assert.equal((await b.call('/bridge/quick', post(Q))).status, 200);
   const r = await b.call('/bridge/quick', post(Q));
   assert.equal(r.status, 429);
   assert.ok(Number(r.headers.get('retry-after')) > 0);
+});
+
+test('per-device rate limit: a new minute starts a fresh window (injected clock)', async (t) => {
+  const plugin = await fakePlugin(); const hermes = await fakeHermes();
+  let clock = 1_700_000_010_000;
+  const b = await startBridge({ HERMES_BASE_URL: hermes.url, BRIDGE_HERMES_PLUGIN_URL: plugin.url, BRIDGE_HERMES_PLUGIN_SECRET_FILE: secretFile, BRIDGE_QUICK_RATE: '1' }, { now: () => clock });
+  t.after(() => { b.close(); plugin.close(); hermes.close(); });
+  assert.equal((await b.call('/bridge/quick', post(Q))).status, 200);
+  assert.equal((await b.call('/bridge/quick', post(Q))).status, 429);
+  clock += 60_000;
+  assert.equal((await b.call('/bridge/quick', post(Q))).status, 200);
 });
 
 test('rate limiter: minute and day windows per key', () => {

@@ -1,6 +1,6 @@
 # English demo videos and trailer (Hermes Interactive UI+)
 
-Reproducible recordings from the public web build: a 390×844 phone viewport at 3× device scale,
+Reproducible recordings from the public web build: a 390×844 phone viewport at 2× device scale (`REC_DSF`; the browser gets `--force-device-scale-factor`, without it the CDP screencast delivers 1× frames),
 60 fps, a local mock Hermes server, and fictional sample content. No private chats, hosts or credentials.
 Photos reuse the existing CC0 media; headphone illustrations are generated fictional products.
 Attribution stays in `media/CREDITS.json` and the gallery’s `CREDITS.json`.

@@ -148,6 +148,13 @@ export function resolveApproval(m: ChatMessage, key: string, outcome: ApprovalOu
   return a.expired ? base : appendLog(base, a, outcome, now);
 }
 
+/** the open requests of run `runId` got `outcome` (the offline demo has no server round trip to wait for) */
+export function resolveRunApprovals(m: ChatMessage, runId: string, outcome: ApprovalOutcome, now: number): ChatMessage {
+  let out = m;
+  for (const a of pendingOf(m)) if (a.runId === runId) out = resolveApproval(out, approvalKey(a), outcome, now);
+  return out;
+}
+
 /** hide an expired card / a request the server no longer knows (no answer is sent) */
 export function dismissApproval(m: ChatMessage, key: string, now: number): ChatMessage {
   const a = pendingOf(m).find((p) => approvalKey(p) === key);

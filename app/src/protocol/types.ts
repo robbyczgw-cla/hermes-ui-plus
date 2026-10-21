@@ -334,6 +334,8 @@ export interface HuiGalleryItem {
 /** Horizontal photo carousel, 2–6 items (each needs `query` or `url`). */
 export interface HuiGallery extends HuiBase {
   type: 'gallery';
+  /** heading above the photos ("Fotos") */
+  title?: string;
   items: HuiGalleryItem[];
   /** width / height of every slide (default 4/3) */
   aspect?: number;
@@ -1034,6 +1036,8 @@ export interface HuiWorkout extends HuiBase {
   id: string;
   title: string;
   kind?: HuiWorkoutKind;
+  /** how to do the session as a whole ("3 rounds, 1 minute break between rounds"; equipment, place), under the title */
+  note?: string;
   warmup?: string;
   /** max 20 */
   exercises: HuiExercise[];

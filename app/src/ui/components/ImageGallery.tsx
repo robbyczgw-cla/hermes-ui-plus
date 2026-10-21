@@ -14,7 +14,7 @@ import { useCallback, useEffect, useRef, useState, type MutableRefObject, type R
 import { Platform, Pressable, ScrollView, View } from 'react-native';
 import { useTheme } from '../theme';
 import { useHui } from '../primitives/context';
-import { HText } from '../primitives/basics';
+import { BlockTitle, HText } from '../primitives/basics';
 import { Skeleton } from '../primitives/Skeleton';
 import { ImageSkeleton } from '../skeletons';
 import { asNumber, asObjects, asOptString, clamp } from '../lib/format';
@@ -109,12 +109,15 @@ export function ImageGallery({ node }: NodeProps<HuiGallery>) {
 
   const reason = streaming ? null : blockMissReason(slides.map((s) => s.miss));
   const markBroken = (url: string) => setBroken((b) => (b[url] ? b : { ...b, [url]: true }));
+  // the model's heading ("Fotos"); BlockTitle draws nothing without one
+  const heading = <BlockTitle title={asOptString(node.title)} />;
 
   if (grid) {
     const cols = n === 1 ? 1 : 2;
     const tileW = w > 0 ? Math.floor((w - gap * (cols - 1)) / cols) : 0;
     return (
       <View onLayout={(e) => setW(Math.round(e.nativeEvent.layout.width))} style={{ gap: t.spacing.s }}>
+        {heading}
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap }} accessibilityLabel={tr('ui.image.galleryA11y', { n })}>
           {slides.map((s, k) => (
             <View key={`${k}-${s.query ?? s.url}`} style={{ width: tileW || (cols === 1 ? '100%' : '48%'), gap: 4 }}>
@@ -143,6 +146,7 @@ export function ImageGallery({ node }: NodeProps<HuiGallery>) {
 
   return (
     <View onLayout={(e) => setW(Math.round(e.nativeEvent.layout.width))} style={{ gap: t.spacing.s }}>
+      {heading}
       {w > 0 ? (
         <View>
           <ScrollView

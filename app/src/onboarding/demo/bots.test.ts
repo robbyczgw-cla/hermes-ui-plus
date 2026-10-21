@@ -12,7 +12,7 @@ import { reformatMessage } from '../../chat/reformat.ts';
 import { checklistReply } from '../../ui/components/modules/a/replies.ts';
 import { cronDelivery } from '../../bots/core.ts';
 import { toApprovalView } from '../../approvals/approvalModel.ts';
-import { withDeadline } from '../../hermes/approvals.ts';
+import { resolveRunApprovals, withDeadline } from '../../hermes/approvals.ts';
 import { createBody, draftFor, ROLE_TEMPLATES, templateColor, WITH_STARTERS, type TemplateId } from '../../bots/create/core.ts';
 import { previewOf } from '../../conversations/messages.ts';
 import { demoBotJobs, createDemoRoutines } from '../../routines/demo.ts';
@@ -56,7 +56,12 @@ async function replay(text: string, o: { lang?: DemoLang; role?: DemoBotRole; ap
       events.push(ev);
       msg = applyEvent(msg, ev, 1);
     },
-    waitForApproval: async () => o.approve ?? 'once',
+    // like useDemoChat.respondApproval: the tapped choice resolves the open request (the receipt shows it)
+    waitForApproval: async (runId) => {
+      const choice = o.approve ?? 'once';
+      msg = resolveRunApprovals(msg, runId, choice, 1);
+      return choice;
+    },
   });
   if (msg.status === 'streaming') msg = finalize(msg, 'done', undefined, 2);
   return { r, events, msg };
@@ -154,6 +159,9 @@ test('Scout waits for an approval with a fixed request (Bots tab and chat agree)
       assert.equal(v.deadlineMs - v.timeoutSeconds * 1000, NOW);
       assert.ok(!v.expired);
       assert.equal(msg.status, 'done');
+      // the receipt carries the tapped choice, never "not answered – run ended"
+      assert.deepEqual(msg.approvalLog?.map((r) => [r.requestId, r.outcome]), [[SCOUT_APPROVAL.requestId, approve]], `${lang}: receipt`);
+      assert.ok(!msg.pendingApprovals?.length);
       if (approve === 'once') {
         assert.ok(msg.tools.some((t) => t.name === 'terminal'), 'the command shows as a tool step');
         assert.match(msg.text, lang === 'de' ? /In der Demo wurde nichts gelöscht/ : lang === 'en' ? /Nothing was deleted in the demo/ : /En la demo no se borró nada/);

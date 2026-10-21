@@ -148,3 +148,10 @@ export function removalAsked(text: string, items: readonly { id: string; text: s
   }
   return out;
 }
+
+/** The text names the item: one of its words (3+ letters, not a number) appears, inflections alike ("Tomate"/"Tomaten"). */
+export function mentions(text: string, item: string): boolean {
+  if (!text) return false;
+  const tw = words(text);
+  return words(item).some((w) => w.length >= 3 && !/^\d+$/.test(w) && tw.some((c) => sameWord(c, w)));
+}

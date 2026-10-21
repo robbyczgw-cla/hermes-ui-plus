@@ -21,6 +21,16 @@ export const MODES: readonly HuiVocabMode[] = ['cards', 'quiz', 'type'];
 const isRec = (v: unknown): v is Rec => !!v && typeof v === 'object' && !Array.isArray(v);
 const str = (v: unknown): string => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : '');
 
+/**
+ * The language codes of the header ("EN → DE") and the languages they stand for: a language the model did not name
+ * (`und`) is left out instead of showing "EN → UND"; none known → no header line.
+ */
+export function vocabRoute(from: string, to: string): { label: string; codes: string[] } {
+  const codes = [from, to].filter((c) => !!c && c !== 'und');
+  const short = codes.map((c) => c.split('-')[0].toUpperCase());
+  return { label: short.join(' → '), codes };
+}
+
 export function readVocab(node: Rec | null | undefined): VocabModel {
   const n = node ?? {};
   const items: VocabItem[] = [];

@@ -133,6 +133,11 @@ export function Workout({ node }: { node: Partial<HuiWorkout> }) {
             {tr('ui.workout.sets', { done, total })}
             {model.kind ? ` · ${kindLabel(model.kind, tr)}` : ''}
           </HText>
+          {model.note ? (
+            <HText variant="caption" color="muted">
+              {model.note}
+            </HText>
+          ) : null}
         </View>
         <SoundToggle on={st.sound !== false} onToggle={() => setSt((s) => ({ ...s, sound: !(s.sound !== false) }))} t={t} />
       </View>
