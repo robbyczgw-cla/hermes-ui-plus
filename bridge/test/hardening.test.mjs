@@ -91,7 +91,8 @@ test('approval answer: body capped at 8 KB before anything goes upstream', async
   behaviour = (_q, res) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"ok":true}'); };
   const ok = await fetch(`${base}/v1/runs/run-1/approval`, { method: 'POST', headers: { ...auth, 'content-type': 'application/json' }, body: JSON.stringify({ choice: 'once' }) });
   assert.equal(ok.status, 200);
-  assert.deepEqual(JSON.parse(seen[0].body.toString()), { choice: 'once' });
+  // (first a run status lookup for a v0.22.3+ generation: none here, so the body goes up unchanged)
+  assert.deepEqual(JSON.parse(seen.find((x) => x.method === 'POST').body.toString()), { choice: 'once' });
 });
 
 test('pass-through: a hanging upstream answers 504 after the upstream timeout', async () => {

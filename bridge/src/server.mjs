@@ -97,7 +97,7 @@ export function createServer(env = process.env, o = {}) {
   // --- pairing hook-in: GET /bridge/pair[.svg|.png] (src/pair.mjs; loopback or one-time page code with BRIDGE_PAIRING=1)
   // and POST /bridge/pair/redeem (one-time pair code → device token, unauthenticated, rate limited).
   const pairing = createPairing(config, { env, logger, devices, now: o.now });
-  const deviceAdmin = createDeviceAdmin({ auth: config.auth, devices, issue: (label) => pairing.issue(label) });
+  const deviceAdmin = createDeviceAdmin({ auth: config.auth, devices, issue: (label) => pairing.issue(label), corsOrigins: config.corsOrigins });
   // --- images hook-in: GET /bridge/images, /bridge/images/config (src/images.mjs, own auth check; keys SERPER_API_KEY/BRAVE_API_KEY).
   // --- image proxy hook-in: GET /bridge/img?u=<https url> (src/image-proxy.mjs, own auth check, no keys; BRIDGE_IMAGE_PROXY=off).
   const imageProxy = createImageProxy(config, { env, logger, now: o.now, ...o.imageProxy });

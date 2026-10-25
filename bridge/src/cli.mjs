@@ -8,11 +8,12 @@ import { parseEnv } from 'node:util';
 import { metaEnabled } from './meta.mjs';
 import { upstreamUrl } from './paths.mjs';
 import { docUrl } from './links.mjs';
+import { corsOriginsFromEnv, describeOrigins } from './cors.mjs';
 
 export const HELP = `hermes-ui-plus-bridge - optional UI bridge for the Hermes Interactive UI+ app
 
 Usage: hermes-ui-plus-bridge [options]   (the old command name hermes-ui-bridge still works)
-       hermes-ui-plus-bridge setup | devices ... | routines ... | doctor bots | bots ...
+       hermes-ui-plus-bridge setup | doctor | devices ... | routines ... | doctor bots | bots ...
 
 Options:
   --env-file <file>   load KEY=VALUE pairs from a file (repeatable; real environment variables win). The file
@@ -29,6 +30,9 @@ Options:
 
 Setup wizard (run on the Hermes host; re-run to update):
   hermes-ui-plus-bridge setup [--yes] [--dry-run] [--json]   (setup --help for all options)
+
+Checks without starting the bridge (Hermes reachable, key, skill, features, browser origins for the desktop app):
+  hermes-ui-plus-bridge doctor [--env-file f]
 
 Device tokens (each paired app gets its own, revocable token; BRIDGE_TOKEN stays the admin token):
   hermes-ui-plus-bridge devices list | add [label] | revoke <id>   [--env-file f] [--state-dir d]
@@ -359,6 +363,8 @@ export function featureSummary(config, env, { pairing, profiles } = {}) {
   lines.push(['skill', config.bootstrap ? `bootstrap message on${inline}${caps} (the hermes-ui skill triggers for app chats)`
     : config.bootstrapMissing ? `bootstrap message MISSING (${config.bootstrapMissing}): no interactive components, see the warning above`
       : 'bootstrap message off (BRIDGE_BOOTSTRAP=off)']);
+  // browser origins allowed by CORS (src/cors.mjs): the desktop app's own origin is one of them by default
+  lines.push(['origins', describeOrigins(corsOriginsFromEnv(env, { authenticated: Boolean(config.token) }), { authenticated: Boolean(config.token) })]);
   lines.push(['pairing', pairing ? (pairing.isEnabled() ? 'remote pairing enabled (BRIDGE_PAIRING=1)' : 'local only') : 'n/a']);
   lines.push(['extras', directProvidersLine(direct)]);
   // routines (src/routines-rights.mjs): bots are opt-in; the device registry can enable more than the env lists

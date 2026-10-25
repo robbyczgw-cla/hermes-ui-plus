@@ -17,7 +17,8 @@
 import type { TKey } from '../i18n/core.ts';
 import { makeT } from '../i18n/core.ts';
 import { finalize } from './chatState.ts';
-import { closePending, isTerminalRunStatus, pendingOf, setPending } from './approvals.ts';
+import { closePending, isLostRunStatus, isTerminalRunStatus, pendingOf, setPending } from './approvals.ts';
+import { RUN_LOST_KEY } from './turnEnd.ts';
 import { mergeAssistantDetails, sameUserTurn } from './sessionMapping.ts';
 import type { ChatMessage, Usage } from './types';
 
@@ -88,10 +89,23 @@ export function needsRunUsage(m: ChatMessage | undefined): m is ChatMessage {
   return !!m && m.role === 'assistant' && m.status === 'done' && m.recoveredAt !== undefined && !!m.completionId && !m.usage && m.metrics?.inputTokens === undefined && m.metrics?.outputTokens === undefined;
 }
 
-/** recovery gave up: the normal error bubble with "Erneut" (`interrupted` stays: retry checks the session first) */
-export function failInterrupted(m: ChatMessage, now: number): ChatMessage {
-  return { ...finalize(m, 'error', deT(INTERRUPTED_LOST_KEY), now, { key: INTERRUPTED_LOST_KEY }), interrupted: m.interrupted };
+/**
+ * recovery gave up: the normal error bubble with "Erneut" (`interrupted` stays: retry checks the session first).
+ * `lost`: Hermes no longer knows the run (404 / Hermes ≥ 0.22.3 `unknown`), most likely it restarted mid-turn.
+ */
+export function failInterrupted(m: ChatMessage, now: number, lost = false): ChatMessage {
+  const key = lost ? RUN_LOST_KEY : INTERRUPTED_LOST_KEY;
+  return { ...finalize(m, 'error', deT(key), now, { key }), interrupted: m.interrupted };
 }
+
+/**
+ * Polls in a row that must report the run as over (terminal status, no stored answer) before recovery gives up early
+ * instead of waiting out RECOVERY_WINDOW_MS: one more stored-session check covers an answer stored right after its end.
+ * Only statuses that say so explicitly (`completed` waits: the stored turn may just not match yet; a 404 waits too:
+ * servers without run status for chat completions answer it for a live run).
+ */
+export const RUN_OVER_CONFIRMATIONS = 2;
+const EARLY_END = new Set(['unknown', 'failed', 'cancelled', 'canceled', 'interrupted', 'error']);
 
 /** A stored assistant turn that is complete: text and not ended by a tool call (Hermes still working). */
 export function isFinalAnswer(m: ChatMessage | undefined): m is ChatMessage {
@@ -109,7 +123,8 @@ export function recoveredMessage(local: ChatMessage, remote: ChatMessage): ChatM
   const base: ChatMessage = {
     ...withoutRecovery(local),
     text: remote.text,
-    status: 'done',
+    // a turn Hermes stored as interrupted (`cancelled`, sessionMapping) stays "Gestoppt"
+    status: remote.status === 'stopped' ? 'stopped' : 'done',
     finishReason: remote.finishReason ?? 'stop',
     metrics: { ...local.metrics, endedAt: remote.metrics?.endedAt ?? local.metrics?.endedAt ?? local.interrupted },
     recoveredAt: Date.now(),
@@ -309,6 +324,11 @@ export function createRecovery(d: RecoveryDeps): Recovery {
   let attempt = 0;
   let inflight = false;
   let disposed = false;
+  /** polls in a row whose run status said the run is over (`overId` = that message) */
+  let overSeen = 0;
+  let overId: string | undefined;
+  /** the message whose run Hermes last reported as gone (404 / `unknown`): its give-up text says so */
+  let lastLost: string | undefined;
 
   const clear = () => {
     if (timer !== null) timers.clear(timer);
@@ -362,18 +382,39 @@ export function createRecovery(d: RecoveryDeps): Recovery {
     } catch {
       remote = undefined; // offline / server busy: next attempt
     }
+    let list = d.get();
+    let idx = recoveringIndex(list);
+    let next = idx >= 0 && remote ? applyRemoteAnswer(list, remote, idx) : null;
+    // no stored answer yet: does the run still exist on Hermes? (a restart forgets it: 404 / `unknown`)
+    let status: string | null = null;
+    if (idx >= 0 && !next && remote !== undefined && d.runStatus) {
+      const id = list[idx].id;
+      try {
+        status = await d.runStatus(list[idx]);
+      } catch {
+        status = null;
+      }
+      if (disposed) return;
+      list = d.get();
+      idx = recoveringIndex(list);
+      if (idx >= 0 && list[idx].id !== id) status = null;
+      if (status !== null && isLostRunStatus(status)) lastLost = id;
+      else if (status !== null && lastLost === id) lastLost = undefined;
+      overSeen = status !== null && EARLY_END.has(status) ? (overId === id ? overSeen + 1 : 1) : 0;
+      overId = id;
+      next = idx >= 0 && remote ? applyRemoteAnswer(list, remote, idx) : null;
+    }
     inflight = false;
     if (disposed) return;
-    const list = d.get();
-    const idx = recoveringIndex(list);
     if (idx < 0) return; // recovered meanwhile (inbox / transcript sync) or the chat moved on
-    const next = remote ? applyRemoteAnswer(list, remote, idx) : null;
+    const runOver = overSeen >= RUN_OVER_CONFIRMATIONS;
     if (next) {
       d.commit(next);
-    } else if (now() >= (list[idx].interrupted as number) + windowMs || (remote === null && !d.inboxAvailable())) {
+    } else if (runOver || now() >= (list[idx].interrupted as number) + windowMs || (remote === null && !d.inboxAvailable())) {
       const failed = list.slice();
-      failed[idx] = failInterrupted(list[idx], now());
+      failed[idx] = failInterrupted(list[idx], now(), lastLost === list[idx].id);
       d.commit(failed);
+      overSeen = 0;
     }
     schedule();
   };

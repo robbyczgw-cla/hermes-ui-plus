@@ -221,16 +221,29 @@ export function findApproval(list: readonly ChatMessage[], key: string): number 
 // ------------------------------------------------------------------ restore (GET /v1/runs/{id})
 
 export type RunStatus = {
-  /** `waiting_for_approval` | running | completed | failed | cancelled | … ; `not_found` for 404 */
+  /**
+   * `waiting_for_approval` | queued | running | completed | failed | cancelled | … ; `not_found` for 404;
+   * Hermes ≥ 0.22.3 `unknown` = the run's execution was lost (Hermes restarted mid-turn); `unreported` = no status field
+   */
   status: string;
+  /** the (latest) pending request */
   approval?: ApprovalRequest;
+  /** Hermes ≥ 0.22.3 `pending_controls`: every pending request, oldest first (`approval` is the last of them) */
+  approvals?: ApprovalRequest[];
   /** server clock from the HTTP `Date` header (ms), for restored deadlines */
   serverNowMs?: number;
   /** token usage of a finished run (`usage`: input/output/total_tokens, or prompt/completion_tokens) */
   usage?: Usage;
 };
 
-const TERMINAL = new Set(['completed', 'failed', 'cancelled', 'canceled', 'incomplete', 'expired', 'stopped', 'not_found', 'error']);
+// `interrupted`: Hermes run events / older run stores; `unknown`: Hermes ≥ 0.22.3 lost the execution (restart) – the run
+// will never answer, its requests can no longer be answered
+const TERMINAL = new Set(['completed', 'failed', 'cancelled', 'canceled', 'incomplete', 'expired', 'stopped', 'interrupted', 'not_found', 'unknown', 'error']);
+
+/** the run is gone on Hermes (forgotten after a restart, or its execution was lost): no answer will come */
+export function isLostRunStatus(status: string): boolean {
+  return status === 'not_found' || status === 'unknown';
+}
 
 export function isTerminalRunStatus(status: string): boolean {
   return TERMINAL.has(status);
@@ -257,12 +270,16 @@ export function restoreCandidates(list: readonly ChatMessage[], now: number, win
  * `running` keeps the queue (another parallel request may still wait).
  */
 export function applyRunStatus(m: ChatMessage, s: RunStatus, now: number, advertisedTimeoutS?: number): ChatMessage {
-  if (s.status === 'waiting_for_approval' && s.approval) {
-    const a = withDeadline(s.approval, { receivedAt: now, advertisedTimeoutS, restored: { serverNowMs: s.serverNowMs } });
-    const key = approvalKey(a);
-    if (approvalRecorded(m, a) || pendingOf(m).some((p) => approvalKey(p) === key)) return expireApprovals(m, now);
-    if (!isLive(a, now)) return appendLog(m, a, 'expired', now);
-    return addApproval(m, a, now);
+  const waiting = s.approvals?.length ? s.approvals : s.approval ? [s.approval] : [];
+  if (s.status === 'waiting_for_approval' && waiting.length) {
+    let out = m;
+    for (const one of waiting) {
+      const a = withDeadline(one, { receivedAt: now, advertisedTimeoutS, restored: { serverNowMs: s.serverNowMs } });
+      const key = approvalKey(a);
+      if (approvalRecorded(out, a) || pendingOf(out).some((p) => approvalKey(p) === key)) continue;
+      out = isLive(a, now) ? addApproval(out, a, now) : appendLog(out, a, 'expired', now);
+    }
+    return expireApprovals(out, now);
   }
   if (isTerminalRunStatus(s.status)) return closePending(m, now);
   return expireApprovals(m, now);

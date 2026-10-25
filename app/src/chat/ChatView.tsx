@@ -12,8 +12,11 @@ import { displayTitle, renameUnique, uniqueTitle } from '../conversations/title'
 import type { ChatMessage, UseHermesChat } from '../hermes';
 import { useHermesCapabilities } from '../hermes/useHermesCapabilities';
 import { useHermesBots } from '../hermes/useHermesBots';
-import { botBadge, withBot } from '../hermes/bots';
-import { botStatusKind } from '../bots/core';
+import { botBadge, botOf, withBot } from '../hermes/bots';
+import { botChatReadOnly, botStatusKind } from '../bots/core';
+import { BotChatReadOnly } from '../bots/BotChatReadOnly';
+import { askInNewChat } from '../library/askHermes';
+import { deliverShare } from '../share/inbox';
 import { BotEmptyState } from '../bots/BotEmptyState';
 import { BotInfoSheet } from '../bots/BotInfoSheet';
 import type { HermesChatOptions } from '../hermes/capabilities';
@@ -578,7 +581,21 @@ function ChatViewInner({
     () => (profile.kind === 'hermes' ? withBot({ baseUrl: profile.baseUrl, apiKey: profile.apiKey }, chatBot) : undefined),
     [profile.kind, profile.baseUrl, profile.apiKey, chatBot],
   );
-  const serverDefault = useHermesCapabilities(hermesConn).catalog?.currentModel;
+  const hermesCaps = useHermesCapabilities(hermesConn);
+  const serverDefault = hermesCaps.catalog?.currentModel;
+  // Hermes v0.22.3+: the Bot Chat belongs to the gateway (readable, not writable from the app): new chats with the bot
+  const botReadOnly = botChat && profile.kind === 'hermes' && botChatReadOnly(hermesCaps.caps?.flags);
+  const chatWithBot = useCallback(
+    (text?: string) => {
+      const bot = botOf(chatBot);
+      if (text) askInNewChat(convs, profile, bot, text, 'send', deliverShare);
+      else {
+        const target = convs.create({ id: profile.id, kind: profile.kind }, bot ? { bot } : undefined);
+        if (convs.activeId !== target.id) convs.setActiveId(target.id);
+      }
+    },
+    [convs, profile, chatBot],
+  );
   const getMessages = useCallback(() => live.current.messages, []);
   const branchFrom = useAnswerBranch({ conversationId, profile, messages: getMessages, sessionId: chat.sessionId });
   const effort = chatEffort(profile, meta?.modelOptions);
@@ -859,7 +876,7 @@ function ChatViewInner({
         ) : quick ? (
           <QuickEmptyState onPick={sendText} model={quick.model} />
         ) : botChat ? (
-          <BotEmptyState name={shownTitle} bot={chatBot} color={botEntry?.color} description={botEntry?.description} template={botEntry?.template} onPick={sendText} offline={health === 'offline'} offlineHint={offlineHint} demo={profile.kind === 'demo'} />
+          <BotEmptyState name={shownTitle} bot={chatBot} color={botEntry?.color} description={botEntry?.description} template={botEntry?.template} onPick={botReadOnly ? chatWithBot : sendText} offline={health === 'offline'} offlineHint={offlineHint} demo={profile.kind === 'demo'} />
         ) : (
           <EmptyState
             onPick={sendText}
@@ -876,7 +893,9 @@ function ChatViewInner({
           <ApprovalStack approvals={approvals} onRespond={onApprovalRespond} onClose={chat.dismissApproval} focus={chat.approvalFocus} bot={approvalBot} style={styles.sheet} />
         </View>
         {!quick ? <LiveAskChip /> : null}
-        {perfWrap('Composer', <Composer
+        {botReadOnly ? (
+          <BotChatReadOnly name={shownTitle} bottomInset={keyboardVisible ? 8 : insets.bottom} onNewChat={() => chatWithBot()} />
+        ) : perfWrap('Composer', <Composer
           ref={composerRef}
           streaming={streaming}
           placeholder={quickMode ? tr('quick.composer.placeholder') : (placeholder ?? tr('chat.composer.placeholderFor', { name: shownTitle }))}

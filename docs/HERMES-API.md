@@ -216,6 +216,7 @@ Errors: 400 `invalid_approval_choice`/`invalid_approval_request`; 404 run not fo
 (The approval flow was derived from source only; not triggered with a real call because that would require running a dangerous command.)
 
 ### Cancellation / disconnect
+- **Hermes v0.22.3+ differs:** a closed connection no longer stops the turn; use `POST /v1/runs/{completion id}/stop` (see the v0.22.3+ section). The two points below describe v0.22.2 and older.
 - Closing the HTTP connection (AbortController → `fetch` abort) is the supported way to stop a streaming turn: the writer catches
   `ConnectionResetError/BrokenPipe/OSError` on its **next write** and calls `_abandon_agent_task` → hard interrupt of the agent + reaping of its
   background processes (OR:964-966, AS:672-690). Latency: next token or next keepalive (≤10 s while the agent is silent, e.g. in a long tool call).
@@ -252,7 +253,7 @@ The client is tested with Hermes v0.22.0; the wire facts in this document were v
 2. Parse SSE with named events; unknown events must be ignored; handle `: keepalive` comments and `[DONE]`.
 3. Tool UI = `hermes.tool.progress` keyed by `toolCallId` (running → completed; no error state on the wire).
 4. Final chunk's `finish_reason` + `hermes{}` decide done / truncated / error; also treat stream end without `[DONE]` as error.
-5. Stop = abort the fetch. Approvals = separate POST to `/v1/runs/{completion id}/approval`.
+5. Stop = abort the fetch on v0.22.2; on v0.22.3+ `POST /v1/runs/{completion id}/stop` (the bridge does both, see the v0.22.3+ section). Approvals = separate POST to `/v1/runs/{completion id}/approval`.
 6. Retry after 429/503 honoring `Retry-After`.
 7. `hermes.ui.route` is **not** sent by Hermes – only by the planned UI Bridge (`event: hermes.ui.route`, `data: RouteDecision`, before the first token).
 8. `hermes.text.replace` is **not** sent by Hermes either: an OpenAI-compatible server that streams provisional text may send
@@ -369,6 +370,27 @@ registered for approvals and status only), so steering a `chatcmpl-…` id alway
   subscriber (256 queued events) is disconnected. Only `/v1/runs` runs have this buffer; chat completions and session streams do not.
 - App/bridge 0.1: Hermes' run idempotency and replay need the runs transport, so the bridge provides both for chat completions itself
   (docs/BRIDGE.md "Idempotent send and resume"); moving to `/v1/runs` is evaluated in docs/adr/0002.
+
+## v0.22.3+ (unified gateway, session authority), source-verified 2026-10-25
+
+Hermes v0.22.3 is the first release with the unified gateway (upstream #106742); v0.22.4 and v0.22.5 add little on
+this surface. Every API turn now goes through the session authority (one FIFO per session); there is no switch to turn
+it off. The capability that tells a client it is talking to the authority: `features.run_unknown_resolution: true` in
+`GET /v1/capabilities` (only advertised when the authority is active). Source: `gateway/platforms/api_server*.py`,
+`gateway/session_api_turn.py`, `gateway/session_pending_controls.py`, `gateway/platforms/api_server_bot_chat.py`.
+Live-checked on a v0.22.5 test instance through the bridge (see the 0.2.2 CHANGELOG entry).
+
+| Topic | v0.22.2 | v0.22.3+ | Client / bridge |
+|---|---|---|---|
+| Stop | closing the connection interrupts the agent | **a closed connection no longer stops the turn** (it keeps running, later turns queue behind it); `POST /v1/runs/{chatcmpl-…}/stop` → 200 `{run_id, status:"stopping"}` and the stream ends with `finish_reason:"cancelled"` | the bridge's `/bridge/chat/stop` calls the run stop first, then closes; v0.22.2 answers that call 409 `run_not_active` and the connection close does the work |
+| Approval answer | `{choice, request_id?}` (also `all`) | body **exactly** `{request_id, execution_generation, choice}`, else 400 `invalid_params`; 409 `stale_generation` / `approval_not_pending`; answer `{run_id, status:"resolved"\|"already_resolved", prompt_id}` | the bridge adds `execution_generation` from the `approval.request` it saw (or from the run status) |
+| `approval.request` | `pattern_key(s)` | new `execution_generation`, optional `timeout_s`, `edit`; `request_id` is the prompt id | |
+| `approval.responded` | emitted | **not** emitted on chat streams | the inbox card resolves on the answer / turn end |
+| `GET /v1/runs/{id}` | `{status, approval, …}` | `{status: queued\|running\|waiting_for_approval\|unknown\|cancelled\|failed\|completed, pending_controls[], admission_id, execution_generation, output, usage}`, no `approval` | the bridge adds `approval` from `pending_controls[kind=approval]` |
+| `finish_reason` | `stop` also for an interrupted turn | `cancelled` (interrupted), `length` (+ `hermes.error_code: iteration_budget_exhausted` on v0.22.5 / `output_truncated`), `error` + `error.message` | |
+| Refusals | HTTP errors | in a stream: HTTP 200, final chunk `finish_reason:"error"`, `error.message` = the reason (`permission_denied`, `unknown_execution`, `queue_full`, `runtime_draining`, …), then `[DONE]`; non-stream: 409 (400 `invalid_params`, 503 + `Retry-After` for `runtime_draining` / `storage_unavailable` / `chain_moved`) | |
+| Restart mid-turn | turn lost | a turn the restart cut becomes `unknown` and **pauses that session** until `POST /v1/runs/{id}/resolve-unknown` `{admission_id, execution_generation}` or a discard on the host; the `chatcmpl-…` alias is in-memory only, so after a restart a client cannot address it by that id | the app explains it and offers a new chat |
+| Bot Chat | an API session the app may write to | `POST /api/sessions {title:"Bot Chat"}` mints a **local** chat (`source:"cli"`); `/v1/chat/completions` into it → `permission_denied`. An API-minted Bot Chat is moved aside as `Bot Chat (API <id>)` on the next delivery. Reminders (`deliver: bot-chat`) land there and are readable. The peer door `POST /api/sessions/{id}/chat[/stream]` admits a turn into the local chat but returns only the settled reply (no deltas, tool progress or approvals) | see BOTS-SERVER.md |
 
 ## Real calls made while writing this doc (3, all with key `hermes-ui-dev`)
 1. `POST /v1/chat/completions` stream, "Antworte nur mit OK" → `fixtures/01-plain.sse` (+ `.headers.txt`)

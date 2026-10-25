@@ -110,6 +110,36 @@ async function botsCmd(sub, argv) {
   process.exitCode = r.code;
 }
 
+/**
+ * `hermes-ui-plus-bridge doctor [--env-file f]`: the startup checks against Hermes and the feature summary (incl. the
+ * browser origins the desktop app needs) without starting the bridge. Read-only like `doctor bots`.
+ */
+async function doctorCmd(argv) {
+  const opts = parseArgs(argv);
+  if (!opts.envFiles.length) {
+    const { defaultEnvFile } = await import('../src/setup/files.mjs');
+    const file = defaultEnvFile(process.env, undefined, { root: process.getuid?.() === 0 });
+    if (existsSync(file)) { opts.envFiles.push(file); err(`(settings from ${file})`); }
+  }
+  // no prepareEnv (it would generate and store a BRIDGE_TOKEN): the running bridge has one unless open mode is set
+  const env = loadEnvFiles(opts.envFiles, process.env, process.cwd());
+  if (!env.HERMES_BASE_URL) {
+    err('HERMES_BASE_URL is not set (run setup, or pass the env file with --env-file)');
+    process.exit(2);
+  }
+  if (!env.BRIDGE_TOKEN && !/^(1|true|yes|on)$/i.test(env.BRIDGE_ALLOW_NO_AUTH ?? '')) env.BRIDGE_TOKEN = 'doctor-placeholder-not-used';
+  const { loadConfig } = await import('../src/config.mjs');
+  const { hermesHome } = await import('../src/setup/detect.mjs');
+  const { createProfiles } = await import('../src/profiles.mjs');
+  const config = loadConfig(env);
+  out('hermes-ui-plus-bridge doctor');
+  const results = await preflight(config, { hermesHome: hermesHome(env), hermesHomeExplicit: Boolean(env.HERMES_HOME) });
+  for (const r of results) out(`  [${checkMark(r.level)}] ${r.message}`);
+  out('  features:');
+  for (const [k, v] of featureSummary(config, env, { profiles: createProfiles(env) })) if (k !== 'pairing') out(`    ${k.padEnd(8)} ${v}`);
+  process.exitCode = results.some((r) => r.level === 'error') ? 1 : 0;
+}
+
 /** `hermes-ui-plus-bridge bots status|enable|disable|grant <device-id>|revoke <device-id>` (src/bots-manage.mjs). */
 async function botsManageCmd(argv) {
   const [sub, ...rest] = argv;
@@ -133,6 +163,7 @@ async function main() {
   if (process.argv[2] === 'routines') return routinesCmd(process.argv.slice(3));
   if (process.argv[2] === 'setup') return setupCmd(process.argv.slice(3));
   if (process.argv[2] === 'doctor' && process.argv[3] === 'bots') return botsCmd('doctor', process.argv.slice(4));
+  if (process.argv[2] === 'doctor') return doctorCmd(process.argv.slice(3));
   if (process.argv[2] === 'bots' && ['status', 'enable', 'disable', 'grant', 'revoke'].includes(process.argv[3])) return botsManageCmd(process.argv.slice(3));
   if (process.argv[2] === 'bots') return botsCmd(process.argv[3], process.argv.slice(4));
   const opts = parseArgs(process.argv.slice(2));

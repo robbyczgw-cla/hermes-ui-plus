@@ -58,6 +58,7 @@ export function parseConsent(raw: string | null | undefined): ConsentRecord | nu
   }
 }
 
+
 /** true when the stored consent covers the current text version (for every connection, whichever wording it saw) */
 export function consentCurrent(record: ConsentRecord | null, version = AI_CONSENT_VERSION): boolean {
   return !!record && record.version >= version;

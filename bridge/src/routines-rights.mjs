@@ -12,6 +12,7 @@
 // docs/ROUTER.md, "Hermes routines (cron jobs)".
 import { DEFAULT_PROFILE, isProfileName } from './profiles.mjs';
 import { ROUTINE_RIGHTS } from './devices.mjs';
+import { applyCors } from './cors.mjs';
 
 export const RIGHTS_PATH = '/bridge/routines/rights';
 export const DEFAULT_DEVICE_RIGHT = 'read';
@@ -181,11 +182,7 @@ export function createRoutinesAdmin({ auth, rights, devices, corsOrigins = [] })
   return {
     matches: (req) => req.method !== 'OPTIONS' && pathOf(req) === RIGHTS_PATH,
     async handle(req, res) {
-      const origin = req.headers.origin;
-      if (origin && corsOrigins.length && (corsOrigins.includes('*') || corsOrigins.includes(origin))) {
-        res.setHeader('access-control-allow-origin', corsOrigins.includes('*') ? '*' : origin);
-        res.setHeader('vary', 'Origin');
-      }
+      applyCors(corsOrigins, req, res);
       const who = auth.check(req);
       if (!who) {
         req.resume();

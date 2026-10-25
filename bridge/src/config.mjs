@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { loadSkillInline } from './skillInline.mjs';
 import { parseRoutinesBots } from './routines-rights.mjs';
 import { bridgeCaps, withCaps } from './caps.mjs';
+import { corsOriginsFromEnv } from './cors.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 // Source checkout: ../hermes-skill (wins, it is the source of truth); npm package: skill/ bundled by scripts/bundle-skill.mjs (prepack).
@@ -88,12 +89,15 @@ export function loadConfig(env = process.env, o = {}) {
   const caps = bridgeCaps(env);
   bootstrap = withCaps(bootstrap, caps);
 
+  const cors = corsOriginsFromEnv(env, { authenticated: Boolean(env.BRIDGE_TOKEN) });
   return {
     host: env.BRIDGE_HOST || '127.0.0.1',
     port: num(env.BRIDGE_PORT, 8790),
     token: env.BRIDGE_TOKEN || '',
     allowNoAuth,
-    corsOrigins: (env.BRIDGE_CORS_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
+    // BRIDGE_CORS_ORIGINS + the desktop app's origins when auth is on (src/cors.mjs; BRIDGE_DESKTOP_ORIGINS=off)
+    corsOrigins: cors.origins,
+    corsDesktop: cors.desktop,
     upstream: { baseUrl: normalizeBaseUrl(env.HERMES_BASE_URL), apiKey: env.HERMES_API_KEY || '' },
     maxBodyBytes: num(env.BRIDGE_MAX_BODY_BYTES, 25 * 1024 * 1024),
     // GPT security M5: concurrent chat turns per credential and in total (a turn counts until Hermes finished it, also

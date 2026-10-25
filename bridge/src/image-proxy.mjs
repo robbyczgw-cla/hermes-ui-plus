@@ -21,6 +21,7 @@ import { join } from 'node:path';
 import { silentLogger } from './log.mjs';
 import { LruCache } from './lru.mjs';
 import { makeAuthorizer, makeCredentials } from './auth.mjs';
+import { corsHeaders } from './cors.mjs';
 
 export const IMAGE_PROXY_PATH = '/bridge/img';
 export const MAX_URL_CHARS = 2048;
@@ -411,11 +412,7 @@ export function createImageProxy(bridgeConfig, o = {}) {
 
   const baseHeaders = (req) => {
     const h = { 'x-hermes-ui-bridge': '1', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer' };
-    const origin = req.headers.origin;
-    if (origin && corsOrigins.length && (corsOrigins.includes('*') || corsOrigins.includes(origin))) {
-      h['access-control-allow-origin'] = corsOrigins.includes('*') ? '*' : origin;
-      h.vary = 'Origin';
-    }
+    Object.assign(h, corsHeaders(corsOrigins, req));
     return h;
   };
   function fail(req, res, status, code, extra = {}) {

@@ -52,6 +52,24 @@ export function branchHistory(messages: readonly ChatMessage[], answerId: string
   });
 }
 
+/**
+ * Where "Continue in new chat" branches from when `answerId` is a FAILED answer (Hermes ≥ 0.22.3 `unknown_execution`:
+ * the chat is paused on the server): the newest finished answer before the failed turn, so the copy leaves the failed
+ * question and its error behind. `answerId` itself when it did not fail; null when nothing came before it.
+ */
+export function branchPoint(messages: readonly ChatMessage[], answerId: string): string | null {
+  const idx = messages.findIndex((m) => m.id === answerId);
+  if (idx === -1) return null;
+  if (messages[idx].status !== 'error') return answerId;
+  let i = idx - 1;
+  while (i >= 0 && messages[i].role !== 'user') i--; // the failed turn's question
+  for (i--; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role === 'assistant' && (m.status === 'done' || m.status === 'stopped')) return m.id;
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------- web search detection
 
 /** tool names (raw or display) that read the web: search engines, page fetches, browsers, X search */

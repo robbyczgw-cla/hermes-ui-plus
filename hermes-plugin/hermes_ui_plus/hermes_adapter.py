@@ -375,11 +375,20 @@ class HermesAuxBackend:
             _close(resp)
 
 
+def _skills_helpers(skills_tool: Any) -> tuple[Any, Any]:
+    """(find_all_skills, sort_skills) of this Hermes: public names since v0.22.3 (upstream 93fafc4d6f), the
+    underscore names before. AttributeError when neither exists (becomes ``hermes_unsupported``)."""
+    find_all = getattr(skills_tool, "find_all_skills", None) or getattr(skills_tool, "_find_all_skills")
+    sort = getattr(skills_tool, "sort_skills", None) or getattr(skills_tool, "_sort_skills")
+    return find_all, sort
+
+
 class HermesLibrary:
     """Read-only skills/memory source for ``library.LibraryService`` (hermes-agent v0.22 internals, all imported
     lazily inside the plugin profile's scope; any failure propagates and becomes ``hermes_unsupported``).
 
-        tools.skills_tool: _find_all_skills(skip_disabled=True), _sort_skills
+        tools.skills_tool: find_all_skills(skip_disabled=True), sort_skills (v0.22.3+; v0.22.2 and older:
+            _find_all_skills, _sort_skills)
         tools.skill_manager_tool: _find_skill
         tools.skill_usage: _read_bundled_names, _read_hub_installed_names, _external_skill_names
         hermes_cli.config.load_config, hermes_cli.skills_config.get_disabled_skills
@@ -395,14 +404,15 @@ class HermesLibrary:
             from hermes_cli.config import load_config
             from hermes_cli.skills_config import get_disabled_skills
             from tools.skill_usage import _external_skill_names, _read_bundled_names, _read_hub_installed_names
-            from tools.skills_tool import _find_all_skills, _sort_skills
+            from tools import skills_tool
 
             cfg = load_config()
             disabled = get_disabled_skills(cfg) | get_disabled_skills(cfg, "api_server")  # the API server's view
             bundled, hub = set(_read_bundled_names()), set(_read_hub_installed_names())
             external = set(_external_skill_names()) - bundled - hub
             out = []
-            for s in _sort_skills(_find_all_skills(skip_disabled=True)):
+            find_all, sort = _skills_helpers(skills_tool)
+            for s in sort(find_all(skip_disabled=True)):
                 n = s["name"]
                 out.append({"name": n, "description": s.get("description") or "", "category": s.get("category"),
                             "enabled": n not in disabled,

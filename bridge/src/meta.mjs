@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 import { silentLogger } from './log.mjs';
 import { LruCache } from './lru.mjs';
 import { makeAuthorizer } from './auth.mjs';
+import { corsHeaders } from './cors.mjs';
 
 export const META_PATH = '/bridge/meta';
 export const META_CONFIG_PATH = '/bridge/meta/config';
@@ -155,11 +156,7 @@ export function createMeta(bridgeConfig, o = {}) {
     if (res.headersSent) return res.destroy();
     const buf = Buffer.from(JSON.stringify(body));
     const headers = { 'content-type': 'application/json', 'content-length': buf.length, 'x-hermes-ui-bridge': '1' };
-    const origin = req.headers.origin;
-    if (origin && corsOrigins.length && (corsOrigins.includes('*') || corsOrigins.includes(origin))) {
-      headers['access-control-allow-origin'] = corsOrigins.includes('*') ? '*' : origin;
-      headers.vary = 'Origin';
-    }
+    Object.assign(headers, corsHeaders(corsOrigins, req));
     if (close) headers.connection = 'close';
     res.writeHead(status, headers);
     if (close) res.on('finish', () => req.socket?.destroy());

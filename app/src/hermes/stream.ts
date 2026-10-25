@@ -10,6 +10,7 @@ import { PERF, perfMark, perfNow, perfSpan } from '../perf/probe.ts';
 import { appendCapped, MAX_MESSAGE_TEXT } from './chatState.ts';
 import { mapApproval, mapFrame, parseJson } from './events.ts';
 import { answerBlocked, type RunStatus } from './approvals.ts';
+import { reasonErrorText } from './turnEnd.ts';
 import { BOOTSTRAP_SYSTEM_MESSAGE, HERMES_FEATURES_MESSAGE } from './bootstrap.ts';
 import { scrubHosts } from './networkFailure.ts';
 import { userTimeZoneMessage } from './timeZone.ts';
@@ -269,6 +270,19 @@ export async function errorFromResponse(res: FetchResponseLike): Promise<HermesE
   const auth = authErrorText(res.status, message);
   if (auth) err.text = auth;
   return err;
+}
+
+/**
+ * A refused chat turn (Hermes ≥ 0.22.3 session authority: 409 / 503 with `error.code` = reason code, e.g.
+ * `permission_denied`, `runtime_draining`): the explanation of that code (turnEnd.ts) as its text. `message` becomes
+ * the German text like every keyed error; `code` keeps the wire code. Other errors are returned unchanged.
+ */
+export function withReasonText(err: HermesError): HermesError {
+  // only the authority's refusal statuses: a 404 `not_found` of a proxy / unknown route is not a refused turn
+  if (err.text || (err.status !== 409 && err.status !== 503)) return err;
+  const reason = reasonErrorText(err.message, err.code);
+  if (!reason) return err;
+  return keyedHermesError(err.kind, reason.key, undefined, { status: err.status, retryAfter: err.retryAfter, code: err.code ?? err.message.trim() });
 }
 
 /**
@@ -606,7 +620,7 @@ export async function streamChatCore(
     const reattach = params.resumeFrom !== undefined && !!params.idempotencyKey;
     let res = await open(reattach ? received : undefined);
     kick();
-    if (!res.ok) throw await Promise.race([errorFromResponse(res), abortPromise]);
+    if (!res.ok) throw withReasonText(await Promise.race([errorFromResponse(res), abortPromise]));
     // a re-attach that got anything but the recorded stream (an old bridge, a proxy): no answer of this turn
     if (reattach && !isSse(res)) {
       void res.body?.cancel().catch(() => {});
@@ -633,7 +647,12 @@ export async function streamChatCore(
         throw wrapFetchError(e, ctrl.signal, timedOut);
       }
       const json = parseJson(raw) as
-        | { id?: string; choices?: { message?: { content?: string; reasoning_content?: string }; finish_reason?: string }[] }
+        | {
+            id?: string;
+            choices?: { message?: { content?: string; reasoning_content?: string }; finish_reason?: string }[];
+            error?: { message?: unknown };
+            hermes?: { error?: unknown; error_code?: unknown };
+          }
         | undefined;
       const choice = json?.choices?.[0];
       emit({ type: 'start', completionId: json?.id ?? '' });
@@ -642,7 +661,12 @@ export async function streamChatCore(
       if (typeof reasoning === 'string' && reasoning) emit({ type: 'reasoning', text: reasoning });
       const content = choice?.message?.content;
       if (content) emit({ type: 'text', text: content });
-      emit({ type: 'finish', reason: choice?.finish_reason ?? 'stop' });
+      // a turn that did not end with `stop` carries `hermes{error, error_code}` (and `error{message}`), like the stream
+      const text = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
+      const reason = choice?.finish_reason ?? 'stop';
+      const error = reason === 'stop' ? undefined : (text(json?.error?.message) ?? text(json?.hermes?.error));
+      const errorCode = reason === 'stop' ? undefined : text(json?.hermes?.error_code);
+      emit({ type: 'finish', reason, ...(error ? { error } : {}), ...(errorCode ? { errorCode } : {}) });
       emit({ type: 'done' });
       return result;
     }
@@ -741,13 +765,17 @@ export const APPROVAL_REQUEST_TIMEOUT_MS = 30_000;
 export async function respondApprovalCore(
   fetchImpl: FetchLike,
   conn: HermesConn,
-  approval: Pick<ApprovalRequest, 'runId' | 'requestId'>,
+  approval: Pick<ApprovalRequest, 'runId' | 'requestId' | 'executionGeneration'>,
   choice: ApprovalChoice,
   timeoutMs = APPROVAL_REQUEST_TIMEOUT_MS,
 ): Promise<void> {
   if (!approval.runId) throw new HermesError('bad_request', 'Approval ohne run_id');
-  const body: { choice: ApprovalChoice; request_id?: string } = { choice };
-  if (approval.requestId) body.request_id = approval.requestId;
+  // Hermes ≥ 0.22.3 (request carries `execution_generation`) accepts exactly {request_id, execution_generation, choice};
+  // older servers get the body they always got
+  const body: Record<string, unknown> =
+    approval.executionGeneration !== undefined
+      ? { request_id: approval.requestId, execution_generation: approval.executionGeneration, choice }
+      : { choice, ...(approval.requestId ? { request_id: approval.requestId } : {}) };
   await withRequestTimeout(timeoutMs, async (signal) => {
     const res = await fetchImpl(joinUrl(conn.baseUrl, `/runs/${encodeURIComponent(approval.runId)}/approval`), {
       method: 'POST',
@@ -795,7 +823,9 @@ export function approvalMayHaveArrived(e: unknown): boolean {
 
 /**
  * GET /v1/runs/{runId} (on the UI bridge allow-list): run status incl. the pending `approval` event when
- * `status` is `waiting_for_approval`. Works for chat completion ids. 404 → `{status:'not_found'}`; other failures throw.
+ * `status` is `waiting_for_approval` (Hermes ≥ 0.22.3: from `pending_controls`, all of them in `approvals`).
+ * Works for chat completion ids. 404 → `{status:'not_found'}` (also: Hermes restarted and forgot the run); other
+ * failures throw.
  */
 export async function fetchRunStatusCore(fetchImpl: FetchLike, conn: HermesConn, runId: string, timeoutMs = APPROVAL_REQUEST_TIMEOUT_MS): Promise<RunStatus> {
   return withRequestTimeout(timeoutMs, async (signal) => {
@@ -808,18 +838,41 @@ export async function fetchRunStatusCore(fetchImpl: FetchLike, conn: HermesConn,
     if (!res.ok) throw await errorFromResponse(res);
     const json = parseJson(await res.text());
     const o = (typeof json === 'object' && json !== null ? json : {}) as Record<string, unknown>;
-    const status = typeof o.status === 'string' ? o.status : 'unknown';
+    // no status field: `unreported` (not Hermes ≥ 0.22.3's `unknown`, which means the run's execution was lost)
+    const status = typeof o.status === 'string' ? o.status : 'unreported';
     const out: RunStatus = { status };
     const date = Date.parse(res.headers.get('date') ?? '');
     if (Number.isFinite(date)) out.serverNowMs = date;
     if (typeof o.approval === 'object' && o.approval !== null && !Array.isArray(o.approval)) {
       const a = mapApproval(o.approval as Record<string, unknown>);
       out.approval = a.runId ? a : { ...a, runId };
+    } else {
+      // Hermes ≥ 0.22.3: no `approval`; the open requests are `pending_controls[kind=approval]` (prompt_id = request id)
+      const pending = pendingApprovals(o.pending_controls, runId);
+      if (pending.length) {
+        out.approval = pending[pending.length - 1];
+        out.approvals = pending;
+      }
     }
     const usage = parseRunUsage(o.usage);
     if (usage) out.usage = usage;
     return out;
   });
+}
+
+/** `pending_controls` of a Hermes ≥ 0.22.3 run status → its approval requests (oldest first; clarify prompts skipped) */
+function pendingApprovals(raw: unknown, runId: string): ApprovalRequest[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ApprovalRequest[] = [];
+  for (const c of raw) {
+    if (typeof c !== 'object' || c === null || Array.isArray(c)) continue;
+    const pc = c as Record<string, unknown>;
+    if (pc.kind !== 'approval') continue;
+    const a = mapApproval(pc);
+    if (!a.requestId) continue; // nothing to answer it with
+    out.push(a.runId ? a : { ...a, runId });
+  }
+  return out;
 }
 
 /**

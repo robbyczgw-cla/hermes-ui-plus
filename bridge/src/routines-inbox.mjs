@@ -21,6 +21,7 @@ import { DEFAULT_PROFILE, profilePrefix } from './profiles.mjs';
 import { isSilence, messageText, MAX_POLLED_PROFILES, OWNER } from './push-hermes.mjs';
 import { previewText } from './push/index.mjs';
 import { makeAuthorizer } from './auth.mjs';
+import { applyCors } from './cors.mjs';
 
 export const INBOX_FILE = 'routines-inbox.json';
 export const ROUTINES_PREFIX = '/bridge/routines/';
@@ -495,12 +496,7 @@ export function createRoutinesInbox(config, o) {
 
   // ---------- HTTP ----------
   const sendJson = (req, res, status, body) => {
-    const origin = req.headers.origin;
-    const cors = config.corsOrigins ?? [];
-    if (origin && cors.length && (cors.includes('*') || cors.includes(origin))) {
-      res.setHeader('access-control-allow-origin', cors.includes('*') ? '*' : origin);
-      res.setHeader('vary', 'Origin');
-    }
+    applyCors(config.corsOrigins, req, res);
     const buf = Buffer.from(JSON.stringify(body));
     res.writeHead(status, { 'content-type': 'application/json', 'content-length': buf.length, 'cache-control': 'no-store', 'x-hermes-ui-bridge': '1' });
     res.end(buf);

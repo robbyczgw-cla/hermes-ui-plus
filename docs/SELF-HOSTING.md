@@ -66,7 +66,8 @@ The wizard above does all of this for you. By hand: create an env file. These ar
 | `BRIDGE_HOST` / `BRIDGE_PORT` | no | Default `127.0.0.1` / `8790`. Keep loopback when a proxy such as `tailscale serve` is in front |
 | `BRIDGE_WEB_DIR` | no | Serve a built web app (PWA) from the bridge itself, same origin as the API (see section 5) |
 | `BRIDGE_WEB_CSP` | no | Content-Security-Policy of the served web app: `on` (default), `report-only` (browser console only) or `off` |
-| `BRIDGE_CORS_ORIGINS` | no | Extra browser origins, comma separated (e.g. `tauri://localhost` for the desktop app) |
+| `BRIDGE_CORS_ORIGINS` | no | Extra browser origins, comma separated, e.g. a web app served from another address. The desktop app needs no entry |
+| `BRIDGE_DESKTOP_ORIGINS` | no | The desktop app's origins (`tauri://localhost` on macOS and Linux, `http://tauri.localhost` on Windows) are allowed by default, so it can pair with the normal pair link. Every request still needs its device token. `off` removes them. In open mode (`BRIDGE_ALLOW_NO_AUTH`, no token) they are never allowed unless listed in `BRIDGE_CORS_ORIGINS` |
 | `BRIDGE_UPLOAD_MAX_BYTES` | no | Largest single upload. Default 20 MB |
 | `BRIDGE_UPLOAD_QUOTA_MB` | no | Total size of the upload folder. When full, expired uploads are deleted first, then new uploads are refused (507). Default `500`, `0` = no limit |
 | `BRIDGE_UPLOAD_MAX_INFLIGHT` / `BRIDGE_UPLOAD_MAX_INFLIGHT_TOTAL` | no | Uploads running at the same time per token / in total. Default `2` / `6` |
@@ -258,7 +259,7 @@ Or host the output folder separately on your tailnet, for example:
 tailscale serve --bg --https=443 /path/to/dist/web
 ```
 
-If the web app and the bridge are on different origins, add the web origin to `BRIDGE_CORS_ORIGINS`. The macOS and Linux desktop apps need `tauri://localhost` there. The pair link can be opened directly in the browser and pairs the web app.
+If the web app and the bridge are on different origins, add the web origin to `BRIDGE_CORS_ORIGINS`. The desktop app (macOS, Linux, Windows) needs no entry: the bridge allows its origins by default (`BRIDGE_DESKTOP_ORIGINS`). `hermes-ui-plus-bridge doctor` and the setup wizard show which origins are allowed. The pair link can be opened directly in the browser and pairs the web app.
 
 ## 6. Push notifications (optional)
 
@@ -354,6 +355,7 @@ First steps: `npx hermes-ui-plus-bridge setup --dry-run` lists what is missing, 
 | Web app: "Refused to … Content Security Policy" in the browser console | Report it as a bug; meanwhile `BRIDGE_WEB_CSP=report-only`. |
 | Answers are plain text, no components | Is the skill installed and visible (`hermes skills list`)? The bridge's startup log has a line about it. Is the bridge sending its bootstrap message (it does by default)? Start a new conversation after installing the skill. Docker: the bridge image does not install the skill into Hermes ([With Docker](#with-docker)). |
 | Web app: network error in the browser console | CORS: add the web app's origin to `BRIDGE_CORS_ORIGINS`. |
+| Desktop app cannot pair ("network error") | Bridge older than 0.2.2: add `BRIDGE_CORS_ORIGINS=tauri://localhost,http://tauri.localhost` and restart it, or update. Newer bridges: check that `BRIDGE_DESKTOP_ORIGINS` is not `off` (`hermes-ui-plus-bridge doctor`, line `origins`). The desktop app connects to `https://` addresses only: a pair link with `http://127.0.0.1:…` (setup without Tailscale or public address) does not work there; give the bridge an https address (Tailscale). |
 | No voice buttons | No speech provider key set on the bridge. |
 | Uploads rejected | File too large or type not allowed (`BRIDGE_UPLOAD_MAX_BYTES`, `BRIDGE_UPLOAD_ALLOWED_MIME`); 507 = upload folder full (`BRIDGE_UPLOAD_QUOTA_MB`); 429 = too many uploads at once. |
 | Push never arrives | Check section 6 settings, the device's notification permission, and the bridge log. On iOS, Web Push needs the home-screen app. |

@@ -18,6 +18,7 @@ import { buildWebPairLink } from '../pair.mjs';
 import { writeFileAtomicSync } from '../atomic-write.mjs';
 import { directProviders, directProvidersLine } from '../cli.mjs';
 import { loadConfig } from '../config.mjs';
+import { corsOriginsFromEnv, describeOrigins } from '../cors.mjs';
 import { defaultEnvFile, readEnvFile, mergeEnv, writeEnvFile, redactEnv, serializeEnv, findSkillSource, planSkillInstall, installSkill } from './files.mjs';
 import {
   SERVICE_NAME, LAUNCHD_LABEL, assertNoControl, execArgv, isNpxCachePath, systemdUnit, systemdUnitPath, systemdCommands, systemServiceProblem,
@@ -466,6 +467,14 @@ export async function runSetup(opts, deps = {}) {
       log(`  wrote ${envFile} (0600), changed: ${changed.join(', ') || 'nothing'}`);
     } else log(`  ${envFile} unchanged`);
     log(`  Hermes key: ${mask(newEnv.HERMES_API_KEY)} (never printed)`);
+    // the bridge creates its token at first start unless open mode is set by hand: the desktop app's origin is then
+    // allowed without a BRIDGE_CORS_ORIGINS entry (src/cors.mjs)
+    const authenticated = Boolean(newEnv.BRIDGE_TOKEN) || !/^(1|true|yes|on)$/i.test(newEnv.BRIDGE_ALLOW_NO_AUTH ?? '');
+    const cors = corsOriginsFromEnv(newEnv, { authenticated });
+    report.network.corsOrigins = cors.origins;
+    report.network.desktopApp = cors.desktop;
+    log(`  Browser origins: ${describeOrigins(cors, { authenticated })}`);
+    if (cors.desktop) log('  The desktop app (macOS, Linux, Windows) pairs with the same https:// link as the phone, no extra setting needed.');
 
     // ---------- 5. Service ----------
     step('Service');
@@ -580,7 +589,9 @@ export async function runSetup(opts, deps = {}) {
         } else {
           // a QR code for 127.0.0.1 looks usable but a phone would connect to itself: print no QR, say what to do
           warn('no address a phone can reach yet: the pair link points to 127.0.0.1 (this machine only), so no QR code is shown');
-          log(`  Pair link for an app on this machine (desktop app): ${opts.json ? '(in the JSON report)' : link}`);
+          // the desktop app connects to https:// servers only (its CSP), so this link is for tools on this machine
+          log(`  Pair link for this machine only: ${opts.json ? '(in the JSON report)' : link}`);
+          log('  The desktop app needs an https:// address (Tailscale, or --public-url https://…); this link does not work there.');
         }
         if (web) log(`  Web app: ${opts.json ? '(in the JSON report)' : web}`);
         if (local) log(`  Web app, in a browser on this machine: ${opts.json ? '(in the JSON report)' : local}`);

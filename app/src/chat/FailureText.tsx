@@ -13,6 +13,15 @@ import { errorCodeOf, noteLastError } from '../support/report';
 import { useToast } from './Toast';
 import { a11yState } from '../ui/lib/a11yState';
 import { scaledLineLimit } from '../ui/lib/fontScaleLayout';
+import { botChatFailureKey } from '../hermes/turnEnd';
+import { useChatShell } from './ChatShellContext';
+import { useConversations } from '../conversations/ConversationsProvider';
+
+/** the open chat is a bot's Bot Chat (bots/core.ts) */
+function useBotChatHere(): boolean {
+  const shell = useChatShell();
+  return !!useConversations().get(shell?.conversationId ?? '')?.botChat;
+}
 
 export function FailureText({ message, override }: { message: Pick<ChatMessage, 'error' | 'errorText'> & { createdAt?: number }; override?: string }) {
   const t = useTheme();
@@ -25,7 +34,9 @@ export function FailureText({ message, override }: { message: Pick<ChatMessage, 
   // a browser that knows it is offline: say so instead of guessing at the server (web only; native has no cheap flag)
   const offline = Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.onLine === false;
   const simple = false;
-  const shown = override ? { text: override } : presentMessageError(message, tr, { plain: simple, offline });
+  // Hermes ≥ 0.22.3 refused a write to a bot's Bot Chat (`permission_denied`): say that this chat is read-only here
+  const botKey = botChatFailureKey(message, useBotChatHere());
+  const shown = override ? { text: override } : botKey ? { text: tr(botKey) } : presentMessageError(message, tr, { plain: simple, offline });
   const { error, errorText, createdAt } = message;
   useEffect(() => noteLastError(errorCodeOf({ error, errorText }), createdAt), [error, errorText, createdAt]);
   return (

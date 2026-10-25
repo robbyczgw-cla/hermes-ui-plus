@@ -135,9 +135,15 @@ off), notification responses and opened files. The web side can be exercised in 
 
 ## Origin (CORS)
 
-The app is served from **`tauri://localhost`** on macOS (`http://tauri.localhost` is the Windows/Android
-form). A UI-Bridge or server that checks `Origin` must allow `tauri://localhost`
-(e.g. in `BRIDGE_CORS_ORIGINS`).
+The app is served from **`tauri://localhost`** on macOS and Linux (`http://tauri.localhost` is the Windows/Android
+form), so every call to the bridge is cross-origin and starts with a CORS preflight. The UI-Bridge (0.2.2 and newer)
+allows both origins by default whenever it has a token, so the default setup pairs without extra settings; the
+preflight is answered before the token check, every real request still needs the device token or the one-time pair
+code. `BRIDGE_DESKTOP_ORIGINS=off` turns this off; in open mode (no token) the origins must be listed in
+`BRIDGE_CORS_ORIGINS`. Older bridges need `BRIDGE_CORS_ORIGINS=tauri://localhost,http://tauri.localhost`.
+Another server that checks `Origin` must allow the same origins. The app connects to `https://` servers only
+(CSP below), so pair it with an https bridge address (Tailscale); the setup wizard's `http://127.0.0.1` link for
+a machine without an address does not work in the desktop app.
 
 ## Content Security Policy
 

@@ -210,6 +210,8 @@ export const chat = {
     queuedDiscard: 'Verwerfen',
     queuedDiscardA11y: 'Nachricht verwerfen (der Text kommt zurück ins Eingabefeld)',
     truncated: 'Antwort wurde wegen Längenlimit abgeschnitten.',
+    /** Hermes ≥ 0.22.5: `length` finish with `hermes.error_code: iteration_budget_exhausted` (hermes/turnEnd.ts) */
+    stepLimit: 'Hermes hat aufgehört: Schrittlimit für diese Antwort erreicht.',
     capped: 'Sehr lange Antwort: in der App gekürzt (Ende mit […] markiert).',
     failed: 'Antwort fehlgeschlagen',
     editConnection: 'Verbindung bearbeiten',
@@ -228,6 +230,8 @@ export const chat = {
     showDetails: 'Details',
     hideDetails: 'Details ausblenden',
     stopped: 'Gestoppt',
+    /** a finished answer without any text (hermes/turnEnd.ts emptyAnswerNotice) */
+    emptyAnswer: 'Die Antwort endete ohne Text.',
     recovering: 'Verbindung unterbrochen – Antwort wird nachgeladen…',
     reconnecting: 'Verbindung unterbrochen – verbinde neu…',
     recovered: 'nachgeladen',

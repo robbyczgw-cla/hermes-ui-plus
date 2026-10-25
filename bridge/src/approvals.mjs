@@ -4,6 +4,9 @@
 // `approval` + push, and `approval_resolved` when the question is gone (answer passed through, Hermes' own
 // `approval.responded`, the turn moved on / ended, or the estimated timeout). Hermes sends NO deadline: expiresAt is
 // request time + approvals.timeout (default 300 s, BRIDGE_APPROVAL_TIMEOUT_S), i.e. an estimate.
+// Hermes v0.22.3+ (session authority) fences every answer with the turn's `execution_generation`: the answer body must
+// be exactly {request_id, execution_generation, choice}. Older apps send {choice, request_id}; the watcher remembers the
+// generation each approval.request carried, and `answerBody` completes the answer (v0.22.2 sends none: unchanged).
 import { createSseParser } from './sse.mjs';
 
 export const APPROVAL_REQUEST_EVENT = 'approval.request';
@@ -12,6 +15,7 @@ export const COMMAND_MAX = 200;
 const SAFE = /^[A-Za-z0-9._:-]{1,256}$/;
 const GRACE_MS = 5_000; // after the estimated deadline Hermes may still honour a choice that lands in the race window
 const SEEN_MAX = 2000;
+const CHOICE = /^[a-z_]{1,16}$/;
 
 /** Answer path of Hermes' run API; returns the run id or null. */
 export function approvalAnswerRun(method, path) {
@@ -35,6 +39,8 @@ export function createApprovalWatcher(o) {
   /** requestId -> pending request (insertion order = oldest first, like Hermes' FIFO without request_id) */
   const pending = new Map();
   const seen = new Set(); // requestIds already announced (dedupe, also across reconnects / replays)
+  /** requestId -> {runId, profile, generation: number|null} of every approval.request seen (null = Hermes sent none) */
+  const known = new Map();
 
   function resolve(requestId, reason, extra = {}) {
     const p = pending.get(requestId);
@@ -59,6 +65,10 @@ export function createApprovalWatcher(o) {
 
   /** @returns {boolean} true when this requestId was new */
   function request(r) {
+    if (r.requestId && SAFE.test(r.requestId) && !known.has(r.requestId)) {
+      known.set(r.requestId, { runId: r.runId, profile: typeof r.profile === 'string' && r.profile ? r.profile : null, generation: Number.isSafeInteger(r.generation) ? r.generation : null });
+      if (known.size > SEEN_MAX) known.delete(known.keys().next().value);
+    }
     if (!r.requestId || !SAFE.test(r.requestId) || seen.has(r.requestId)) return false;
     seen.add(r.requestId);
     if (seen.size > SEEN_MAX) seen.delete(seen.values().next().value);
@@ -100,6 +110,34 @@ export function createApprovalWatcher(o) {
     return targets.map((id) => resolve(id, 'answered', extra)).some(Boolean);
   }
 
+  /**
+   * The body to send upstream for an approval answer of `runId` (profile null = default), or null to forward it
+   * unchanged. Only when the watcher saw a generation for that request (Hermes v0.22.3+): exactly
+   * {request_id, execution_generation, choice}. Without request_id the oldest pending request of that run is meant
+   * (what older Hermes resolves). `lookup` (optional) supplies a generation the watcher never saw (bridge restarted
+   * mid-turn): (requestId|null) => Promise<{requestId, generation}|null>.
+   * @returns {Promise<{body: object, requestId: string, generation: number} | null>}
+   */
+  async function answerBody(runId, body, profile = null, lookup = null) {
+    if (!body || typeof body !== 'object' || Array.isArray(body) || 'execution_generation' in body) return null;
+    const choice = typeof body.choice === 'string' ? body.choice.trim().toLowerCase() : '';
+    if (!CHOICE.test(choice)) return null; // Hermes answers the invalid choice itself
+    let rid = str(body.request_id);
+    if (!rid) {
+      rid = [...pending].find(([, p]) => p.runId === runId && (p.profile ?? null) === (profile ?? null))?.[0];
+    }
+    const k = rid ? known.get(rid) : undefined;
+    if (k && k.runId === runId && (k.profile ?? null) === (profile ?? null)) {
+      if (k.generation === null) return null; // an older Hermes: nothing to add
+      return { body: { request_id: rid, execution_generation: k.generation, choice }, requestId: rid, generation: k.generation };
+    }
+    if (!lookup) return null;
+    const found = await lookup(rid ?? null);
+    if (!found || !SAFE.test(found.requestId) || !Number.isSafeInteger(found.generation)) return null;
+    known.set(found.requestId, { runId, profile: profile ?? null, generation: found.generation });
+    return { body: { request_id: found.requestId, execution_generation: found.generation, choice }, requestId: found.requestId, generation: found.generation };
+  }
+
   const settleRun = (runId, reason) => {
     for (const [id, p] of [...pending]) if (p.runId === runId) resolve(id, reason);
   };
@@ -121,6 +159,7 @@ export function createApprovalWatcher(o) {
         runs.add(runId);
         request({
           runId, requestId, sessionId: str(ctx.sessionId() ?? j?.session_id, 128), profile: ctx.profile ?? null, command: j.command, description: str(j.description, 200),
+          generation: j.execution_generation,
           smartDenied: j.smart_denied === true, choices: Array.isArray(j.choices) ? j.choices.filter((c) => typeof c === 'string').slice(0, 5) : undefined,
         });
       } else if (event === APPROVAL_RESPONDED_EVENT) {
@@ -148,5 +187,5 @@ export function createApprovalWatcher(o) {
     };
   }
 
-  return { observe, request, answered, pending: () => pending.size, stop() { for (const p of pending.values()) clearTimeout(p.timer); pending.clear(); } };
+  return { observe, request, answered, answerBody, pending: () => pending.size, stop() { for (const p of pending.values()) clearTimeout(p.timer); pending.clear(); } };
 }

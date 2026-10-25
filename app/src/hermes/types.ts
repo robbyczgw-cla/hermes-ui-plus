@@ -166,8 +166,16 @@ export type ApprovalRequest = {
   // ---- additions (approval hardening, hermes/approvals.ts) ----
   /** server deadline (ms since epoch) if the event / run status carries one (`expires_at`); Hermes v0.21 does not */
   expiresAt?: number;
-  /** server-advertised wait (`timeout` in the event or `approvals.timeout` from /v1/capabilities), seconds */
+  /**
+   * server-advertised wait (`timeout` / `timeout_seconds` / Hermes ≥ 0.22.3 `timeout_s` in the event, or
+   * `approvals.timeout` from /v1/capabilities), seconds
+   */
   timeoutSeconds?: number;
+  /**
+   * Hermes ≥ 0.22.3: `execution_generation` of the run the request belongs to. When present, the answer body must be
+   * exactly `{request_id, execution_generation, choice}` (respondApprovalCore); absent on older servers.
+   */
+  executionGeneration?: number;
   /** ms (device clock) when the app received the request (live event or restored from GET /v1/runs/{id}) */
   receivedAt?: number;
   /** effective deadline in device ms (resolveDeadline): server value, else start + advertised timeout, else +300 s */
@@ -229,6 +237,11 @@ export type ChatMessage = {
   finishReason?: string;
   /** true when finish_reason was `length` (output truncated) */
   truncated?: boolean;
+  /**
+   * Hermes ≥ 0.22.3: `hermes.error_code` of a turn that did not end with `stop` (`iteration_budget_exhausted`,
+   * `output_truncated`, `agent_error`, …); the answer shows a matching end line (hermes/turnEnd.ts)
+   */
+  finishCode?: string;
   /**
    * the app shortened `text` (marker `[…]` at the cut): over MAX_MESSAGE_TEXT while streaming (hermes/chatState.ts) or
    * over STORED_TEXT_MAX when persisted (conversations/messages.ts). The answer shows a notice.

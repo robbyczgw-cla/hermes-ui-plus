@@ -72,6 +72,42 @@ scripts/test-instance/ti.sh --host mac conversation-test
   fallback. Report: `$HUI_PRIVATE_DIR/reports/conversations/<time>/conversation-report.md` (outside the repo). For product questions with
   real tool data, set the instance up once with keyless web search: `ti.sh --host mac setup --force-config --web ddgs`.
 
+#### Every shipped platform: install, pair, chat (required)
+
+Before every release, **each platform the release ships** gets one run the way a new user does it: install the build
+that will ship (fresh: no earlier app data), set up the bridge with the **default setup wizard**
+(`hermes-ui-plus-bridge setup`, defaults, no hand-edited env file and no extra settings such as
+`BRIDGE_CORS_ORIGINS`), pair with the link or QR code the wizard printed, send one message and see the answer. Our own
+setups and test bridges carry settings a normal install does not have; 0.2.0 and 0.2.1 shipped a desktop app that
+could not pair with a default bridge because no platform run like this was done.
+
+| Platform | Run | How |
+|---|---|---|
+| Android | APK / AAB of the release | on a device or the emulator: paste or scan the wizard's link, one chat (`scripts/e2e/smoke.sh --live <pair-link file>` covers the pair + chat part) |
+| iOS | TestFlight build | on a device: scan the wizard's QR code, one chat |
+| Web | the release web bundle | served by the bridge (`setup --web-dir …`), open the wizard's web pair link in a browser, one chat |
+| macOS | the notarised DMG | install from the DMG on a Mac without an earlier install (or with the app's data removed), paste the wizard's link, one chat |
+| Linux | the AppImage | automated, real window: `scripts/desktop-check/linux.sh --appimage <file> --hermes-home <dir>` on a Linux host (below) |
+| Windows | only when a Windows build ships | like macOS |
+
+A platform without this run is **not released**, or the release notes name it as untested in this release
+("<platform>: not tested with a default setup in this release"). Note each run (platform, build, bridge version,
+result) in the release report.
+
+The Linux run is scripted (`scripts/desktop-check/`): it extracts the AppImage, starts it in Xvfb inside a container
+with a fresh HOME, runs `setup --yes --service none` against the given Hermes home (in a temp HOME; the public address is
+`https://bridge.test:<port>` behind a throwaway test CA, because the desktop app connects to `https:` servers only),
+starts the bridge with the command the wizard printed, and drives the real app window through WebKitGTK's WebDriver:
+"Connect" → "I have a QR code or link" → paste the link → "Connect" → "Start an empty chat" → one message → an answer.
+Exit 0 = PASS; `steps.json` and small JPEG screenshots of every step go to `--out`. With the throwaway Hermes test
+instance (left as it was afterwards):
+
+```
+scripts/test-instance/ti.sh --host linux sync
+scripts/test-instance/ti.sh --host linux hold --start -- \
+  bash <repo copy on the host>/scripts/desktop-check/linux.sh --appimage <file> --hermes-home <TI_DIR>/data --out <dir>
+```
+
 The **release workflow** (`.github/workflows/release.yml`, run by hand from the Actions tab or by pushing a `v*` tag)
 builds the web bundle and the `npm pack` of the bridge on a GitHub runner and attaches them to the run as artifacts,
 each with a `.sha256` file. It checks that all version fields agree, that a tag equals `v<version>` and that the

@@ -278,11 +278,20 @@ test('client disconnect mid-stream keeps the Hermes run going; one client_closed
   }
 });
 
+/** Hermes v0.22.2 answers a run stop for a chat completion id with 409 (it only knows /v1/runs runs) */
+const legacyRunStop = (req, res) => {
+  if (!/\/v1\/runs\/[^/]+\/stop$/.test(String(req.url))) return false;
+  res.writeHead(409, { 'content-type': 'application/json' });
+  res.end(JSON.stringify({ error: { message: 'Run is not active in this gateway process', type: 'invalid_request_error', code: 'run_not_active' } }));
+  return true;
+};
+
 test('POST /bridge/chat/stop ends the kept run of that session (the app\'s stop button)', async () => {
   seen = [];
   let upstreamClosed;
   const closed = new Promise((r) => { upstreamClosed = r; });
-  behaviour = (_req, res) => {
+  behaviour = (req, res) => {
+    if (legacyRunStop(req, res)) return;
     res.writeHead(200, { 'content-type': 'text/event-stream' });
     res.write(SSE_PARTS[0]);
     const iv = setInterval(() => res.write(': keepalive\n\n'), 10);
@@ -299,7 +308,90 @@ test('POST /bridge/chat/stop ends the kept run of that session (the app\'s stop 
     assert.equal(r.status, 200);
     assert.deepEqual(JSON.parse(r.body.toString()), { stopped: 1 });
     await Promise.race([closed, new Promise((_r, rej) => setTimeout(() => rej(new Error('upstream not stopped')), 2000))]);
+    // the run API was asked first (v0.22.2: 409), then the connection closed as before
+    assert.deepEqual(seen.filter((x) => x.url.includes('/runs/')).map((x) => `${x.method} ${x.url}`), ['POST /v1/runs/c1/stop']);
     assert.equal((await rawRequest(base, '/bridge/chat/stop', { headers: { authorization: 'Bearer nope' }, body: { sessionId: 'hui-stop' } })).status, 401);
+  } finally {
+    server.close(); server.closeAllConnections();
+  }
+});
+
+test('POST /bridge/chat/stop on Hermes v0.22.3+: POST /v1/runs/{chatcmpl}/stop ends the turn, the final chunk reaches the app', async () => {
+  seen = [];
+  const RUN = 'chatcmpl-0225stop';
+  /** @type {http.ServerResponse|null} */
+  let turn = null;
+  let upstreamClosed = false;
+  behaviour = (req, res) => {
+    const url = String(req.url);
+    if (url.endsWith('/stop')) {
+      // v0.22.5 api_server_authority_runs.stop_run: 200 {run_id, status: stopping, admission_id}; the stream then ends
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ run_id: RUN, status: 'stopping', admission_id: 'adm_test_0001' }));
+      setTimeout(() => {
+        turn?.end(`data: {"id":"${RUN}","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"cancelled"}],"hermes":{"completed":false,"partial":false,"failed":false,"error":"","error_code":"agent_error"}}\n\ndata: [DONE]\n\n`);
+      }, 30);
+      return;
+    }
+    turn = res;
+    res.writeHead(200, { 'content-type': 'text/event-stream', 'x-hermes-session-id': 'hui-0225' });
+    res.write(`data: {"id":"${RUN}","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}\n\n`);
+    res.write(`data: {"id":"${RUN}","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"Teil"},"finish_reason":null}]}\n\n`);
+    // v0.22.3+: a closed connection does NOT stop the turn, so keep writing until stopped
+    const iv = setInterval(() => { if (!res.writableEnded) res.write(': keepalive\n\n'); }, 10);
+    res.on('close', () => { clearInterval(iv); upstreamClosed = !res.writableFinished; });
+  };
+  const { server, base } = await startBridge();
+  try {
+    // the app keeps reading its stream while it presses stop
+    const body = new Promise((resolve, reject) => {
+      const req = http.request(`${base}/v1/chat/completions`, { method: 'POST', headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json', 'x-hermes-session-id': 'hui-0225' } }, (res) => {
+        const c = [];
+        res.on('data', (d) => c.push(d));
+        res.on('end', () => resolve(Buffer.concat(c).toString()));
+      });
+      req.on('error', reject);
+      req.end(JSON.stringify(chat([{ role: 'user', content: 'lang' }])));
+    });
+    await new Promise((r) => setTimeout(r, 80));
+    const r = await rawRequest(base, '/bridge/chat/stop', { body: { sessionId: 'hui-0225' } });
+    assert.deepEqual(JSON.parse(r.body.toString()), { stopped: 1 });
+    const text = await body;
+    assert.match(text, /"finish_reason":"cancelled"/, 'Hermes\' own end of the turn reaches the app');
+    assert.match(text, /data: \[DONE\]/);
+    assert.equal(upstreamClosed, false, 'the turn ended by itself, the bridge did not cut it');
+    const stopCall = seen.find((x) => String(x.url).endsWith('/stop'));
+    assert.equal(stopCall.url, `/v1/runs/${RUN}/stop`);
+    assert.equal(stopCall.method, 'POST');
+    assert.equal(stopCall.headers.authorization, `Bearer ${UP_KEY}`);
+  } finally {
+    server.close(); server.closeAllConnections();
+  }
+});
+
+test('POST /bridge/chat/stop: an accepted run stop whose stream lingers is closed after the grace time', async () => {
+  seen = [];
+  let closedAt = 0;
+  behaviour = (req, res) => {
+    if (String(req.url).endsWith('/stop')) {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      return res.end('{"status":"stopping"}');
+    }
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.write('data: {"id":"chatcmpl-linger","choices":[{"index":0,"delta":{"role":"assistant"}}]}\n\n');
+    const iv = setInterval(() => res.write(': keepalive\n\n'), 20);
+    res.on('close', () => { clearInterval(iv); closedAt = Date.now(); });
+  };
+  const { server, base } = await startBridge();
+  try {
+    await startAndDrop(base, { 'x-hermes-session-id': 'hui-linger' });
+    await new Promise((r) => setTimeout(r, 50));
+    const t0 = Date.now();
+    assert.deepEqual(JSON.parse((await rawRequest(base, '/bridge/chat/stop', { body: { sessionId: 'hui-linger' } })).body.toString()), { stopped: 1 });
+    await new Promise((r) => setTimeout(r, 1000));
+    assert.equal(closedAt, 0, 'not cut right after the accepted stop');
+    for (let i = 0; i < 60 && !closedAt; i++) await new Promise((r) => setTimeout(r, 100));
+    assert.ok(closedAt - t0 >= 2500, `closed after the grace time (${closedAt - t0} ms)`);
   } finally {
     server.close(); server.closeAllConnections();
   }
@@ -310,6 +402,7 @@ test('POST /bridge/chat/stop is scoped to the profile: the same session id in an
   /** @type {Set<string>} upstream paths of the runs still streaming */
   const running = new Set();
   behaviour = (req, res) => {
+    if (legacyRunStop(req, res)) return;
     const url = String(req.url);
     running.add(url);
     res.writeHead(200, { 'content-type': 'text/event-stream' });

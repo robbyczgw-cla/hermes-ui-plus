@@ -134,6 +134,9 @@ test('POST /v1/runs/{id}/approval: path, body and the answer (200 and 409) pass 
     const res = await rawRequest(base, `/v1/runs/${RUN}/approval`, { body: sent });
     assert.equal(res.status, 200);
     assert.ok(res.body.equals(okBody));
+    // the bridge never saw this request on a stream: it asks the run status for a v0.22.3+ generation (none here)
+    assert.deepEqual(seen.map((x) => `${x.method} ${x.url}`), [`GET /v1/runs/${RUN}`, `POST /v1/runs/${RUN}/approval`]);
+    seen = seen.filter((x) => x.method === 'POST');
     const up = seen[0];
     assert.equal(up.method, 'POST');
     assert.equal(up.url, `/v1/runs/${RUN}/approval`);
@@ -145,7 +148,7 @@ test('POST /v1/runs/{id}/approval: path, body and the answer (200 and 409) pass 
     const late = await rawRequest(base, `/v1/runs/${RUN}/approval`, { body: '{"choice":"always","request_id":"x"}' });
     assert.equal(late.status, 409);
     assert.ok(late.body.equals(goneBody), 'Hermes error code reaches the app (approval_not_pending)');
-    assert.equal(seen[1].raw.toString(), '{"choice":"always","request_id":"x"}');
+    assert.equal(seen.filter((x) => x.method === 'POST')[1].raw.toString(), '{"choice":"always","request_id":"x"}');
 
     // without the bridge token nothing reaches Hermes
     const n = seen.length;

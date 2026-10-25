@@ -70,7 +70,10 @@ Hermes API directly, with the limitations above.
   - `GET /health`, `GET /v1/health` (no token needed)
   - `POST /v1/chat/completions` (chat turns, with the router hint)
   - `GET /v1/models`, `GET /v1/capabilities`, `GET /v1/skills`
-  - `GET /v1/runs/{id}` (run status after a lost stream) and `POST /v1/runs/{id}/approval` (answer an approval)
+  - `GET /v1/runs/{id}` (run status after a lost stream), `POST /v1/runs/{id}/approval` (answer an approval),
+    `POST /v1/runs/{id}/stop` and `POST /v1/runs/{id}/resolve-unknown` (Hermes v0.22.3+ run controls). On v0.22.3+ the
+    bridge completes an approval answer with the turn's `execution_generation` and adds the legacy `approval` object
+    to a run status that only has `pending_controls` ([HERMES-API.md](HERMES-API.md#v0223-unified-gateway-session-authority-source-verified-2026-10-25))
   - `GET /api/sessions`, `GET|PATCH|DELETE /api/sessions/{id}`, `GET /api/sessions/{id}/messages`,
     `POST /api/sessions/{id}/fork`, `POST /api/sessions/{id}/model` (Hermes v0.22 per-chat model lock, body ≤ 8 KB),
     `GET /api/model/options`
@@ -81,7 +84,7 @@ Hermes API directly, with the limitations above.
     [ROUTER.md](ROUTER.md#hermes-routines-cron-jobs)
 
   Everything else is refused before it reaches Hermes: unknown paths with 404, a wrong method with 405 and an `Allow`
-  header. That includes run creation (`POST /v1/runs`), run events/steer/stop, `/v1/responses`, `/v1/toolsets`,
+  header. That includes run creation (`POST /v1/runs`), run events/steer, `/v1/responses`, `/v1/toolsets`,
   artifacts, `/health/detailed`, creating / editing / deleting cron jobs and Hermes' admin and config APIs. Requests keep the path of `HERMES_BASE_URL`
   (a reverse-proxy sub-path such as `https://example.com/hermes` works).
   Hermes profiles (bots, `/p/<profile>/…`) get exactly the same allow-list (their `/health` needs the token);

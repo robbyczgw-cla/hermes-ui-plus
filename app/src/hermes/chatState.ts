@@ -9,6 +9,7 @@ import type { ChatMessage, HermesEvent, MessageStatus, ToolEvent, Usage } from '
 import { appendRaw, markFirstToken, pushTrace, traceReasoning, withMetrics } from './trace.ts';
 import { addApproval, closePending } from './approvals.ts';
 import { authErrorText } from './authError.ts';
+import { isCancelledFinish, reasonErrorText, serverErrorText } from './turnEnd.ts';
 import type { AppendRun } from '../protocol/appendRun.ts';
 
 export type ErrorText = NonNullable<ChatMessage['errorText']>;
@@ -201,6 +202,7 @@ function applyEventTo(msg: ChatMessage, ev: HermesEvent, now: number): ChatMessa
       // queued per request_id (parallel tool calls); deadline stamped by the hook (advertised timeout) or here
       return addApproval(msg, ev.approval, now);
     case 'finish': {
+      // Hermes ≥ 0.22.3: `cancelled` = interrupted (Stop / watchdog), `error` may carry a bare reason code (turnEnd.ts)
       const failed = ev.reason === 'error';
       const next: ChatMessage = {
         // the run is over: still-open requests are logged as expired / cancelled
@@ -211,18 +213,38 @@ function applyEventTo(msg: ChatMessage, ev: HermesEvent, now: number): ChatMessa
         tools: closeRunningTools(msg.tools, now),
         statusNote: undefined,
       };
+      // why a turn did not end with `stop` (a `cancelled` one says `agent_error` there: no news, not kept)
+      if (ev.errorCode && ev.reason !== 'stop' && !isCancelledFinish(ev.reason)) next.finishCode = ev.errorCode;
       if (failed) {
         next.status = 'error';
-        next.error = ev.error || 'Der Agent hat den Lauf mit einem Fehler beendet.';
-        if (ev.error) delete next.errorText;
-        else next.errorText = { key: 'backends.hermes.errors.agentFailed' };
+        const reason = reasonErrorText(ev.error);
+        const shown = serverErrorText(ev.error);
+        if (reason) {
+          next.errorText = reason;
+          next.error = deT(reason.key);
+        } else if (shown) {
+          next.error = shown;
+          delete next.errorText;
+        } else {
+          next.error = 'Der Agent hat den Lauf mit einem Fehler beendet.';
+          next.errorText = { key: 'backends.hermes.errors.agentFailed' };
+        }
+      } else if (isCancelledFinish(ev.reason)) {
+        // like a stop in the app: partial text kept, "Gestoppt" marker; never an error
+        next.status = 'stopped';
+        delete next.error;
+        delete next.errorText;
       } else {
         next.status = 'done';
       }
       return next;
     }
-    case 'error':
-      return finalize(msg, 'error', ev.message, now, authErrorText(undefined, ev.message));
+    case 'error': {
+      // an error envelope in the stream; a known Hermes reason code gets its explanation (turnEnd.ts)
+      const reason = authErrorText(undefined, ev.message) ? undefined : reasonErrorText(ev.message, ev.code);
+      if (reason) return finalize(msg, 'error', deT(reason.key), now, reason);
+      return finalize(msg, 'error', serverErrorText(ev.message) ?? ev.message, now, authErrorText(undefined, ev.message));
+    }
     case 'done':
       return msg;
     default:

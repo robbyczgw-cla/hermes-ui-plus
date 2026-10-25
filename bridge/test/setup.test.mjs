@@ -277,6 +277,11 @@ test('wizard --yes --json: env, skill, unit, tailscale serve, pair link; no secr
   assert.equal(env.ROUTER_BACKEND, 'heuristic');
   assert.ok(env.BRIDGE_PUSH_VAPID_PUBLIC_KEY && env.BRIDGE_PUSH_VAPID_PRIVATE_KEY);
   assert.equal(env.BRIDGE_STATE_DIR, join(f.home, '.local', 'state', 'hermes-ui-bridge'));
+  // desktop app: no CORS entry written, its origins are allowed by default and shown (src/cors.mjs)
+  assert.equal(env.BRIDGE_CORS_ORIGINS, undefined);
+  assert.deepEqual(r.network.corsOrigins, ['tauri://localhost', 'http://tauri.localhost']);
+  assert.equal(r.network.desktopApp, true);
+  assert.ok(f.lines.some((l) => /Browser origins: desktop app \(tauri:\/\/localhost, http:\/\/tauri\.localhost\)/.test(l)));
   // unit + commands
   const unit = readFileSync(join(f.home, '.config', 'systemd', 'user', 'hermes-ui-plus-bridge.service'), 'utf8');
   assert.match(unit, new RegExp(`EnvironmentFile=${envFile}`));
@@ -640,7 +645,8 @@ test('wizard without a reachable address: no 127.0.0.1 QR code, but where and ho
   const human = f.lines.join('\n');
   assert.doesNotMatch(human, QR_BLOCKS, 'no QR code for a loopback address');
   assert.doesNotMatch(human, /Scan with the Hermes UI\+ app/);
-  assert.match(human, /Pair link for an app on this machine/);
+  assert.match(human, /Pair link for this machine only/);
+  assert.match(human, /desktop app needs an https:\/\/ address/);
   assert.ok(r.warnings.some((w) => /127\.0\.0\.1/.test(w) && /no QR code/.test(w)));
   assert.ok(human.includes(`Edit BRIDGE_PUBLIC_URL in\n    ${r.envFile.path}`), 'names the env file');
   assert.match(human, /tailscale serve --bg --https=8790 http:\/\/127\.0\.0\.1:8790/);

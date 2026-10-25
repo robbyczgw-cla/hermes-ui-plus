@@ -5,6 +5,7 @@
  */
 import type { ErrorText } from './chatState.ts';
 import { isHermesError } from './stream.ts';
+import { isReasonKey } from './turnEnd.ts';
 import type { ChatMessage } from './types';
 
 /** longest Retry-After (seconds) that is waited for automatically */
@@ -30,6 +31,8 @@ export function autoRetryDelayMs(err: unknown, opts: { attempt: number; streamed
 /** "… Bitte in N s erneut versuchen." for rate-limit / busy errors that carry a Retry-After. */
 export function retryAfterErrorText(err: unknown): ErrorText | undefined {
   if (!isHermesError(err) || (err.kind !== 'rate_limit' && err.kind !== 'busy')) return undefined;
+  // a Hermes reason code (`runtime_draining`, …) has its own explanation, which already says to retry shortly
+  if (isReasonKey(err.text?.key)) return undefined;
   const s = err.retryAfter;
   if (s === undefined || !Number.isFinite(s) || s < 0) return undefined;
   return { key: 'backends.hermes.errors.retryAfter', params: { message: err.message.trim(), seconds: s } };

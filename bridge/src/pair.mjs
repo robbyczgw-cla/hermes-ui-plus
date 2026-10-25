@@ -13,6 +13,7 @@
 // Docs: docs/BRIDGE.md ("Pairing"), docs/ROUTER.md, "Install & pairing".
 import { randomInt, timingSafeEqual, createHash } from 'node:crypto';
 import { silentLogger } from './log.mjs';
+import { corsHeaders } from './cors.mjs';
 
 export const PAIR_PATH = '/bridge/pair';
 /** first = default; mirrors app/brand/identity.json scheme + legacySchemes (test/pair-cli.test.mjs) */
@@ -195,15 +196,9 @@ export function createPairing(bridgeConfig, o = {}) {
     redeemHits.set(addr, mine);
     return true;
   }
-  const corsHeaders = (req) => {
-    const origin = req.headers.origin;
-    const allowed = bridgeConfig.corsOrigins ?? [];
-    if (!origin || !allowed.length || (!allowed.includes('*') && !allowed.includes(origin))) return {};
-    return { 'access-control-allow-origin': allowed.includes('*') ? '*' : origin, vary: 'Origin' };
-  };
   const json = (req, res, status, body, extra = {}) => {
     const buf = Buffer.from(JSON.stringify(body));
-    res.writeHead(status, { 'content-type': 'application/json', 'content-length': buf.length, 'cache-control': 'no-store', 'x-hermes-ui-bridge': '1', ...corsHeaders(req), ...extra });
+    res.writeHead(status, { 'content-type': 'application/json', 'content-length': buf.length, 'cache-control': 'no-store', 'x-hermes-ui-bridge': '1', ...corsHeaders(bridgeConfig.corsOrigins, req), ...extra });
     res.end(buf);
   };
   const redeemError = (req, res, status, message, code, extra) => json(req, res, status, { error: { message, type: 'invalid_request_error', code } }, extra);

@@ -16,6 +16,7 @@ import { parseWebToolOutput, webMetaOf } from './webResults.ts';
 import { splitTurnExtras, stripTurnExtras, type TurnExtras } from './turnOverride.ts';
 import type { LiveBatches } from '../live/trailer.ts';
 import { applyEvent } from './chatState.ts';
+import { isCancelledFinish } from './turnEnd.ts';
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
@@ -236,6 +237,9 @@ export function mapRemoteMessages(rows: RemoteMessage[]): ChatMessage[] {
         cur.msg.finishReason = r.finishReason;
         cur.msg.truncated = r.finishReason === 'length' ? true : undefined;
         if (cur.msg.truncated === undefined) delete cur.msg.truncated;
+        // Hermes ≥ 0.22.3 stores an interrupted turn as `cancelled`: shown "Gestoppt" like the live answer
+        if (isCancelledFinish(r.finishReason)) cur.msg.status = 'stopped';
+        else if (cur.msg.status === 'stopped') cur.msg.status = 'done';
       }
       cur.msg.metrics = { endedAt: ts };
       continue;

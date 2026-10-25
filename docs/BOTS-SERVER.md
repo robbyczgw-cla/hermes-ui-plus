@@ -141,6 +141,17 @@ aside.
   stored in that profile's `config.yaml` (`command_allowlist`), so it applies to that bot only and covers a category
   of commands, not just the exact command.
 
+### Hermes v0.22.3 and newer: the Bot Chat is read-only in the app
+
+From v0.22.3 (unified gateway) the Bot Chat belongs to the gateway itself: `POST /api/sessions {title:"Bot Chat"}`
+mints a local chat (`local-…` id), and Hermes refuses chat turns into it over the API (`permission_denied`). Reminders
+and routine results still land there and the app reads them as before (also the bridge's push per delivery).
+The app recognises such a Hermes by `features.run_unknown_resolution` in `GET /v1/capabilities` and shows the thread
+read-only: instead of the composer a short note and "New chat with <bot>", which opens an ordinary chat with that bot
+(full streaming, approvals and Stop). A Bot Chat made on v0.22.2 by the bridge is moved aside by Hermes as
+`Bot Chat (API <id>)` on the next delivery; one that a v0.22.2 cron delivery made (`source: cli`) stays the Bot Chat.
+On v0.22.2 nothing changes.
+
 ## Creating bots from the app
 
 From 0.2 the app can create a bot itself: **Bots tab → Neuer Bot**, pick a role (Recherche, Angebote & Preise,

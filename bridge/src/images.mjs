@@ -4,6 +4,7 @@
 import { LruCache } from './lru.mjs';
 import { silentLogger } from './log.mjs';
 import { makeAuthorizer } from './auth.mjs';
+import { corsHeaders } from './cors.mjs';
 
 export const IMAGES_PATH = '/bridge/images';
 export const IMAGES_CONFIG_PATH = '/bridge/images/config';
@@ -130,11 +131,7 @@ export function createImages(bridgeConfig, o = {}) {
   function send(req, res, status, body, extra = {}) {
     const buf = Buffer.from(JSON.stringify(body));
     const h = { 'content-type': 'application/json', 'content-length': buf.length, 'x-hermes-ui-bridge': '1', 'cache-control': 'no-store', ...extra };
-    const origin = req.headers.origin;
-    if (origin && corsOrigins.length && (corsOrigins.includes('*') || corsOrigins.includes(origin))) {
-      h['access-control-allow-origin'] = corsOrigins.includes('*') ? '*' : origin;
-      h.vary = 'Origin';
-    }
+    Object.assign(h, corsHeaders(corsOrigins, req));
     res.writeHead(status, h);
     res.end(buf);
   }

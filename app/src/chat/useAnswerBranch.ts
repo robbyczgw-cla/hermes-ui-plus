@@ -15,7 +15,7 @@ import { sessionsSupported } from '../hermes/support';
 import type { ChatMessage } from '../hermes/types';
 import { useT } from '../i18n';
 import type { ConnectionProfile } from '../settings/profiles';
-import { branchHistory, planBranch } from './answerMenu';
+import { branchHistory, branchPoint, planBranch } from './answerMenu';
 import { forkSession } from './commands/api';
 import { useToast } from './Toast';
 
@@ -43,13 +43,15 @@ export function useAnswerBranch(opts: {
       const meta = conversationId ? convs.get(conversationId) : undefined;
       if (!meta) return;
       const list = messages();
-      const history = branchHistory(list, answerId);
+      // a failed answer (a chat Hermes paused): the copy starts from the answer before the failed turn
+      const point = branchPoint(list, answerId);
+      const history = point ? branchHistory(list, point) : null;
       if (!history) return;
       const hermes = profile.kind === 'hermes';
       const sid = hermes ? (meta.hermesSessionId ?? sessionId) : undefined;
       let mode = planBranch({
         kind: profile.kind,
-        isLast: list[list.length - 1]?.id === answerId,
+        isLast: list[list.length - 1]?.id === point,
         hasRemoteSession: hermes && !!sid && history.some((m) => m.role === 'user'),
         sessionsApi: hermes ? sessionsSupported(withBot({ baseUrl: profile.baseUrl, apiKey: profile.apiKey }, meta.hermesProfile)) : undefined,
       });

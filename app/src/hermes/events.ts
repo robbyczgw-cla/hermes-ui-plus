@@ -59,26 +59,30 @@ export function mapApproval(d: Json): ApprovalRequest {
   const choices = rawChoices.filter((c): c is ApprovalChoice =>
     APPROVAL_CHOICES.includes(c as ApprovalChoice)
   );
+  // Hermes ≥ 0.22.3: `execution_generation` binds the answer to the run; a run-status `pending_controls` entry has
+  // `prompt_id` where the event has `request_id`
+  const generation = num(d.execution_generation);
   return {
     runId: str(d.run_id) ?? '',
-    requestId: str(d.request_id),
+    requestId: str(d.request_id) ?? str(d.prompt_id),
     command: str(d.command) ?? '',
     description: str(d.description) ?? '',
     patternKey: str(d.pattern_key),
     choices: choices.length ? choices : ['once', 'deny'],
     smartDenied: d.smart_denied === true ? true : undefined,
     timestamp: num(d.timestamp) ?? Date.now() / 1000,
-    // not sent by Hermes v0.21 (no deadline field); honoured when a newer server / plugin adds them
+    ...(generation !== undefined && Number.isInteger(generation) ? { executionGeneration: generation } : {}),
+    // not sent by Hermes v0.21 / v0.22.2 (no deadline field); Hermes ≥ 0.22.3 sends `timeout_s`
     ...optionalDeadline(d),
   };
 }
 
-/** `expires_at` (epoch s or ms) and `timeout` / `timeout_seconds` (s) of an approval payload, if present. */
+/** `expires_at` (epoch s or ms) and `timeout` / `timeout_seconds` / `timeout_s` (s) of an approval payload, if present. */
 function optionalDeadline(d: Json): { expiresAt?: number; timeoutSeconds?: number } {
   const out: { expiresAt?: number; timeoutSeconds?: number } = {};
   const exp = num(d.expires_at) ?? num(d.deadline);
   if (exp !== undefined && exp > 0) out.expiresAt = exp < 1e12 ? exp * 1000 : exp;
-  const to = num(d.timeout_seconds) ?? num(d.timeout);
+  const to = num(d.timeout_seconds) ?? num(d.timeout) ?? num(d.timeout_s);
   if (to !== undefined && to > 0) out.timeoutSeconds = to;
   return out;
 }

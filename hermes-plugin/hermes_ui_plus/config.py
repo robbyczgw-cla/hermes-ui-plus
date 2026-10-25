@@ -13,7 +13,7 @@ PLUGIN_NAME = "hermes-ui-plus"
 AUX_TASK_KEY = "hui_quick"
 AUX_INHERIT_FROM = "title_generation"  # built-in fast slot; the user's auxiliary.hui_quick block still wins
 KILL_SWITCH_ENV = "HERMES_UI_PLUS_DISABLE"  # read once at plugin load: 1/true/yes/on = register nothing
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 
 DEFAULT_PORT = 8646
 MAX_TURNS = 6

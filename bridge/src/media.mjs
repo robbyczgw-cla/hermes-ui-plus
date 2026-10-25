@@ -6,6 +6,7 @@ import { open, realpath } from 'node:fs/promises';
 import { basename, extname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { silentLogger } from './log.mjs';
 import { makeAuthorizer } from './auth.mjs';
+import { corsHeaders } from './cors.mjs';
 
 export const MEDIA_PATH = '/bridge/media';
 export const DEFAULT_MEDIA_MAX_BYTES = 100 * 1024 * 1024;
@@ -128,11 +129,7 @@ export function createMedia(bridgeConfig, o = {}) {
 
   const baseHeaders = (req) => {
     const h = { 'x-hermes-ui-bridge': '1', 'x-content-type-options': 'nosniff' };
-    const origin = req.headers.origin;
-    if (origin && corsOrigins.length && (corsOrigins.includes('*') || corsOrigins.includes(origin))) {
-      h['access-control-allow-origin'] = corsOrigins.includes('*') ? '*' : origin;
-      h.vary = 'Origin';
-    }
+    Object.assign(h, corsHeaders(corsOrigins, req));
     return h;
   };
   function fail(req, res, status, message, code) {

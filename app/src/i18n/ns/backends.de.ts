@@ -30,6 +30,23 @@ export const backends = {
       agentFailed: 'Der Agent hat den Lauf mit einem Fehler beendet.',
       retryAfter: '{message} Bitte in {seconds} s erneut versuchen.',
       interruptedLost: 'Verbindung unterbrochen – die Antwort konnte nicht nachgeladen werden.',
+      /** recovery gave up: Hermes no longer knows the run (404 / Hermes ≥ 0.22.3 `unknown`), hermes/turnEnd.ts */
+      runLost: 'Hermes kennt diese Antwort nicht mehr (zum Beispiel nach einem Neustart), sie konnte nicht geladen werden. Tippe auf „Wiederholen“, um noch einmal zu fragen.',
+      /** Hermes ≥ 0.22.3 session-authority reason codes of a refused turn (hermes/turnEnd.ts REASON_KEYS) */
+      reason: {
+        foreignChat: 'Hermes lässt die App nicht in diesen Chat schreiben: Er gehört zu einem anderen Zugang (zum Beispiel Telegram, die Kommandozeile oder der Chat eines Bots). Starte einen neuen Chat, um weiterzuschreiben.',
+        foreignBotChat: 'In den Chat dieses Bots kann die App mit dieser Hermes-Version nicht schreiben. Starte einen neuen Chat mit dem Bot.',
+        unknownExecution: 'Hermes hat diesen Chat angehalten: Eine frühere Antwort hier wurde durch einen Neustart von Hermes abgebrochen, und Hermes hält den Chat an, bis dieser verlorene Durchgang bereinigt ist. Mach in einem neuen Chat oder in einer Kopie dieses Chats weiter. Um diesen Chat selbst wieder zu nutzen, bereinige den verlorenen Durchgang auf dem Server (zum Beispiel mit „hermes sessions discard“).',
+        queueFull: 'Bei Hermes warten in diesem Chat zu viele Nachrichten. Warte, bis die aktuelle Antwort fertig ist, und versuche es dann erneut.',
+        runtimeDraining: 'Hermes startet gerade neu oder fährt herunter. Versuche es gleich noch einmal.',
+        storageUnavailable: 'Hermes konnte gerade nicht auf seinen Speicher zugreifen. Versuche es gleich noch einmal.',
+        admissionConflict: 'Hermes bearbeitet in diesem Chat gerade eine andere Nachricht. Warte, bis sie fertig ist, und versuche es dann erneut.',
+        sessionDeleted: 'Dieser Chat wurde auf Hermes gelöscht. Starte einen neuen Chat, um weiterzuschreiben.',
+        notFound: 'Hermes hat diesen Chat nicht gefunden. Starte einen neuen Chat, um weiterzuschreiben.',
+        admissionQueued: 'Hermes hat diese Nachricht eingereiht und beantwortet sie später. Öffne diesen Chat in einer Weile wieder, um die Antwort zu sehen; erneut senden würde sie doppelt einreihen.',
+        chainMoved: 'Dieser Chat hat sich auf Hermes inzwischen geändert (zum Beispiel von einem anderen Gerät aus). Versuche es erneut.',
+        botChatUnbound: 'Der Chat dieses Bots ist auf dem Hermes-Server noch nicht eingerichtet. Öffne ihn dort einmal (hermes chat -c "Bot Chat") und versuche es dann erneut.',
+      },
     },
     options: {
       title: 'Optionen für diesen Chat',

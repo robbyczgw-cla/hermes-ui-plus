@@ -9,6 +9,7 @@ import { silentLogger } from './log.mjs';
 import { makeAuthorizer } from './auth.mjs';
 import { DEFAULT_PROFILE, isProfileName } from './profiles.mjs';
 import { loadQuickConfig, quickReason } from './quick.mjs';
+import { corsHeaders } from './cors.mjs';
 
 export const LIBRARY_PREFIX = '/bridge/library/';
 const ROUTES = { '/bridge/library/config': 'config', '/bridge/library/skills': 'skills', '/bridge/library/skills/content': 'content', '/bridge/library/memory': 'memory' };
@@ -98,11 +99,7 @@ export function createLibrary(bridgeConfig, o = {}) {
 
   function headers(req, extra = {}) {
     const h = { 'x-hermes-ui-bridge': '1', 'cache-control': 'no-store', ...extra };
-    const origin = req.headers.origin;
-    if (origin && corsOrigins.length && (corsOrigins.includes('*') || corsOrigins.includes(origin))) {
-      h['access-control-allow-origin'] = corsOrigins.includes('*') ? '*' : origin;
-      h.vary = 'Origin';
-    }
+    Object.assign(h, corsHeaders(corsOrigins, req));
     return h;
   }
   function send(req, res, status, body, extra = {}) {

@@ -29,6 +29,7 @@ import { createApprovalWatcher } from './approvals.mjs';
 import { upstreamUrl } from './paths.mjs';
 import { writeFileAtomicSync } from './atomic-write.mjs';
 import { profilePrefix } from './profiles.mjs';
+import { applyCors } from './cors.mjs';
 
 export const INBOX_PATH = '/bridge/inbox/stream';
 export const HOOK_PATH = '/bridge/hermes-hook';
@@ -529,11 +530,7 @@ export function createHermesPush(config, o = {}) {
     async handle(req, res) {
       const url = new URL(req.url ?? '/', 'http://bridge');
       const p = url.pathname;
-      const origin = req.headers.origin;
-      if (origin && config.corsOrigins.length && (config.corsOrigins.includes('*') || config.corsOrigins.includes(origin))) {
-        res.setHeader('access-control-allow-origin', config.corsOrigins.includes('*') ? '*' : origin);
-        res.setHeader('vary', 'Origin');
-      }
+      applyCors(config.corsOrigins, req, res);
       if (p === HOOK_PATH && req.method === 'POST') return handleHook(req, res).catch(() => res.destroy());
       if (!authorized(req)) return sendJson(res, 401, { error: { message: 'Invalid bridge token', type: 'invalid_request_error', code: 'invalid_api_key' } });
       if (p === INBOX_PATH && req.method === 'GET') {

@@ -6,6 +6,7 @@ import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { silentLogger } from './log.mjs';
 import { makeAuthorizer, makeCredentials } from './auth.mjs';
+import { corsHeaders } from './cors.mjs';
 
 export const UPLOAD_PATH = '/bridge/uploads';
 export const DEFAULT_UPLOAD_DIR = '/var/lib/hermes-ui-bridge/uploads';
@@ -237,12 +238,7 @@ export function createUploads(bridgeConfig, o = {}) {
   function send(req, res, status, body, { close = false } = {}) {
     if (res.headersSent) return res.destroy();
     const buf = Buffer.from(JSON.stringify(body));
-    const origin = req.headers.origin;
-    const headers = { 'content-type': 'application/json', 'content-length': buf.length, 'x-hermes-ui-bridge': '1' };
-    if (origin && corsOrigins.length && (corsOrigins.includes('*') || corsOrigins.includes(origin))) {
-      headers['access-control-allow-origin'] = corsOrigins.includes('*') ? '*' : origin;
-      headers.vary = 'Origin';
-    }
+    const headers = { 'content-type': 'application/json', 'content-length': buf.length, 'x-hermes-ui-bridge': '1', ...corsHeaders(corsOrigins, req) };
     if (close) headers.connection = 'close';
     res.writeHead(status, headers);
     if (!close || req.complete) return void res.end(buf);

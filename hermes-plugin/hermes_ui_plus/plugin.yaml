@@ -1,5 +1,5 @@
 name: hermes-ui-plus
-version: "0.2.0"
+version: "0.2.1"
 description: >
   Thin companion plugin for the Hermes Interactive UI+ app: quick answers (one-off questions answered by a
   fast model through Hermes' own providers, without the agent) and read-only skills/memory library routes on a loopback-only listener for the UI Bridge.

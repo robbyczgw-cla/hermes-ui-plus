@@ -10,6 +10,7 @@ import { readFileSync } from 'node:fs';
 import { silentLogger } from './log.mjs';
 import { makeAuthorizer, makeCredentials } from './auth.mjs';
 import { upstreamUrl } from './paths.mjs';
+import { corsHeaders } from './cors.mjs';
 
 export const QUICK_PATHS = ['/bridge/quick', '/bridge/quick/v1/chat/completions'];
 export const QUICK_CONFIG_PATH = '/bridge/quick/config';
@@ -142,11 +143,7 @@ export function createQuick(bridgeConfig, o = {}) {
 
   function headers(req, extra = {}) {
     const h = { 'x-hermes-ui-bridge': '1', 'cache-control': 'no-store', ...extra };
-    const origin = req.headers.origin;
-    if (origin && corsOrigins.length && (corsOrigins.includes('*') || corsOrigins.includes(origin))) {
-      h['access-control-allow-origin'] = corsOrigins.includes('*') ? '*' : origin;
-      h.vary = 'Origin';
-    }
+    Object.assign(h, corsHeaders(corsOrigins, req));
     return h;
   }
   function send(req, res, status, body, extra = {}) {

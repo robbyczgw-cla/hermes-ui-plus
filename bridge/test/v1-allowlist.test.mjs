@@ -49,19 +49,22 @@ test('allowed: exactly the endpoints the app calls, forwarded with the upstream 
   const cases = [
     ['GET', '/v1/models'], ['GET', '/v1/models?limit=5'], ['GET', '/v1/capabilities'], ['GET', '/v1/skills'],
     ['GET', '/v1/runs/chatcmpl-abc123'], ['POST', '/v1/runs/chatcmpl-abc123/approval'],
+    ['POST', '/v1/runs/chatcmpl-abc123/stop'], ['POST', '/v1/runs/chatcmpl-abc123/resolve-unknown'],
   ];
   for (const [method, path] of cases) {
     seen = [];
     const r = await call(path, { method, body: method === 'POST' ? '{"choice":"once"}' : undefined });
     assert.equal(r.status, 200, `${method} ${path}`);
-    assert.deepEqual(seen, [`${method} ${path} Bearer ${UP_KEY}`]);
+    // an approval answer the bridge never saw a request for: one run status lookup for a v0.22.3+ generation first
+    const lookup = path.endsWith('/approval') ? [`GET ${path.replace(/\/approval$/, '')} Bearer ${UP_KEY}`] : [];
+    assert.deepEqual(seen, [...lookup, `${method} ${path} Bearer ${UP_KEY}`]);
   }
 });
 
 test('refused with 404: everything the app does not use (never forwarded)', async () => {
   seen = [];
   const cases = [
-    ['POST', '/v1/runs'], ['GET', '/v1/runs'], ['GET', '/v1/runs/chatcmpl-1/events'], ['POST', '/v1/runs/chatcmpl-1/stop'],
+    ['POST', '/v1/runs'], ['GET', '/v1/runs'], ['GET', '/v1/runs/chatcmpl-1/events'], ['POST', '/v1/runs/chatcmpl-1/stops'],
     ['POST', '/v1/runs/chatcmpl-1/steer'], ['POST', '/v1/responses'], ['GET', '/v1/responses/resp_1'], ['DELETE', '/v1/responses/resp_1'],
     ['GET', '/v1/toolsets'], ['GET', '/v1/artifacts'], ['GET', '/v1/artifacts/a1'], ['POST', '/v1/artifacts'], ['GET', '/v1/attachments/x'],
     ['POST', '/v1/files'], ['GET', '/v1/models/hermes-agent'], ['GET', '/v1/skills/x'], ['POST', '/v1/completions'], ['GET', '/v1/x'],
@@ -82,6 +85,7 @@ test('wrong method on an allowed path → 405 with Allow, nothing upstream', asy
   const cases = [
     ['POST', '/v1/models', 'GET'], ['DELETE', '/v1/models', 'GET'], ['PUT', '/v1/capabilities', 'GET'], ['POST', '/v1/skills', 'GET'],
     ['POST', '/v1/runs/chatcmpl-1', 'GET'], ['DELETE', '/v1/runs/chatcmpl-1', 'GET'], ['GET', '/v1/runs/chatcmpl-1/approval', 'POST'],
+    ['GET', '/v1/runs/chatcmpl-1/stop', 'POST'], ['GET', '/v1/runs/chatcmpl-1/resolve-unknown', 'POST'],
     ['GET', '/v1/chat/completions', 'POST'], ['PUT', '/v1/chat/completions', 'POST'], ['POST', '/v1/health', 'GET'],
   ];
   for (const [method, path, allow] of cases) {

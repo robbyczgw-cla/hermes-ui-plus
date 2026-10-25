@@ -5,6 +5,7 @@ import { randomBytes } from 'node:crypto';
 import { silentLogger } from './log.mjs';
 import { normalizeMime } from './uploads.mjs';
 import { makeAuthorizer } from './auth.mjs';
+import { corsHeaders as allowedOrigin } from './cors.mjs';
 
 export const VOICE_CONFIG_PATH = '/bridge/voice/config';
 export const STT_PATH = '/bridge/stt';
@@ -164,12 +165,8 @@ export function createVoice(bridgeConfig, o = {}) {
   const matches = (req) => routeOf(req) !== null;
 
   function corsHeaders(req) {
-    const origin = req.headers.origin;
-    if (!origin || !corsOrigins.length || !(corsOrigins.includes('*') || corsOrigins.includes(origin))) return {};
-    return {
-      'access-control-allow-origin': corsOrigins.includes('*') ? '*' : origin, vary: 'Origin',
-      'access-control-expose-headers': 'X-TTS-Provider, X-TTS-Voice',
-    };
+    const h = allowedOrigin(corsOrigins, req);
+    return h['access-control-allow-origin'] ? { ...h, 'access-control-expose-headers': 'X-TTS-Provider, X-TTS-Voice' } : {};
   }
 
   function send(req, res, status, body, { close = false } = {}) {

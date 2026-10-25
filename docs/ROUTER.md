@@ -78,7 +78,9 @@ it forwards, so `/v1/../api/jobs` or `/v1/%2e%2e/api/jobs` can no longer reach H
 Non-streaming chat requests are routed too (header only) unless `BRIDGE_ROUTE_NONSTREAM=0`.
 Client opt-out per request: header `X-Hermes-UI-Route: off` (bootstrap still added, no routing).
 `Origin`, `Referer`, `Cookie` are not forwarded (Hermes' CORS check would reject browser origins);
-the bridge answers CORS itself if `BRIDGE_CORS_ORIGINS` is set (only needed for `expo start --web`).
+the bridge answers CORS itself (`src/cors.mjs`): for the desktop app's origins (`tauri://localhost`,
+`http://tauri.localhost`) whenever it has a token, and for the origins in `BRIDGE_CORS_ORIGINS` (a web app on another
+origin, `expo start --web`). Preflights are answered before the token check; real requests still need a credential.
 
 ### Wire additions (for the app)
 - `event: hermes.ui.route` / `data: RouteDecision` – exactly the SPEC fields
@@ -635,7 +637,8 @@ real Hermes for `/health` and `/v1/models` only (no real chat turn was sent thro
 | `BRIDGE_BOOTSTRAP` / `BRIDGE_BOOTSTRAP_FILE` | on / `../hermes-skill/bootstrap-system-message.txt` | skill bootstrap system message (`off` disables) |
 | `BRIDGE_SKILL_INLINE` / `BRIDGE_SKILL_FILE` | on / `hermes-ui/SKILL.md` next to the bootstrap file, repo `hermes-skill/`, bundled `skill/` | skill core as a system message after the bootstrap on app turns (`off` disables; missing file: warning, no injection) |
 | `BRIDGE_CONTEXT_MEMORY`, `BRIDGE_CONTEXT_MAX_SESSIONS`, `BRIDGE_CONTEXT_TTL_MS`, `BRIDGE_CONTEXT_MAX_CHARS` | 1, 500, 86400000, 2000 | per-session routing context (in memory only) |
-| `BRIDGE_CORS_ORIGINS` | – | comma list or `*` (web dev only) |
+| `BRIDGE_CORS_ORIGINS` | – | extra browser origins, comma list or `*` (web app on another origin, web dev) |
+| `BRIDGE_DESKTOP_ORIGINS` | on | `off` stops allowing the desktop app's origins `tauri://localhost` / `http://tauri.localhost` (never allowed in open mode without a token unless listed in `BRIDGE_CORS_ORIGINS`) |
 | `BRIDGE_WEB_DIR` | – | serve a built web app at `/` (same origin; `src/static.mjs`, see bridge/README.md "Serving the web app") |
 | `BRIDGE_MAX_CONCURRENT_TURNS` / `BRIDGE_MAX_TURNS_TOTAL` | 8 / 16 | concurrent chat turns per credential / for the whole bridge (a turn counts until Hermes finished it) → 429 |
 | `BRIDGE_MAX_BODY_BYTES` | 25 MB | limit for the buffered `/v1/chat/completions` body only; **not** applied to uploads |
@@ -695,7 +698,7 @@ X-Filename: <encodeURIComponent(name)>
   (so the app must send a real type, e.g. `text/markdown` for `.md`). Override with `BRIDGE_UPLOAD_ALLOWED_MIME`,
   e.g. `...,application/zip` (the list *replaces* the default, so repeat the defaults you want to keep).
 - The route is hooked in `src/server.mjs` before the bridge handler (only `POST /bridge/uploads`); everything else is unchanged.
-  CORS: if `BRIDGE_CORS_ORIGINS` allows the origin, the answer carries `Access-Control-Allow-Origin` (preflight is the bridge's).
+  CORS: if the origin is allowed (desktop app or `BRIDGE_CORS_ORIGINS`), the answer carries `Access-Control-Allow-Origin` (preflight is the bridge's).
 
 ### Storage
 - Layout `<BRIDGE_UPLOAD_DIR>/<yyyy-mm-dd UTC>/<id>-<sanitized-name>`; written as `.<id>.part` and renamed when complete, so
@@ -769,7 +772,7 @@ POST /bridge/tts                     Authorization: Bearer ...   Content-Type: a
   cuts the connection (the client sees a truncated stream).
 - `voice` selects the provider too: a curated voice id of any provider that has a key goes to that provider (so the app can offer one list); any other well-formed id
   (`[A-Za-z0-9._-]{1,64}`, e.g. a custom ElevenLabs voice) goes to the default provider. No `voice` = `defaultVoice`. The config lists the voices of all providers with a key, default provider first.
-- CORS: if `BRIDGE_CORS_ORIGINS` allows the origin, answers carry `Access-Control-Allow-Origin` and expose `X-TTS-Provider, X-TTS-Voice` (preflight is the bridge's).
+- CORS: if the origin is allowed (desktop app or `BRIDGE_CORS_ORIGINS`), answers carry `Access-Control-Allow-Origin` and expose `X-TTS-Provider, X-TTS-Voice` (preflight is the bridge's).
 
 ### Providers (request shapes checked against the official docs, 2026-10)
 | | endpoint | auth | notes |

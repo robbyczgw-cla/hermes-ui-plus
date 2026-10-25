@@ -47,6 +47,16 @@ export function isBotChatEntry(c: ConversationMeta): boolean {
   return !!c.botChat || c.remote?.title === BOT_CHAT_TITLE;
 }
 
+/**
+ * Can the app write into a bot's Bot Chat on this Hermes? Not under the session authority of Hermes v0.22.3+ (unified
+ * gateway): there the Bot Chat is a local chat the gateway owns, `/v1/chat/completions` into it is refused with
+ * `permission_denied`, but deliveries (reminders, routine results) still land there and stay readable. The authority
+ * is the only setup that advertises `features.run_unknown_resolution`; v0.22.2 and older do not (writable as before).
+ */
+export function botChatReadOnly(flags: Readonly<Record<string, boolean>> | undefined): boolean {
+  return flags?.run_unknown_resolution === true;
+}
+
 // ------------------------------------------------------------------ session lookup / create answers
 
 type Json = Record<string, unknown>;

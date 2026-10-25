@@ -5,6 +5,7 @@ import { ApprovalHistory } from '../approvals/ApprovalHistory';
 import { AttachmentTray, MessageAttachments } from '../attachments';
 import type { ChatMessage } from '../hermes';
 import { isRecovering } from '../hermes/recovery.ts';
+import { emptyAnswerNotice, truncatedKey, UNKNOWN_EXECUTION_KEY } from '../hermes/turnEnd.ts';
 import { textAppendRun } from '../hermes/chatState.ts';
 import { AUTH_DENIED_KEY, isAuthErrorMessage } from '../hermes/authError.ts';
 import { router } from 'expo-router';
@@ -297,6 +298,8 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
   const recovering = isRecovering(message);
   // 401/403 / "Invalid bridge token": human text + "Verbindung bearbeiten" (hermes/authError.ts)
   const authError = isAuthErrorMessage(message);
+  const emptyNotice = emptyAnswerNotice(message);
+  const pausedChat = message.status === 'error' && message.errorText?.key === UNKNOWN_EXECUTION_KEY;
   // UX1: interim notes before tool calls ("Ich schaue kurz nach…") leave the answer body for the tool
   // timeline; the answer is the text after the last tool round (Settings → Antworten keeps them inline)
   const notesInline = usePreferences().prefs['answers.progressNotes'];
@@ -530,7 +533,7 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
       {reminders.length ? <ReminderCards reminders={reminders} /> : null}
       {message.status === 'done' ? <LiveQuietLine messageId={message.id} /> : null}
       {message.truncated ? (
-        <Text style={[t.typography.caption, styles.stopped, { color: t.colors.subtle }]}>{tr('chat.message.truncated')}</Text>
+        <Text testID="msg-truncated" style={[t.typography.caption, styles.stopped, { color: t.colors.subtle }]}>{tr(truncatedKey(message))}</Text>
       ) : null}
       {message.textCapped ? (
         <Text style={[t.typography.caption, styles.stopped, { color: t.colors.subtle }]}>{tr('chat.message.capped')}</Text>
@@ -553,7 +556,13 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
               onPress={() => router.push({ pathname: '/settings', params: { edit: profile.id } })}
             />
           ) : isLast ? (
-            <Button label={tr('chat.message.retry')} icon={(color, size) => <Icon name="retry" size={size} color={color} />} size="small" onPress={onRetry} testID="msg-retry" />
+            <View style={{ gap: 6 }}>
+              <Button label={tr('chat.message.retry')} icon={(color, size) => <Icon name="retry" size={size} color={color} />} size="small" onPress={onRetry} testID="msg-retry" />
+              {pausedChat && actions?.canBranch && !isFirstTurn ? (
+                // Hermes ≥ 0.22.3 paused this chat (`unknown_execution`): go on in a copy of it (answerMenu.ts branchPoint)
+                <Button label={tr('menus.answer.branch')} icon={(color, size) => <Icon name="branch" size={size} color={color} />} size="small" onPress={() => actions.branchFrom(id)} testID="msg-branch" />
+              ) : null}
+            </View>
           ) : null}
         </View>
       ) : null}
@@ -569,7 +578,13 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
       ) : message.status === 'stopped' ? (
         <Text testID="msg-stopped" style={[t.typography.caption, styles.stopped, { color: t.colors.subtle }]}>{tr('chat.message.stopped')}</Text>
       ) : message.status === 'done' ? (
-        <LateMark message={message} />
+        <>
+          {emptyNotice ? (
+            // a finished answer without any text (also a future finish reason): a notice instead of an empty bubble
+            <Text testID="msg-empty" style={[t.typography.caption, styles.stopped, { color: t.colors.subtle }]}>{tr(emptyNotice)}</Text>
+          ) : null}
+          <LateMark message={message} />
+        </>
       ) : null}
       {message.quick && !streaming ? (
         // quick answer: "⚡ model · 1,6 s" in place of the turn footer (no tools to show)

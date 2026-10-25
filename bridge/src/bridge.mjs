@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { routingContext } from './router/context.mjs';
 import { parseLiveHeader } from './router/live.mjs';
 import { applySystemMessages, buildHint } from './router/hint.mjs';
-import { asciiJson, createAssistantCollector, sseFrame } from './sse.mjs';
+import { asciiJson, createAssistantCollector, createSseParser, sseFrame } from './sse.mjs';
 import { LruCache } from './lru.mjs';
 import { silentLogger } from './log.mjs';
 import { checkRequestPath, upstreamUrl } from './paths.mjs';
@@ -15,11 +15,15 @@ import { createReplayStore, idempotencyKey, resumeOffset, RESUMABLE_HEADER } fro
 import { createJobsHandler, isJobsPath } from './jobs.mjs';
 import { createRoutinesRights } from './routines-rights.mjs';
 import { createProfiles, DEFAULT_PROFILE, isProfileName, PROFILES_PATH, splitProfilePath } from './profiles.mjs';
+import { corsHeaders } from './cors.mjs';
 
 const SAFE_ID = /^[A-Za-z0-9._:-]{1,128}$/;
 const API_BODY_MAX = 64 * 1024;
 const API_TIMEOUT_MS = 30_000;
 const STOP_BODY_MAX = 4 * 1024;
+const STOP_TIMEOUT_MS = 5_000; // Hermes' run stop answers at once; a slow one falls back to closing the connection
+const LOOKUP_TIMEOUT_MS = 5_000; // run status lookup before an approval answer the bridge has no generation for
+const STOP_GRACE_MS = 3_000; // after an accepted run stop: time for Hermes' final `cancelled` chunk before the bridge closes
 const APPROVAL_BODY_MAX = 8 * 1024;
 const MODEL_LOCK_BODY_MAX = 8 * 1024;
 const BOT_CHAT_BODY_MAX = 1024;
@@ -131,7 +135,8 @@ export function createBridgeHandler(config, deps) {
    * Running upstream chat requests per (Hermes profile, X-Hermes-Session-Id). A client that goes away (network switch,
    * app in the background) does NOT stop the Hermes run any more – the answer lands in the session and reaches the app
    * via the live inbox / session sync. A deliberate stop is `POST /bridge/chat/stop {sessionId, profile?}`.
-   * @type {Map<string, Set<{reqId: string, up: import('node:http').ClientRequest}>>}
+   * `runId` = the turn's `chatcmpl-…` id from its first SSE chunk (Hermes' run id for `/v1/runs/{id}/stop`).
+   * @type {Map<string, Set<{reqId: string, up: import('node:http').ClientRequest, runId: string|null, profile: string|null}>>}
    */
   const runs = new Map();
   // session ids are only unique within a profile; `default` is the unprefixed profile
@@ -147,13 +152,14 @@ export function createBridgeHandler(config, deps) {
     };
   }
 
+  /** @returns {boolean} whether the request's origin may read the answer (src/cors.mjs) */
   function cors(req, res) {
-    const origin = req.headers.origin;
-    if (!origin || !config.corsOrigins.length) return;
-    if (!config.corsOrigins.includes('*') && !config.corsOrigins.includes(origin)) return;
-    res.setHeader('Access-Control-Allow-Origin', config.corsOrigins.includes('*') ? '*' : origin);
+    const h = corsHeaders(config.corsOrigins, req);
+    if (!h['access-control-allow-origin']) return false;
+    res.setHeader('Access-Control-Allow-Origin', h['access-control-allow-origin']);
     res.setHeader('Vary', 'Origin');
     res.setHeader('Access-Control-Expose-Headers', EXPOSE_HEADERS);
+    return true;
   }
 
   function sendJson(res, status, body) {
@@ -201,7 +207,7 @@ export function createBridgeHandler(config, deps) {
 
   /**
    * Strict allow-list for Hermes' OpenAI-style `/v1` API (docs/BRIDGE.md, "Narrow pass-through"): exactly what the app
-   * calls. Run creation (`POST /v1/runs`), `/v1/responses`, run events / steer / stop, toolsets, artifacts and anything
+   * calls. Run creation (`POST /v1/runs`), `/v1/responses`, run events / steer, toolsets, artifacts and anything
    * else under `/v1` are never forwarded. Returns the allowed methods for a path, or null (→ 404).
    */
   function v1Allowed(path) {
@@ -211,8 +217,10 @@ export function createBridgeHandler(config, deps) {
       case '/v1/models': case '/v1/capabilities': case '/v1/skills': return ['GET'];
       default: break;
     }
-    // GET /v1/runs/{id}: status + pending approval after a lost stream; POST …/approval: answer approval.request
-    const m = /^\/v1\/runs\/([^/]+)(\/approval)?$/.exec(path);
+    // GET /v1/runs/{id}: status + pending approval after a lost stream; POST …/approval: answer approval.request;
+    // POST …/stop: end the turn (Hermes v0.22.3+ ends a chat turn only this way, a closed connection no longer stops
+    // it); POST …/resolve-unknown: release a chat Hermes paused after a restart cut a turn (v0.22.3+)
+    const m = /^\/v1\/runs\/([^/]+)(\/approval|\/stop|\/resolve-unknown)?$/.exec(path);
     if (!m || !SAFE_ID.test(m[1]) || m[1].includes('..')) return null;
     return m[2] ? ['POST'] : ['GET'];
   }
@@ -222,9 +230,10 @@ export function createBridgeHandler(config, deps) {
    * approval answers): request body capped (`bodyMax`, only for POST/PATCH; GET/DELETE bodies are never read or
    * forwarded), upstream timeout limits.apiTimeoutMs (BRIDGE_UPSTREAM_TIMEOUT_MS, 30 s), response streamed back. `tap` sees the parsed request JSON once
    * Hermes accepted it (2xx).
-   * @param {{bodyMax?: number, tap?: ((body: any) => void) | null}} [o]
+   * `rewrite` may replace the parsed request JSON before it goes upstream (null = forward the bytes unchanged).
+   * @param {{bodyMax?: number, tap?: ((body: any) => void) | null, rewrite?: ((body: any) => Promise<any>) | null}} [o]
    */
-  async function apiPassthrough(req, res, reqId, { bodyMax = API_BODY_MAX, tap = null } = {}) {
+  async function apiPassthrough(req, res, reqId, { bodyMax = API_BODY_MAX, tap = null, rewrite = null } = {}) {
     const method = req.method ?? '';
     const headers = filterRequestHeaders(req.headers);
     let body = null;
@@ -248,6 +257,16 @@ export function createBridgeHandler(config, deps) {
         }
         body = Buffer.concat(chunks);
       } catch { return res.destroy(); }
+      if (rewrite) {
+        let parsed;
+        try { parsed = JSON.parse(body.toString('utf8') || '{}'); } catch { parsed = undefined; }
+        const next = parsed === undefined ? null : await rewrite(parsed).catch(() => null);
+        if (next) {
+          body = Buffer.from(JSON.stringify(next));
+          headers['content-type'] = 'application/json';
+        }
+        if (res.destroyed) return;
+      }
       headers['content-length'] = String(body.length);
     } else {
       req.resume(); // GET/DELETE (and /health): no body upstream
@@ -277,14 +296,14 @@ export function createBridgeHandler(config, deps) {
   }
 
   /** One buffered upstream request (JSON in/out) for the bridge's own composed calls. Never throws. */
-  function upstreamJson(method, path, headers, body) {
+  function upstreamJson(method, path, headers, body, timeoutMs = limits.apiTimeoutMs) {
     return new Promise((resolve) => {
       const h = { ...headers, 'accept-encoding': 'identity' };
       delete h['content-length'];
       const buf = body === undefined ? null : Buffer.from(JSON.stringify(body));
       if (buf) { h['content-type'] = 'application/json'; h['content-length'] = String(buf.length); } else delete h['content-type'];
       const up = upstreamRequest(method, path, h);
-      up.setTimeout(limits.apiTimeoutMs, () => up.destroy(Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' })));
+      up.setTimeout(timeoutMs, () => up.destroy(Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' })));
       up.on('response', (r) => {
         const chunks = [];
         let size = 0;
@@ -300,6 +319,40 @@ export function createBridgeHandler(config, deps) {
       up.on('error', (err) => resolve({ status: 0, error: err }));
       up.end(buf ?? undefined);
     });
+  }
+
+  /**
+   * GET /v1/runs/{id}, buffered. Hermes v0.22.3+ reports a waiting approval only as `pending_controls[]` (no
+   * `approval` field): the bridge adds the `approval` object older apps read (legacy approval.request shape, plus
+   * `execution_generation`). Everything else is passed on unchanged.
+   */
+  async function runStatus(req, res, reqId) {
+    req.resume();
+    const r = await upstreamJson('GET', String(req.url), filterRequestHeaders(req.headers));
+    if (res.destroyed) return;
+    if (r.status === 0 && r.error?.code === 'ETIMEDOUT') return openaiError(res, 504, 'Hermes upstream timed out', 'bridge_error', 'upstream_timeout');
+    if (r.status === 0) return upstreamFailed(res, r.error, reqId);
+    let text = r.text;
+    const j = r.json;
+    if (r.status === 200 && j && typeof j === 'object' && !Array.isArray(j) && !j.approval) {
+      const a = Array.isArray(j.pending_controls) ? j.pending_controls.find((c) => c && c.kind === 'approval' && typeof c.prompt_id === 'string') : null;
+      if (a) {
+        const { kind: _kind, prompt_id: promptId, ...rest } = a;
+        text = JSON.stringify({ ...j, approval: { ...rest, event: 'approval.request', run_id: j.run_id, request_id: promptId, ...(j.session_id ? { session_id: j.session_id } : {}) } });
+      }
+    }
+    const head = filterResponseHeaders(r.headers ?? {});
+    delete head['content-length'];
+    delete head['content-encoding'];
+    res.writeHead(r.status, { ...head, 'content-length': Buffer.byteLength(text), 'x-hermes-ui-bridge': '1' });
+    res.end(text);
+  }
+
+  /** {requestId, generation} of a pending approval in a v0.22.3+ run status (`rid` null = the first one), else null */
+  function pendingApproval(r, rid) {
+    const list = r?.status === 200 && Array.isArray(r.json?.pending_controls) ? r.json.pending_controls : [];
+    const c = list.find((p) => p && p.kind === 'approval' && typeof p.prompt_id === 'string' && (!rid || p.prompt_id === rid));
+    return c && Number.isSafeInteger(c.execution_generation) ? { requestId: c.prompt_id, generation: c.execution_generation } : null;
   }
 
   /**
@@ -463,7 +516,8 @@ export function createBridgeHandler(config, deps) {
     ac.signal.addEventListener('abort', abortUpstream, { once: true });
     const headerTimer = setTimeout(() => up.destroy(Object.assign(new Error('response headers timed out'), { code: 'ETIMEDOUT' })), limits.chatHeaderTimeoutMs);
     endTurn = deps.turns?.begin(sessionHeader, profile) ?? (() => {});
-    const untrack = trackRun(sessionHeader && runKey(profile, sessionHeader), { reqId, up });
+    const runEntry = { reqId, up, runId: /** @type {string|null} */ (null), profile };
+    const untrack = trackRun(sessionHeader && runKey(profile, sessionHeader), runEntry);
     // 'close' = the upstream request is over: response consumed (also while detached), error, or stopped
     up.on('close', () => {
       // a record whose turn never answered is dropped; once there is a response, its own 'close' ends the record: the
@@ -507,6 +561,19 @@ export function createBridgeHandler(config, deps) {
         upRes.on('close', () => rec.end(!upRes.complete));
       }
 
+      // the turn's run id (first chunk's `id`) for a Stop through Hermes' run API; parsing ends after the first frame
+      if (isSse && sessionHeader) {
+        let idParser = createSseParser(({ event, data }) => {
+          if (event !== 'message' || !idParser) return;
+          try {
+            const id = JSON.parse(data)?.id;
+            if (typeof id === 'string' && SAFE_ID.test(id)) runEntry.runId = id;
+          } catch { /* not JSON */ }
+          if (runEntry.runId) idParser = null;
+        }, { maxFrameChars: 64 * 1024 });
+        const onData = (c) => { if (idParser) idParser.push(c); else upRes.off('data', onData); };
+        upRes.on('data', onData);
+      }
       // approval.request side channel (also while detached): inbox event + push, see src/approvals.mjs
       const watch = isSse && deps.approvals ? deps.approvals.observe({ sessionId: () => String(upRes.headers['x-hermes-session-id'] ?? sessionHeader ?? '') || null, profile }) : null;
       if (watch) {
@@ -598,12 +665,31 @@ export function createBridgeHandler(config, deps) {
     if (!SAFE_ID.test(sessionId)) return openaiError(res, 400, 'sessionId required', 'invalid_request_error');
     const profile = body?.profile ?? null;
     if (profile !== null && profile !== '' && !isProfileName(profile)) return openaiError(res, 400, 'Invalid profile', 'invalid_request_error');
-    const set = runs.get(runKey(profile, sessionId));
-    const stopped = set ? set.size : 0;
-    // closing the upstream connection is what makes Hermes interrupt the agent (docs/HERMES-API.md)
-    for (const r of set ?? []) r.up.destroy();
-    log.info('chat_stop', { reqId, stopped });
+    const set = [...(runs.get(runKey(profile, sessionId)) ?? [])];
+    // Hermes v0.22.3+ keeps a turn running when its connection closes: ask its run API first. Older Hermes answers
+    // 404/409 for a chat completion id; there (and when the id is not known yet) closing the upstream connection is
+    // what makes Hermes interrupt the agent (docs/HERMES-API.md).
+    const via = await Promise.all(set.map(async (r) => {
+      const ok = r.runId ? await stopUpstreamRun(r) : false;
+      if (!ok) r.up.destroy();
+      else {
+        // the turn ends by itself now (final chunk `cancelled` + [DONE] reaches the app); close it if it lingers
+        const t = setTimeout(() => r.up.destroy(), STOP_GRACE_MS);
+        t.unref?.();
+        r.up.once('close', () => clearTimeout(t));
+      }
+      return ok ? 'run_stop' : 'close';
+    }));
+    const stopped = set.length;
+    log.info('chat_stop', { reqId, stopped, runStop: via.filter((v) => v === 'run_stop').length });
     sendJson(res, 200, { stopped });
+  }
+
+  /** POST /v1/runs/{runId}/stop for one tracked turn; true when Hermes accepted it (2xx) */
+  async function stopUpstreamRun(r) {
+    const prefix = r.profile ? `/p/${r.profile}` : ''; // same form as the turn's own request
+    const out = await upstreamJson('POST', `${prefix}/v1/runs/${r.runId}/stop`, {}, {}, STOP_TIMEOUT_MS);
+    return out.status >= 200 && out.status < 300;
   }
 
   /** @param {import('node:http').IncomingMessage} req @param {import('node:http').ServerResponse} res */
@@ -617,7 +703,7 @@ export function createBridgeHandler(config, deps) {
     if (!checked.ok) return openaiError(res, 400, 'Invalid request path', 'invalid_request_error', 'invalid_path');
     // the forwarded target must stay below HERMES_BASE_URL's path (upstreamUrl throws otherwise; never for a checked path)
     try { upstreamUrl(config.upstream.baseUrl, req.url ?? ''); } catch { return openaiError(res, 400, 'Invalid request path', 'invalid_request_error', 'invalid_path'); }
-    cors(req, res);
+    const corsAllowed = cors(req, res);
     // Hermes profiles: `/p/<name>/<path>` routes like `<path>` (same allow-list) and is forwarded with the prefix
     // (req.url untouched). Bridge endpoints have no profile form; an unknown / invalid name never reaches Hermes.
     const split = splitProfilePath(fullPath);
@@ -627,12 +713,15 @@ export function createBridgeHandler(config, deps) {
     // the prefix must be literal in the raw target too (no %-escapes Hermes would decode into another name)
     if (profile && !String(req.url).startsWith(`/p/${profile}/`)) return openaiError(res, 404, 'Not found', 'invalid_request_error', 'unknown_profile');
 
-    if (req.method === 'OPTIONS' && req.headers.origin && config.corsOrigins.length) {
-      res.writeHead(204, {
+    // CORS preflight for every route family (the modules in server.mjs leave OPTIONS to this handler). Answered here,
+    // before the token check: a browser never sends credentials with a preflight. A foreign origin gets an empty 204,
+    // which the browser treats as a refusal.
+    if (req.method === 'OPTIONS' && req.headers.origin) {
+      res.writeHead(204, corsAllowed ? {
         'access-control-allow-methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
         'access-control-allow-headers': String(req.headers['access-control-request-headers'] ?? 'authorization, content-type, x-hermes-session-id, x-hermes-session-key'),
         'access-control-max-age': '600',
-      });
+      } : {});
       return res.end();
     }
     if (req.headers.upgrade) return openaiError(res, 501, 'WebSocket upgrades are not proxied by the bridge', 'bridge_error');
@@ -759,9 +848,16 @@ export function createBridgeHandler(config, deps) {
         res.setHeader('Allow', methods.join(', '));
         return openaiError(res, 405, 'Method not allowed', 'invalid_request_error', 'method_not_allowed');
       }
+      if (req.method === 'GET') return void runStatus(req, res, reqId);
       const answerRun = deps.approvals ? approvalAnswerRun(req.method, path) : null;
       const tap = answerRun ? (body) => deps.approvals.answered(answerRun, body, profile) : null; // other devices dismiss the card
-      return void apiPassthrough(req, res, reqId, { bodyMax: req.method === 'POST' ? APPROVAL_BODY_MAX : API_BODY_MAX, tap });
+      // Hermes v0.22.3+: complete an older app's {choice, request_id} with the turn's execution_generation
+      const rewrite = answerRun ? async (body) => {
+        const runPath = String(req.url).split('?')[0].replace(/\/approval$/, '');
+        const lookup = async (rid) => pendingApproval(await upstreamJson('GET', runPath, filterRequestHeaders(req.headers), undefined, LOOKUP_TIMEOUT_MS), rid);
+        return (await deps.approvals.answerBody(answerRun, body, profile, lookup))?.body ?? null;
+      } : null;
+      return void apiPassthrough(req, res, reqId, { bodyMax: req.method === 'POST' ? APPROVAL_BODY_MAX : API_BODY_MAX, tap, rewrite });
     }
     // a profile's /health: token required (above), no unauthenticated health budget needed
     if (profile && req.method === 'GET' && path === '/health') return void apiPassthrough(req, res, reqId);

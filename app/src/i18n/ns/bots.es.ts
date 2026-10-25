@@ -81,5 +81,7 @@ export const bots = {
     starterLast: '¿Qué hiciste por mí la última vez?',
     starterKnow: '¿Qué sabes ya de mí?',
     notInBotChat: 'No es posible en el chat de un bot: solo existe este chat, también en Hermes Desktop.',
+    readOnly: 'En esta versión de Hermes, el chat de {name} pertenece a Hermes: aquí llegan los recordatorios y los resultados de las rutinas, pero la app no puede escribir en él.',
+    readOnlyNewChat: 'Nuevo chat con {name}',
   },
 } satisfies typeof de;

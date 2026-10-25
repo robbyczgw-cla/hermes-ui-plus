@@ -1,12 +1,16 @@
 import json
 import os
+import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from helpers import FakeBackend, Running
 
 from hermes_ui_plus.config import VERSION, settings_from_mapping
+from hermes_ui_plus.hermes_adapter import HermesLibrary
 from hermes_ui_plus.library import LibraryService, profile_name, split_entries
 
 SKILLS = [
@@ -189,6 +193,66 @@ class LibraryUnitTest(unittest.TestCase):
             [{"name": "x", "description": None, "category": "", "enabled": True, "source": "weird"}]), "/h")
         self.assertEqual(svc._skill_list(), [{"name": "x", "description": "", "category": None, "enabled": True,
                                               "source": "local"}])
+
+
+class HermesLibrarySkillsTest(unittest.TestCase):
+    """HermesLibrary.skills() against fake Hermes modules in the v0.22.2 and v0.22.3+ shapes."""
+
+    RAW = [{"name": "zeta", "description": "z", "category": "tools"},
+           {"name": "alpha", "description": None, "category": None},
+           {"name": "beta", "description": "b", "category": "apps"}]
+
+    def _hermes(self, shape):
+        calls = []
+
+        def find_all(*, skip_disabled):
+            calls.append(("find", skip_disabled))
+            return list(self.RAW)
+
+        def sort(items):
+            calls.append(("sort", len(items)))
+            return sorted(items, key=lambda s: (s["category"] or "", s["name"]))
+
+        st = types.ModuleType("tools.skills_tool")
+        if shape == "0.22.2":
+            st._find_all_skills, st._sort_skills = find_all, sort
+        elif shape == "0.22.5":  # upstream 93fafc4d6f renamed both, no alias
+            st.find_all_skills, st.sort_skills = find_all, sort
+        su = types.ModuleType("tools.skill_usage")
+        su._read_bundled_names = lambda: ["beta"]
+        su._read_hub_installed_names = lambda: ["zeta"]
+        su._external_skill_names = lambda: []
+        tools = types.ModuleType("tools")
+        tools.skills_tool, tools.skill_usage = st, su
+        cfg = types.ModuleType("hermes_cli.config")
+        cfg.load_config = lambda: {}
+        sc = types.ModuleType("hermes_cli.skills_config")
+        sc.get_disabled_skills = lambda c, platform=None: {"alpha"} if platform is None else set()
+        hc = types.ModuleType("hermes_cli")
+        hc.config, hc.skills_config = cfg, sc
+        mods = {"tools": tools, "tools.skills_tool": st, "tools.skill_usage": su, "hermes_cli": hc,
+                "hermes_cli.config": cfg, "hermes_cli.skills_config": sc, "agent": None}  # no profile scopes
+        patcher = mock.patch.dict(sys.modules, mods)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return calls
+
+    def test_same_list_on_both_hermes_versions(self):
+        want = [
+            {"name": "alpha", "description": "", "category": None, "enabled": False, "source": "local"},
+            {"name": "beta", "description": "b", "category": "apps", "enabled": True, "source": "bundled"},
+            {"name": "zeta", "description": "z", "category": "tools", "enabled": True, "source": "hub"},
+        ]
+        for shape in ("0.22.2", "0.22.5"):
+            with self.subTest(shape=shape):
+                calls = self._hermes(shape)
+                self.assertEqual(HermesLibrary(None).skills(), want)
+                self.assertEqual(calls, [("find", True), ("sort", 3)])
+
+    def test_neither_name_is_unsupported(self):
+        self._hermes("none")
+        with self.assertRaises(AttributeError):  # LibraryService turns this into hermes_unsupported
+            HermesLibrary(None).skills()
 
 
 if __name__ == "__main__":

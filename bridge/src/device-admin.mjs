@@ -4,13 +4,15 @@
 //                                         1 hour; the app redeems it for its token: POST /bridge/pair/redeem)
 //   DELETE /bridge/devices/<id>       -> 204   (takes effect immediately; open inbox streams end within ~30 s)
 // CLI equivalent (works on the state directory, picked up by a running bridge): `hermes-ui-bridge devices …`.
+import { applyCors } from './cors.mjs';
+
 export const DEVICES_PATH = '/bridge/devices';
 const ITEM_RE = /^\/bridge\/devices\/(d_[a-z0-9]{10})$/;
 
 /**
- * @param {{auth: ReturnType<typeof import('./auth.mjs').createAuth>, devices: any, issue: (label: string) => {id: string|null, uri: string, webUri?: string, expiresAt: number|null}}} o
+ * @param {{auth: ReturnType<typeof import('./auth.mjs').createAuth>, devices: any, issue: (label: string) => {id: string|null, uri: string, webUri?: string, expiresAt: number|null}, corsOrigins?: string[]}} o
  */
-export function createDeviceAdmin({ auth, devices, issue }) {
+export function createDeviceAdmin({ auth, devices, issue, corsOrigins = [] }) {
   const json = (res, status, body) => {
     const buf = Buffer.from(JSON.stringify(body));
     res.writeHead(status, { 'content-type': 'application/json', 'content-length': buf.length, 'cache-control': 'no-store', 'x-hermes-ui-bridge': '1' });
@@ -22,6 +24,7 @@ export function createDeviceAdmin({ auth, devices, issue }) {
     matches: (req) => req.method !== 'OPTIONS' && (pathOf(req) === DEVICES_PATH || pathOf(req).startsWith(`${DEVICES_PATH}/`)),
     async handle(req, res) {
       const p = pathOf(req);
+      applyCors(corsOrigins, req, res);
       const who = auth.check(req);
       if (!who) {
         req.resume();
