@@ -2,6 +2,12 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com), and the project aims to follow [Semantic Versioning](https://semver.org).
 
+## Unreleased
+
+### Website
+- New imprint page (, linked in the footer and the sitemap) with the disclosure under Austrian law.
+- Privacy policy: names the controller (who is responsible for the website and for messages to the developer) and links the imprint. Default data flows describe services by kind (a hosted model service, the device's speech service, a public image archive, a map tile service, public script CDNs, the browser's push service); optional extras that you set up yourself keep their provider names. Dated 2026-10-28.
+
 ## 0.2.2 - 2026-10-25
 
 A patch release with two fixes: the desktop app pairs with a bridge set up by the default wizard, and HUI+ works with Hermes Agent v0.22.3 and newer. Tested with Hermes v0.22.2 and v0.22.5. Most of the fixes are in the bridge, so update it (`npx hermes-ui-plus-bridge@latest setup`, or your install method) and the optional hermes-ui-plus plugin (now 0.2.1: re-run `python3 hermes-plugin/install.py --hermes-home <home> --copy`, then restart the Hermes gateway). Apps still on 0.2.1 get the bridge fixes too.

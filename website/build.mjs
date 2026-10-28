@@ -216,6 +216,7 @@ ${body}
 <li><a href="/privacy"${current === 'privacy' ? ' aria-current="page"' : ''}>Privacy</a></li>
 <li><a href="/support"${current === 'support' ? ' aria-current="page"' : ''}>Support</a></li>
 <li><a href="/security"${current === 'security' ? ' aria-current="page"' : ''}>Security</a></li>
+<li><a href="/imprint"${current === 'imprint' ? ' aria-current="page"' : ''}>Imprint</a></li>
 <li><a href="${REPO}">Source code</a></li>
 <li><a href="${REPO}/blob/main/LICENSE">MIT license</a></li>
 </ul>
@@ -554,6 +555,20 @@ ${seal('seal-letter')}
 </div>
 </section>`;
 
+// Imprint: disclosure under § 25 of the Austrian Media Act and § 5 of the E-Commerce Act, for a private, non-commercial site.
+const imprintBody = `<h1>Imprint</h1>
+<p>Disclosure pursuant to § 25 of the Austrian Media Act (Mediengesetz) and information pursuant to § 5 of the Austrian E-Commerce Act (ECG).</p>
+<ul>
+<li>Media owner and publisher: Robert (Robby) Czesany</li>
+<li>Place of residence: Graz, Austria</li>
+<li>Contact: <a href="mailto:${MAIL}">${MAIL}</a></li>
+<li>Nature of the site: private, non-commercial project page for the free, open-source app ${esc(NAME)}. No goods or services are sold, no advertising.</li>
+<li>Editorial direction: information about ${esc(NAME)}, its download and its documentation.</li>
+</ul>
+<p>Operated by a private individual, not a company. No commercial register entry, no VAT number and no supervisory authority apply.</p>
+<p>Privacy: see the <a href="/privacy">privacy policy</a>. Supervisory authority for data protection: Austrian Data Protection Authority, Barichgasse 40–42, 1030 Vienna, <a href="mailto:dsb@dsb.gv.at">dsb@dsb.gv.at</a>.</p>
+<p>The software is provided as is, without warranty of any kind, under the MIT licence. Hermes Agent is a project of Nous Research; ${esc(NAME)} is not affiliated with it.</p>`;
+
 const supportBody = `<h1>Support</h1>
 <p>${esc(NAME)} is a volunteer project. Replies can take a few days.</p>
 
@@ -600,7 +615,7 @@ const JSON_LD = JSON.stringify({
 // sitemap.xml lists every indexable page (no lastmod: the pages are generated, a date here would only go stale)
 const SITEMAP = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-${['/', '/privacy', '/security', '/support'].map((p) => `  <url><loc>${SITE}${p}</loc></url>`).join('\n')}
+${['/', '/privacy', '/security', '/support', '/imprint'].map((p) => `  <url><loc>${SITE}${p}</loc></url>`).join('\n')}
 </urlset>
 `;
 
@@ -611,6 +626,7 @@ export function build() {
     'index.html': page({ file: 'index.html', path: '/', title: NAME, description: `${ID.tagline}. An unofficial, open-source mobile and web app for Hermes Agent: approvals, live tool steps, interactive answers and lists that stay up to date. No accounts, no tracking.`, current: '', body: indexBody, kind: 'home', jsonld: JSON_LD }),
     'privacy.html': page({ file: 'privacy.html', path: '/privacy', title: 'Privacy policy', description: `Privacy policy of ${NAME}: the developers collect no data; your data goes only to the server you set up.`, current: 'privacy', body: `<h1>${esc(/^#\s+(.*)$/m.exec(priv)[1])}</h1>\n${markdown(priv)}` }),
     'security.html': page({ file: 'security.html', path: '/security', title: 'Security', description: `Security policy and threat model of ${NAME}, and how to report a vulnerability.`, current: 'security', body: `<h1>${esc(/^#\s+(.*)$/m.exec(sec)[1])}</h1>\n${markdown(sec)}` }),
+    'imprint.html': page({ file: 'imprint.html', path: '/imprint', title: 'Imprint', description: `Imprint and disclosure for ${NAME} under Austrian law.`, current: 'imprint', body: imprintBody }),
     'support.html': page({ file: 'support.html', path: '/support', title: 'Support', description: `Get help with ${NAME}: GitHub issues, documentation and the contact address.`, current: 'support', body: supportBody }),
     'sitemap.xml': SITEMAP,
     '404.html': page({ file: '404.html', path: '/404', title: 'Page not found', description: 'Page not found.', current: '', body: notFoundBody, noindex: true }),

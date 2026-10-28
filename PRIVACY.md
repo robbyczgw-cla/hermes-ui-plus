@@ -1,8 +1,14 @@
 # Privacy policy
 
-_Last updated: 2026-10-16. Applies to the Hermes Interactive UI+ apps ("HUI+" on the home screen, "HUI+ for Hermes Agent" in the stores; Android, iOS, web, macOS) and the Hermes UI+ bridge._
+_Last updated: 2026-10-28. Applies to the Hermes Interactive UI+ apps ("HUI+" on the home screen, "HUI+ for Hermes Agent" in the stores; Android, iOS, web, macOS) and the Hermes UI+ bridge._
 
 Hermes Interactive UI+ is an unofficial, open-source community client for the Hermes Agent. It is not affiliated with Nous Research.
+
+## Who is responsible
+
+Controller under Article 4(7) GDPR for this website and for any message you send to the developer: Robert (Robby) Czesany, Graz, Austria, robby@robbyczesany.com. No data protection officer is appointed. The [imprint](https://hermesui.xyz/imprint) has the disclosure under Austrian law.
+
+The apps and the bridge run on your devices and your server. For what happens there, the person who runs the server is responsible, usually you.
 
 ## Summary
 
@@ -14,19 +20,19 @@ Hermes Interactive UI+ is an unofficial, open-source community client for the He
 
 | Data | Where it goes |
 |---|---|
-| Messages, attachments (photos, documents), voice recordings you send | From your device to **your bridge**, then to **your Hermes Agent**. Hermes sends the content to the AI model providers **you** configured in Hermes (for example Anthropic, OpenAI, OpenRouter or a local model). Their privacy policies apply to that part. |
-| Dictation audio | One of three ways, depending on your settings: processed by your device's speech recognition (Android may use Google's speech services for this, depending on the device); sent to your bridge and from there to the speech-to-text provider configured on it (Groq or OpenAI); or, if you add your own key in the app, sent from your device directly to that provider (Groq, OpenAI or a custom endpoint you enter). Not stored by the app after transcription. |
+| Messages, attachments (photos, documents), voice recordings you send | From your device to **your bridge**, then to **your Hermes Agent**. Hermes sends the content to the AI model providers **you** configured in Hermes (a hosted model service or a local model). Their privacy policies apply to that part. |
+| Dictation audio | One of three ways, depending on your settings: processed by your device's speech recognition (on Android this is the speech service built into the device, which can be provided by the phone's maker or by Google); sent to your bridge and from there to the speech-to-text provider configured on it (Groq or OpenAI); or, if you add your own key in the app, sent from your device directly to that provider (Groq, OpenAI or a custom endpoint you enter). Not stored by the app after transcription. |
 | Read-aloud text | Spoken by your device's voices; or sent via your bridge to the text-to-speech provider configured on it (Deepgram, ElevenLabs or OpenAI); or, with your own key in the app, sent from your device directly to that provider (OpenAI, Deepgram or a custom endpoint). |
 | Connection settings (server address, device token) | Stored on your device in secure storage (Keychain, Android Keystore). On the web, in the browser's local storage for the app's origin. |
 | Conversations and interactive state (checked items, votes) | Stored on your device. Hermes keeps its own session history on your server. |
-| Images in answers | Product, place and event photos from Hermes' answers are fetched by **your bridge's image proxy** (on by default, `BRIDGE_IMAGE_PROXY=off` disables it): the image host sees your bridge's address, not your device's, and gets no cookies or referrer. Other images are loaded from the host named in the answer (for example Wikimedia); unknown hosts only after you tap, and that host sees your IP address as with any web page. |
+| Images in answers | Product, place and event photos from Hermes' answers are fetched by **your bridge's image proxy** (on by default, `BRIDGE_IMAGE_PROXY=off` disables it): the image host sees your bridge's address, not your device's, and gets no cookies or referrer. Other images are loaded from the host named in the answer (for example a public image archive); unknown hosts only after you tap, and that host sees your IP address as with any web page. |
 | Image search (optional) | If you set up your own image search provider and key in the app (for example Brave), search terms go from your device directly to that provider. |
 | Reports of answers ("Report") | Stored on your device only (reason, optional comment). Nothing is sent automatically. "Send to developer" opens your mail app with a prepared e-mail (reason, app version, an answer excerpt only if you tick it); you decide whether to send it. |
 | Update check ("Check for updates", on by default, Settings → About) | At most once a day, when the app comes to the foreground, the app asks GitHub's public API for the newest release of this project: `GET https://api.github.com/repos/robbyczgw-cla/hermes-ui-plus/releases/latest` (installed pre-release versions: `…/releases?per_page=10`). The request has no login, cookies, referrer or identifiers; GitHub sees your IP address and the app's user agent, as with any web request ([GitHub's privacy statement](https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement)). Not made on iOS, in store installs, or while the device reports being offline. Turn it off with the switch. |
 | "Report a problem" (Settings → About, failure cards) | Nothing is sent automatically. The app shows the exact text first, then opens a prefilled GitHub issue in your browser, or copies the text instead. It contains only the app version, build and commit, platform and OS version, build flavor, connection type (bridge / direct / demo), Hermes and bridge versions if your server reports them, enabled feature flags, and the category and code of the last error. Never server addresses, IP addresses, tokens, e-mail addresses or message contents. You decide whether to submit the issue on GitHub. |
 | Share to HUI+, "Share as image" | Content shared to HUI+ from another app stays on your device until you tap Send in the share sheet; then it goes to your Hermes like any message or attachment. A shared answer image is rendered on your device and only leaves it where you send it (share sheet, download, clipboard). No request to a third party. |
-| Map tiles | Requested from OpenStreetMap-based tile servers when you open a map. |
-| Interactive HTML widgets | May load script libraries from public CDNs (jsDelivr, unpkg, cdnjs, esm.sh). The widgets run in a sandbox without access to your stored data. |
+| Map tiles | Requested from a public map tile service based on OpenStreetMap data when you open a map. |
+| Interactive HTML widgets | May load script libraries from public content delivery networks for JavaScript. The widgets run in a sandbox without access to your stored data. |
 
 ### Optional bridge extras (off unless you opt in)
 
@@ -49,7 +55,7 @@ Routines: for each bot on which you turn routines on, the bridge keeps a copy of
 
 Push is optional and off until you enable it.
 
-- **Web Push** goes through the push service of your browser vendor (Google, Mozilla or Apple). The payload is encrypted for your device.
+- **Web Push** goes through the push service of your browser's vendor. The payload is encrypted for your device.
 - **Android:** the APK from GitHub Releases does not use Firebase Cloud Messaging, so no push data goes to Google. While an answer is running, the app's own keep-alive service shows a notification on the device.
 - **Self-built apps** with Firebase Cloud Messaging (Android) or the Apple Push Notification service (iOS) deliver through Google or Apple. Your bridge then sends them a device push token and the notification content.
 - **Previews are off by default.** Notifications then only say that a message or approval request arrived, without its text. If you or your server's operator turn previews on, the notification text passes through Google or Apple.
