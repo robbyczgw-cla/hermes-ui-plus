@@ -5,7 +5,7 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
 ## Unreleased
 
 ### Website
-- New imprint page (, linked in the footer and the sitemap) with the disclosure under Austrian law.
+- New imprint page (/imprint, linked in the footer and the sitemap) with the disclosure under Austrian law.
 - Privacy policy: names the controller (who is responsible for the website and for messages to the developer) and links the imprint. Default data flows describe services by kind (a hosted model service, the device's speech service, a public image archive, a map tile service, public script CDNs, the browser's push service); optional extras that you set up yourself keep their provider names. Dated 2026-10-28.
 
 ## 0.2.2 - 2026-10-25

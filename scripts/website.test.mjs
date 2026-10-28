@@ -40,7 +40,7 @@ test('website: no scripts, no third-party resources, no inline handlers', () => 
 });
 
 test('website: local references resolve (demo videos are copied in at deploy time)', () => {
-  const clean = new Set(['/privacy', '/support', '/security', '/']);
+  const clean = new Set(['/privacy', '/support', '/security', '/imprint', '/']);
   for (const [f, html] of Object.entries(pages)) {
     for (const m of html.matchAll(/\s(?:src|href|poster)="(\/[^"#]*)(?:#[^"]*)?"/g)) {
       const p = m[1];
@@ -123,7 +123,7 @@ test('website: crawl and share metadata (canonical, sitemap, noindex 404, image 
     assert.match(html, /og:image:width" content="1920"/);
   }
   const urls = [...pages['sitemap.xml'].matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]);
-  assert.deepEqual(urls, ['/', '/privacy', '/security', '/support'].map((p) => `https://hermesui.xyz${p}`));
+  assert.deepEqual(urls, ['/', '/privacy', '/security', '/support', '/imprint'].map((p) => `https://hermesui.xyz${p}`));
   assert.match(readFileSync(join(SITE, 'robots.txt'), 'utf8'), /^Sitemap: https:\/\/hermesui\.xyz\/sitemap\.xml$/m);
   const ld = JSON.parse(/<script type="application\/ld\+json">([^<]+)<\/script>/.exec(pages['index.html'])[1]);
   assert.equal(ld['@type'], 'SoftwareApplication');
