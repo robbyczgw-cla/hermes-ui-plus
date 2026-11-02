@@ -183,7 +183,7 @@ export function Weather({ node }: { node: Partial<HuiWeather> }) {
         ) : null}
 
         {streaming ? <SkeletonLines lines={2} /> : null}
-        <ProvenanceChip node={node} />
+        <ProvenanceChip node={node} factual />
       </View>
     </Surface>
   );

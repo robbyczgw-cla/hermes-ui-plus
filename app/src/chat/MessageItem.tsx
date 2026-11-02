@@ -44,6 +44,9 @@ import { Icon, type IconName } from './icons';
 import { isLocalMessage } from './localMessages';
 import { Markdown } from './Markdown';
 import { ReplyChip } from './ReplyChip';
+import { QuoteBlock } from './QuoteBlock';
+import { quoteOf, splitQuotes } from './quote';
+import { selectionWithin, trackSelection, useReply } from './replyContext';
 import { LiveSentLine } from '../live/ui/LiveSentLine';
 import { LiveQuietLine } from '../live/ui/LiveNotes';
 import { mayHaveTaskList, splitTaskListsCached } from './taskLists';
@@ -73,6 +76,10 @@ import { AnswerScope } from './answers/AnswerScope';
 import { summaryBefore } from './answers/collapse';
 import { withCitationSources } from './answers/citations';
 import { withRetrievedSources } from './answers/webSources';
+import { EvidenceContext } from '../ui/components/modules/EvidenceContext';
+import { ProvenanceChip } from '../ui/components/modules/ProvenanceChip';
+import { factualBlock } from './answers/evidence';
+import type { EvidenceView } from '../ui/components/modules/a/misc';
 import { dedupeTranslations } from './answers/dedupe';
 import { splitProgressNotes, type ProgressNote } from '../hermes/progressNotes';
 import { hideToolMarkup } from './toolMarkup';
@@ -90,6 +97,7 @@ import type { TFn, TKey } from '../i18n';
 import { a11yState } from '../ui/lib/a11yState';
 import { cronDelivery } from '../bots/core';
 import { CronDeliveryMarker } from '../bots/CronDeliveryMarker';
+import { StoppedRunCard } from '../bots/StoppedRunCard';
 
 /**
  * HuiAction handler of the chat shell. `messageId` = the assistant message holding the node (the `ask`
@@ -104,28 +112,58 @@ export const UserMessage = memo(function UserMessage({ message }: { message: Cha
   const t = useTheme();
   const tr = useT();
   const copy = useCopy();
+  // "Antworten" (quote.ts): quoted excerpts ride in front of the typed text; the bubble shows them as quote boxes
+  const quoted = useMemo(() => splitQuotes(message.text), [message.text]);
+  const typed = quoted.text;
   // protocol replies (`[choice:…] …`, `[form:…] {…}`, ask lines): the stored text stays the machine string,
   // the user sees the free text (if any) + a short localized "↩ …" chip per reply
-  const reply = useMemo(() => parseReplyMessage(message.text, tr), [message.text, tr]);
+  const reply = useMemo(() => parseReplyMessage(typed, tr), [typed, tr]);
   // a job's delivery into a Bot Chat (`[Cronjob "…" output …]`, bots/core.ts): a marker + its output, not a bubble
   const cron = useMemo(() => cronDelivery(message.text), [message.text]);
-  const bubbleText = reply ? reply.head : message.text;
-  const copyText = reply ? replyCopyText(reply) : message.text;
-  const hasText = !!bubbleText.trim();
+  const bubbleText = reply ? reply.head : typed;
+  const copyText = reply ? replyCopyText(reply) : typed;
+  const hasText = !!bubbleText.trim() || quoted.quotes.length > 0;
+  const replyCtx = useReply();
+  if (replyCtx) trackSelection();
+  const canReply = !!replyCtx?.canQuote && !message.sendPending && !message.sendQueued && !!copyText.trim();
+  const doReply = () => replyCtx?.reply(message.id, selectionWithin(copyText) || (reply ? copyText : undefined));
+  const [menuOpen, setMenuOpen] = useState(false);
   // Settings: Darstellung → Nachrichtenstil (Blase / Schlicht) + Schriftgröße, Chat → Zeitstempel
   const { prefs } = usePreferences();
   const plain = prefs.bubbleStyle === 'plain';
   const doCopy = () => copy(copyText, tr('chat.message.copied'));
+  // long-press: "Antworten" / "Kopieren" (copy right away where the chat cannot quote)
+  const onLongPress = canReply ? () => setMenuOpen(true) : doCopy;
   const hl = useMessageHighlight(message.id); // "Im Chat suchen"
-  // VoiceOver: the bubble is one element (plain text, no controls inside); long-press copy is offered as
-  // an accessibility action so it stays reachable without the gesture
+  // VoiceOver: the bubble is one element (plain text, no controls inside); copy and reply are offered as
+  // accessibility actions so they stay reachable without the gesture
   const a11yCopy = {
-    accessibilityActions: [{ name: 'longpress', label: tr('actions.copy') }],
+    accessibilityActions: [{ name: 'longpress', label: tr('actions.copy') }, ...(canReply ? [{ name: 'reply', label: tr('chat.quote.reply') }] : [])],
     onAccessibilityAction: (e: { nativeEvent: { actionName: string } }) => {
       if (e.nativeEvent.actionName === 'longpress') doCopy();
+      else if (e.nativeEvent.actionName === 'reply') doReply();
     },
   };
-  if (cron) return <CronDeliveryMarker delivery={cron} at={message.createdAt} />;
+  const menuItems = useMemo<MenuItem[]>(
+    () =>
+      menuOpen
+        ? [
+            { key: 'reply', icon: 'reply', label: tr('chat.quote.reply'), hint: tr('chat.quote.replyHint'), onPress: doReply },
+            { key: 'copy', icon: 'copy', label: tr('actions.copy'), onPress: doCopy },
+          ]
+        : [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [menuOpen, tr, copyText],
+  );
+  if (cron) {
+    return (
+      <>
+        <CronDeliveryMarker delivery={cron} at={message.createdAt} onReply={canReply && message.feed ? doReply : undefined} />
+        {/* the run skipped a step that needs an approval (bots/stoppedRuns.ts); nothing when unknown */}
+        <StoppedRunCard id={message.id} />
+      </>
+    );
+  }
   return (
     <View style={styles.userRow}>
       {message.sendPending ? (
@@ -135,7 +173,7 @@ export const UserMessage = memo(function UserMessage({ message }: { message: Cha
       )}
       {hasText ? (
         <Pressable
-          onLongPress={doCopy}
+          onLongPress={onLongPress}
           delayLongPress={350}
           style={({ pressed }) => [
             styles.userBubble,
@@ -148,20 +186,36 @@ export const UserMessage = memo(function UserMessage({ message }: { message: Cha
           accessibilityHint={tr('chat.message.longPressCopy')}
           {...a11yCopy}
         >
-          <Text style={[t.typography.reading, { color: t.colors.text }, plain && styles.userPlainText]} selectable={Platform.OS === 'web'}>
-            {hl ? <Highlighted text={bubbleText} hl={hl} /> : bubbleText}
-          </Text>
+          {quoted.quotes.length ? (
+            <View style={[styles.userQuotes, !bubbleText.trim() && styles.userQuotesOnly]}>
+              {quoted.quotes.map((q, i) => (
+                <QuoteBlock
+                  key={`${i}:${q.ref ?? ''}`}
+                  quote={q}
+                  pos={{ n: i + 1, of: quoted.quotes.length }}
+                  onPress={replyCtx ? () => replyCtx.jump(message.id, q) : undefined}
+                  testID={`msg-quote-${i}`}
+                />
+              ))}
+            </View>
+          ) : null}
+          {bubbleText.trim() ? (
+            <Text style={[t.typography.reading, { color: t.colors.text }, plain && styles.userPlainText]} selectable={Platform.OS === 'web'}>
+              {hl ? <Highlighted text={bubbleText} hl={hl} /> : bubbleText}
+            </Text>
+          ) : null}
         </Pressable>
       ) : null}
+      {menuOpen ? <ActionMenu visible onClose={() => setMenuOpen(false)} label={tr('chat.quote.messageMenu')} items={menuItems} /> : null}
       {reply
         ? reply.replies.map((r, i) => (
-            <Pressable key={`${r.kind}:${r.id}:${i}`} onLongPress={doCopy} delayLongPress={350} accessible={false} style={styles.replyRow}>
+            <Pressable key={`${r.kind}:${r.id}:${i}`} onLongPress={onLongPress} delayLongPress={350} accessible={false} style={styles.replyRow}>
               <ReplyChip text={r.display} />
             </Pressable>
           ))
         : null}
       {message.turnExtras ? <TurnExtrasChips extras={message.turnExtras} /> : null}
-      {message.live ? <LiveSentLine batches={message.live} /> : null}
+      {message.live ? <LiveSentLine batches={message.live} messageId={message.id} /> : null}
       {message.sendQueued ? <QueuedActions message={message} /> : null}
       {prefs.showTimestamps ? <Timestamp at={message.createdAt} /> : null}
     </View>
@@ -262,14 +316,19 @@ type AssistantProps = {
   compareBefore?: string;
   /** a later `[reformat:…]` request refers to this answer → "umgeformt ↓" marker (A1) */
   reformatted?: boolean;
+  /** what the chat's tools back up to this answer (chat/answers/evidence.ts); undefined = unknown */
+  evidence?: EvidenceView;
 };
 
-export const AssistantMessage = memo(function AssistantMessage({ conversationId, ...props }: AssistantProps) {
-  // FindScope: "Im Chat suchen" marks the matches of this answer (findContext.tsx)
+export const AssistantMessage = memo(function AssistantMessage({ conversationId, evidence, ...props }: AssistantProps) {
+  // FindScope: "Im Chat suchen" marks the matches of this answer (findContext.tsx); EvidenceContext: data cards check
+  // their source against the chat's tool calls (ProvenanceChip)
   const body = (
-    <FindScope messageId={props.message.id}>
-      <AssistantBody {...props} conversationId={conversationId} />
-    </FindScope>
+    <EvidenceContext.Provider value={evidence}>
+      <FindScope messageId={props.message.id}>
+        <AssistantBody {...props} conversationId={conversationId} />
+      </FindScope>
+    </EvidenceContext.Provider>
   );
   return conversationId ? (
     <NodeScope conversationId={conversationId} messageId={props.message.id} createdAt={props.message.createdAt}>
@@ -289,7 +348,9 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
   const id = message.id;
   // bind the message id (ask action) – stable per message so memoized segments don't re-render
   const onAction = useCallback<ActionHandler>((a, v, m) => onShellAction(a, v, m, id), [onShellAction, id]);
-  const local = isLocalMessage(message);
+  // a Bot Chat row on a bot's timeline (bots/timeline.ts) is read-only like a local one: copy, quote and read aloud stay
+  const ownLocal = isLocalMessage(message);
+  const local = ownLocal || !!message.feed;
   // generated images on the assistant message; skip those already shown inline as a hui image
   const atts = message.attachments;
   const extraAtts = useMemo(() => atts?.filter((a) => !message.text.includes(a.uri)), [atts, message.text]);
@@ -350,6 +411,9 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
   // "Antwort melden" (Play AI-generated content policy) keeps its report sheet (compliance/)
   const report = useAnswerReport(id);
   const actions = useAnswerActions();
+  const replyCtx = useReply();
+  if (replyCtx) trackSelection();
+  const doReply = () => replyCtx?.reply(id, selectionWithin(media.text));
   const { formatDate, formatRelative, locale } = useLocale();
   const [menuOpen, setMenuOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
@@ -371,10 +435,15 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
       reported: !!report.report,
       canBranch: !!actions?.canBranch,
       canHandOff: !!actions?.handOff && !!message.quick,
+      canReply: !!replyCtx?.canQuote && !!quoteOf(message),
+      feed: !!message.feed,
     });
     const items: MenuItem[] = [];
     for (const k of keys) {
       switch (k) {
+        case 'reply':
+          items.push({ key: k, icon: 'reply', label: tr('chat.quote.reply'), hint: tr('chat.quote.replyHint'), onPress: doReply });
+          break;
         case 'handOff':
           if (actions?.handOff) items.push({ key: k, icon: 'branch', label: tr('quick.handOff.action'), hint: tr('quick.handOff.a11y'), onPress: () => actions.handOff?.(id) });
           break;
@@ -420,7 +489,7 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
       }
     }
     return items;
-  }, [menuOpen, local, streaming, failed, isLast, hasCopy, recovering, message, canShareImage, report.report, actions, tr, copy, share, media.text, id]);
+  }, [menuOpen, local, streaming, failed, isLast, hasCopy, recovering, message, canShareImage, report.report, actions, tr, copy, share, media.text, id, replyCtx]); // eslint-disable-line react-hooks/exhaustive-deps
   const menuHeader = useMemo(() => {
     if (!menuOpen) return null;
     const lines: string[] = [];
@@ -451,7 +520,7 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
         copy: () => copy(plainCopyText(media.text), tr('chat.message.answerCopied')),
         copyMarkdown: () => copy(media.text.trim(), tr('menus.answer.markdownCopied')),
         retry: actions ? () => actions.retry('same') : undefined,
-        speak: local ? undefined : speaking ? stopSpeaking : () => toggleSpeaking({ id, text: shownText, conn: voiceConn, t: tr, locale }),
+        speak: ownLocal ? undefined : speaking ? stopSpeaking : () => toggleSpeaking({ id, text: shownText, conn: voiceConn, t: tr, locale }),
         speaking,
         share: () => void share(plainCopyText(media.text)),
         shareImage: () => setImageOpen(true),
@@ -531,7 +600,7 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
       {!streaming && media.refs.length ? <MediaFiles refs={media.refs} conn={mediaConn} /> : null}
       {notes.length ? <MemoryNotes notes={notes} /> : null}
       {reminders.length ? <ReminderCards reminders={reminders} /> : null}
-      {message.status === 'done' ? <LiveQuietLine messageId={message.id} /> : null}
+      {message.status !== 'streaming' ? <LiveQuietLine messageId={message.id} /> : null}
       {message.truncated ? (
         <Text testID="msg-truncated" style={[t.typography.caption, styles.stopped, { color: t.colors.subtle }]}>{tr(truncatedKey(message))}</Text>
       ) : null}
@@ -540,7 +609,7 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
       ) : null}
       {isCut(message) ? (
         // direct backend, app was in the background: calm notice with "Fortsetzen" / "Neu starten" (background/cut.ts)
-        <CutNotice message={message} isLast={isLast} onRetry={onRetry} />
+        <CutNotice message={message} isLast={isLast && !message.feed} onRetry={onRetry} />
       ) : message.status === 'error' ? (
         <View style={[styles.errorBox, { backgroundColor: t.colors.dangerSoft, borderRadius: t.radii.control }]}>
           <Icon name="alert" size={18} color={t.colors.danger} />
@@ -555,7 +624,7 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
               size="small"
               onPress={() => router.push({ pathname: '/settings', params: { edit: profile.id } })}
             />
-          ) : isLast ? (
+          ) : isLast && !message.feed ? (
             <View style={{ gap: 6 }}>
               <Button label={tr('chat.message.retry')} icon={(color, size) => <Icon name="retry" size={size} color={color} />} size="small" onPress={onRetry} testID="msg-retry" />
               {pausedChat && actions?.canBranch && !isFirstTurn ? (
@@ -606,9 +675,11 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
         perfWrap('ActionRow', <View style={styles.actionsRow}>
           {/* visible row: Kopieren · Vorlesen · Teilen · Als Bild teilen · ⋯ (retry variants, branch, Melden live in the menu) */}
           {hasCopy ? <CopyButton onCopy={() => copy(copyText(), tr('chat.message.answerCopied'))} /> : null}
-          {local || !hasCopy ? null : <SpeakButton message={shownText === message.text ? message : { id: message.id, text: shownText }} conn={voiceConn} onError={toast} />}
+          {ownLocal || !hasCopy ? null : <SpeakButton message={shownText === message.text ? message : { id: message.id, text: shownText }} conn={voiceConn} onError={toast} />}
           {hasCopy ? <IconButton icon="share" label={tr('actions.share')} onPress={() => void share(copyText())} /> : null}
           {canShareImage ? <IconButton icon="image" label={tr('menus.answer.shareImage')} onPress={() => setImageOpen(true)} /> : null}
+          {/* web: no swipe, so "Antworten" is a visible button (phones: swipe right or the ⋯ menu) */}
+          {Platform.OS === 'web' && replyCtx?.canQuote && !ownLocal ? <IconButton icon="reply" label={tr('chat.quote.reply')} onPress={doReply} /> : null}
           {openMenu ? <IconButton icon="more" label={tr('menus.answer.more')} onPress={openMenu} /> : null}
           {showTime ? <Timestamp at={message.createdAt} inline /> : null}
           {/* quick thread, newest answer: the way on to the full agent */}
@@ -619,7 +690,7 @@ function AssistantBody({ message, isLast, isFirstTurn = false, onAction: onShell
       ) : null}
       {reformatted && !streaming ? <ReformattedMarker /> : null}
       {/* A1 "Umformen" chips: last finished answer only (the tag reformats "the last answer"); not under quick answers */}
-      {isLast && !local && !actions?.quick && message.status !== 'stopped' ? <TransformBar message={message} onAction={onAction} segments={segments} text={media.text} /> : null}
+      {isLast && !ownLocal && !actions?.quick && message.status !== 'stopped' ? <TransformBar message={message} onAction={onAction} segments={segments} text={media.text} /> : null}
       {followups && isLast && !streaming && uiPrefs.showFollowups && !ownSuggestions ? (
         <View style={styles.followups}>
           {/* follow-ups: vertical list of full questions (Suggestions layout "row") */}
@@ -823,7 +894,7 @@ function CopyButton({ onCopy }: { onCopy: () => void }) {
   );
 }
 
-function IconButton({ icon, label, onPress }: { icon: Extract<IconName, 'copy' | 'retry' | 'share' | 'image' | 'more'>; label: string; onPress: () => void }) {
+function IconButton({ icon, label, onPress }: { icon: Extract<IconName, 'copy' | 'retry' | 'share' | 'image' | 'more' | 'reply'>; label: string; onPress: () => void }) {
   const t = useTheme();
   return (
     <Pressable
@@ -838,7 +909,7 @@ function IconButton({ icon, label, onPress }: { icon: Extract<IconName, 'copy' |
   );
 }
 
-const SegmentView = memo(function SegmentView({
+export const SegmentView = memo(function SegmentView({
   seg,
   first,
   live,
@@ -909,6 +980,8 @@ export function HuiSegment({ seg, onAction, route }: { seg: Extract<Segment, { k
       <View>
         <Text style={[t.typography.caption, styles.fallbackNote, { color: t.colors.muted }]}>{tr('chat.message.componentFallback')}</Text>
         <HuiView node={seg.node} streaming={false} onAction={onAction} routeFormat={route} animateIn={fadeIn} />
+        {/* a product / place / weather block the app could not read still states facts: no web lookup → say so */}
+        {factualBlock(seg.raw) ? <ProvenanceChip factual style={styles.fallbackChip} /> : null}
         <RawBlock raw={seg.raw} />
       </View>
     );
@@ -1000,10 +1073,14 @@ const styles = StyleSheet.create({
   time: { marginTop: 2, fontVariant: ['tabular-nums'] },
   timeInline: { marginTop: 0, marginLeft: 6 },
   replyRow: { maxWidth: '100%', alignItems: 'flex-end' },
+  // quote boxes above the typed text: wide enough to read two lines even under a one-word follow-up
+  userQuotes: { gap: 4, marginBottom: 6, minWidth: 220, maxWidth: '100%' },
+  userQuotesOnly: { marginBottom: 0 },
   assistant: { width: '100%' },
   segGap: { marginTop: 14 },
   errorBox: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, marginTop: 8 },
   fallbackNote: { marginBottom: 6 },
+  fallbackChip: { marginTop: 6 },
   rawWrap: { marginTop: 8 },
   rawBody: { marginTop: 6, maxHeight: 320 },
   errorTitle: { fontWeight: '600' },

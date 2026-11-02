@@ -23,6 +23,13 @@ import type { CreateResult } from './create/api';
 import { createOffer, createShowsTab, type CreatedBot, type CreateOffer } from './create/core';
 import { useBotCreate } from './create/useBotCreate';
 import { useDemoBotsTab } from './useDemoBotsTab';
+import { workingOf } from './activity';
+import { parkBot, type AboutFailure } from './aboutApi';
+import type { ArchivedBot } from './about';
+import { useActivity } from './useActivity';
+import { usePreference } from '../settings/PreferencesProvider';
+import { fetch as expoFetch } from 'expo/fetch';
+import type { FetchLike } from '../hermes/stream';
 
 export type BotsTab = {
   profileId: string;
@@ -47,6 +54,9 @@ export type BotsTab = {
   created(bot: CreatedBot): void;
   /** the offline demo's tab (bots/useDemoBotsTab.ts): invented bots, made on this device only */
   demo?: true;
+  /** archived bots (Hermes' gateway.parked through the plugin) this device may bring back; [] when none / unknown */
+  archived: ArchivedBot[];
+  restore(name: string): Promise<{ ok: true } | { ok: false; failure: AboutFailure }>;
 };
 
 export function useBotsTab(profile: ConnectionProfile | undefined, o: { enabled: boolean; onOpen(meta: ConversationMeta): void }): BotsTab | null {
@@ -67,9 +77,18 @@ export function useBotsTab(profile: ConnectionProfile | undefined, o: { enabled:
   const profileId = hermes?.id ?? '';
 
   const attention = useMemo(() => attentionOf(allAttention, profileId), [allAttention, profileId]);
+  // running work the bridge knows (turns from any device, routines), bots/activity.ts; Routines off: no routine runs
+  const activity = useActivity(hermes, available);
+  const routinesOn = usePreference('routines');
   const rows = useMemo(
-    () => (available ? rosterRows({ bots, items: convs.list, profileId, running, unread, attention }) : []),
-    [available, bots, convs.list, profileId, running, unread, attention],
+    () =>
+      available
+        ? rosterRows({ bots, items: convs.list, profileId, running, unread, attention }).map((r) => {
+            const w = workingOf(activity, r.bot.default ? undefined : r.bot.name, { localRunning: r.working, botChatSession: r.chat?.hermesSessionId, routinesOn });
+            return { ...r, working: w.working, workingLine: w.line };
+          })
+        : [],
+    [available, bots, convs.list, profileId, running, unread, attention, activity, routinesOn],
   );
   const byKey = useMemo(() => new Map<string, HermesBot>(bots.map((b) => [b.default ? 'default' : b.name, b])), [bots]);
   const nameOf = useCallback(
@@ -165,10 +184,25 @@ export function useBotsTab(profile: ConnectionProfile | undefined, o: { enabled:
     return { count: s.count, names: s.bots.map(nameOf), first: s.first };
   }, [attention, nameOf]);
 
+  const restore = useCallback(
+    async (name: string) => {
+      const p = live.current.hermes;
+      if (!p) return { ok: false as const, failure: 'offline' as const };
+      const r = await parkBot(expoFetch as unknown as FetchLike, { baseUrl: p.baseUrl, apiKey: p.apiKey }, name, 'restore');
+      if (!r.ok) return { ok: false as const, failure: r.failure };
+      refreshCreate();
+      void ensureBots(p, true);
+      return { ok: true as const };
+    },
+    [refreshCreate],
+  );
+
   if (demoTab) return demoTab;
   if (!available || !hermes) return null;
   return {
     profileId, rows, waiting, nameOf, opening, notice, dismissNotice: () => setNotice(null), unreachable, open, openWaiting, refresh,
     create: createOffer(createConfig), createBot, created,
+    archived: createConfig?.manage.allowed ? createConfig.archived : [],
+    restore,
   };
 }

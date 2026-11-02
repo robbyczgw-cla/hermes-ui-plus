@@ -41,6 +41,8 @@ export type InboxSummary = {
   read: boolean;
   /** ms */
   createdAt: number;
+  /** a step Hermes skipped in this run because it needs an approval (cron runs never ask, `approvals.cron_mode`) */
+  stopped?: { description?: string; command?: string };
 };
 
 export type InboxItem = InboxSummary & { text: string; error?: string };
@@ -80,7 +82,17 @@ export function parseInboxSummary(raw: unknown): InboxSummary | null {
     // `read` (served shape) or `readAt` (stored shape) – anything else counts as unread
     read: raw.read === true || (typeof raw.readAt === 'number' && raw.readAt > 0),
     createdAt: typeof raw.createdAt === 'number' && Number.isFinite(raw.createdAt) ? raw.createdAt : 0,
+    ...stoppedOf(raw.blocked),
   };
+}
+
+/** `blocked` of a bridge entry (routines-inbox.mjs): what the run wanted to do; one plain line each, capped. */
+function stoppedOf(v: unknown): { stopped?: { description?: string; command?: string } } {
+  if (!isObj(v)) return {};
+  const line = (x: unknown) => (typeof x === 'string' && x.trim() ? x.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200) : undefined);
+  const description = line(v.description);
+  const command = line(v.command);
+  return { stopped: { ...(description ? { description } : {}), ...(command ? { command } : {}) } };
 }
 
 export function parseInboxItem(raw: unknown): InboxItem | null {

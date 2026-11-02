@@ -3,7 +3,7 @@
  *   POST {origin}/bridge/uploads   origin = profile baseUrl without trailing /v1
  *   Authorization: Bearer <BRIDGE_TOKEN>, Content-Type: <mime>, X-Filename: encodeURIComponent(name)
  *   body = raw file bytes (no multipart), max 20 MB
- *   201 {id, path, name, size, mimeType} | 400/401/413/415 {error:{message,type}}
+ *   201 {id, path, name, size, mimeType} | 400/401/413/415/429 {error:{message,type}}
  * Bridge detection: GET {origin}/health → response header `X-Hermes-UI-Bridge: 1`.
  */
 import { AttachmentError, LIMITS } from './types.ts';
@@ -29,6 +29,18 @@ export function uploadHeaders(att: Pick<Attachment, 'name' | 'mimeType'>, token:
     'X-Filename': encodeURIComponent(att.name),
     Accept: 'application/json',
   };
+}
+
+/** A user-given name as one safe file name (no folders, no hidden file, within the 255-byte limit of file systems). */
+export function shareFileName(name: string, fallback: string): string {
+  // eslint-disable-next-line no-control-regex
+  const base = (name.split(/[/\\]/).pop() ?? '').replace(/[\x00-\x1f\x7f:]/g, '_').replace(/^\.+/, '').trim();
+  if (!base) return fallback;
+  const dot = base.lastIndexOf('.');
+  const ext = dot > 0 && base.length - dot <= 16 ? base.slice(dot) : '';
+  let stem = ext ? base.slice(0, dot) : base;
+  while (stem.length > 1 && new TextEncoder().encode(stem + ext).length > 200) stem = Array.from(stem).slice(0, -1).join('');
+  return stem + ext;
 }
 
 export function isBridgeHeader(value: string | null | undefined): boolean {
@@ -57,6 +69,8 @@ export function uploadErrorMessage(status: number, body: string, name: string): 
       return { key: 'attachments.upload.tooLarge', vars: { name, max: formatBytes(LIMITS.maxUploadBytes) } };
     case 415:
       return { key: 'attachments.upload.unsupportedType', vars: { name } };
+    case 429:
+      return { key: 'attachments.upload.busy', vars: { name } };
     case 400: {
       const reason = serverMessage(body);
       return reason ? { key: 'attachments.upload.failedWithReason', vars: { name, reason } } : { key: 'attachments.upload.failed', vars: { name } };

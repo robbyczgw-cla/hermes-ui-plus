@@ -218,3 +218,4 @@ const chat = useHermesChat(conn, { ...sessionOptions(conv), modelOptions: effect
 - UI bridge (`bridge/src/bridge.mjs`) only proxies `/v1/*` → `/api/sessions*` and `/api/model/options` return 404 via the bridge, so sync and
   the options catalog are off for the bridge profile. To enable: pass through `/api/sessions` (GET/PATCH/DELETE) and `/api/model/options`.
 - Mock server has no `/api/sessions` (feature auto-off there).
+

@@ -207,6 +207,7 @@ test('CSP: enforced on HTML (index + SPA fallback), not on assets; report-only /
     for (const s of ["'unsafe-inline'", "'unsafe-eval'", ...SANDBOX_CDN_ORIGINS]) assert.ok(d['script-src'].includes(s), s);
     assert.ok(!d['script-src'].some((s) => s.startsWith("'sha256-") || s.startsWith("'nonce-")), 'hashes/nonces would disable unsafe-inline for the sandbox');
     assert.ok(!d['connect-src'].includes('http:') && !d['img-src'].includes('http:'), 'no plain-http exfiltration');
+    assert.ok(d['connect-src'].includes('blob:'), 'a picked file is read through its blob URL: without it no attachment works on the web');
     assert.ok(!csp.includes('*'), 'no wildcard sources');
   }
   const js = await get('/assets/plain.js');

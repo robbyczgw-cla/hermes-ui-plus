@@ -232,3 +232,10 @@ test('without a Bots tab the default bot\'s thread (reminders) is a chat row onc
   ];
   assert.equal(previewOf(msgs as never), 'Buy tea: Time to buy tea.');
 });
+
+test('default bot lookup applies to a direct Hermes connection without the bridge (reminders must not vanish)', async () => {
+  const { defaultBotLookupApplies } = await import('./core.ts');
+  assert.equal(defaultBotLookupApplies({ kind: 'hermes', apiKey: 'k' }), true);
+  assert.equal(defaultBotLookupApplies({ kind: 'hermes', apiKey: '' }), false);
+  assert.equal(defaultBotLookupApplies({ kind: 'claude', apiKey: 'k' }), false);
+});

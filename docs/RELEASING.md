@@ -64,13 +64,18 @@ scripts/test-instance/ti.sh --host mac conversation-test
   the way the chat renders a block. Every fixture has to show text or a photo, never nothing, an empty box or a
   shimmer that does not settle. A new node type has to be added to `app/src/ui/renderFixtures.ts` (a unit test fails
   otherwise).
-- **Live conversation test** (`bridge/eval/conversations/run.mjs`, via `ti.sh … conversation-test`): realistic
-  multi-turn chats (dictation typos, short follow-ups such as "Fotos?", "als Tabelle?") through the bridge with its
-  **default configuration** (no image search keys, router `heuristic`), what production and most users run, on the
-  throwaway test instance (session + lock, left stopped). Every answer is parsed with the app's parser: each block must
-  render content, and images must arrive as real URLs (checked through the bridge's image proxy) or show the visible
-  fallback. Report: `$HUI_PRIVATE_DIR/reports/conversations/<time>/conversation-report.md` (outside the repo). For product questions with
-  real tool data, set the instance up once with keyless web search: `ti.sh --host mac setup --force-config --web ddgs`.
+- **Live conversation test** (`bridge/eval/conversations/run.mjs`, via `ti.sh … conversation-test`, details in
+  [CHAT-REGRESSION.md](CHAT-REGRESSION.md)): the QA journeys (the twelve everyday chats, Live-card shopping, reminders,
+  memory, typos, follow-ups such as "Fotos?", "als Tabelle?", a Spanish chat) through the bridge with its **default
+  configuration** (no image search keys, router `heuristic`), what production and most users run, on the throwaway test
+  instance (session + lock, left stopped), with a cheap model and a fixed token budget. Requests are built and streams
+  parsed by the app's own code; every answer is drawn by the app's real components and checked for what a user would
+  call broken (empty gaps, raw JSON, "no data" over real content, false reminder or memory confirmations …); scripted
+  taps send what the app would send. Report: `conversation-report.md` (renderer, agent-content and environment
+  failures kept apart) in the `--out` directory, outside the repo. For product questions with real tool data, set the
+  instance up once with keyless web search: `ti.sh --host mac setup --force-config --web ddgs`.
+- The model-free half of the same gate (every recorded QA answer replayed through the real components) runs in
+  `scripts/check.sh all`; a release needs it green like every other test.
 
 #### Every shipped platform: install, pair, chat (required)
 
@@ -85,7 +90,7 @@ could not pair with a default bridge because no platform run like this was done.
 |---|---|---|
 | Android | APK / AAB of the release | on a device or the emulator: paste or scan the wizard's link, one chat (`scripts/e2e/smoke.sh --live <pair-link file>` covers the pair + chat part) |
 | iOS | TestFlight build | on a device: scan the wizard's QR code, one chat |
-| Web | the release web bundle | served by the bridge (`setup --web-dir …`), open the wizard's web pair link in a browser, one chat |
+| Web | the release web bundle | served by the bridge (`setup --web-dir …`), open the wizard's web pair link in a browser, one chat; a file: `node scripts/ux-check/web-attach.mjs --web-dir=<bundle>` |
 | macOS | the notarised DMG | install from the DMG on a Mac without an earlier install (or with the app's data removed), paste the wizard's link, one chat |
 | Linux | the AppImage | automated, real window: `scripts/desktop-check/linux.sh --appimage <file> --hermes-home <dir>` on a Linux host (below) |
 | Windows | only when a Windows build ships | like macOS |

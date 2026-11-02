@@ -14,6 +14,10 @@ test('message starts with the marker', () => {
   assert.ok(BOOTSTRAP_SYSTEM_MESSAGE.startsWith('[hermes-ui-app]'));
 });
 
+test('message names the reminder target: without the bridge no skill core is inline and the model picks local/origin, which the app never shows', () => {
+  assert.match(BOOTSTRAP_SYSTEM_MESSAGE, /Reminders, scheduled jobs: always deliver: "bot-chat"/);
+});
+
 test('message covers the inline skill core (bridge), the skill_view fallback (direct) and result-first', () => {
   assert.match(BOOTSTRAP_SYSTEM_MESSAGE, /follows inline as the next system message/);
   assert.match(BOOTSTRAP_SYSTEM_MESSAGE, /skill_view\("hermes-ui", file_path="references\/<ref>\.md"\)/);

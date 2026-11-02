@@ -137,6 +137,62 @@ test('bots: other_bot, unknown bot, invalid bot, allowed bot served by the plugi
   assert.equal((await (await w.b.call('/bridge/library/skills')).json()).error.reason, 'other_bot'); // default is not the plugin's bot
 });
 
+test('bots: a root plugin with `profiles: true` serves other bots via ?profile=<bot>; older plugin stays other_bot', async (t) => {
+  // fake root plugin that reads other profiles: writer is known, ghost (allowed by the bridge) is not
+  const seen = [];
+  const json = (res, status, body) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
+  const plugin = await listen((req, res) => {
+    const u = new URL(req.url, 'http://x');
+    seen.push(req.url);
+    if (req.headers.authorization !== `Bearer ${PLUGIN_SECRET}`) { res.writeHead(401); return res.end('{}'); }
+    const prof = u.searchParams.get('profile');
+    if (prof && prof !== 'writer') return json(res, 404, { error: { code: 'unknown_bot', message: 'no /home/someone' } });
+    if (u.pathname === '/library/config') {
+      return json(res, 200, prof
+        ? { version: '0.3.0', profile: prof, skills: { available: true }, memory: { available: false, reason: 'memory_not_exposed' } }
+        : { version: '0.3.0', profile: 'default', profiles: true, skills: { available: true }, memory: { available: true } });
+    }
+    if (u.pathname === '/library/skills') return json(res, 200, { object: 'list', data: [{ name: prof ? 'writer-skill' : 'a', description: 'd', source: 'local', secret: 'x' }] });
+    if (u.pathname === '/library/skills/content') return json(res, 200, { name: u.searchParams.get('name'), content: `# ${prof ?? 'default'}` });
+    return json(res, 404, {});
+  });
+  const b = await startBridge({ BRIDGE_HERMES_PLUGIN_URL: plugin.url, BRIDGE_HERMES_PLUGIN_SECRET_FILE: secretFile, BRIDGE_PROFILES: 'writer,ghost' });
+  t.after(() => { b.close(); plugin.close(); });
+
+  let c = await (await b.call('/bridge/library/config?bot=writer')).json();
+  assert.deepEqual(c, { skills: { available: true }, memory: { available: false, reason: 'memory_not_exposed' }, bot: 'writer' });
+  let r = await b.call('/bridge/library/skills?bot=writer');
+  assert.equal(r.status, 200);
+  assert.deepEqual((await r.json()).data, [{ name: 'writer-skill', description: 'd', category: null, source: 'local' }]);
+  r = await b.call('/bridge/library/skills/content?bot=writer&name=x');
+  assert.deepEqual(await r.json(), { name: 'x', content: '# writer', truncated: false });
+  assert.ok(seen.includes('/library/skills?profile=writer'));
+  assert.ok(seen.includes('/library/skills/content?name=x&profile=writer'));
+  r = await b.call('/bridge/library/memory?bot=writer');
+  assert.deepEqual([r.status, (await r.json()).error.reason], [404, 'memory_not_exposed']);
+  // the default bot is the plugin's own: no profile parameter
+  assert.equal((await b.call('/bridge/library/skills')).status, 200);
+  assert.ok(seen.includes('/library/skills'));
+  // config probed once per bot (cached)
+  await b.call('/bridge/library/config?bot=writer');
+  assert.equal(seen.filter((u) => u === '/library/config?profile=writer').length, 1);
+  // allowed by the bridge, unknown to the plugin
+  for (const route of ['config', 'skills']) {
+    r = await b.call(`/bridge/library/${route}?bot=ghost`);
+    const body = await r.text();
+    assert.deepEqual([r.status, JSON.parse(body).error.code], [404, 'unknown_profile'], route);
+    assert.ok(!body.includes('/home/someone'));
+  }
+  // an older plugin (no flag) answers other_bot as before, without a per-bot probe
+  const old = await withPlugin(t);
+  c = await (await old.b.call('/bridge/library/config?bot=writer')).json();
+  assert.equal(c.skills.reason, 'other_bot');
+  assert.ok(!old.plugin.seen.some((s) => s.url.includes('profile=')));
+  // a plugin in another profile never reads others, even with the flag
+  const side = await withPlugin(t, { config: { version: '0.3.0', profile: 'writer', profiles: true, skills: { available: true }, memory: { available: true } } }, { BRIDGE_PROFILES: 'writer,ghost' });
+  assert.equal((await (await side.b.call('/bridge/library/config?bot=ghost')).json()).skills.reason, 'other_bot');
+});
+
 test('plugin reasons pass through only in the safe shape', async (t) => {
   const a = await withPlugin(t, { config: { profile: 'default', skills: { available: false, reason: 'disabled_by_config' }, memory: { available: false, reason: 'Free <text> /home/x' } } });
   const c = await (await a.b.call('/bridge/library/config')).json();

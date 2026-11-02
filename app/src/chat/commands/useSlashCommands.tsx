@@ -10,6 +10,7 @@ import { fetch as expoFetch } from 'expo/fetch';
 import { useRouter } from 'expo-router';
 import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useConversations, useConversationsInternals } from '../../conversations/ConversationsProvider';
+import { isBotPlace } from '../../conversations/types';
 import { chatOptionsSummary, type HermesChatOptions } from '../../hermes/capabilities';
 import { createJsonRequest, isNotFoundError, sessionErrorText } from '../../hermes/sessions';
 import { botOf, withBot } from '../../hermes/bots';
@@ -147,7 +148,7 @@ export function useSlashCommands(a: UseSlashCommandsArgs): SlashCommands {
     async (def: CommandDef, plan: CommandPlan) => {
       const { a: cur, meta: m, sessionId: sid } = live.current;
       // a bot's Bot Chat is one shared thread (Hermes Desktop finds it by its title): never renamed, deleted or branched
-      if (m?.botChat && (plan.type === 'rename' || plan.type === 'delete' || plan.type === 'branch')) {
+      if (m && isBotPlace(m) && (plan.type === 'rename' || plan.type === 'delete' || plan.type === 'branch')) {
         toast(tr('bots.chat.notInBotChat'));
         return;
       }

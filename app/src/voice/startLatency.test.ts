@@ -68,6 +68,43 @@ test('microphone: the non-prompting warm-up check fills the cache', async () => 
   assert.equal(perms.micPermissionKnown(), true);
 });
 
+test('microphone on web: the warm-up never reaches expo-audio or getUserMedia, whatever the browser says', async () => {
+  const nav = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  const setPermissions = (permissions: unknown) => Object.defineProperty(globalThis, 'navigator', { value: { permissions }, configurable: true });
+  rn.platform.OS = 'web';
+  try {
+    for (const state of ['prompt', 'denied']) {
+      perms.forgetMicPermission();
+      calls.length = 0;
+      setPermissions({ query: async () => ({ state }) });
+      assert.equal(await perms.micPermissionGranted(), false, state);
+      assert.deepEqual(calls, [], `${state}: nothing that could prompt`);
+    }
+    // no Permissions API / "microphone" unknown to it: not granted, still no prompt
+    for (const permissions of [undefined, { query: async () => Promise.reject(new TypeError('unknown name')) }]) {
+      calls.length = 0;
+      setPermissions(permissions);
+      assert.equal(await perms.micPermissionGranted(), false);
+      assert.deepEqual(calls, []);
+    }
+    setPermissions({ query: async () => ({ state: 'granted' }) });
+    assert.equal(await perms.micPermissionGranted(), true);
+    assert.equal(perms.micPermissionKnown(), true);
+    assert.deepEqual(calls, []);
+    // the user's press may prompt, and says so
+    perms.forgetMicPermission();
+    micGranted = true;
+    setPermissions({ query: async () => ({ state: 'prompt' }) });
+    assert.deepEqual(await perms.ensureMicPermission(), { ok: true, blocked: false, prompted: true });
+    assert.deepEqual(calls, ['mic:request']);
+  } finally {
+    rn.platform.OS = 'android';
+    perms.forgetMicPermission();
+    if (nav) Object.defineProperty(globalThis, 'navigator', nav);
+    else delete (globalThis as { navigator?: unknown }).navigator;
+  }
+});
+
 test('on-device recognition: permission and installed languages are queried once (prewarm), not per start', async () => {
   calls.length = 0;
   assert.equal(stt.recognitionPermissionKnown(), false);

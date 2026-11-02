@@ -93,6 +93,7 @@ export function Vocab({ node }: { node: Partial<HuiVocab> }) {
 
   const run = st.run!;
   const ui = lang as UiLang;
+  // "EN → DE"; a language the model did not name ('und') is left out instead of showing "EN → UND"
   const { label: route, codes: routeCodes } = vocabRoute(model.from, model.to);
   const routeA11y = routeCodes.map((c) => languageName(c, ui)).join(' → ');
 

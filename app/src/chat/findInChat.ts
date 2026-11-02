@@ -6,6 +6,7 @@
  */
 import type { ChatMessage } from '../hermes/types.ts';
 import { stripTurnExtras } from '../hermes/turnOverride.ts';
+import { stripQuotes } from './quoteWire.ts';
 import { parseMessage } from '../protocol/streamParser.ts';
 
 /** shortest query that is searched (1 char would light up every message) */
@@ -121,7 +122,8 @@ export function huiText(node: unknown, out: string[] = [], depth = 0): string[] 
 
 /** searchable text of one message: what the user sees (Markdown source + hui strings), not the raw JSON */
 export function searchableText(m: Pick<ChatMessage, 'role' | 'text'>): string {
-  if (m.role === 'user') return stripTurnExtras(m.text);
+  // a user message's quotes belong to the cited message (found there); the bubble highlights only the typed text
+  if (m.role === 'user') return stripQuotes(stripTurnExtras(m.text));
   const parts: string[] = [];
   for (const seg of parseMessage(m.text)) {
     if (seg.kind === 'markdown') parts.push(seg.text);

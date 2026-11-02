@@ -10,7 +10,7 @@ import { once } from 'node:events';
 import { createServer } from '../src/server.mjs';
 import { silentLogger } from '../src/log.mjs';
 import {
-  applyRetention, cutUtf8, entryId, finalAssistantText, mapStatus, parseInboxState, summaryOf, INBOX_FILE,
+  applyRetention, blockedStep, cutUtf8, entryId, finalAssistantText, mapStatus, parseInboxState, summaryOf, INBOX_FILE,
 } from '../src/routines-inbox.mjs';
 import { buildNotification, CHANNEL_DEFAULT, CHANNEL_QUIET } from '../src/push/notifier.mjs';
 
@@ -589,4 +589,76 @@ test('notifier: routine kind, preview off / on, failed body, quiet hours channel
   assert.equal(n.quiet, false, 'registration time zone');
   // other kinds unchanged
   assert.equal(buildNotification(reg(), { title: 'Hermes', text: 'hi', threadKey: 't', data: {}, count: 2 }).body, 'hi (+1 more)');
+});
+
+// ---------- Bots v2 slice 5: blocked steps, per-bot push levels ----------
+
+/** tool rows of a cron run whose dangerous command Hermes blocked (v0.22 tools/approval.py + terminal_tool.py shapes) */
+const blockedRows = (t) => [
+  { id: msgSeq++, role: 'assistant', content: '', finish_reason: 'tool_calls', timestamp: t - 30,
+    tool_calls: [{ id: 'call_rm', type: 'function', function: { name: 'terminal', arguments: JSON.stringify({ command: 'rm -rf /srv/cache/old' }) } }] },
+  { id: msgSeq++, role: 'tool', tool_call_id: 'call_rm', tool_name: 'terminal', timestamp: t - 29,
+    content: JSON.stringify({ output: '', exit_code: -1, error: 'BLOCKED: Command flagged as dangerous (recursive delete (rm -r)) but cron jobs run without a user present to approve it. Find an alternative approach that avoids this command. To allow dangerous commands in cron jobs, set approvals.cron_mode: approve in config.yaml.', status: 'blocked' }) },
+];
+
+test('blockedStep: dangerous command (description + command), execute_code, none; caps', () => {
+  const t = 1_800_000_000;
+  assert.deepEqual(blockedStep(blockedRows(t)), { description: 'recursive delete (rm -r)', command: 'rm -rf /srv/cache/old' });
+  const code = [
+    { id: 1, role: 'assistant', tool_calls: [{ id: 'c1', function: { name: 'execute_code', arguments: { code: 'import os\nos.system("x")' } } }], timestamp: t },
+    { id: 2, role: 'tool', tool_call_id: 'c1', timestamp: t + 1, content: JSON.stringify({ status: 'error', error: 'BLOCKED: execute_code runs arbitrary local Python (including subprocess calls that bypass shell-string approval checks). Cron jobs run without a user present to approve it. Use normal tools instead.' }) },
+  ];
+  assert.deepEqual(blockedStep(code), { command: 'import os os.system("x")' });
+  // no tool call found: still blocked, without command
+  assert.deepEqual(blockedStep([code[1]]), {});
+  // other BLOCKED texts (a user denial in a chat, read loops) are not this marker
+  assert.equal(blockedStep([{ role: 'tool', content: JSON.stringify({ error: 'BLOCKED: User denied this command.', status: 'blocked' }) }]), null);
+  assert.equal(blockedStep([{ role: 'tool', content: 'BLOCKED: Command flagged as dangerous (x) but cron jobs run without a user present' }]), null, 'status blocked required');
+  assert.equal(blockedStep([{ role: 'assistant', content: 'BLOCKED: Command flagged as dangerous (x) but cron jobs run without a user present "status": "blocked"' }]), null, 'tool rows only');
+  assert.equal(blockedStep(null), null);
+  const long = blockedStep([{ role: 'tool', content: JSON.stringify({ status: 'blocked', error: `BLOCKED: Command flagged as dangerous (${'d'.repeat(400)}) but cron jobs run without a user present to approve it.` }) }]);
+  assert.equal(long.description.length, 200);
+});
+
+test('a run with a blocked step: entry carries blocked {description, command} in list and item answers', async () => {
+  const c = await bridge();
+  const J = addJob('', jobId(41), { name: 'Cleanup' });
+  await c.poll(); // baseline (no run yet)
+  const at = new Date();
+  const sid = run('', J, { text: 'Ich konnte den Cache nicht leeren.', at });
+  botData('').messages[sid].splice(1, 0, ...blockedRows(at.getTime() / 1000));
+  await c.poll();
+  const e = c.items().find((x) => x.jobId === J.id);
+  assert.deepEqual(e.blocked, { description: 'recursive delete (rm -r)', command: 'rm -rf /srv/cache/old' });
+  const list = await c.call('/bridge/routines/inbox?hermesProfile=default');
+  assert.deepEqual(list.data.items.find((x) => x.id === e.id).blocked, e.blocked);
+  const item = await c.call(`/bridge/routines/inbox/${e.id}?hermesProfile=default`);
+  assert.deepEqual(item.data.item.blocked, e.blocked);
+  // a normal run has no blocked field; the stored file keeps it across a restart
+  const K = addJob('', jobId(42));
+  run('', K, { text: 'ok' });
+  await c.poll();
+  assert.equal('blocked' in c.items().find((x) => x.jobId === K.id), false);
+  const again = await bridge({}, { stateDir: c.stateDir, reset: false });
+  assert.deepEqual(again.ctx.routines.state().items.find((x) => x.id === e.id).blocked, e.blocked);
+});
+
+test('per-bot push levels: quiet / off skip routine pushes of that bot only', async () => {
+  const c = await bridge();
+  const D = addJob('', jobId(51), { name: 'Default job' });
+  const W = addJob('writer', jobId(52), { name: 'Writer job' });
+  await c.register(1);
+  // registrations with levels (scope is sent whole)
+  let r = await c.call('/bridge/push/register', { method: 'POST', body: { platform: 'fcm', token: fcmToken(3), profileId: 'p-3', scope: { sources: ['routines'], quietBots: ['default'] } } });
+  assert.equal(r.status, 200);
+  r = await c.call('/bridge/push/register', { method: 'POST', body: { platform: 'fcm', token: fcmToken(4), profileId: 'p-4', scope: { sources: ['routines'], offBots: ['writer'] } } });
+  assert.equal(r.status, 200);
+  await c.poll(); // baselines
+  run('', D, { text: 'Default result' });
+  run('writer', W, { text: 'Writer result' });
+  await c.poll();
+  await tick();
+  const byJob = (id) => c.sent.filter((x) => x.n.data.jobId === id).map((x) => x.token).sort();
+  assert.deepEqual(byJob(D.id), [fcmToken(1), fcmToken(4)].sort(), 'quiet on default: no routine push');
+  assert.deepEqual(byJob(W.id), [fcmToken(1), fcmToken(3)].sort(), 'off on writer: no routine push');
 });

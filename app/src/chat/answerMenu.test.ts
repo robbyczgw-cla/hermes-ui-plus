@@ -88,6 +88,12 @@ test('menu items: order, last-answer retry, web item, report last', () => {
   const q = { ...s, canBranch: false, canHandOff: true, usedWeb: false, shareImage: false };
   assert.deepEqual(answerMenuItems(q), ['handOff', 'retry', 'copy', 'copyMarkdown', 'share', 'report']);
   assert.deepEqual(answerMenuItems({ ...q, failed: true, hasText: false }), ['retry']);
+  // "Antworten" first: also for an answer made only of cards; never for a failed, streaming or app-made one
+  assert.deepEqual(answerMenuItems({ ...s, canReply: true, isLast: false, usedWeb: false, shareImage: false }), ['reply', 'branch', 'copy', 'copyMarkdown', 'share', 'report']);
+  assert.deepEqual(answerMenuItems({ ...s, canReply: true, hasText: false, isLast: false, canBranch: false, shareImage: false }), ['reply', 'report']);
+  assert.ok(!answerMenuItems({ ...s, canReply: true, failed: true, isLast: false }).includes('reply'));
+  assert.deepEqual(answerMenuItems({ ...s, canReply: true, local: true, usedWeb: false, shareImage: false }), ['copy', 'copyMarkdown', 'share']);
+  assert.deepEqual(answerMenuItems({ ...s, canReply: true, streaming: true }), []);
 });
 
 test('menu items: share as image also for an answer that is only cards (no copyable text)', () => {

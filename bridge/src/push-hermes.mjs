@@ -28,7 +28,7 @@ import { makeAuthorizer, makeCredentials } from './auth.mjs';
 import { createApprovalWatcher } from './approvals.mjs';
 import { upstreamUrl } from './paths.mjs';
 import { writeFileAtomicSync } from './atomic-write.mjs';
-import { profilePrefix } from './profiles.mjs';
+import { DEFAULT_PROFILE, isProfileName, profilePrefix } from './profiles.mjs';
 import { applyCors } from './cors.mjs';
 
 export const INBOX_PATH = '/bridge/inbox/stream';
@@ -45,6 +45,18 @@ export const MAX_POLLED_PROFILES = 8;
 export const DEFAULT_CLIENT_SOURCES = Object.freeze(['api_server']);
 /** Sources a registration / stream may ask for. `routines`: results of the routines inbox (src/routines-inbox.mjs). */
 export const KNOWN_SOURCES = Object.freeze(['api_server', 'cron', 'telegram', 'cli', 'routines']);
+/**
+ * Per-bot push levels of a registration (scope.quietBots = "only when I am needed", scope.offBots = "off"; `default` =
+ * the default bot): answers, Bot Chat deliveries and routine results skip a registration that lists the bot in either.
+ * Approvals are never filtered, nor is the live inbox (the app filters what it shows itself).
+ * @param {any} reg  @param {string|null|undefined} bot  Hermes profile (null = default)
+ */
+export function botMuted(reg, bot) {
+  const b = bot || DEFAULT_PROFILE;
+  return (Array.isArray(reg?.scope?.quietBots) && reg.scope.quietBots.includes(b)) || (Array.isArray(reg?.scope?.offBots) && reg.scope.offBots.includes(b));
+}
+const botList = (v) => (Array.isArray(v) ? [...new Set(v.filter((n) => n === DEFAULT_PROFILE || isProfileName(n)))] : undefined);
+
 /** a bot's one shared thread (Hermes Desktop's convention; src/bridge.mjs BOT_CHAT_TITLE) */
 const BOT_CHAT = 'Bot Chat';
 /** `[Cronjob "<name>" output — scheduled job, not the user. …]\n\n<output>` (dash variants tolerated) */
@@ -143,10 +155,15 @@ export function createHermesPush(config, o = {}) {
     sendJson,
     validateScope: (user, scope) => {
       const bad = (scope.sources ?? []).find((s) => !KNOWN_SOURCES.includes(s));
-      return bad ? { ok: false, message: `unknown source ${bad}` } : { ok: true, value: { sources: scope.sources } };
+      if (bad) return { ok: false, message: `unknown source ${bad}` };
+      // per-bot levels: only valid bot names are kept (an unknown-format name could never match a bot anyway)
+      const quietBots = botList(scope.quietBots);
+      const offBots = botList(scope.offBots);
+      return { ok: true, value: { sources: scope.sources, ...(quietBots ? { quietBots } : {}), ...(offBots ? { offBots } : {}) } };
     },
-    // apps add `routines` to their scope only when the bridge lists it (an older bridge refuses unknown sources)
-    publicConfig: () => ({ ...service.publicConfig(), sources: [...KNOWN_SOURCES] }),
+    // apps add `routines` to their scope only when the bridge lists it (an older bridge refuses unknown sources);
+    // botLevels: scope.quietBots / scope.offBots are honoured (an older bridge drops them)
+    publicConfig: () => ({ ...service.publicConfig(), sources: [...KNOWN_SOURCES], botLevels: true }),
   });
 
   // routines inbox hooks (src/routines-inbox.mjs, set by server.mjs): which bots it covers, rights per credential
@@ -369,7 +386,7 @@ export function createHermesPush(config, o = {}) {
           data: { src: 'hermes', sessionId: s.id, ...bot, source: s.source, messageId: String(last.id) },
           match: (reg) => {
             const sources = reg.scope?.sources?.length ? reg.scope.sources : DEFAULT_CLIENT_SOURCES;
-            if (!sources.includes(s.source)) return false;
+            if (!sources.includes(s.source) || botMuted(reg, profile)) return false;
             // the routines inbox pushes this cron run itself to registrations that asked for `routines`: no second push
             return !(cronCovered && sources.includes('routines') && canReadRoutines(reg.credential, profile ?? 'default'));
           },
@@ -447,8 +464,8 @@ export function createHermesPush(config, o = {}) {
       count: 1,
       previewDefault: pc.preview,
       data: { src: 'hermes', sessionId: s.id, ...bot, source: 'api_server', botChat: '1', messageId: String(last.id) },
-      // the app's own default scope (api_server) covers a bot's thread
-      match: (reg) => (reg.scope?.sources?.length ? reg.scope.sources : DEFAULT_CLIENT_SOURCES).includes('api_server'),
+      // the app's own default scope (api_server) covers a bot's thread; per-bot level quiet / off: no push
+      match: (reg) => (reg.scope?.sources?.length ? reg.scope.sources : DEFAULT_CLIENT_SOURCES).includes('api_server') && !botMuted(reg, profile),
       inbox,
     });
     log.info('push_hermes_bot_chat', { via, cron: cron.length, answers: answers.length, ...(profile ? { profile } : {}) });

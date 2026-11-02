@@ -357,7 +357,7 @@ type InputProps = {
   ref?: React.Ref<RNTextInput>;
 };
 
-function LabeledInput({ label, value, onChangeText, placeholder, hint, problem, maxLength, multiline, returnKeyType, onSubmitEditing, autoCapitalize, testID, ref }: InputProps) {
+export function LabeledInput({ label, value, onChangeText, placeholder, hint, problem, maxLength, multiline, returnKeyType, onSubmitEditing, autoCapitalize, testID, ref }: InputProps) {
   const t = useTheme();
   const [focus, setFocus] = useState(false);
   const border = problem ? t.colors.danger : focus ? t.colors.accent : t.colors.borderControl;

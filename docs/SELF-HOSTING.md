@@ -325,6 +325,11 @@ gets them there; otherwise as a push notification. All settings are optional:
 | `BRIDGE_PUSH_HOOK_SECRET` | – | Enables `POST /bridge/hermes-hook`: point Hermes' outbound webhook (`hooks.outbound`, event `post_llm_call`) at `<bridge>/bridge/hermes-hook` with this secret. The HMAC-signed call (`X-Hermes-Signature-256`) only triggers an immediate poll, for lower latency. Without the secret the route answers `404` |
 | `BRIDGE_PUSH_HOOK_READ_MS` | `10000` | Deadline for reading the (unauthenticated until verified) hook request body |
 
+**Per-bot levels.** A registration's `scope` may carry `quietBots` and `offBots` (bot names, `default` for the default
+bot), set by the app's "Notifications" level per bot ("only when I am needed" / "off"); `GET /bridge/push/config` says
+`botLevels: true`. A listed bot sends no push for its answers, Bot Chat deliveries and routine results; approval
+requests are always pushed and the live inbox is never filtered. Nothing to configure on the server.
+
 ## 7. Updating
 
 - **Wizard:** `npx hermes-ui-plus-bridge@latest setup` updates the skill (with backup), the env file and the service in place, and restarts only the bridge. With a global install: `npm i -g hermes-ui-plus-bridge@latest`, then `hermes-ui-plus-bridge setup`. There is also an update prompt in [SETUP-WITH-AGENT.md](SETUP-WITH-AGENT.md).

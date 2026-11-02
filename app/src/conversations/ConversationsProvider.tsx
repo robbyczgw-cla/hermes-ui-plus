@@ -24,6 +24,7 @@ import { deleteAttachmentFiles } from '../attachments/store';
 import type { ChatMessage } from '../hermes/types';
 import { useT } from '../i18n';
 import { deleteConversationState } from '../nodestate/defaultStore';
+import { forgetReading, moveReadingDraft, readingReady, savedDraftIds } from '../chat/readingStore';
 import { createBulkDeleter, type BulkDeleter, type DeleteReport, type PendingDelete } from './bulkDelete';
 import { BulkDeleteToast } from './BulkDeleteToast';
 import { createController, type ConversationController } from './controller';
@@ -58,7 +59,10 @@ export type ConversationsApi = {
   setBot: (id: string, bot: string | undefined) => void;
   /** a bot's "Bot Chat" (bots/core.ts): existing / adopted / new, activated unless `activate: false` */
   openBotChat: ConversationController['openBotChat'];
+  ensureBotTalk: ConversationController['ensureBotTalk'];
+  moveBotTalk: ConversationController['moveBotTalk'];
   /** server activity of a bot's Bot Chat (Bots tab refresh) */
+  retireBotChat: ConversationController['retireBotChat'];
   botChatRemote: ConversationController['botChatRemote'];
   remove: (id: string) => void;
   rename: (id: string, title: string) => void;
@@ -117,7 +121,7 @@ export function ConversationsProvider({ children, storage }: { children: ReactNo
         if (!storage) storageHealth.reportOk();
       },
     });
-    const base = createController(store, repo);
+    const base = createController(store, repo, Date.now, { onBotTalkMove: moveReadingDraft });
     const controller: ConversationController = {
       ...base,
       save(id: string, messages: ChatMessage[], opts?: { keepOrder?: boolean }) {
@@ -129,6 +133,7 @@ export function ConversationsProvider({ children, storage }: { children: ReactNo
       remove(id: string) {
         const pending = base.loadMessages(id);
         base.remove(id);
+        forgetReading(id); // its unsent draft and reading position go too
         void pending.then((messages) => deleteUnshared(store, repo, attachmentUris(messages))).catch(() => {});
       },
       hideRemote(id: string) {
@@ -139,7 +144,10 @@ export function ConversationsProvider({ children, storage }: { children: ReactNo
       // chats the session sync drops (deleted/archived elsewhere) also lose their node state
       mergeRemote(...args: Parameters<ConversationController['mergeRemote']>) {
         const res = base.mergeRemote(...args);
-        for (const id of res.removed) void deleteConversationState(id).catch(() => {});
+        for (const id of res.removed) {
+          void deleteConversationState(id).catch(() => {});
+          forgetReading(id);
+        }
         return res;
       },
       // entries hidden by the session filter (local only) also lose their node state
@@ -149,7 +157,13 @@ export function ConversationsProvider({ children, storage }: { children: ReactNo
         return res;
       },
     };
-    const deleter = createBulkDeleter({ store, purge: (ids) => purgeLocal(store, repo, ids) });
+    const deleter = createBulkDeleter({
+      store,
+      purge: (ids) => {
+        for (const id of ids) forgetReading(id);
+        return purgeLocal(store, repo, ids);
+      },
+    });
     return { store, repo, controller, custom: !!storage, deleter, remoteActionsRef: { current: null as RemoteActions | null } };
   });
   const [ready, setReady] = useState(false);
@@ -157,13 +171,14 @@ export function ConversationsProvider({ children, storage }: { children: ReactNo
   useEffect(() => {
     let cancelled = false;
     const { store, repo } = internals;
-    void repo.loadIndex().then((state) => {
+    // the drafts first: an empty chat with an unsent draft is not pruned
+    void Promise.all([repo.loadIndex(), readingReady()]).then(([state]) => {
       if (cancelled) return;
       // start reading the open chat's transcript now: it runs alongside ChatScreen's crash-marker read and is
       // usually in memory when the session mounts (useConversation takes it synchronously)
       if (state.activeId) void internals.controller.prefetchMessages([state.activeId]);
       store.dispatch({ type: 'load', state });
-      store.dispatch({ type: 'pruneDrafts', keep: state.activeId });
+      store.dispatch({ type: 'pruneDrafts', keep: state.activeId, drafts: savedDraftIds() });
       setReady(true);
     });
     return () => {
@@ -376,6 +391,9 @@ export function useConversations(): ConversationsApi {
       create: (profile: ProfileRef, opts?: { bot?: string }) => controller.create(profile, { bot: opts?.bot }),
       setBot: controller.setBot,
       openBotChat: controller.openBotChat,
+      ensureBotTalk: controller.ensureBotTalk,
+      moveBotTalk: controller.moveBotTalk,
+      retireBotChat: controller.retireBotChat,
       botChatRemote: controller.botChatRemote,
       remove: controller.remove,
       rename: controller.rename,

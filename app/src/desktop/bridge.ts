@@ -196,6 +196,24 @@ export async function desktopSaveImage(png: Uint8Array, fileName: string): Promi
   }
 }
 
+/**
+ * A file from a chat into the Downloads folder (`desktop_save_file`; raw bytes, never overwrites), `open`: then opened
+ * with the system's default app (documents / images / media only). Null when it failed or outside the desktop app.
+ */
+export async function desktopSaveFile(bytes: Uint8Array, fileName: string, open: boolean): Promise<{ path: string; opened: boolean } | null> {
+  const t = internals();
+  if (!t) return null;
+  try {
+    const r = (await t.invoke('desktop_save_file', bytes, { headers: { 'x-file-name': encodeURIComponent(fileName), 'x-open': open ? '1' : '0' } })) as {
+      path?: unknown;
+      opened?: unknown;
+    } | null;
+    return r && typeof r.path === 'string' ? { path: r.path, opened: r.opened === true } : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Is the desktop window the key window? (visibilityState stays "visible" while another app is in front) */
 export function desktopWindowFocused(): boolean {
   return typeof document !== 'undefined' && document.hasFocus();

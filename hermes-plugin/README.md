@@ -27,6 +27,12 @@ Design and migration plan: [`docs/HERMES-PLUGIN.md`](../docs/HERMES-PLUGIN.md).
   that enabled the plugin. A self-test (no model call) checks that this works; if it does not, `/quick/config`
   says `available: false` with `reason: "profile_scope_unavailable"` and the app hides ⚡. Details: "Multiple
   profiles (bots)" in [`docs/HERMES-PLUGIN.md`](../docs/HERMES-PLUGIN.md).
+- A `pre_llm_call` hook (`cronreview.py`) adds a short note to one kind of turn only: the Bot Chat turn
+  `[Cronjob "<name>" output — … Review it …]` that Hermes runs when a `deliver: bot-chat` job finishes. If the output
+  is a reminder line (`⏰ …`, what the hermes-ui skill's reminder prompt produces), the note asks for the reminder
+  itself and nothing about the job. If the job is one-shot (`repeat.times` 1 or `schedule.kind` once in
+  `<HERMES_HOME>/cron/jobs.json`), it says this is the only run: Hermes marks the job completed only after that turn,
+  so a job list read during the turn still shows it as scheduled. All other turns get nothing.
 
 ## Endpoints (127.0.0.1 only)
 
@@ -35,16 +41,24 @@ Design and migration plan: [`docs/HERMES-PLUGIN.md`](../docs/HERMES-PLUGIN.md).
 | GET | `/health` | none | `{"ok": true}` |
 | GET | `/quick/config` | Bearer secret | `enabled`/`available` + `reason` (self-test), `scope` (diagnostics), aux slot, last route used, limits, prompt-size estimate |
 | POST | `/quick/v1/chat/completions` | Bearer secret | OpenAI-compatible; `stream: true` returns SSE `chat.completion.chunk` events and `[DONE]`; usage in the final chunk |
-| GET | `/library/config` | Bearer secret | `{version, profile, skills, memory}`; each part `{available, reason?}` |
+| GET | `/library/config` | Bearer secret | `{version, profile, profiles, skills, memory}`; each part `{available, reason?}`; `profiles` = this plugin can read other profiles |
 | GET | `/library/skills` | Bearer secret | skills of this profile: `name`, `description`, `category`, `enabled`, `source` (`bundled\|hub\|external\|local`) |
 | GET | `/library/skills/content?name=` | Bearer secret | SKILL.md of a listed skill (exact name only, 256 KiB cap, `truncated`) |
 | GET | `/library/memory` | Bearer secret | MEMORY.md / USER.md entries, limits, `updated_at`; 404 `feature_off` unless `library.expose_memory: true` |
 | GET | `/bots` | Bearer secret | bots (named profiles): `name`, `title`, `description`, `color`, `pinned`, `hidden`, `parked`, `app`, `template`; `create: {available, reason?}`, `limit`, `count` |
 | POST | `/bots` | Bearer secret | create a bot from `{title, job, how, template, lang, may, color, api_key}` → 201 (0.2.0, Bots v2; docs/BOTS-SERVER.md "Creating bots from the app") |
 | GET / PATCH | `/bots/<name>` | Bearer secret | the three fields of a bot / rewrite `SOUL.md` and `ui_meta` from `{title, job, how, lang?}`; never the default profile |
+| GET | `/bots/<name>/allowlist` | Bearer secret | `{name, entries: [{pattern}], mode}`: that profile's `command_allowlist` (at most 200 entries of at most 200 characters, `omitted` counts the rest) and `approvals.mode` (`null` = not set); `default` = the root profile (0.3.0) |
+| POST | `/bots/<name>/allowlist/revoke` | Bearer secret | `{"pattern": "..."}` → the same shape without it; 404 `not_found` when it is not in the list |
+| POST | `/bots/<name>/archive` | Bearer secret | park the bot (`gateway.parked`, first line `hermes-ui-plus: archived`) → `{bot}` with `parked`, `archived`; 409 `parked_elsewhere` when someone else parked it; never `default` (403) |
+| POST | `/bots/<name>/restore` | Bearer secret | remove that marker → `{bot}`; not parked = 200 as is; any other marker (also a failed setup) = 409 `parked_elsewhere` |
 
-The library routes (0.2.0) are read-only and serve only the plugin's own profile. Contract and reasons:
-[`docs/SKILLS-MEMORY.md`](../docs/SKILLS-MEMORY.md).
+The library routes (0.2.0) are read-only. They serve the plugin's own profile and, from 0.3.0 and only in the root
+(default) profile's plugin, another profile with `?profile=<name>` (unknown name: 404 `unknown_bot`; a plugin that
+cannot: 404 `feature_off` with `not_root_profile` or `hermes_unsupported`). Contract and reasons:
+[`docs/SKILLS-MEMORY.md`](../docs/SKILLS-MEMORY.md). The allow-list, archive and restore routes (0.3.0) also work
+only in the root profile's plugin; details in [`docs/BOTS-SERVER.md`](../docs/BOTS-SERVER.md) "Allow-list, archive
+and other bots' skills".
 
 Request limits:
 

@@ -3,7 +3,8 @@
 First feature: quick answers. One-off questions are answered by a fast model through Hermes' own providers
 and credentials (auxiliary slot ``auxiliary.hui_quick``), without the agent: no tools, no memory, no
 session, a short prompt. Second feature (0.2.0): read-only skills/memory library routes for the app. Third (0.2.0): bots,
-i.e. Hermes profiles the app lists, creates and edits (bots.py). The UI Bridge reaches them over a loopback listener
+i.e. Hermes profiles the app lists, creates and edits (bots.py). 0.3.0: the root profile's plugin also reads other
+profiles' skills/memory, lists and revokes a bot's "always allow" entries and archives / restores bots. The UI Bridge reaches them over a loopback listener
 protected by an installer-generated secret.
 
 Plugin rules (ADR 0001): public ``PluginContext`` hooks only, feature-detected with ``hasattr``; stdlib
@@ -46,6 +47,14 @@ def _register(ctx: Any) -> None:
     if kill_switch_on(os.environ):
         logger.info("%s: disabled by %s", PLUGIN_NAME, KILL_SWITCH_ENV)
         return
+    # Cron review turns of reminders (cronreview.py): independent of the listener, also in the CLI process that
+    # Hermes starts for a Bot Chat delivery.
+    if hasattr(ctx, "register_hook"):
+        try:
+            from .cronreview import make_hook
+            ctx.register_hook("pre_llm_call", make_hook(_hermes_home))
+        except Exception as exc:  # the rest of the plugin doesn't depend on it
+            logger.warning("%s: cron review notes off (%s)", PLUGIN_NAME, type(exc).__name__)
     if not hasattr(ctx, "register_auxiliary_task"):
         logger.warning("%s: this Hermes has no PluginContext.register_auxiliary_task; quick answers off", PLUGIN_NAME)
         return

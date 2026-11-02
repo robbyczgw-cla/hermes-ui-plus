@@ -47,6 +47,15 @@ const MAX_OPEN_FILE_BYTES: u64 = 64 * 1024 * 1024;
 /// "Share as image" PNGs written to Downloads (a 1170 px wide answer image is a few MB at most)
 const MAX_SAVE_IMAGE_BYTES: usize = 40 * 1024 * 1024;
 const PNG_MAGIC: &[u8] = b"\x89PNG\r\n\x1a\n";
+/// files from a chat saved to Downloads ("Sichern" / "Öffnen"); the web side loads at most 100 MB
+const MAX_SAVE_FILE_BYTES: usize = 100 * 1024 * 1024;
+/// saved chat files opened with the default app afterwards: documents, images, media only (never scripts, apps,
+/// installers, HTML or anything else the system would run)
+const OPENABLE_EXTS: &[&str] = &[
+    "pdf", "png", "jpg", "jpeg", "gif", "webp", "heic", "bmp", "tiff", "txt", "md", "csv", "tsv", "json", "rtf",
+    "docx", "xlsx", "pptx", "doc", "xls", "ppt", "odt", "ods", "odp", "epub", "mp3", "m4a", "wav", "ogg", "flac",
+    "mp4", "mov", "webm",
+];
 
 /// traffic lights (overlay title bar): inset of the close button, so they sit vertically centred in the
 /// app's 54 px header rows; the web side moves its first header item right of them (`titlebarInset`)
@@ -682,6 +691,94 @@ fn desktop_save_image(app: AppHandle, request: tauri::ipc::Request<'_>) -> Resul
     Err("no free file name".into())
 }
 
+/// `%XX` escapes of the `x-file-name` header (the web side percent-encodes non-ASCII names) → UTF-8 text
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            let hex = |c: u8| (c as char).to_digit(16);
+            if let (Some(h), Some(l)) = (hex(b[i + 1]), hex(b[i + 2])) {
+                out.push((h * 16 + l) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// (stem, ".ext") for a chat file saved to Downloads: last path segment, letters / digits / a few punctuation marks
+/// only, no leading dots, at most 120 characters, never empty
+fn save_file_parts(name: &str) -> (String, String) {
+    let base = name.rsplit(['/', '\\']).next().unwrap_or("");
+    let clean: String = base
+        .chars()
+        .map(|c| if c.is_alphanumeric() || matches!(c, '-' | '_' | '.' | ' ' | '(' | ')' | '+' | ',') { c } else { '_' })
+        .collect();
+    let clean = clean.trim().trim_start_matches('.').trim().to_string();
+    let (stem, ext) = match clean.rfind('.') {
+        Some(i) if i > 0 && clean.len() - i <= 11 && clean[i + 1..].chars().all(|c| c.is_ascii_alphanumeric()) && i + 1 < clean.len() => {
+            (clean[..i].to_string(), clean[i..].to_ascii_lowercase())
+        }
+        _ => (clean, String::new()),
+    };
+    let stem: String = stem.chars().take(120).collect();
+    let stem = stem.trim().to_string();
+    (if stem.is_empty() { "file".into() } else { stem }, ext)
+}
+
+fn open_with_default_app(path: &std::path::Path) {
+    #[cfg(target_os = "macos")]
+    let _ = std::process::Command::new("/usr/bin/open").arg(path).spawn();
+    #[cfg(target_os = "linux")]
+    let _ = std::process::Command::new("xdg-open").arg(path).spawn();
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    let _ = path;
+}
+
+/// "Sichern" / "Öffnen" of a file in a chat (the webview ignores `<a download>`): the raw bytes (file name
+/// percent-encoded in `x-file-name`) → the Downloads folder, never overwriting (`-2`, `-3`, …); `x-open: 1` then
+/// opens it with the default app when its type is on the OPENABLE_EXTS list. Size-capped, refused while the app lock
+/// is on. Returns `{ path, opened }`.
+#[tauri::command]
+fn desktop_save_file(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<Value, String> {
+    if is_locked(&app) {
+        return Err("locked".into());
+    }
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("expected the file bytes".into());
+    };
+    if bytes.is_empty() || bytes.len() > MAX_SAVE_FILE_BYTES {
+        return Err("empty or too large".into());
+    }
+    let header = |k: &str| request.headers().get(k).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+    let (stem, ext) = save_file_parts(&percent_decode(&header("x-file-name")));
+    let want_open = header("x-open") == "1";
+    let dir = app.path().download_dir().map_err(|e| e.to_string())?;
+    for i in 1..100 {
+        let file = if i == 1 { format!("{stem}{ext}") } else { format!("{stem}-{i}{ext}") };
+        let path = dir.join(file);
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut f) => {
+                f.write_all(bytes).map_err(|e| e.to_string())?;
+                log(&app, "info", &format!("saved chat file ({} bytes)", bytes.len()));
+                let opened = want_open && OPENABLE_EXTS.contains(&ext.trim_start_matches('.'));
+                if opened {
+                    open_with_default_app(&path);
+                }
+                return Ok(json!({ "path": path.to_string_lossy(), "opened": opened }));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    Err("no free file name".into())
+}
+
 /// files dropped on the dock icon / opened with the app → attachments of the open chat
 #[allow(dead_code)] // RunEvent::Opened is macOS / iOS only
 fn on_opened(app: &AppHandle, urls: &[Url]) {
@@ -804,6 +901,7 @@ pub fn run() {
             desktop_context_menu,
             desktop_share,
             desktop_save_image,
+            desktop_save_file,
             desktop_set_login_item,
             desktop_open_login_items,
             desktop_set_prefs,
@@ -905,7 +1003,28 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::image_stem;
+    use super::{image_stem, percent_decode, save_file_parts};
+
+    #[test]
+    fn save_file_parts_keeps_name_and_extension() {
+        assert_eq!(save_file_parts("Rechnung März 2026.pdf"), ("Rechnung März 2026".into(), ".pdf".into()));
+        assert_eq!(save_file_parts("Report.PDF"), ("Report".into(), ".pdf".into()));
+        assert_eq!(save_file_parts("notes"), ("notes".into(), "".into()));
+        assert_eq!(percent_decode("Rechnung%20M%C3%A4rz.pdf"), "Rechnung März.pdf");
+        assert_eq!(percent_decode("100%"), "100%");
+        assert_eq!(percent_decode("%ä%zz"), "%ä%zz");
+    }
+
+    #[test]
+    fn save_file_parts_never_leaves_the_folder() {
+        assert_eq!(save_file_parts("../../etc/passwd"), ("passwd".into(), "".into()));
+        assert_eq!(save_file_parts("..\\..\\x.sh"), ("x".into(), ".sh".into()));
+        assert_eq!(save_file_parts(".bashrc"), ("bashrc".into(), "".into()));
+        assert_eq!(save_file_parts("..."), ("file".into(), "".into()));
+        assert_eq!(save_file_parts(""), ("file".into(), "".into()));
+        assert_eq!(save_file_parts("a\u{0}b:c*.txt"), ("a_b_c_".into(), ".txt".into()));
+        assert_eq!(save_file_parts(&"x".repeat(300)).0.len(), 120);
+    }
 
     #[test]
     fn image_stem_keeps_safe_names() {

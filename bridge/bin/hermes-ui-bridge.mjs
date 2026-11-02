@@ -148,6 +148,15 @@ async function botsManageCmd(argv) {
   for (const line of botsManageCli(sub, positional, { env, store })) out(line);
 }
 
+/** `hermes-ui-plus-bridge groups status|enable|disable` (src/groups.mjs): the owner's switch for bot groups. */
+async function groupsCmd(argv) {
+  const [sub, ...rest] = argv;
+  const { env } = await deviceStoreFromArgs(rest);
+  const { groupsCli } = await import('../src/groups.mjs');
+  const stateDir = env.BRIDGE_STATE_DIR || String(env.STATE_DIRECTORY ?? '').split(':')[0] || '';
+  for (const line of groupsCli(sub, { env, stateDir })) out(line);
+}
+
 /** `hermes-ui-plus-bridge setup [--yes] [--dry-run] [--json] ...` (src/setup/wizard.mjs). */
 async function setupCmd(argv) {
   const { parseSetupArgs, runSetup, SETUP_HELP } = await import('../src/setup/wizard.mjs');
@@ -166,6 +175,7 @@ async function main() {
   if (process.argv[2] === 'doctor') return doctorCmd(process.argv.slice(3));
   if (process.argv[2] === 'bots' && ['status', 'enable', 'disable', 'grant', 'revoke'].includes(process.argv[3])) return botsManageCmd(process.argv.slice(3));
   if (process.argv[2] === 'bots') return botsCmd(process.argv[3], process.argv.slice(4));
+  if (process.argv[2] === 'groups') return groupsCmd(process.argv.slice(3));
   const opts = parseArgs(process.argv.slice(2));
   if (opts.help) return out(HELP);
   if (opts.version) return out(JSON.parse(readFileSync(join(here, '../package.json'), 'utf8')).version);

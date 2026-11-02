@@ -39,7 +39,7 @@ export function resolveChatProfile(
  */
 export function emptyChatRebindTarget(
   conv:
-    | { profileId: string; profileKind: ProfileKind; messageCount: number; preview: string; origin?: 'remote'; branchSeed?: number; botChat?: true }
+    | { profileId: string; profileKind: ProfileKind; messageCount: number; preview: string; origin?: 'remote'; branchSeed?: number; botChat?: true; botTalk?: true; botChatRetired?: true }
     | undefined,
   active: { id: string; kind: ProfileKind },
   /** a turn of this chat is running (first message just sent, not saved yet) */
@@ -48,7 +48,7 @@ export function emptyChatRebindTarget(
   if (!conv || running) return null;
   // non-empty, synced from Hermes (transcript may still load) or branched (copied context): keep
   // a bot's "Bot Chat" stays on its server (bots/core.ts)
-  if (conv.messageCount > 0 || conv.preview !== '' || conv.origin === 'remote' || conv.branchSeed || conv.botChat) return null;
+  if (conv.messageCount > 0 || conv.preview !== '' || conv.origin === 'remote' || conv.branchSeed || conv.botChat || conv.botTalk || conv.botChatRetired) return null;
   if (conv.profileId === active.id && conv.profileKind === active.kind) return null;
   return { id: active.id, kind: active.kind };
 }

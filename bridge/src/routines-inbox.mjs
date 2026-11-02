@@ -18,7 +18,7 @@ import { silentLogger } from './log.mjs';
 import { upstreamUrl } from './paths.mjs';
 import { writeFileAtomicSync } from './atomic-write.mjs';
 import { DEFAULT_PROFILE, profilePrefix } from './profiles.mjs';
-import { isSilence, messageText, MAX_POLLED_PROFILES, OWNER } from './push-hermes.mjs';
+import { botMuted, isSilence, messageText, MAX_POLLED_PROFILES, OWNER } from './push-hermes.mjs';
 import { previewText } from './push/index.mjs';
 import { makeAuthorizer } from './auth.mjs';
 import { applyCors } from './cors.mjs';
@@ -99,6 +99,61 @@ function huiField(node, depth = 0) {
   return '';
 }
 
+const BLOCKED_MAX = 200;
+// Hermes v0.22 tools/approval.py: a dangerous command in a cron run (approvals.cron_mode deny) and execute_code there
+const BLOCKED_COMMAND = /BLOCKED: Command flagged as dangerous \(([\s\S]*)\) but cron jobs run without a user present/;
+const BLOCKED_CODE = /BLOCKED: execute_code runs arbitrary local Python[\s\S]*?Cron jobs run without a user present/;
+
+/** The arguments of the assistant tool call `id` (OpenAI shape, arguments as JSON text or object), else null. */
+function toolCallArgs(list, id) {
+  for (const m of list) {
+    if (m.role !== 'assistant' || !Array.isArray(m.tool_calls)) continue;
+    const call = m.tool_calls.find((c) => obj(c) && c.id === id);
+    if (!call) continue;
+    const raw = obj(call.function)?.arguments ?? call.arguments;
+    if (obj(raw)) return raw;
+    try { return obj(JSON.parse(String(raw ?? ''))); } catch { return null; }
+  }
+  return null;
+}
+
+/**
+ * A step Hermes blocked in a cron run because nobody was there to approve it (tool result marker, see above) →
+ * {description?, command?} (each one line, at most 200 chars), the newest one; null when there is none.
+ * description: the pattern description from the parentheses; command: the blocked call's `command` / `code` argument.
+ */
+export function blockedStep(messages) {
+  const list = (Array.isArray(messages) ? messages : []).filter((m) => obj(m));
+  const ts = (m) => (typeof m.timestamp === 'number' ? m.timestamp : 0);
+  const idOf = (m) => (typeof m.id === 'number' ? m.id : 0);
+  const newest = list.map((m, i) => ({ m, i })).sort((a, b) => ts(b.m) - ts(a.m) || idOf(b.m) - idOf(a.m) || a.i - b.i).map((x) => x.m);
+  for (const m of newest) {
+    if (m.role !== 'tool') continue;
+    const raw = messageText(m.content);
+    if (!raw.includes('BLOCKED: ')) continue;
+    let parsed = null;
+    try { parsed = obj(JSON.parse(raw)); } catch { /* plain text result */ }
+    const text = [parsed?.error, parsed?.message, parsed?.output].find((v) => typeof v === 'string' && v.includes('BLOCKED: ')) ?? raw;
+    const statusBlocked = parsed ? parsed.status === 'blocked' : /"status"\s*:\s*"blocked"/.test(raw);
+    const cmd = statusBlocked ? BLOCKED_COMMAND.exec(text) : null;
+    if (!cmd && !BLOCKED_CODE.test(text)) continue;
+    const args = typeof m.tool_call_id === 'string' ? toolCallArgs(list, m.tool_call_id) : null;
+    const command = oneLine(typeof args?.command === 'string' ? args.command : typeof args?.code === 'string' ? args.code : '', BLOCKED_MAX);
+    const description = cmd ? oneLine(cmd[1], BLOCKED_MAX) : '';
+    return { ...(description ? { description } : {}), ...(command ? { command } : {}) };
+  }
+  return null;
+}
+
+/** Stored / built `blocked` field, validated. */
+function parseBlocked(v) {
+  const b = obj(v);
+  if (!b) return null;
+  const description = oneLine(b.description, BLOCKED_MAX);
+  const command = oneLine(b.command, BLOCKED_MAX);
+  return { ...(description ? { description } : {}), ...(command ? { command } : {}) };
+}
+
 /** Plain summary (<= 240 chars): markdown / hui stripped; when nothing is left, the first title of the first hui block. */
 export function summaryOf(text) {
   const plain = previewText(text, SUMMARY_MAX);
@@ -168,6 +223,7 @@ function parseEntry(e) {
     ...(typeof o.error === 'string' && o.error ? { error: o.error.slice(0, ERROR_MAX) } : {}),
     sessionId: typeof o.sessionId === 'string' && o.sessionId.length <= 200 ? o.sessionId : null,
     hasRich: o.hasRich === true,
+    ...(parseBlocked(o.blocked) ? { blocked: parseBlocked(o.blocked) } : {}),
     readAt: Number.isFinite(o.readAt) ? o.readAt : null,
     createdAt: Number.isFinite(o.createdAt) ? o.createdAt : 0,
   };
@@ -298,6 +354,7 @@ export function createRoutinesInbox(config, o) {
     const minSec = isoOk(prevLr) ? Date.parse(prevLr) / 1000 - PREV_RUN_SLACK_S : -Infinity;
     let text = '';
     let session = null;
+    let blocked = null;
     if (!ctx.sessions) {
       try {
         const list = (await hermesGet(`${prefix}/api/sessions?source=cron&limit=50`))?.data;
@@ -316,11 +373,12 @@ export function createRoutinesInbox(config, o) {
       try {
         const msgs = (await hermesGet(`${prefix}/api/sessions/${encodeURIComponent(s.id)}/messages?order=latest&limit=30`))?.data;
         text = finalAssistantText(msgs);
+        blocked = blockedStep(msgs); // a step nobody could approve (cron runs without a user present)
       } catch (e) {
         log.warn('routines_messages_failed', { bot, job: jobId, error: failReason(e) });
         return { retry: true };
       }
-      if (text) session = s;
+      if (text || blocked) session = s;
     }
     const mapped = mapStatus(job.last_status, text);
     const lastError = oneLine(job.last_error, ERROR_MAX);
@@ -345,6 +403,7 @@ export function createRoutinesInbox(config, o) {
       ...(error ? { error } : {}),
       sessionId: session ? session.id.slice(0, 200) : null,
       hasRich: /```hui(?:-html)?[ \t]*\n/.test(text),
+      ...(blocked ? { blocked } : {}),
       readAt: mapped.status === 'silent' ? now() : readAt,
       createdAt: now(),
     };
@@ -458,7 +517,7 @@ export function createRoutinesInbox(config, o) {
       data: { src: 'hermes', ...(bot !== DEFAULT_PROFILE ? { hermesProfile: bot } : {}), jobId: e.jobId, itemId: e.id },
       // NOT dispatch(): a live stream on one device must not suppress another device's push
       match: (reg) => reg.enabled !== false && Array.isArray(reg.scope?.sources) && reg.scope.sources.includes('routines')
-        && rights.rightOfCredential(reg.credential, bot) !== 'none',
+        && rights.rightOfCredential(reg.credential, bot) !== 'none' && !botMuted(reg, bot), // per-bot level quiet / off
     }).then((r) => log.info('routines_push', { bot, sent: r.sent, failed: r.failed, ...(r.skipped ? { skipped: r.skipped } : {}) }))
       .catch((err) => log.warn('routines_push_failed', { error: String(err?.message ?? err).slice(0, 80) }));
   }

@@ -41,7 +41,7 @@ test('a patch for a card the chat never had is no version (the callout stays a c
   assert.equal(headOf(f.cards.get('einkauf')!).n, 2);
   // a tick that is already there is "no change", not "failed"
   assert.deepEqual(f.marks.get('ha-5'), [{ card: 'einkauf', n: 2, unchanged: true }]);
-  assert.deepEqual(f.marks.get('ha-2'), [{ card: 'einkauf', n: 1, unchanged: true, failed: true }]);
+  assert.deepEqual(f.marks.get('ha-2'), [{ card: 'einkauf', n: 1, unchanged: true, failed: true, missed: [{ del: 'nope' }] }]);
   assert.deepEqual(f.marks.get('ha-3'), [{ card: 'other', n: 0, adopted: 'patch:other', unapplied: true }]);
   assert.equal(f.cards.has('other'), false);
 });

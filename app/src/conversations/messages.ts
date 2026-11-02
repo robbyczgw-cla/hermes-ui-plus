@@ -6,6 +6,7 @@ import type { ChatMessage } from '../hermes/types.ts';
 import { compactDetails } from '../hermes/trace.ts';
 import { answerText } from '../hermes/progressNotes.ts';
 import { answerOutputText } from '../chat/toolMarkup.ts';
+import { stripQuotes } from '../chat/quoteWire.ts';
 import { queuedForStorage, withoutUnackedAnswers } from '../hermes/pendingSend.ts';
 import { MESSAGES_MAX_BYTES, MESSAGE_CAP, PREVIEW_MAX } from './types.ts';
 
@@ -187,7 +188,7 @@ export function previewOf(messages: ChatMessage[], max: number = PREVIEW_MAX): s
     // a job's delivery into a Bot Chat reads "Preis-Check: 289 € bei Shop A", not the injected header (bots/core.ts)
     const cron = m.role === 'user' ? cronDelivery(m.text) : null;
     // raw tool-call markup of an answer → "[Werkzeug]", never the call's JSON (PC-07)
-    const src = cron ? `${cron.name}: ${cron.output}` : m.role === 'assistant' ? answerOutputText(answerText(m), TOOL_MARKER) : m.text;
+    const src = cron ? `${cron.name}: ${cron.output}` : m.role === 'assistant' ? answerOutputText(answerText(m), TOOL_MARKER) : stripQuotes(m.text);
     const p = flattenHead(src, 2 * max + 16) || attachmentMarker(m);
     if (p) return truncate(p, max);
   }
@@ -209,6 +210,18 @@ function flattenHead(text: string, need: number): string {
   return flatten(text);
 }
 
+/**
+ * An agent server's file link reads as the file name in a one-line preview ("Einkaufsliste.pdf", not
+ * "[Einkaufsliste.pdf](/v1/attachments/…)"): files arrive as `[name](…/v1/attachments/<signed>)` (files/fileLinks.ts).
+ * Other links and images stay as they are; a link cut off by the server's preview limit (no closing parenthesis) counts.
+ */
+export function linkLabels(text: string): string {
+  if (!text.includes('/v1/attachments/')) return text;
+  return text
+    .replace(/(^|[^!])\[([^\]\n]{1,200})\]\(\s*<?[^\s()<>]*\/v1\/attachments\/[^\s()<>]*>?\s*\)/g, '$1$2')
+    .replace(/(^|[^!])\[([^\]\n]{1,200})\]\(\s*<?[^\s()<>]*\/v1\/attachments\/[^\s()<>]*$/, '$1$2');
+}
+
 function flatten(text: string): string {
   // the fence patterns start with ``` – without one they cannot match (and Hermes' regex interpreter would still visit
   // every char of the text three times)
@@ -218,7 +231,7 @@ function flatten(text: string): string {
         .replace(/```hui[\s\S]*?(?:```|$)/g, ' [Komponente] ')
         .replace(/```[\s\S]*?(?:```|$)/g, ' [Code] ')
     : text;
-  return t.replace(/[`*_#>]+/g, '').replace(/\s+/g, ' ').trim();
+  return linkLabels(t).replace(/[`*_#>]+/g, '').replace(/\s+/g, ' ').trim();
 }
 
 /** flatten(m.text) per message object (searchTextOf runs on every save of a conversation); answers as they show */
@@ -226,7 +239,7 @@ const flatTexts = new WeakMap<ChatMessage, string>();
 
 function flatText(m: ChatMessage): string {
   let f = flatTexts.get(m);
-  if (f === undefined) flatTexts.set(m, (f = flatten(m.role === 'assistant' ? answerOutputText(m.text, '') : m.text)));
+  if (f === undefined) flatTexts.set(m, (f = flatten(m.role === 'assistant' ? answerOutputText(m.text, '') : stripQuotes(m.text))));
   return f;
 }
 

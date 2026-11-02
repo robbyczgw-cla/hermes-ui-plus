@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // PWA post-processing of an `expo export -p web` output dir (called by scripts/build-web.sh):
 //  - manifest.webmanifest from EXPO_PUBLIC_APP_NAME / _APP_SHORT_NAME / _THEME_COLOR (+ WEB_DESCRIPTION, official: the tagline)
-//  - index.html: <title>, application-name, apple-mobile-web-app-title, theme-color metas (data-pwa="…"), <html lang="en">
+//  - index.html: <title>, application-name, apple-mobile-web-app-title, theme-color metas (data-pwa="…"), <html lang="en">,
+//    translate="no" + <meta name="google" content="notranslate"> (no browser page translation)
 //  - sw.js: SHELL_VERSION = content hash of the FINAL export (relative paths + bytes of every shipped file incl. the
 //    shell, manifest and icons, plus the worker template), PRECACHE = the export's hashed bundles / lazy chunks /
 //    assets; registration script.
@@ -84,6 +85,11 @@ export function finalize(dir, env = process.env) {
   // the app (applyDocumentLang) switch it to the UI language at runtime
   if (!/<html\b[^>]*\blang="/.test(html)) console.warn('web-finalize: <html lang> not found');
   html = html.replace(/(<html\b[^>]*?\blang=")[^"]*"/, '$1en"');
+  // never machine-translated by the browser: Chrome's page translation rewrites React's text nodes, and the next update of
+  // a streaming / re-rendered message then throws `removeChild … not a child of this node` (the message shows the
+  // "could not be displayed" card). Seen live with answers in another language than the UI in a Chrome app.
+  if (!/<html\b[^>]*\btranslate="no"/.test(html)) html = html.replace(/<html\b/, '<html translate="no"');
+  if (!/<meta name="google" content="notranslate"/.test(html)) html = html.replace('</head>', '<meta name="google" content="notranslate">\n</head>');
   setMeta('name', name);
   setMeta('short-name', shortName);
   setMeta('theme-light', theme);

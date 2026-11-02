@@ -224,6 +224,8 @@ export type ChatMessage = {
   error?: string;
   createdAt: number;
   // ---- additions (never remove fields above) ----
+  /** a row of the bot's read-only Bot Chat on its merged timeline (bots/timeline.ts): no retry, branch or edit; never stored in the talk */
+  feed?: true;
   /** `delta.reasoning_content` ("thinking"), if the model streams it */
   reasoning?: string;
   /** transient `hermes.status` line (provider wait, retry, compaction); cleared when text resumes */
@@ -347,6 +349,11 @@ export type HermesConn = {
   model?: string;
   /** X-Hermes-Session-Key (memory scope). Default `hermes-ui`. */
   sessionKey?: string;
+  /**
+   * Leave X-Hermes-Session-Key out. A browser talking directly to Hermes must: the header is not in Hermes' CORS allow-list
+   * (`Access-Control-Allow-Headers`), so the preflight fails and no message could ever be sent.
+   */
+  omitSessionKey?: boolean;
   /**
    * Send the bootstrap system message (bootstrap.ts) with every request. Default true; set false
    * when baseUrl points to the UI bridge, which injects it itself.

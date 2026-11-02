@@ -16,6 +16,7 @@ import { formatClock, toMinutes } from '../../ui/components/modules/c2/agendaMod
 import { dayLabel, dayOf, freshPerDay, nextOpenBlock, tripDays } from '../trip.ts';
 import { pricesAt, watchCounts } from '../watch.ts';
 import { ListTile, ProgressRing, useTimeLabel } from './parts';
+import { usePhrases } from './LiveSync';
 
 export const LiveTray = memo(function LiveTray({ maxWidth, collapsed, onExpand }: { maxWidth?: number; collapsed?: boolean; onExpand?: () => void }) {
   const live = useLive();
@@ -78,7 +79,7 @@ function CollapsedRow({ t, model, others, onPress, onExpand }: { t: Theme; model
           {model.title}
         </HText>
         {model.unread ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.colors.accent }} /> : null}
-        <HText variant="caption" color={model.openConflicts ? 'warning' : model.pendingCount ? 'info' : 'muted'} numberOfLines={1} tabular style={{ flex: 1 }}>
+        <HText variant="caption" color={model.openConflicts || (model.undone && !model.pendingCount && !model.sending) ? 'warning' : model.pendingCount || model.sending ? 'info' : 'muted'} numberOfLines={1} tabular style={{ flex: 1 }}>
           {status}
         </HText>
       </PressableScale>
@@ -107,14 +108,19 @@ function useTrayStatus(model: LiveCardModel): string {
   const tr = useT();
   const time = useTimeLabel();
   const progress = useTrayBase(model);
+  const phrases = usePhrases();
   const who = tr(model.head.author === 'hermes' ? 'live.who.hermes' : 'live.who.you');
   return model.openConflicts
     ? tr('live.tray.conflict', { progress, count: model.openConflicts })
     : model.pendingCount
       ? tr('live.tray.waiting', { progress, count: model.pendingCount })
-      : model.type === 'trip'
-        ? progress
-        : tr('live.tray.status', { progress, who: model.type === 'products' ? tr('live.who.hermes') : who, time: time(model.type === 'products' ? (pricesAt(model.card) ?? model.head.at) : model.head.at) });
+      : model.sending
+        ? tr('live.tray.sending', { progress })
+        : model.undone?.undone.length && !model.closed
+          ? tr('live.tray.undone', { progress, items: phrases.list(model.undone.undone.map(phrases.undone), 2) })
+          : model.type === 'trip'
+          ? progress
+          : tr('live.tray.status', { progress, who: model.type === 'products' ? tr('live.who.hermes') : who, time: time(model.type === 'products' ? (pricesAt(model.card) ?? model.head.at) : model.head.at) });
 }
 
 function TrayRow({ t, model, first, onPress }: { t: Theme; model: LiveCardModel; first: boolean; onPress: () => void }) {
@@ -140,7 +146,7 @@ function TrayRow({ t, model, first, onPress }: { t: Theme; model: LiveCardModel;
           </HText>
           {model.unread ? <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: t.colors.accent }} /> : null}
         </View>
-        <HText variant="caption" color={model.openConflicts ? 'warning' : model.pendingCount ? 'info' : 'muted'} numberOfLines={1} tabular>
+        <HText variant="caption" color={model.openConflicts || (model.undone && !model.pendingCount && !model.sending) ? 'warning' : model.pendingCount || model.sending ? 'info' : 'muted'} numberOfLines={1} tabular>
           {status}
         </HText>
       </View>

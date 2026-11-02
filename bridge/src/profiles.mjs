@@ -14,7 +14,8 @@
 // Bots the hermes-ui-plus plugin reports (src/bots-manage.mjs, `setExternal`) are merged in: `auto` adds them to the
 // directory scan, `any` (a sandboxed bridge that cannot read the Hermes home) lists exactly them, `list` adds the bots
 // made in the app (an explicit list stays the owner's choice for every other profile), `off` ignores them. Parked bots
-// (Hermes does not serve them) are never listed.
+// (Hermes does not serve them: archived in the app, or a `gateway.parked` marker in the profile directory) are never
+// listed, also not from the directory scan or an explicit list; a restored bot is listed again.
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { hermesHome, listProfiles, parseYamlSubset } from './setup/detect.mjs';
@@ -134,7 +135,9 @@ export function createProfiles(env = process.env, o = {}) {
   let scan = { at: -Infinity, names: /** @type {string[]} */ ([]) };
   function scanned() {
     if (now() - scan.at < SCAN_TTL_MS) return scan.names;
-    const names = listProfiles(home, { fs }).map((p) => p.name).filter(isProfileName).filter((n) => n !== DEFAULT_PROFILE);
+    const names = listProfiles(home, { fs }).filter((p) => isProfileName(p.name) && p.name !== DEFAULT_PROFILE)
+      .filter((p) => { try { return !fs.existsSync(join(p.dir, 'gateway.parked')); } catch { return true; } })
+      .map((p) => p.name);
     scan = { at: now(), names };
     return names;
   }
@@ -146,7 +149,11 @@ export function createProfiles(env = process.env, o = {}) {
   /** Non-default profile names known to the bridge (`any`: only what the plugin reports). */
   function names() {
     if (mode === 'off') return [];
-    const add = (base, more) => [...base, ...more.map((b) => b.name).filter((n) => !base.includes(n))];
+    const parked = new Set(external.filter((b) => b.parked).map((b) => b.name));
+    const add = (base, more) => {
+      const kept = base.filter((n) => !parked.has(n));
+      return [...kept, ...more.map((b) => b.name).filter((n) => !kept.includes(n))];
+    };
     if (mode === 'list') return add(setting.names, served().filter((b) => b.app));
     if (mode === 'auto') return add(scanned(), served());
     return served().map((b) => b.name);

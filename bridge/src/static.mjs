@@ -61,7 +61,8 @@ export function appCsp({ allowHttp = false } = {}) {
     `font-src 'self' data: ${cdn}`,
     `img-src 'self' data: blob: https:${allowHttp ? ' http:' : ''}`,
     "media-src 'self' data: blob: https:",
-    `connect-src 'self' https: wss:${allowHttp ? ' http:' : ''}`,
+    // blob: the app reads a picked file through its own blob URL (attachments/webStore.ts); those are bound to this origin
+    `connect-src 'self' blob: https: wss:${allowHttp ? ' http:' : ''}`,
     "worker-src 'self' blob:",
     "frame-src 'self' blob: data:",
     "manifest-src 'self'",

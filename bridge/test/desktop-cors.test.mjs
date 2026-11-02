@@ -67,6 +67,7 @@ const ROUTES = [
   ['POST', '/bridge/stt'], ['POST', '/bridge/tts'], ['GET', '/bridge/meta/config'], ['GET', '/bridge/quick/config'],
   ['GET', '/bridge/library/config'], ['GET', '/bridge/bots'], ['GET', '/bridge/routines/capabilities'],
   ['GET', '/bridge/routines/rights'], ['GET', '/bridge/inbox/stream'], ['POST', '/bridge/push/register'], ['GET', '/bridge/devices'],
+  ['GET', '/bridge/bots/activity'], ['GET', '/bridge/groups'], ['POST', '/bridge/groups'],
 ];
 
 /** GET routes whose answer (also an error answer) the app must be able to read, with a valid device token. */
@@ -74,7 +75,7 @@ const READ_ROUTES = [
   '/v1/models', '/api/sessions', '/bridge/profiles', '/bridge/status', '/bridge/media?path=/nonexistent/x.png',
   '/bridge/img?u=https%3A%2F%2Fexample.invalid%2Fa.png', '/bridge/images/config', '/bridge/voice/config', '/bridge/meta/config',
   '/bridge/quick/config', '/bridge/library/config', '/bridge/bots', '/bridge/routines/capabilities', '/bridge/routines/rights',
-  '/bridge/routines/inbox', '/bridge/push/config', '/bridge/devices',
+  '/bridge/routines/inbox', '/bridge/push/config', '/bridge/devices', '/bridge/bots/activity', '/bridge/groups',
 ];
 
 async function pairAs(base, ctx, origin) {

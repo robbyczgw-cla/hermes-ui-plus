@@ -2686,6 +2686,7 @@ function norm(x: unknown, depth: number, ctx: Ctx, path: string): HuiNode | null
         .slice(0, MAX_TABLE_ROWS)
         .map((r) => (r as unknown[]).slice(0, Math.max(columns.length, 0)).map(normalizeCell));
       put(base, 'caption', str(x.caption));
+      put(base, 'note', str(x.note));
       put(base, 'source', str(x.source));
       put(base, 'basis', basis(x.basis));
       break;

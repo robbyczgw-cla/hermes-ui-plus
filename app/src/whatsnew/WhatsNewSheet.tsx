@@ -5,7 +5,7 @@
  */
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import { Icon, type IconName } from '../chat/icons';
 import { useConversations } from '../conversations/ConversationsProvider';
 import { botOf } from '../hermes/bots';
@@ -21,12 +21,17 @@ import { markWhatsNewShown, whatsNewClaimed, whatsNewForLaunch } from './storage
 
 type Ctx = { profile: ConnectionProfile; bot: string | undefined; open(path: string): void; ask(text: string): void; t: ReturnType<typeof useT> };
 
-/** per item: its icon, whether the open connection has it, and what a tap opens */
-const ITEMS: Record<WhatsNewItemId, { icon: IconName; applies(p: ConnectionProfile): boolean; run(c: Ctx): void }> = {
+/** per item: its icon, whether the open connection has it, and what a tap opens (`run` absent: a plain note, a tap just closes) */
+const ITEMS: Record<WhatsNewItemId, { icon: IconName; applies(p: ConnectionProfile): boolean; run?(c: Ctx): void }> = {
   // a new chat with an example request in the composer: the user sends it (or not) and Hermes makes the live card
   liveCards: { icon: 'checklist', applies: (p) => p.kind === 'hermes' || p.kind === 'demo', run: (c) => c.ask(c.t('whatsNew.items.liveCards.prompt')) },
   skills: { icon: 'book', applies: libraryApplies, run: (c) => c.open(libraryRoute(c.bot)) },
   memory: { icon: 'brain', applies: libraryApplies, run: (c) => c.open(libraryRoute(c.bot, 'memory')) },
+  // 0.3: notes only (these are on screens the user reaches in a tap anyway)
+  botTimeline: { icon: 'history', applies: (p) => p.kind === 'hermes' || p.kind === 'demo' },
+  replies: { icon: 'reply', applies: () => true },
+  botAbout: { icon: 'eye', applies: (p) => p.kind === 'hermes' || p.kind === 'demo' },
+  pdfViewer: { icon: 'file', applies: () => Platform.OS === 'web' },
 };
 
 /** Mount once per chat view; at most one sheet per app run opens (the first unblocked view takes it). */
@@ -88,10 +93,10 @@ export function WhatsNewSheet({ release, items, profile, bot, onClose }: { relea
               testID={`whatsnew-${id}`}
               onPress={() => {
                 onClose();
-                ITEMS[id].run(ctx);
+                ITEMS[id].run?.(ctx);
               }}
               accessibilityRole="button"
-              accessibilityLabel={tr('whatsNew.itemA11y', { title, text })}
+              accessibilityLabel={tr(ITEMS[id].run ? 'whatsNew.itemA11y' : 'whatsNew.itemInfoA11y', { title, text })}
               style={({ pressed }) => [styles.row, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: th.colors.border }, pressed && { backgroundColor: th.colors.surfacePressed }]}
             >
               <View style={[styles.icon, { backgroundColor: th.colors.accentSoft }]}>
@@ -105,7 +110,7 @@ export function WhatsNewSheet({ release, items, profile, bot, onClose }: { relea
                   {text}
                 </Text>
               </View>
-              <Icon name="chevronRight" size={16} color={th.colors.subtle} />
+              {ITEMS[id].run ? <Icon name="chevronRight" size={16} color={th.colors.subtle} /> : null}
             </Pressable>
           );
         })}

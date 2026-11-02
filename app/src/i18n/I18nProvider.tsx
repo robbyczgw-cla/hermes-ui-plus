@@ -49,6 +49,15 @@ function build(lang: Lang, locale: string, setting: LangSetting, setSetting: (s:
 const fallback: Ctx = build('de', 'de-DE', 'de', () => {});
 const I18nContext = createContext<Ctx>(fallback);
 
+/**
+ * One fixed language, no device locale or stored setting (render tests: testkit/answerView.ts). The language's
+ * dictionary must be loaded first (`loadDictionary`), else German shows.
+ */
+export function FixedI18nProvider({ lang, locale, children }: { lang: Lang; locale?: string; children: React.ReactNode }) {
+  const value = useMemo(() => build(lang, locale ?? { de: 'de-DE', en: 'en-US', es: 'es-ES' }[lang], lang, () => {}), [lang, locale]);
+  return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
+}
+
 export function I18nProvider({ children }: { children: React.ReactNode }) {
   const deviceTags = useLocales().map((l) => l.languageTag);
   const tagsRef = useRef(deviceTags);

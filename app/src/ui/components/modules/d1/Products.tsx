@@ -135,7 +135,7 @@ function PlainProducts({ node }: { node: Partial<HuiProducts> }) {
                 {tr('ui.products.count', { n: model.items.length })}
               </HText>
             ) : null}
-            <ProvenanceChip basis={model.basis} source={model.source} />
+            <ProvenanceChip basis={model.basis} source={model.source} factual />
           </View>
           {model.compare && model.items.length > 1 ? (
             <HeaderPill icon={comparing ? 'check' : 'compare'} label={comparing ? tr('ui.products.compareDone') : tr('ui.products.compare')} onPress={toggleMode} active={comparing} disabled={streaming} />
@@ -829,7 +829,7 @@ function ProductDetails({ t, p, lang, onShop, source, basis }: { t: Theme; p: Pr
         </View>
       ) : null}
 
-      <ProvenanceChip basis={basis} source={source} />
+      <ProvenanceChip basis={basis} source={source} factual />
     </View>
   );
 }

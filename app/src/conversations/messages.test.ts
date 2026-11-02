@@ -44,6 +44,14 @@ test('capMessages enforces a byte budget but keeps at least the last message', (
   assert.equal(one.length, 1);
 });
 
+test('previewOf shows an agent file link as the file name, other links and images stay', () => {
+  const file = '[Einkaufsliste.pdf](/v1/attachments/eyJhIjoxfQ.sig-1_x) (2 KB)';
+  assert.equal(previewOf([msg(1, { text: file })]), 'Einkaufsliste.pdf (2 KB)');
+  assert.equal(previewOf([msg(1, { text: `Hier: [Plan.pdf](https://agent.example.com/v1/attachments/abc.def)` })]), 'Hier: Plan.pdf');
+  assert.equal(previewOf([msg(1, { text: 'Siehe [Doku](https://example.com/doku)' })]), 'Siehe [Doku](https://example.com/doku)');
+  assert.equal(previewOf([msg(1, { text: '![Bild](/v1/attachments/abc)' })]), '![Bild](/v1/attachments/abc)');
+});
+
 test('prepareForStorage default cap is 300', () => {
   const list = Array.from({ length: 450 }, (_, i) => msg(i));
   const p = prepareForStorage(list);

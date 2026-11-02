@@ -115,5 +115,7 @@ export function useDemoBotsTab(profile: ConnectionProfile | undefined, o: { enab
   return {
     profileId, rows, waiting, nameOf, opening: null, notice: null, dismissNotice: () => {}, unreachable: NONE, open, openWaiting,
     refresh: () => {}, create: { kind: 'create' }, createBot, created, demo: true,
+    // archiving needs a Hermes server: the demo has nothing archived
+    archived: [], restore: async () => ({ ok: false, failure: 'unsupported' }),
   };
 }

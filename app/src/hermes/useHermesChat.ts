@@ -152,6 +152,8 @@ export type UseHermesChatOptions = {
    * along as a `[hui:live]` trailer, `onAccepted` runs once Hermes took the turn (only then are they cleared).
    */
   liveOutgoing?: (text: string) => LiveOutgoing | null;
+  /** extra system message for the turn being sent (a bot's recent deliveries, bots/timeline.ts); read at send time */
+  turnContext?: (messages: ChatMessage[]) => string | null;
 };
 
 /** Bubble actions of a user message that waits for its uploads (`sendPending`). */
@@ -612,6 +614,7 @@ export function useHermesChat(conn: HermesConn, options: UseHermesChatOptions = 
               idempotencyKey,
               liveCards: optsRef.current.liveCards,
               liveHeader: live?.header || undefined,
+              turnContext: optsRef.current.turnContext?.(messagesRef.current) ?? undefined,
               wake,
               onConnection: (state) => {
                 if (current()) markConnection(state);

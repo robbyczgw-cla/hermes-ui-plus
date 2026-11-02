@@ -1,4 +1,5 @@
-// Hermes-generated files: GET /bridge/media?path=<absolute server path> (authenticated, read-only).
+// Hermes-generated files: GET /bridge/media?path=<absolute server path>[&download=1] (authenticated, read-only).
+// `inline` for types a browser may show, `attachment` for the rest and with download=1.
 // Hermes answers with `MEDIA:<server path>` tags; the app asks for exactly that path. Only files below the
 // operator-configured roots (BRIDGE_MEDIA_DIRS, comma/colon separated absolute dirs) are served; with no root
 // configured the endpoint answers 404 `media_disabled`. Zero dependencies.
@@ -142,7 +143,12 @@ export function createMedia(bridgeConfig, o = {}) {
   async function handle(req, res) {
     if (!authorized(req)) return fail(req, res, 401, 'Invalid bridge token', 'invalid_api_key');
     let raw;
-    try { raw = new URL(req.url, 'http://x').searchParams.get('path'); } catch { raw = null; }
+    let download = false;
+    try {
+      const q = new URL(req.url, 'http://x').searchParams;
+      raw = q.get('path');
+      download = q.get('download') === '1'; // the app's "Sichern" fallback: a download, not a view
+    } catch { raw = null; }
     const r = await resolveMedia(raw, cfg);
     if (!r.ok) {
       if (r.status !== 404 || r.code === 'media_disabled') log.info('media_denied', { code: r.code });
@@ -158,7 +164,7 @@ export function createMedia(bridgeConfig, o = {}) {
         ...baseHeaders(req),
         'content-type': r.type,
         'content-length': st.size,
-        'content-disposition': disposition(r.inline, r.name),
+        'content-disposition': disposition(r.inline && !download, r.name),
         'content-security-policy': "sandbox; default-src 'none'",
         'cache-control': 'private, max-age=300',
       });

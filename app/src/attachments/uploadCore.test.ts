@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { bridgeOrigin, healthUrl, isBridgeHeader, parseUploadResponse, uploadHeaders, uploadUrl } from './uploadCore.ts';
+import { bridgeOrigin, healthUrl, isBridgeHeader, parseUploadResponse, shareFileName, uploadErrorMessage, uploadHeaders, uploadUrl } from './uploadCore.ts';
 import { isAttachmentError } from './types.ts';
 
 const A = { id: 'att-1', name: 'Übersicht März.pdf', mimeType: 'application/pdf', size: 2048 };
@@ -55,4 +55,21 @@ test('bridge detection header', () => {
   assert.equal(isBridgeHeader('1'), true);
   assert.equal(isBridgeHeader(null), false);
   assert.equal(isBridgeHeader('0'), false);
+});
+
+test('429 is a busy server in words, not an HTTP code', () => {
+  assert.deepEqual(uploadErrorMessage(429, '{}', 'x.pdf'), { key: 'attachments.upload.busy', vars: { name: 'x.pdf' } });
+});
+
+test('share file name: the own name, as one safe file name', () => {
+  assert.equal(shareFileName('Übersicht März.pdf', 'att-1'), 'Übersicht März.pdf');
+  assert.equal(shareFileName('../../etc/passwd', 'att-1'), 'passwd');
+  assert.equal(shareFileName('a\\b.txt', 'att-1'), 'b.txt');
+  assert.equal(shareFileName('..hidden', 'att-1'), 'hidden');
+  assert.equal(shareFileName('a:b\n.txt', 'att-1'), 'a_b_.txt');
+  assert.equal(shareFileName('', 'att-1'), 'att-1');
+  assert.equal(shareFileName('...', 'att-1'), 'att-1');
+  const long = shareFileName(`${'ä'.repeat(300)}.pdf`, 'att-1');
+  assert.ok(new TextEncoder().encode(long).length <= 200, 'bytes, not characters');
+  assert.ok(long.endsWith('.pdf'));
 });

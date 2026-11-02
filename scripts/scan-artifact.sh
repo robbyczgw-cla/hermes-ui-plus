@@ -15,7 +15,11 @@ export PATH="$HOME/.local/bin:$PATH"
 #           gitleaks only. Refused when a denylist exists, so the maintainer's gate can never be weakened by it.
 PUBLIC=0
 if [ "${1:-}" = --public ]; then PUBLIC=1; shift; fi
-[ $# -eq 1 ] || { echo "usage: $0 [--public] <apk|aab|ipa|zip|dir|.app>" >&2; exit 2; }
+# --assets WEBDIR (or $HUI_EMBEDDED_ASSETS): for a desktop app that embeds the compressed files of that web dir byte for byte;
+# leak-guard scans them by content and skips only exact copies of the clean ones in the binary (docs/LEAK-GUARD.md)
+ASSETS=()
+if [ "${1:-}" = --assets ]; then [ $# -ge 2 ] || { echo "scan-artifact: --assets needs a directory" >&2; exit 2; }; ASSETS=(--assets "$2"); shift 2; fi
+[ $# -eq 1 ] || { echo "usage: $0 [--public] [--assets WEBDIR] <apk|aab|ipa|zip|dir|.app>" >&2; exit 2; }
 target="$1"
 PDIR="${HUI_PRIVATE_DIR:-$HOME/work/hermesiui-private}"
 if [ "$PUBLIC" = 1 ] && [ -e "$PDIR/leak-denylist.txt" ]; then
@@ -59,7 +63,7 @@ echo "scan-artifact: scanning $target"
 rc=0
 # leak-guard --path reads .leak-guard-allow from the working directory: always the repo's, wherever this is called from
 scan_dir="$(cd "$scan_dir" && pwd)"
-lg() { (cd "$ROOT" && node scripts/leak-guard.mjs --path "$scan_dir" "$@"); }
+lg() { (cd "$ROOT" && node scripts/leak-guard.mjs --path "$scan_dir" ${ASSETS[@]+"${ASSETS[@]}"} "$@"); }
 if [ "$PUBLIC" = 1 ]; then
   echo "== leak-guard (public: generic patterns only, no private overlay) =="
   lg --generic-only ${HERMES[@]+"${HERMES[@]}"} || rc=1

@@ -46,8 +46,15 @@ test('request body: one-line name and job, the app language, commands only for c
 });
 
 test('bridge answers: config, created bot; unknown shapes are null', () => {
-  assert.deepEqual(parseBotsConfig({ create: { allowed: true }, admin: true, limit: 50, count: 2 }), { create: { allowed: true }, admin: true, limit: 50, count: 2 });
-  assert.deepEqual(parseBotsConfig({ create: { allowed: false, reason: 'owner_off' } }), { create: { allowed: false, reason: 'owner_off' }, admin: false, limit: 50, count: 0 });
+  assert.deepEqual(parseBotsConfig({ create: { allowed: true }, admin: true, limit: 50, count: 2 }), { create: { allowed: true }, admin: true, limit: 50, count: 2, manage: { allowed: true }, archived: [] });
+  assert.deepEqual(parseBotsConfig({ create: { allowed: false, reason: 'owner_off' } }), { create: { allowed: false, reason: 'owner_off' }, admin: false, limit: 50, count: 0, manage: { allowed: false, reason: 'owner_off' }, archived: [] });
+  // slice 4: the bridge's own `manage` answer wins; an older bridge: manage follows create, the bot limit does not close it
+  assert.deepEqual(parseBotsConfig({ create: { allowed: false, reason: 'limit' } })?.manage, { allowed: true });
+  assert.deepEqual(parseBotsConfig({ create: { allowed: true }, manage: { allowed: false, reason: 'device_forbidden' } })?.manage, { allowed: false, reason: 'device_forbidden' });
+  assert.deepEqual(
+    parseBotsConfig({ create: { allowed: true }, archived: [{ name: 'scout', label: ' Scout ', color: '#AABBCC' }, { name: 'default' }, { name: 'Bad Name' }, { name: 'scout' }] })?.archived,
+    [{ name: 'scout', label: 'Scout', color: '#aabbcc' }],
+  );
   assert.deepEqual(parseBotsConfig({ create: { allowed: false, reason: '<b>free text</b>' } })?.create, { allowed: false, reason: 'unknown' });
   assert.equal(parseBotsConfig({ object: 'list' }), null);
   assert.equal(parseBotsConfig(null), null);
@@ -89,7 +96,7 @@ const conn = { baseUrl: 'https://bridge.example.com/p/scout/v1', apiKey: 'nca_us
 
 test('api: GET and POST /bridge/bots at the server root with the device token', async () => {
   const g = fake(200, { create: { allowed: true }, admin: false, limit: 50, count: 1 });
-  assert.deepEqual(await fetchBotsConfig(g.fetchImpl, conn), { create: { allowed: true }, admin: false, limit: 50, count: 1 });
+  assert.deepEqual(await fetchBotsConfig(g.fetchImpl, conn), { create: { allowed: true }, admin: false, limit: 50, count: 1, manage: { allowed: true }, archived: [] });
   assert.deepEqual(g.calls[0], { url: 'https://bridge.example.com/bridge/bots', method: 'GET', body: undefined, auth: 'Bearer nca_user_test_token_000' });
   assert.equal(await fetchBotsConfig(fake(404, { error: {} }).fetchImpl, conn), null, 'older bridge');
   assert.equal(await fetchBotsConfig(fake(0, null, { throws: true }).fetchImpl, conn), null, 'offline');
@@ -105,7 +112,7 @@ test('api: GET and POST /bridge/bots at the server root with the device token', 
 
 test('Bots tab: create button, the owner note (command for admins), or the 0.1 look', async () => {
   const { createOffer, createShowsTab } = await import('./core.ts');
-  const cfg = (allowed: boolean, reason = '', admin = false) => ({ create: allowed ? { allowed: true as const } : { allowed: false as const, reason }, admin, limit: 50, count: 0 });
+  const cfg = (allowed: boolean, reason = '', admin = false) => ({ create: allowed ? { allowed: true as const } : { allowed: false as const, reason }, admin, limit: 50, count: 0, manage: { allowed: true as const }, archived: [] });
   assert.deepEqual(createOffer(cfg(true)), { kind: 'create' });
   assert.deepEqual(createOffer(cfg(false, 'owner_off', true)), { kind: 'owner', reason: 'owner_off', command: true });
   assert.deepEqual(createOffer(cfg(false, 'owner_off', false)), { kind: 'owner', reason: 'owner_off', command: false });
@@ -117,4 +124,8 @@ test('Bots tab: create button, the owner note (command for admins), or the 0.1 l
   assert.equal(createShowsTab(cfg(false, 'plugin_not_configured', true)), false, 'default bridge without plugin: 0.1 look');
   assert.equal(createShowsTab(cfg(false, 'bridge_off', true)), false);
   assert.equal(createShowsTab(null), false);
+  // the last bot archived on a device that may not create: the tab stays for "Archived → Bring back"
+  const parked = [{ name: 'research', label: 'Research' }];
+  assert.equal(createShowsTab({ ...cfg(false, 'owner_off', false), archived: parked }), true);
+  assert.equal(createShowsTab({ ...cfg(false, 'owner_off', false), archived: parked, manage: { allowed: false as const, reason: 'device' } }), false, 'nothing to do there without the manage right');
 });

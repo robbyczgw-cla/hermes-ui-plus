@@ -6,7 +6,8 @@
 import { fetch as expoFetch } from 'expo/fetch';
 import { File, UploadType } from 'expo-file-system';
 import { Platform } from 'react-native';
-import { healthUrl, isBridgeHeader, parseUploadResponse, uploadHeaders, uploadUrl } from './uploadCore';
+import { createUploadQueue } from './uploadQueue';
+import { bridgeOrigin, healthUrl, isBridgeHeader, parseUploadResponse, uploadHeaders, uploadUrl } from './uploadCore';
 import { AttachmentError, isAttachmentError } from './types';
 import type { Attachment, RemoteRef } from './types';
 import { webAttachments } from './webStore';
@@ -19,7 +20,17 @@ export type UploadOptions = {
   onProgress?: (fraction: number | undefined) => void;
 };
 
-export async function uploadAttachment(att: Attachment, conn: BridgeConn, opts: UploadOptions = {}): Promise<RemoteRef> {
+const queue = createUploadQueue({
+  isBusy: (e) => isAttachmentError(e) && e.code === 'upload_429',
+  aborted: () => new AttachmentError('upload_aborted', { key: 'attachments.upload.aborted' }),
+});
+
+/** One file, in turn with the others on this bridge credential (uploadQueue.ts). */
+export function uploadAttachment(att: Attachment, conn: BridgeConn, opts: UploadOptions = {}): Promise<RemoteRef> {
+  return queue.run(`${bridgeOrigin(conn.baseUrl)} ${conn.apiKey}`, opts.signal, () => sendFile(att, conn, opts));
+}
+
+async function sendFile(att: Attachment, conn: BridgeConn, opts: UploadOptions): Promise<RemoteRef> {
   const url = uploadUrl(conn.baseUrl);
   const headers = uploadHeaders(att, conn.apiKey);
   try {

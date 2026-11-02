@@ -117,6 +117,7 @@ function ThemedRoot() {
                         <Stack.Screen name="index" options={{ title: APP_NAME, ...(vibrancy ? { contentStyle: { backgroundColor: 'transparent' } } : null) }} />
                         <Stack.Screen name="settings" options={{ presentation: 'modal', title: APP_NAME }} />
                         <Stack.Screen name="routines" options={{ presentation: 'modal', title: APP_NAME }} />
+                        <Stack.Screen name="group" options={{ title: APP_NAME }} />
                         <Stack.Screen name="skills" options={{ presentation: 'modal', title: APP_NAME }} />
                         <Stack.Screen
                           name="gallery"

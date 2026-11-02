@@ -99,6 +99,8 @@ let upstreamUrl;
 let seen = [];
 before(async () => {
   upstream = http.createServer(async (req, res) => {
+    // the bridge's one-time web capability probe (src/webcaps.mjs, covered in caps.test.mjs): answered "unknown"
+    if (req.method === 'GET' && /\/v1\/toolsets$/.test(req.url ?? '')) { res.writeHead(404).end(); return; }
     const chunks = [];
     for await (const c of req) chunks.push(c);
     const raw = Buffer.concat(chunks);

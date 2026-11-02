@@ -15,6 +15,7 @@ import { createImages } from './images.mjs'; // web image search (docs/ROUTER.md
 import { createImageProxy } from './image-proxy.mjs'; // GET /bridge/img?u=: images Hermes' tools returned (docs/BRIDGE.md, "Image proxy")
 import { createMeta } from './meta.mjs'; // titles & follow-ups (docs/ROUTER.md, "Meta (titles & follow-ups)")
 import { createBotsManage } from './bots-manage.mjs'; // create / edit bots via the plugin, bots.manage right (docs/BOTS-SERVER.md)
+import { createBotsActivity } from './bots-activity.mjs'; // GET /bridge/bots/activity: running turns + routines per bot (docs/BOTS-SERVER.md)
 import { createLibrary } from './library.mjs'; // skills & memory library via the same plugin (docs/SKILLS-MEMORY.md)
 import { createQuick } from './quick.mjs'; // quick answers via the optional Hermes plugin (docs/HERMES-PLUGIN.md)
 import { createHermesPush } from './push-hermes.mjs'; // push + live inbox (docs/SELF-HOSTING.md "Push notifications")
@@ -26,6 +27,7 @@ import { createStatic, isLandingRequest, serveLanding } from './static.mjs'; // 
 import { createProfiles } from './profiles.mjs'; // Hermes profiles under /p/<name>/ (BRIDGE_PROFILES)
 import { createRoutinesAdmin, createRoutinesRights } from './routines-rights.mjs'; // routines rights per device + bot
 import { createRoutinesInbox } from './routines-inbox.mjs'; // routines result inbox + /bridge/routines/* (docs/ROUTER.md)
+import { createGroups } from './groups.mjs'; // bot groups: /bridge/groups*, rounds driven by the bridge (docs/BOT-GROUPS.md)
 
 /** Unauthenticated liveness path (`GET /bridge/live` → 200 "ok"): says only that the bridge process answers. */
 export const LIVE_PATH = '/bridge/live';
@@ -76,7 +78,9 @@ export function createServer(env = process.env, o = {}) {
     logger, fetch: o.fetch, now: o.now, rights: routinesRights, push, profiles,
   });
   push.setRoutines({ covers: routines.covers, rightOfCredential: routinesRights.rightOfCredential });
-  const bridgeHandler = createBridgeHandler(config, { router, logger, turns: push.turns, approvals: push.approvals, profiles, routinesRights });
+  // --- activity: the bridge's own running chat turns (+ tool steps from their SSE) and running routines per bot
+  const activity = createBotsActivity(config, { logger, fetch: o.fetch, now: o.now, rights: routinesRights, profiles });
+  const bridgeHandler = createBridgeHandler(config, { router, logger, turns: push.turns, approvals: push.approvals, profiles, routinesRights, activity });
   // --- uploads hook-in: POST /bridge/uploads is handled by src/uploads.mjs (own auth check, streamed
   // to disk, not subject to BRIDGE_MAX_BODY_BYTES); every other request goes to the bridge unchanged.
   const uploads = createUploads(config, { env, logger });
@@ -94,6 +98,12 @@ export function createServer(env = process.env, o = {}) {
   // own auth; creating needs the owner's switch, the device grant and the plugin). Also feeds the plugin's bot list into
   // `profiles` before GET /bridge/profiles and before a `/p/<name>/` the bridge does not know yet.
   const bots = createBotsManage(config, { env, devices, profiles, fetch: o.botsFetch ?? o.libraryFetch ?? o.quickFetch, logger, now: o.now });
+  // --- groups hook-in: /bridge/groups* (src/groups.mjs, own auth; off until the owner switches it on). The bridge runs the
+  // rounds over each member's hidden `Group: <id>` session; approvals of a member turn go through the approval watcher.
+  const groups = createGroups(config, {
+    env, stateDir: env.BRIDGE_STATE_DIR || String(env.STATE_DIRECTORY ?? '').split(':')[0] || '',
+    profiles, approvals: push.approvals, turns: push.turns, fetch: o.groupsFetch ?? o.fetch, logger, now: o.now,
+  });
   // --- pairing hook-in: GET /bridge/pair[.svg|.png] (src/pair.mjs; loopback or one-time page code with BRIDGE_PAIRING=1)
   // and POST /bridge/pair/redeem (one-time pair code → device token, unauthenticated, rate limited).
   const pairing = createPairing(config, { env, logger, devices, now: o.now });
@@ -145,6 +155,8 @@ export function createServer(env = process.env, o = {}) {
     if (meta.matches(req)) return meta.handle(req, res);
     if (quick.matches(req)) return void quick.handle(req, res).catch((e) => { logger.error('quick failed', { err: e.name }); if (!res.headersSent) res.writeHead(500); res.end(); });
     if (library.matches(req)) return void library.handle(req, res).catch((e) => { logger.error('library failed', { err: e.name }); if (!res.headersSent) res.writeHead(500); res.end(); });
+    if (groups.matches(req)) return void groups.handle(req, res).catch((e) => { logger.error('groups failed', { err: String(e?.message ?? e).slice(0, 120) }); if (!res.headersSent) res.writeHead(500); res.end(); });
+    if (activity.matches(req)) return void activity.handle(req, res).catch((e) => { logger.error('activity failed', { err: String(e?.message ?? e).slice(0, 120) }); if (!res.headersSent) res.writeHead(500); res.end(); });
     if (bots.matches(req)) return void bots.handle(req, res).catch((e) => { logger.error('bots failed', { err: String(e?.message ?? e).slice(0, 120) }); if (!res.headersSent) res.writeHead(500); res.end(); });
     if (uploads.matches(req)) return uploads.handle(req, res);
     if (media.matches(req)) return void media.handle(req, res).catch(() => { if (!res.headersSent) res.writeHead(500); res.end(); });
@@ -172,6 +184,7 @@ export function createServer(env = process.env, o = {}) {
   const close = () => closing ??= (async () => {
     push.stop();
     routines.stop();
+    groups.stop();
     // Check turns after incoming requests close: an accepted request can start a detached turn during drain.
     const drained = new Promise((resolve) => server.close(resolve)).then(() => bridgeHandler.whenIdle());
     let timer;
@@ -186,7 +199,7 @@ export function createServer(env = process.env, o = {}) {
       })]);
     } finally { clearTimeout(timer); devices?.close(); }
   })();
-  return { server, close, config, logger, router, uploads, media, voice, meta, quick, library, bots, pairing, images, imageProxy, push, devices, web, profiles, routines, routinesRights };
+  return { server, close, config, logger, router, uploads, media, voice, meta, quick, library, bots, activity, groups, pairing, images, imageProxy, push, devices, web, profiles, routines, routinesRights };
 }
 
 /**

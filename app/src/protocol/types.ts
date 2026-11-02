@@ -194,6 +194,8 @@ export interface HuiStats extends HuiBase, HuiProvenance {
 export type HuiCell = string | number | null;
 
 export interface HuiTable extends HuiBase, HuiProvenance {
+  /** a remark on the whole table, shown under it (models add it unasked) */
+  note?: string;
   type: 'table';
   /** max 12 */
   columns: string[];

@@ -37,6 +37,18 @@ export type ConversationMeta = {
    * renamed on Hermes (Hermes Desktop finds it by that title), never a draft. `hermesSessionId` = that session.
    */
   botChat?: true;
+  /**
+   * Bots A+ (bots/timeline.ts): the app's own session of a bot, `hermesSessionId` = `hui-bot-<bot>`. Where the user writes
+   * on a Hermes whose Bot Chat is read-only; the bot's screen shows it merged with the Bot Chat. Never listed under Chats.
+   */
+  botTalk?: true;
+  /**
+   * a former Bot Chat the server moved off that title (bots/adopt.ts): keeps its session and transcript, shown as history
+   * on the bot's screen, and counts as the app's own, not as a foreign session.
+   */
+  botChatRetired?: true;
+  /** on a former talk: rows that went over to the next talk (bots/timeline.ts unsentTurns), not shown here */
+  carriedTurns?: string[];
   createdAt: number;
   updatedAt: number;
   pinned?: boolean;
@@ -69,6 +81,11 @@ export type ConversationMeta = {
    */
   historyTruncated?: boolean;
 };
+
+/** A place of a bot rather than a chat of the user's: no draft, no rename, no delete, no list entry of its own. */
+export function isBotPlace(c: Pick<ConversationMeta, 'botChat' | 'botTalk' | 'botChatRetired'>): boolean {
+  return !!c.botChat || !!c.botTalk || !!c.botChatRetired;
+}
 
 export type RemoteInfo = {
   /** Hermes session `source`: `api_server` (app/API), `telegram`, `cli`, … */

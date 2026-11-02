@@ -25,6 +25,8 @@ export const TRAILER_STATE_BUDGET = 6144;
 export const TRAILER_TOTAL_BUDGET = 12288;
 const MAX_CARDS = 8;
 const MAX_OPS = 200;
+/** batch ids one batch may send again (`re`) */
+export const MAX_RESENT = 8;
 
 const isRec = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);
 
@@ -36,6 +38,7 @@ function wireBatch(b: UserBatch, type: LiveCardType): Record<string, unknown> {
     ...(b.ops ? { ops: b.ops.map((op) => encodeOp(type, op)) } : {}),
     ...(b.state ? { state: encodeState(type, b.state) } : {}),
     ...(b.bid ? { bid: b.bid } : {}),
+    ...(b.re?.length ? { re: b.re } : {}),
     ...(b.focus ? { focus: true } : {}),
   };
 }
@@ -84,8 +87,11 @@ export function decodeBatches(raw: unknown): LiveBatches | undefined {
     if (state) batch.state = state;
     if (typeof b.create === 'string' && (LIVE_CARD_TYPES as readonly string[]).includes(b.create) && state) batch.create = b.create as LiveCardType;
     if (typeof b.bid === 'string' && b.bid.length <= 40) batch.bid = b.bid;
+    const re = Array.isArray(b.re) ? b.re.filter((x): x is string => typeof x === 'string' && x.length > 0 && x.length <= 40).slice(0, MAX_RESENT) : [];
+    if (re.length) batch.re = re;
     if (b.focus === true) batch.focus = true;
-    if (batch.ops?.length || batch.state || batch.focus) out[card] = batch;
+    // a batch that only names re-sent ones (the user undid what was sent again) still counts: they are skipped
+    if (batch.ops?.length || batch.state || batch.focus || batch.re) out[card] = batch;
   }
   return Object.keys(out).length ? out : undefined;
 }
@@ -105,11 +111,11 @@ export function snapshotOf(view: LiveCardState): LiveCardState {
  * @returns the batch and how many of `ops` it carries (for clearing them after acceptance)
  */
 export function budgetBatch(
-  b: { v: number; ops: LiveOp[]; bid: string; focus?: boolean; create?: LiveCardType; snapshot?: boolean },
+  b: { v: number; ops: LiveOp[]; bid: string; focus?: boolean; create?: LiveCardType; snapshot?: boolean; re?: string[] },
   view: LiveCardState,
   type: LiveCardType = 'checklist',
 ): { batch: UserBatch; carried: 'all' | number } {
-  const tail = { bid: b.bid, ...(b.focus ? { focus: true } : {}) };
+  const tail = { bid: b.bid, ...(b.re?.length ? { re: b.re } : {}), ...(b.focus ? { focus: true } : {}) };
   const opsFit = bytes(JSON.stringify(b.ops.map((op) => encodeOp(type, op)))) <= TRAILER_OPS_BUDGET;
   if (opsFit && !b.snapshot && !b.create) return { batch: { v: b.v, ops: b.ops, ...tail }, carried: 'all' };
   const state = snapshotOf(view);

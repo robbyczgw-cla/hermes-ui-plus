@@ -30,6 +30,28 @@ list, provenance sets, `_find_skill`, `load_config`), run in a worker thread ins
 are read straight from `<HERMES_HOME>/memories/`. Missing Hermes internals give `hermes_unsupported`, never a 500.
 Memory is off unless `library.expose_memory: true`. The plugin never writes, and the client cannot pass a path.
 
+From 0.3.0 the root (default) profile's plugin also reads other profiles: `?profile=<name>` on the four routes, and
+`GET /library/config` says `"profiles": true|false`. The name must be a live profile from Hermes' profile list; the
+read runs with Hermes' home override forced to `<root>/profiles/<name>` (also when the caller already has a scope) and,
+when Hermes multiplexes, that profile's secret scope (`forced_profile_scope`). Memory files come from that profile's
+`memories/`, the memory settings from its `config.yaml`, still behind the root's `library.expose_memory`.
+
+## Bots: allow-list, archive, restore (0.3.0)
+
+`bots.py` (pure) and `HermesBots` (adapter), root profile's plugin only, same `bots.enabled` gate as `/bots`:
+
+- `GET /bots/<name>/allowlist` reads `command_allowlist` and `approvals.mode` from that profile's `config.yaml`
+  (`default` = the root). `POST /bots/<name>/allowlist/revoke {pattern}` rewrites the file without the entry (atomic)
+  and calls Hermes' `tools.approval.load_permanent_allowlist()` under that profile's home override (for the root also
+  once unscoped, the module-level set), which replaces Hermes' in-process "always" set and its baseline, so the next
+  command asks again without a restart and a later "always" cannot write the entry back. Limit: "always" also
+  approved the pattern for the session it was given in; Hermes keeps that in memory until the session ends, and the
+  plugin does not touch sessions.
+- `POST /bots/<name>/archive` creates `gateway.parked` (first line `hermes-ui-plus: archived`, then a UTC time) and
+  asks the multiplexer to rescan; Hermes stops serving `/p/<name>/` (otherwise within 30 s). `restore` deletes the
+  marker only when its first line is exactly that; markers from `hermes -p <name> gateway stop`, from a failed setup
+  (`hermes-ui-plus: setup failed`) or anything else give 409 `parked_elsewhere`.
+
 ## Hermes surfaces used (v0.21.x)
 
 | Surface | Kind | Use |
@@ -40,6 +62,9 @@ Memory is off unless `library.expose_memory: true`. The plugin never writes, and
 | `agent/auxiliary_client.py` `call_llm(task=, provider=, model=, messages=, max_tokens=, timeout=, stream=, stream_options=, route_info=)` | **internal**, the one allowed aux-call adapter (`hermes_adapter.py`) | the completion |
 | `agent.secret_scope` (`is_multiplex_active`, `current_secret_scope`, `build_profile_secret_scope`, `set_secret_scope`, `reset_secret_scope`) + `hermes_constants.set_hermes_home_override` | **internal**, same adapter, v0.22+ only | profile scope of a quick call on a gateway that multiplexes profiles |
 | `agent/auxiliary_client.py` `aux_probe_mode()` + `get_text_auxiliary_client(task)` | **internal**, same adapter, optional | self-test: resolves the slot's provider and credentials without a model call |
+| `hermes_cli.profiles` (`list_profile_names`, `get_profile_dir`, `create_profile`), `gateway_multiplex_served.notify_multiplexer_profiles_changed` | **internal**, same adapter, v0.22+ | bots: list, create, rescan after create / archive / restore |
+| `tools.approval.load_permanent_allowlist` + `hermes_constants.set_hermes_home_override` | **internal**, same adapter, optional | re-sync Hermes' in-process "always allow" set after a revoke |
+| `<profile>/gateway.parked` | file convention (content ignored by Hermes) | archive / restore a bot |
 | plugin discovery (`plugin.yaml` + `register(ctx)`, `plugins.enabled`) | public | loading |
 
 Every hook is feature-detected with `hasattr`, and the plugin uses the Python stdlib only.

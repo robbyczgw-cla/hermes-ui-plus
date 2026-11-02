@@ -6,10 +6,18 @@
  */
 import { markUnread, shellState } from '../background/noticeState';
 import { botOf, withBot, type HermesBot } from '../hermes/bots';
-import { hermesJsonRequest } from '../hermes/client';
+import { hermesJsonRequest, hermesSessions } from '../hermes/client';
 import type { ConversationsApi } from '../conversations/ConversationsProvider';
+import type { ConversationMeta } from '../conversations/types';
+import { rebindBotChat } from './adopt';
 import { lookupBotChat } from './api';
+import { findBotTalk } from './core';
 import { setUnreachable } from './state';
+
+/** the bot's merged screen (bots/timeline.ts) is what's open: its news is seen */
+function botScreenOpen(chat: ConversationMeta, list: readonly ConversationMeta[]): boolean {
+  return shellState.openConversationId === findBotTalk(list, chat.profileId, chat.hermesProfile)?.id;
+}
 
 const REFRESH_MS = 30_000;
 /** never look up more bots than this in one refresh */
@@ -17,7 +25,7 @@ const REFRESH_MAX = 12;
 const last = new Map<string, number>();
 
 type Conn = { id: string; kind: 'hermes'; baseUrl: string; apiKey: string };
-type Convs = Pick<ConversationsApi, 'list' | 'openBotChat' | 'botChatRemote'>;
+type Convs = Pick<ConversationsApi, 'list' | 'openBotChat' | 'retireBotChat' | 'botChatRemote'>;
 
 export function refreshBotChats(p: Conn, bots: readonly Pick<HermesBot, 'name' | 'default'>[], convs: () => Convs, force = false): void {
   const key = `${p.id}|${bots.map((b) => b.name).join(',')}`;
@@ -37,10 +45,15 @@ export function refreshBotChats(p: Conn, bots: readonly Pick<HermesBot, 'name' |
           if (s.messageCount > 0) c.openBotChat({ id: p.id, kind: p.kind }, bot, s, { activate: false });
           continue;
         }
-        if (meta.hermesSessionId !== s.id) continue; // a thread of this app only (older server): leave it
+        if (meta.hermesSessionId !== s.id) {
+          // moved aside by the server: the new one takes over, what it holds is news. Still titled: leave it
+          const next = await rebindBotChat(c, p, bot, meta, s, (conn, id) => hermesSessions(conn, 8000).get(id));
+          if (next && s.messageCount > 0 && shellState.openConversationId !== next.id && !botScreenOpen(next, c.list)) markUnread(next.id);
+          continue;
+        }
         const seen = meta.remote?.loadedAt ?? meta.updatedAt;
         c.botChatRemote(meta.id, { lastActive: s.lastActive, remoteCount: s.messageCount });
-        if (s.lastActive && s.lastActive > seen + 1000 && shellState.openConversationId !== meta.id) markUnread(meta.id);
+        if (s.lastActive && s.lastActive > seen + 1000 && shellState.openConversationId !== meta.id && shellState.openBotChatId !== meta.id) markUnread(meta.id);
       } catch (e) {
         const status = (e as { status?: number } | null)?.status;
         if (status === 401 || status === 403) setUnreachable(`${p.id}/${k}`, true);

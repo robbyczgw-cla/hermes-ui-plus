@@ -10,14 +10,14 @@ import type { ChatMessage } from '../hermes/types';
 import { cachedSegments, storeSegments } from '../chat/parseCache';
 import { parseMessage } from '../protocol/streamParser';
 import { deriveCards, LOCAL_KEY, type LiveCardModel } from './derive.ts';
-import { hermesMayHaveLost, liveEventsOf, mayCarryLiveNode, transcriptBids } from './extract.ts';
-import { editTarget, liveHeader } from './focus.ts';
+import { liveEventsOf, mayCarryLiveNode } from './extract.ts';
 import { getLiveLocalStore } from './defaultStore';
-import { EMPTY_RECORD, MAX_OWN, type LiveLocalRecord } from './localStore.ts';
+import { EMPTY_RECORD, type LiveLocalRecord } from './localStore.ts';
 import { diffFull, fitCategory, foldLive, headOf, snapshotOps, stateAt, type LiveCardState, type LiveCardType, type LiveEvent, type LiveFold, type LiveFull, type LiveItem, type LiveOp, type MessageMark } from './model.ts';
 import { inferCategory } from '../ui/components/modules/a/checklistModel.ts';
-import { addPendingOp, afterAccepted, isEmptyPending, newBatchId, newUserItemId, pruneInflight, type DeleteChoice, type FieldChoice, type PendingMap } from './pending.ts';
-import { budgetBatch, fitTotal, type LiveBatches, type LiveTypes } from './trailer.ts';
+import { addPendingOp, isEmptyPending, newBatchId, newUserItemId, type DeleteChoice, type FieldChoice, type PendingMap } from './pending.ts';
+import { messageOutcomes, type BatchOutcome } from './receipts.ts';
+import { acceptSend, planSend, settleRecord } from './sendPlan.ts';
 import type { LiveOutgoing } from './outgoing.ts';
 import { registerLiveTarget } from './registry.ts';
 import { adoptId } from './adopt.ts';
@@ -36,6 +36,10 @@ export interface LiveContextValue {
   ownBids: ReadonlySet<string>;
   /** one edit on this device (pending until the next message) */
   edit(cardId: string, op: LiveOp): void;
+  /** "Wiederherstellen": put the user's version back after Hermes' answer did it differently (receipts.ts `restore`) */
+  restore(cardId: string, ops: readonly LiveOp[]): void;
+  /** what the batches of a user message became (the "mitgeschickt" line under it) */
+  outcomesOf(messageId: string): BatchOutcome[];
   /** "Auf vN zurück": the card back to the state of version `n`, as ordinary edits (nothing is rewritten) */
   revert(cardId: string, n: number): void;
   /**
@@ -134,39 +138,32 @@ export function LiveProvider({
   );
 
   const sig = liveSignature(messages);
+  const loaded = store.isLoaded(conversationId);
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
   const creates = useMemo(() => localCreates(rec.pending), [rec.pending]);
   const createSig = creates.map((e) => `${e.card}:${e.batch.bid}`).join(',');
   const createsRef = useRef(creates);
   createsRef.current = creates;
+  // batches this device is about to send again (their turn broke off): skipped where they stand, applied when re-sent
+  const resendSig = Object.values(rec.pending).flatMap((p) => p.resend ?? []).join(',');
   // eslint-disable-next-line react-hooks/exhaustive-deps -- refold only when a live-relevant message (or a local card) changed
-  const fold = useMemo(() => foldLive([...liveEventsOf(messagesRef.current, parse), ...createsRef.current]), [sig, createSig]);
-  const cards = useMemo(() => deriveCards(fold, rec), [fold, rec]);
+  const fold = useMemo(() => foldLive([...liveEventsOf(messagesRef.current, parse), ...createsRef.current], { skip: new Set(resendSig ? resendSig.split(',') : []) }), [sig, createSig, resendSig]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- answers' states are in `sig`
+  const cards = useMemo(() => deriveCards(fold, rec, messagesRef.current), [fold, rec, sig]);
   const byId = useMemo(() => new Map(cards.map((c) => [c.id, c])), [cards]);
   const foldRef = useRef(fold);
   foldRef.current = fold;
   const cardsRef = useRef(byId);
   cardsRef.current = byId;
 
-  // sent edits (and cards made here) that reached the transcript leave the in-flight list; only bids of user messages
-  // count, never the fold's (a local first version carries its own bid there)
+  // sent edits (and cards made here) leave the in-flight list once the answer of their turn is done (Hermes stored
+  // them); a turn that broke off gives them back to the pending edits, sent again with the next message (`re`). Only
+  // user messages' batches count, never the fold's (a local first version carries its own bid there)
   useEffect(() => {
-    const bids = transcriptBids(messagesRef.current);
-    if (!bids.size) return;
-    store.update(conversationId, (r) => {
-      let changed = false;
-      const pending = { ...r.pending };
-      for (const [id, p] of Object.entries(r.pending)) {
-        const next = pruneInflight(p, bids);
-        if (next === p) continue;
-        changed = true;
-        if (next) pending[id] = next;
-        else delete pending[id];
-      }
-      return changed ? { ...r, pending } : r;
-    });
-  }, [fold, store, conversationId]);
+    if (!loaded) return;
+    store.update(conversationId, (r) => settleRecord(r, messagesRef.current));
+  }, [fold, sig, loaded, store, conversationId]);
 
   const editMany = useCallback(
     (cardId: string, ops: readonly LiveOp[]) => {
@@ -182,6 +179,9 @@ export function LiveProvider({
     [store, conversationId],
   );
   const edit = useCallback((cardId: string, op: LiveOp) => editMany(cardId, [op]), [editMany]);
+  const restore = useCallback((cardId: string, ops: readonly LiveOp[]) => editMany(cardId, ops), [editMany]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- answers' states are in `sig`
+  const outcomesOf = useCallback((messageId: string) => messageOutcomes(fold, messagesRef.current, messageId), [fold, sig]);
   const revert = useCallback(
     (cardId: string, n: number) => {
       const model = cardsRef.current.get(cardId);
@@ -256,53 +256,17 @@ export function LiveProvider({
   // the send path: this device's pending edits (+ the focused card) as trailer batches, the open cards as header
   controllerRef.current = {
     outgoing(text: string) {
-      const r = store.get(conversationId);
       const f = focusRef.current;
-      const models = Array.from(cardsRef.current.values());
-      const open = models.filter((m) => !m.closed);
-      // an edit request about the one fitting open card counts as about it (design §9.3, same rule as the router)
-      const about = f ?? editTarget(text, open);
-      const batches: LiveBatches = {};
-      const types: LiveTypes = {};
-      const sent: Record<string, { bid: string; count: number; newBase: number; created: boolean }> = {};
-      for (const model of models) {
-        const p = r.pending[model.id];
-        const focused = f === model.id;
-        const ops = model.view.outgoing;
-        const create = p?.create && !p.create.sent ? p.create.type : undefined;
-        // Hermes may have lost the card from its context: a message about it carries the whole card again
-        const snapshot = !create && about === model.id && hermesMayHaveLost(messagesRef.current, model.card);
-        if (!ops.length && !focused && !create && !snapshot) continue;
-        const bid = p?.bid ?? newBatchId();
-        const { batch, carried } = budgetBatch({ v: create ? 0 : (p?.base ?? model.head.n), ops, bid, focus: focused, create, snapshot }, model.view.state, model.type);
-        batches[model.id] = batch;
-        types[model.id] = model.type;
-        sent[model.id] = { bid, count: p && carried === 'all' ? p.ops.length : 0, newBase: create ? 1 : model.head.n + (ops.length || snapshot ? 1 : 0), created: !!create };
-      }
-      const fitted = fitTotal(batches, types);
-      const header = liveHeader(open.filter((m) => !m.local || fitted[m.id]), f);
-      if (!Object.keys(fitted).length && !header) return null;
+      const plan = planSend({ rec: store.get(conversationId), models: Array.from(cardsRef.current.values()), focus: f, text, messages: messagesRef.current });
+      if (!plan) return null;
       return {
-        batches: fitted,
-        types,
-        header,
+        batches: plan.batches,
+        types: plan.types,
+        header: plan.header,
         onAccepted: () => {
-          if (!Object.keys(fitted).length) return;
-          if (f && fitted[f]) setFocusState((cur) => (cur === f ? null : cur));
-          store.update(conversationId, (rec) => {
-            const pending = { ...rec.pending };
-            for (const id of Object.keys(fitted)) {
-              const s = sent[id];
-              const p = pending[id];
-              if (!s || !p) continue;
-              const accepted = afterAccepted(p, s, s.newBase) ?? p;
-              const next = s.created && accepted.create ? { ...accepted, create: { ...accepted.create, sent: true } } : accepted;
-              if (!isEmptyPending(next)) pending[id] = { ...next, ...(next.ops.length ? {} : { choices: undefined, confirmed: undefined }) };
-              else delete pending[id];
-            }
-            const own = [...(rec.own ?? []), ...Object.values(sent).map((x) => x.bid)].slice(-MAX_OWN);
-            return { ...rec, pending, own };
-          });
+          if (!Object.keys(plan.batches).length) return;
+          if (f && plan.batches[f]) setFocusState((cur) => (cur === f ? null : cur));
+          store.update(conversationId, (rec) => acceptSend(rec, plan));
         },
       };
     },
@@ -336,8 +300,8 @@ export function LiveProvider({
   }, [adoptedMap, byId]);
   const ownBids = useMemo(() => new Set(rec.own ?? []), [rec.own]);
   const value = useMemo<LiveContextValue>(
-    () => ({ conversationId, demo, cards, byId, marks: fold.marks, fold, ownBids, edit, revert, adopt, adoptedFrom, takeOver, setChoice, confirmConflicts, markSeen, setPinned, setFocus, focus, sheet, openSheet }),
-    [conversationId, demo, cards, byId, fold, ownBids, edit, revert, adopt, adoptedFrom, takeOver, setChoice, confirmConflicts, markSeen, setPinned, setFocus, focus, sheet],
+    () => ({ conversationId, demo, cards, byId, marks: fold.marks, fold, ownBids, edit, restore, outcomesOf, revert, adopt, adoptedFrom, takeOver, setChoice, confirmConflicts, markSeen, setPinned, setFocus, focus, sheet, openSheet }),
+    [conversationId, demo, cards, byId, fold, ownBids, edit, restore, outcomesOf, revert, adopt, adoptedFrom, takeOver, setChoice, confirmConflicts, markSeen, setPinned, setFocus, focus, sheet],
   );
   return <LiveContext.Provider value={value}>{children}</LiveContext.Provider>;
 }

@@ -77,7 +77,8 @@ export function parseReminders(tools: readonly ToolEvent[]): Reminder[] {
       action,
       jobId,
       name,
-      text: oneLine(str(output.name) ?? str(input?.name) ?? prompt ?? name, 90),
+      // `name` first: an update's result may only carry it in `job`; a prompt is an instruction to the model (SKILL.md), never shown as it is
+      text: oneLine(str(output.name) ?? str(job?.name) ?? str(input?.name) ?? prompt?.replace(/^Reply with only this line:\s*/i, '') ?? name, 90),
       schedule,
       nextRun: parseNextRun(output.next_run_at ?? job?.next_run_at),
       recurring: isRecurringSchedule(schedule),

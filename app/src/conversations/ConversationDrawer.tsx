@@ -7,7 +7,7 @@
  *
  * Tap on the scrim, swipe left or Esc (web) closes it. Width = min(320, 86 % of the screen) -> fine at 360 px.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { Easing, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
@@ -53,6 +53,20 @@ export function ConversationDrawer({ open, onClose, onSelect, onNewChat, ...rest
     return () => clearTimeout(id);
   }, [open, mounted]);
   useEscapeToClose(open, onClose); // web: Esc closes the drawer
+  // iOS Safari (home-screen app): the tap that picked a chat closes the drawer on touchend, and the browser's
+  // synthesized click for the same tap follows ~300 ms later. A layer that stopped catching taps lets that click land on
+  // whatever is under the finger now: the chat behind (its header's "new chat", a starter card) or another row of the
+  // sliding panel → the wrong chat. A transparent shield over the closing drawer swallows it.
+  const [shield, setShield] = useState(false);
+  const wasOpen = useRef(open);
+  useEffect(() => {
+    const closing = wasOpen.current && !open;
+    wasOpen.current = open;
+    if (!closing) return;
+    setShield(true);
+    const id = setTimeout(() => setShield(false), GHOST_CLICK_MS);
+    return () => clearTimeout(id);
+  }, [open]);
 
   // fully open: React owns the end state (ui/lib/fadeIn.ts), so a dropped animated value cannot slide
   // the open panel back off-screen on the next list render; a swipe clears it before it takes over
@@ -62,8 +76,11 @@ export function ConversationDrawer({ open, onClose, onSelect, onNewChat, ...rest
   const panelStyle = useAnimatedStyle(() => ({ transform: [{ translateX: (progress.value - 1) * width }] }));
   const scrimStyle = useAnimatedStyle(() => ({ opacity: progress.value }));
 
+  // `panning` only for a real swipe (onStart = after activeOffsetX), never on touch-down: a plain tap on a row must not
+  // drop the settled-open override – with a dropped animated value the panel jumped off-screen for the tap (the flash
+  // when switching chats on iOS) and the release landed on the chat behind it
   const pan = Gesture.Pan()
-    .onBegin(() => {
+    .onStart(() => {
       runOnJS(setPanning)(true);
     })
     .onFinalize(() => {
@@ -79,13 +96,14 @@ export function ConversationDrawer({ open, onClose, onSelect, onNewChat, ...rest
       else progress.value = withTiming(1, { duration: 160 });
     });
 
-  if (!mounted) return null;
+  // unmounted after the close animation, the shield alone still catches the late click
+  if (!mounted) return shield ? <View style={[StyleSheet.absoluteFill, styles.layer]} testID="drawer-ghost-shield" /> : null;
 
   return (
     // closing: never catch clicks/taps any more (the scrim fades out over the chat)
     // above the chat header and its banners (DEMO, offline): on Android a raised sibling would otherwise draw over
     // the drawer and cover its top buttons ("Neuer Chat", "Auswählen")
-    <Animated.View style={[StyleSheet.absoluteFill, styles.layer]} pointerEvents={open ? 'box-none' : 'none'}>
+    <Animated.View style={[StyleSheet.absoluteFill, styles.layer]} pointerEvents={open ? 'box-none' : shield ? 'auto' : 'none'}>
       <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: t.colors.overlay }, scrimStyle, settledOpen ? { opacity: 1 } : null]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityRole="button" accessibilityLabel={tr('conversations.drawer.close')} />
       </Animated.View>
@@ -101,9 +119,14 @@ export function ConversationDrawer({ open, onClose, onSelect, onNewChat, ...rest
           <ConversationList {...rest} onSelect={onSelect} onNewChat={onNewChat} />
         </Animated.View>
       </GestureDetector>
+      {/* last child: above scrim and panel while the drawer closes (ghost click, see `shield`) */}
+      {shield && !open ? <View style={StyleSheet.absoluteFill} testID="drawer-ghost-shield" /> : null}
     </Animated.View>
   );
 }
+
+/** iOS delivers the synthesized click up to ~300 ms after touchend (plus a little slack) */
+const GHOST_CLICK_MS = 450;
 
 const styles = StyleSheet.create({
   layer: { zIndex: 20, elevation: 20 },

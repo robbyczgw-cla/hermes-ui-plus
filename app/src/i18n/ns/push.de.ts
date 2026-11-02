@@ -3,7 +3,7 @@ export const push = {
   title: 'Benachrichtigungen',
   profile: 'Profil: {name}',
   enable: 'Benachrichtigungen für dieses Profil',
-  enableSub: 'Nachrichten, die {name} von sich aus schickt (Erinnerungen, Berichte, späte Ergebnisse), kommen als Benachrichtigung – auch wenn die App geschlossen ist.',
+  enableSub: 'Nachrichten, die {name} von sich aus schickt (Erinnerungen, Berichte, späte Ergebnisse), kommen als Benachrichtigung, auch bei geschlossener App, wenn der Server Push senden kann (siehe unten).',
   preview: 'Vorschau des Textes',
   previewAuto: 'Automatisch',
   previewOn: 'An',
@@ -20,7 +20,7 @@ export const push = {
   status: {
     checking: 'Server wird geprüft …',
     unsupportedBridge: 'Dieses Profil unterstützt keine Benachrichtigungen. Nötig ist die {bridge}.',
-    notConfigured: 'Der Server hat noch keine Zugangsdaten für {platform}. Neue Nachrichten kommen trotzdem live an, solange die App offen ist.',
+    notConfigured: 'Der Server hat noch keine Zugangsdaten für {platform}. Im Hintergrund oder bei geschlossener App kommt deshalb keine Benachrichtigung. Neue Nachrichten siehst du beim Öffnen; solange die App offen ist, kommen sie live an.',
     registered: 'Aktiv auf diesem Gerät ({platform}).',
     denied: 'Benachrichtigungen sind in den Systemeinstellungen blockiert.',
     webUnsupported: 'Dieser Browser unterstützt keine Web-Push-Benachrichtigungen. iPhone/iPad: Seite zum Home-Bildschirm hinzufügen (ab iOS 16.4) und von dort öffnen.',

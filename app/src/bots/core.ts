@@ -17,6 +17,15 @@ import type { ConversationMeta } from '../conversations/types.ts';
 /** Title of a bot's one shared thread (Hermes Desktop's bot mode convention; the bridge only creates this title). */
 export const BOT_CHAT_TITLE = 'Bot Chat';
 
+/**
+ * Whether the app looks up the default bot's Bot Chat for this connection when there is no Bots tab: every Hermes
+ * connection with a key, bridge or not. Hermes' own session API has the thread, and a reminder or routine result of a
+ * user without the bridge lands there too (docs/BOTS-SERVER.md); gating it on the bridge hid those deliveries for good.
+ */
+export function defaultBotLookupApplies(p: { kind: string; apiKey?: string }): boolean {
+  return p.kind === 'hermes' && !!p.apiKey;
+}
+
 /** `default` for the unprefixed profile, else the profile name. */
 export function botKey(bot: string | null | undefined): string {
   return botOf(bot) ?? DEFAULT_BOT;
@@ -34,6 +43,29 @@ export function botsTabAvailable(kind: string | undefined, bots: readonly Hermes
 export function findBotChat(items: readonly ConversationMeta[], profileId: string, bot: string | null | undefined): ConversationMeta | undefined {
   const b = botOf(bot);
   return items.find((c) => c.botChat && c.profileId === profileId && botOf(c.hermesProfile) === b);
+}
+
+/** The bot's talk (bots/timeline.ts), if the app has one. */
+export function findBotTalk(items: readonly ConversationMeta[], profileId: string, bot: string | null | undefined): ConversationMeta | undefined {
+  const b = botOf(bot);
+  return items.find((c) => c.botTalk && c.profileId === profileId && botOf(c.hermesProfile) === b);
+}
+
+/**
+ * What a bot's Bot Chat entry opens: `talk` = the merged screen (Hermes owns the Bot Chat, or this bot already has a
+ * talk or a former Bot Chat to show); `wait` = capabilities not known yet; `thread` = the writable Bot Chat itself.
+ */
+export function botScreenMode(
+  meta: ConversationMeta,
+  items: readonly ConversationMeta[],
+  caps: { flags: Readonly<Record<string, boolean>> } | null | undefined,
+): 'talk' | 'wait' | 'thread' {
+  if (meta.profileKind !== 'hermes') return 'thread';
+  const b = botOf(meta.hermesProfile);
+  const mine = (c: ConversationMeta) => c.profileId === meta.profileId && botOf(c.hermesProfile) === b;
+  if (meta.botChatRetired || items.some((c) => (c.botTalk || c.botChatRetired) && mine(c))) return 'talk';
+  if (botChatReadOnly(caps?.flags)) return 'talk';
+  return caps ? 'thread' : 'wait';
 }
 
 /** An existing conversation of exactly that session (synced earlier as an ordinary chat): adopted, not duplicated. */
@@ -188,10 +220,14 @@ export type RosterRow = {
   bot: HermesBot;
   /** the bot's Bot Chat in the app, if any */
   chat?: ConversationMeta;
+  /** the bot's talk (bots/timeline.ts), the conversation its screen shows under Hermes v0.22.3+ */
+  talkId?: string;
   /** last activity of the Bot Chat (ms), shown as time */
   time?: number;
-  /** a turn of the Bot Chat is running */
+  /** a turn of the Bot Chat is running (here, or for the bridge anywhere, bots/activity.ts), or a routine of the bot */
   working: boolean;
+  /** what the bot is doing, when known: the current step of its turn or the routine that runs (bots/activity.ts) */
+  workingLine?: { kind: 'step'; text: string } | { kind: 'routine'; name: string } | null;
   /** approvals waiting for this bot */
   waiting: number;
   badge: RosterBadge;
@@ -216,16 +252,18 @@ export function rosterRows(o: RosterInput): RosterRow[] {
   const rows = o.bots.map((bot): RosterRow => {
     const key = bot.default ? DEFAULT_BOT : bot.name;
     const chat = findBotChat(o.items, o.profileId, bot.default ? undefined : bot.name);
+    const talk = findBotTalk(o.items, o.profileId, bot.default ? undefined : bot.name);
     // an item of a known conversation belongs to that chat only (an approval in an ordinary chat is not the bot's row)
-    const waiting = o.attention.filter((i) => i.profileId === o.profileId && (i.conversationId ? i.conversationId === chat?.id : botKey(i.bot) === key)).length;
-    const unread = !!chat && o.unread.has(chat.id);
+    const waiting = o.attention.filter((i) => i.profileId === o.profileId && (i.conversationId ? i.conversationId === chat?.id || i.conversationId === talk?.id : botKey(i.bot) === key)).length;
+    const unread = (!!chat && o.unread.has(chat.id)) || (!!talk && o.unread.has(talk.id));
     const hasContent = !!chat && (chat.messageCount > 0 || chat.preview !== '');
     return {
       key,
       bot,
       ...(chat ? { chat } : {}),
+      ...(talk ? { talkId: talk.id } : {}),
       ...(hasContent ? { time: chat.updatedAt } : {}),
-      working: !!chat && o.running.has(chat.id),
+      working: (!!chat && o.running.has(chat.id)) || (!!talk && o.running.has(talk.id)),
       waiting,
       badge: waiting ? 'approval' : unread ? 'unread' : null,
     };

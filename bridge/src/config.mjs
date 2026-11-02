@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { loadSkillInline } from './skillInline.mjs';
 import { parseRoutinesBots } from './routines-rights.mjs';
 import { bridgeCaps, withCaps } from './caps.mjs';
+import { webToolsSetting } from './webcaps.mjs';
 import { corsOriginsFromEnv } from './cors.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -88,6 +89,8 @@ export function loadConfig(env = process.env, o = {}) {
   // A client that sends its own bootstrap marker gets nothing injected, so no caps line either (= unknown, like before).
   const caps = bridgeCaps(env);
   bootstrap = withCaps(bootstrap, caps);
+  // web=on|off is added per profile at turn time (src/webcaps.mjs); BRIDGE_WEB_TOOLS=on|off pins it, auto probes
+  const webTools = webToolsSetting(env);
 
   const cors = corsOriginsFromEnv(env, { authenticated: Boolean(env.BRIDGE_TOKEN) });
   return {
@@ -165,6 +168,7 @@ export function loadConfig(env = process.env, o = {}) {
     bootstrap,
     bootstrapMissing,
     caps,
+    webTools,
     // skill core inline after the bootstrap on app turns (src/skillInline.mjs): skillInline, skillInlineFile, skillInlineMissing
     ...loadSkillInline(env, { bootstrap, bootstrapFile, candidates: o.skillFiles ?? DEFAULT_SKILL_FILES }),
     memory: {

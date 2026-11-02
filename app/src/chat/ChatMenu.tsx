@@ -8,7 +8,7 @@ import { memo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Text, TextInput } from '../ui/primitives/Text';
 import { displayTitle } from '../conversations/title';
-import type { ConversationMeta } from '../conversations/types';
+import { isBotPlace, type ConversationMeta } from '../conversations/types';
 import { useT } from '../i18n';
 import { Button, SheetGrabber, SheetModal, useTheme } from '../ui';
 import { ActionMenu, type MenuItem } from './ActionMenu';
@@ -37,7 +37,7 @@ export const ChatMenu = memo(function ChatMenu({ open, onClose, meta, hasMessage
   const [renaming, setRenaming] = useState(false);
   const stored = !!meta && hasMessages;
   // a bot's Bot Chat is shared with Hermes Desktop and found by its title: no pin / rename / archive / delete here
-  const botChat = !!meta?.botChat;
+  const botChat = !!meta && isBotPlace(meta);
   const items: MenuItem[] = [
     // name, model and (unless Settings → Chat → "Routinen" is off) the bot's routines, for every Hermes chat, also without bots
     ...(onAbout ? [{ key: 'about', icon: 'bell' as const, label: tr('bots.info.title', { name: aboutName ?? 'Hermes' }), onPress: onAbout }] : []),

@@ -9,6 +9,7 @@ import Animated, { FadeOutDown, ReduceMotion } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useT } from '../i18n';
 import { haptic, HText, useTheme } from '../ui';
+import { remoteFailedKey } from './bulkDelete';
 import { useBulkDelete } from './ConversationsProvider';
 
 export function BulkDeleteToast() {
@@ -17,7 +18,7 @@ export function BulkDeleteToast() {
   const insets = useSafeAreaInsets();
   const { deleter, pending, report } = useBulkDelete();
 
-  const text = pending ? tr('conversations.bulk.deleted', { count: pending.count }) : report ? tr('conversations.bulk.remoteFailed', { count: report.remoteFailed }) : null;
+  const text = pending ? tr('conversations.bulk.deleted', { count: pending.count }) : report ? tr(remoteFailedKey(report), { count: report.remoteFailed }) : null;
 
   useEffect(() => {
     if (text && Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility(text);

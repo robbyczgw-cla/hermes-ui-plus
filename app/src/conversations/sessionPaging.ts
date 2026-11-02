@@ -14,7 +14,8 @@
  */
 import type { RemoteSession } from '../hermes/sessions.ts';
 import type { ChatScope } from './chatScope.ts';
-import { syncSources, type SyncFilter } from './remoteSync.ts';
+import { syncSources, type MergeResult, type SyncFilter } from './remoteSync.ts';
+import type { ConversationMeta, ProfileKind, ProfileRef } from './types.ts';
 
 /** sessions per source on every list sync (GET /api/sessions?limit=50, Hermes' default) */
 export const SESSION_PAGE = 50;
@@ -58,6 +59,26 @@ export type OlderStep = {
   pageSize?: number;
   cancelled?: () => boolean;
 };
+
+/**
+ * `OlderStep.merge` of one server: under the server's own kind, as the list sync (an agent server's `oai-` sessions are
+ * not listable as Hermes'). Returns the added entries `shows` lets through.
+ */
+export function mergeOlderPage(
+  ctl: {
+    mergeRemote(profile: ProfileRef, sessions: RemoteSession[], opts: { filter?: SyncFilter; sameServer?: (profileId: string) => boolean; bot?: string }): MergeResult;
+    get(id: string): ConversationMeta | undefined;
+  },
+  server: { id: string; kind: string },
+  sessions: RemoteSession[],
+  opts: { filter?: SyncFilter; sameServer?: (profileId: string) => boolean; bot?: string },
+  shows: (c: ConversationMeta) => boolean,
+): ConversationMeta[] {
+  return ctl
+    .mergeRemote({ id: server.id, kind: server.kind as ProfileKind }, sessions, opts)
+    .added.map((id) => ctl.get(id))
+    .filter((c): c is ConversationMeta => !!c && shows(c));
+}
 
 /**
  * One "load older" step: pages through the sources (in order) until a shown chat was added, nothing older is left or

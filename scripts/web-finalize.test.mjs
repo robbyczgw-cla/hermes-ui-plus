@@ -135,7 +135,7 @@ test('lang: the shell defaults to en (app.json and web-finalize), whatever the e
       const f = join(a.d, 'index.html');
       writeFileSync(f, readFileSync(f, 'utf8').replace(/<html lang="[^"]*"/, `<html lang="${filled}"`));
       run(a.d);
-      assert.match(readFileSync(f, 'utf8'), /^<!DOCTYPE html>\n<html lang="en">/, filled);
+      assert.match(readFileSync(f, 'utf8'), /^<!DOCTYPE html>\n<html translate="no" lang="en">/, filled);
     } finally {
       a.done();
     }
@@ -159,4 +159,21 @@ test('lang: the inline shell script takes the saved UI language, else the browse
   assert.equal(langFor({ languages: [], language: 'es-MX' }), 'es');
   assert.equal(langFor({ languages: ['fr', 'it'] }), 'en');
   assert.equal(langFor({ storageThrows: true, languages: ['de'] }), 'de');
+});
+
+// live 2026-10-27 (Chrome app, answers in another language than the UI): Chrome's page translation wrapped the text nodes
+// of a message in <font>, React's next update threw `removeChild … not a child of this node`, the message showed the error card
+test('no browser page translation: translate="no" on <html> and the google notranslate meta, once, also on a second run', () => {
+  const a = exportDir();
+  try {
+    const f = join(a.d, 'index.html');
+    run(a.d);
+    run(a.d);
+    const html = readFileSync(f, 'utf8');
+    assert.equal(html.match(/translate="no"/g)?.length, 1);
+    assert.equal(html.match(/<meta name="google" content="notranslate">/g)?.length, 1);
+    assert.ok(html.indexOf('notranslate') < html.indexOf('</head>'));
+  } finally {
+    a.done();
+  }
 });

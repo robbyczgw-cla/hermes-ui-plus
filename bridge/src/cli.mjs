@@ -13,7 +13,7 @@ import { corsOriginsFromEnv, describeOrigins } from './cors.mjs';
 export const HELP = `hermes-ui-plus-bridge - optional UI bridge for the Hermes Interactive UI+ app
 
 Usage: hermes-ui-plus-bridge [options]   (the old command name hermes-ui-bridge still works)
-       hermes-ui-plus-bridge setup | doctor | devices ... | routines ... | doctor bots | bots ...
+       hermes-ui-plus-bridge setup | doctor | devices ... | routines ... | doctor bots | bots ... | groups ...
 
 Options:
   --env-file <file>   load KEY=VALUE pairs from a file (repeatable; real environment variables win). The file
@@ -45,8 +45,12 @@ Routines (Hermes cron jobs): which bots offer them, and what each paired device 
 Bots (Hermes profiles) on this server, read-only checks and the owner's safety net (docs/BOTS-SERVER.md):
   hermes-ui-plus-bridge doctor bots [--json] | bots backup [--to dir] | bots rollback <backup-dir> [--yes]
   [--hermes-home dir] [--env-file f]
-Creating bots from the app (off until you enable it; admin token yes, paired devices only with a grant):
+Creating and managing bots from the app (create, edit, archive / restore, revoke "always allowed" rules;
+off until you enable it; admin token yes, paired devices only with a grant):
   hermes-ui-plus-bridge bots status | enable | disable | grant <device-id> | revoke <device-id>   [--env-file f] [--state-dir d]
+
+Bot groups (2 to 6 bots in one chat, at most 8 model calls per message; off until you enable it):
+  hermes-ui-plus-bridge groups status | enable | disable   [--env-file f] [--state-dir d]
 
 Required: HERMES_BASE_URL (e.g. http://127.0.0.1:8642). Usually also HERMES_API_KEY.
 BRIDGE_TOKEN is generated on first run and stored in <state-dir>/state.json (mode 0600) if not set.
@@ -359,7 +363,8 @@ export function featureSummary(config, env, { pairing, profiles } = {}) {
   // not a provider: no key, no model; it only fetches pictures that Hermes' own tools returned (src/image-proxy.mjs)
   lines.push(['images', /^(off|0|false|no)$/i.test((env.BRIDGE_IMAGE_PROXY ?? '').trim()) ? 'proxy off (BRIDGE_IMAGE_PROXY=off)' : 'proxy on (pictures from Hermes answers, fetched by the bridge)']);
   const inline = config.skillInline ? ' + skill core inline' : config.skillInlineMissing ? ` (skill core inline MISSING: ${config.skillInlineMissing})` : ' (skill core inline off)';
-  const caps = config.caps ? `, caps ${Object.entries(config.caps).map(([k, v]) => `${k}=${v}`).join(' ')}` : '';
+  const web = config.webTools === 'on' || config.webTools === 'off' ? ` web=${config.webTools}` : ' web=<from Hermes toolsets>';
+  const caps = config.caps ? `, caps ${Object.entries(config.caps).map(([k, v]) => `${k}=${v}`).join(' ')}${web}` : '';
   lines.push(['skill', config.bootstrap ? `bootstrap message on${inline}${caps} (the hermes-ui skill triggers for app chats)`
     : config.bootstrapMissing ? `bootstrap message MISSING (${config.bootstrapMissing}): no interactive components, see the warning above`
       : 'bootstrap message off (BRIDGE_BOOTSTRAP=off)']);

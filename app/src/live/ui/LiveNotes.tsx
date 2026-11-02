@@ -3,7 +3,8 @@
  * - under a plain list that does not continue the card ("Nicht in „Einkauf“ übernommen", "In die Live-Karte
  *   übernehmen" applies it as the user's own edit, sent with the next message), or under a patch for a card this chat
  *   does not have;
- * - under an answer without any card block after a message about the card ("„Einkauf“ wurde nicht geändert").
+ * - under an answer without any card block after a message about the card ("„Einkauf“ wurde nicht geändert"; an
+ *   answer that broke off says so).
  * Nothing is applied silently and nothing is ignored silently. The fold decides (live/model.ts `continuationOf`).
  */
 import { View } from 'react-native';
@@ -86,12 +87,12 @@ export function LiveQuietLine({ messageId }: { messageId: string }) {
       haptic="selection"
       onPress={() => live.openSheet({ kind: 'card', id: model.id })}
       accessibilityRole="button"
-      accessibilityLabel={`${tr('live.note.quiet', { title: model.title })} ${tr('live.receipt.open')}`}
+      accessibilityLabel={`${tr(mark.broken ? 'live.note.quietBroken' : 'live.note.quiet', { title: model.title })} ${tr('live.receipt.open')}`}
       style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s, minHeight: 36, alignSelf: 'flex-start' }}
     >
       <Icon name="alert" size={14} color={t.colors.muted} />
       <HText variant="caption" color="muted" style={{ flexShrink: 1 }}>
-        {tr('live.note.quiet', { title: model.title })}
+        {tr(mark.broken ? 'live.note.quietBroken' : 'live.note.quiet', { title: model.title })}
       </HText>
       <HText variant="caption" weight="600" color="accent">
         {tr('live.receipt.open')}

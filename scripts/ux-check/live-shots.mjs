@@ -133,7 +133,7 @@ async function main() {
     const sent = turns.at(-1)?.text ?? '';
     report.checks.trailerSent = /\[hui:live\]\{"einkauf":\{"v":1,"ops":\[\{"check":"milch"\},\{"check":"eier"\}\],"bid":"b-[a-z0-9]+"\}\}\[\/hui:live\]$/.test(sent);
     report.trailer = sent.slice(sent.indexOf('[hui:live]'));
-    report.checks.sentLine = await visible(page, /2 Häkchen in „Einkauf Samstag“ mitgeschickt/);
+    report.checks.sentLine = await visible(page, /An „Einkauf Samstag“: Milch abgehakt, Eier abgehakt/);
     report.checks.receipt = await visible(page, /Grillkohle/);
     report.checks.trayAfter = await visible(page, /2 von 10 · Hermes/);
     report.checks.noRawTrailer = !(await visible(page, /\[hui:live\]/));

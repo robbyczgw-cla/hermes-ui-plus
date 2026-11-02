@@ -67,6 +67,24 @@ export function columnLooksLikeProduct(c: Column): boolean {
   return spec || (strength === 'strong' && facts.some((f) => PRICE.test(f)));
 }
 
+/**
+ * At least two of these labels name a concrete model ("iPhone 16", "Pixel 9", "Galaxy S25"; not "Merkmal", "Plan A"):
+ * a table / compare about products. Their facts need a lookup, so without a web result the provenance chip says
+ * "aus Modellwissen" even when the node names no `basis` (ProvenanceChip `factual`). Titles only, looser than
+ * compareLooksLikeProducts (which also decides thumbnails).
+ */
+export function namesProducts(labels: readonly unknown[]): boolean {
+  let n = 0;
+  for (const l of labels) if (typeof l === 'string' && titleModelStrength(l) === 'strong' && ++n >= 2) return true;
+  return false;
+}
+
+/** A `table` about products: two product names among the column headers, or among the first cells of the rows. */
+export function tableNamesProducts(columns: unknown, rows: unknown): boolean {
+  if (Array.isArray(columns) && namesProducts(columns)) return true;
+  return Array.isArray(rows) && namesProducts(rows.slice(0, 30).map((r) => (Array.isArray(r) ? r[0] : undefined)));
+}
+
 /** Every column (2+) is a product: the compare node is a product comparison. */
 export function compareLooksLikeProducts(columns: readonly Column[]): boolean {
   return columns.length >= 2 && columns.every(columnLooksLikeProduct);

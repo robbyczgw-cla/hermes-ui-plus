@@ -28,6 +28,8 @@ import { watchChangeDetail, watchCounts } from '../watch.ts';
 import { CHANGE_SIGN } from '../changeSign.ts';
 import { LiveChecklistBody } from './LiveChecklistBody';
 import { ListTile, LiveSeal, VersionChip } from './parts';
+import { SyncStatus, usePhrases } from './LiveSync';
+import { missedNames } from '../receipts.ts';
 
 const RECEIPT_LINES = 6;
 const PREVIEW_LINES = 4;
@@ -120,7 +122,7 @@ function InlineCard({ t, model }: { t: Theme; model: LiveCardModel }) {
         <ProgressLine t={t} ratio={total ? done / total : 0} />
       </View>
       <LiveChecklistBody model={model} t={t} onEdit={(op) => live.edit(model.id, op)} highlights={false} />
-      <SyncLine t={t} model={model} />
+      <SyncLine t={t} model={model} n={1} />
     </View>
   );
 }
@@ -191,7 +193,7 @@ function InlineSummary({ t, model }: { t: Theme; model: LiveCardModel }) {
         </HText>
         <Icon name="chevronRight" size={16} color={t.colors.accent} />
       </PressableScale>
-      <SyncLine t={t} model={model} />
+      <SyncLine t={t} model={model} n={1} />
     </View>
   );
 }
@@ -225,6 +227,7 @@ function SnapshotRow({ t, model }: { t: Theme; model: LiveCardModel }) {
 
 function Receipt({ t, model, mark }: { t: Theme; model: LiveCardModel; mark: MessageMark }) {
   const tr = useT();
+  const phrases = usePhrases();
   const live = useLive()!;
   const after = stateAt(model.card, mark.n);
   const changes = mark.unchanged ? [] : sortChanges(diffStates(stateAt(model.card, mark.n - 1), after));
@@ -254,7 +257,9 @@ function Receipt({ t, model, mark }: { t: Theme; model: LiveCardModel; mark: Mes
       </PressableScale>
       {mark.unchanged || !changes.length ? (
         <HText variant="caption" color="muted" style={{ paddingHorizontal: t.spacing.l, paddingBottom: t.spacing.m }}>
-          {tr(mark.unchanged ? (mark.failed ? 'live.receipt.failed' : 'live.receipt.unchanged') : `live.receipt.card.${cardLevelChange(model.card.versions[mark.n - 1]?.ops ?? []) ?? 'other'}`)}
+          {mark.unchanged && mark.failed && mark.missed?.length
+            ? tr('live.receipt.missed', { items: phrases.list(missedNames(model.card, mark.missed)) })
+            : tr(mark.unchanged ? (mark.failed ? 'live.receipt.failed' : 'live.receipt.unchanged') : `live.receipt.card.${cardLevelChange(model.card.versions[mark.n - 1]?.ops ?? []) ?? 'other'}`)}
         </HText>
       ) : (
         <View style={{ paddingHorizontal: t.spacing.l, paddingBottom: t.spacing.s }}>
@@ -268,12 +273,17 @@ function Receipt({ t, model, mark }: { t: Theme; model: LiveCardModel; mark: Mes
           ) : null}
         </View>
       )}
+      {mark.missed?.length && !mark.failed ? (
+        <HText variant="caption" color="muted" style={{ paddingHorizontal: t.spacing.l, paddingBottom: t.spacing.m }}>
+          {tr('live.receipt.missed', { items: phrases.list(missedNames(model.card, mark.missed)) })}
+        </HText>
+      ) : null}
       {mark.withheld?.length ? (
         <HText variant="caption" color="muted" style={{ paddingHorizontal: t.spacing.l, paddingBottom: t.spacing.m }}>
           {tr('live.receipt.withheld', { items: mark.withheld.join(', ') })}
         </HText>
       ) : null}
-      <SyncLine t={t} model={model} />
+      <SyncLine t={t} model={model} n={mark.n} />
     </View>
   );
 }
@@ -384,16 +394,11 @@ function firstFieldChange(c: ItemChange): [string, string] | null {
   return null;
 }
 
-function SyncLine({ t, model }: { t: Theme; model: LiveCardModel }) {
-  const tr = useT();
-  const demo = !!useLive()?.demo;
-  const n = model.pendingCount;
+function SyncLine({ t, model, n }: { t: Theme; model: LiveCardModel; n: number }) {
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.colors.border, paddingHorizontal: t.spacing.l, paddingVertical: t.spacing.m }}>
-      <Icon name={n ? 'cloud' : 'cloudCheck'} size={18} color={n ? t.colors.info : t.colors.success} />
-      <HText variant="caption" color="muted" style={{ flex: 1 }} accessibilityLiveRegion="polite">
-        {n ? tr('live.sync.pending', { count: n }) : tr(demo ? 'live.sync.demo' : 'live.sync.synced')}
-      </HText>
+    <View style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.colors.border, paddingHorizontal: t.spacing.l, paddingVertical: t.spacing.m }}>
+      {/* the restore action only under the answer that did it */}
+      <SyncStatus t={t} model={model} iconSize={18} restore={model.undone?.answerN === n} />
     </View>
   );
 }

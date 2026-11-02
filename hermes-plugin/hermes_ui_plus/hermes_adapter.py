@@ -54,11 +54,12 @@ def hermes_call_llm() -> Callable[..., Any]:
 
 
 def _scope_modules() -> tuple[Any, Any]:
-    """Hermes' profile-scope helpers, (None, None) on a Hermes without profile multiplexing."""
+    """Hermes' profile-scope helpers and its home-override module; None for what this Hermes lacks (no secret scope
+    = no profile multiplexing)."""
     try:
         from agent import secret_scope  # profile-scoped credentials (Hermes v0.22+)
     except Exception:
-        return None, None
+        secret_scope = None
     try:
         import hermes_constants  # HERMES_HOME override for the scoped call (optional)
     except Exception:
@@ -149,6 +150,35 @@ def profile_scope(home: Optional[str]) -> Iterator[str]:
                     reset(token)
                 except Exception:  # a token from another context: nothing of ours left to undo
                     pass
+
+
+@contextlib.contextmanager
+def forced_profile_scope(home: str) -> Iterator[None]:
+    """Run a read in ANOTHER profile's home: always set Hermes' HERMES_HOME override to ``home`` (also when the caller
+    already has a scope, e.g. a turn of the default profile), plus that profile's secret scope when Hermes multiplexes
+    and has the helpers (so ``${VAR}`` refs in its config resolve against its own .env). File reads only need the
+    override: a secret scope that cannot be built is skipped. Raises when this Hermes has no home override (the read
+    would silently answer for the wrong profile)."""
+    ss, hc = _scope_modules()
+    set_home = getattr(hc, "set_hermes_home_override", None)
+    reset_home = getattr(hc, "reset_hermes_home_override", None)
+    if not callable(set_home) or not callable(reset_home):
+        raise RuntimeError("this Hermes has no HERMES_HOME override")
+    home_token = set_home(str(home))
+    secret_token = None
+    try:
+        if _scope_state(ss) != "off" and all(callable(getattr(ss, n, None)) for n in _SCOPE_HELPERS):
+            try:
+                secret_token = ss.set_secret_scope(ss.build_profile_secret_scope(Path(home)), profile_home=str(home))
+            except Exception as exc:  # the override alone is enough for file reads
+                logger.debug("library: no secret scope for another profile (%s)", type(exc).__name__)
+        yield
+    finally:
+        if secret_token is not None:
+            with contextlib.suppress(Exception):
+                ss.reset_secret_scope(secret_token)
+        with contextlib.suppress(Exception):
+            reset_home(home_token)
 
 
 def is_unscoped_error(exc: BaseException) -> bool:
@@ -392,15 +422,44 @@ class HermesLibrary:
         tools.skill_manager_tool: _find_skill
         tools.skill_usage: _read_bundled_names, _read_hub_installed_names, _external_skill_names
         hermes_cli.config.load_config, hermes_cli.skills_config.get_disabled_skills
+        hermes_cli.profiles.list_profile_names, get_profile_dir (other profiles, root profile's plugin)
+        hermes_constants.set_hermes_home_override / reset_hermes_home_override (forced for other profiles)
 
     Same provenance order as the dashboard (hub > bundled > external), the rest is called ``local``.
+
+    ``force=True`` (a source made by ``for_profile``) reads another profile: every call runs in
+    ``forced_profile_scope(home)``; Hermes' config and skills readers follow the home override.
     """
 
-    def __init__(self, home: Optional[str] = None):
+    def __init__(self, home: Optional[str] = None, *, force: bool = False):
         self.home = home
+        self.force = force
+
+    def _scope(self) -> Any:
+        return forced_profile_scope(str(self.home)) if self.force else profile_scope(self.home)
+
+    @staticmethod
+    def profile_names() -> list[str]:
+        """Named profiles another library source can be made for. Raises without a home override (see
+        ``forced_profile_scope``) or without Hermes' profile list."""
+        _ss, hc = _scope_modules()
+        if not all(callable(getattr(hc, n, None)) for n in ("set_hermes_home_override", "reset_hermes_home_override")):
+            raise RuntimeError("this Hermes has no HERMES_HOME override")
+        from hermes_cli.profiles import list_profile_names
+
+        return [n for n in list_profile_names() if n != "default"]
+
+    @staticmethod
+    def for_profile(name: str) -> tuple["HermesLibrary", str]:
+        from hermes_cli.profiles import get_profile_dir
+
+        d = Path(get_profile_dir(name))
+        if d.name != name or d.parent.name != "profiles":
+            raise ValueError("unexpected profile directory")
+        return HermesLibrary(str(d), force=True), str(d)
 
     def skills(self) -> list[dict]:
-        with profile_scope(self.home):
+        with self._scope():
             from hermes_cli.config import load_config
             from hermes_cli.skills_config import get_disabled_skills
             from tools.skill_usage import _external_skill_names, _read_bundled_names, _read_hub_installed_names
@@ -422,7 +481,7 @@ class HermesLibrary:
 
     def skill_md(self, name: str) -> Optional[bytes]:
         """SKILL.md bytes of the skill Hermes resolves ``name`` to (at most 256 KiB + 1), None if there is none."""
-        with profile_scope(self.home):
+        with self._scope():
             from tools.skill_manager_tool import _find_skill
 
             found = _find_skill(name)
@@ -435,7 +494,7 @@ class HermesLibrary:
                 return f.read(256 * 1024 + 1)
 
     def memory_settings(self) -> dict:
-        with profile_scope(self.home):
+        with self._scope():
             from hermes_cli.config import load_config
 
             mem = load_config().get("memory") or {}
@@ -486,6 +545,8 @@ class HermesBots:
         agent.secret_scope.is_multiplex_active
         hermes_yaml (v0.22.2: ruamel with Hermes' YAML 1.1 policy), else PyYAML (older images), for profile.yaml /
         config.yaml of the new profile
+        tools.approval.load_permanent_allowlist (revoke: re-sync Hermes' in-process "always" set of that profile)
+        hermes_constants.set_hermes_home_override / reset_hermes_home_override (around that re-sync)
 
     Creating a profile is file work plus a rescan of the running multiplexer: no package manager, no gateway restart
     (docs/BOTS-SERVER.md). Files are only written inside ``<root>/profiles/<name>/`` of a name Hermes validated.
@@ -539,8 +600,95 @@ class HermesBots:
         except Exception:
             return {}
 
+    def _home(self, name: str) -> Path:
+        """Hermes home of a profile; ``default`` is the root (where the default profile lives)."""
+        return Path(self._profiles().get_profile_dir("default")) if name == "default" else self._dir(name)
+
     def is_parked(self, name: str) -> bool:
         return (self._dir(name) / "gateway.parked").exists()
+
+    def park_marker(self, name: str) -> Optional[str]:
+        """First line of gateway.parked (Hermes ignores the content; ours says who parked it), None = not parked."""
+        try:
+            with open(self._dir(name) / "gateway.parked", "rb") as f:
+                head = f.read(512)
+        except FileNotFoundError:
+            return None
+        return head.decode("utf-8", errors="replace").splitlines()[0] if head else ""
+
+    def write_park_marker(self, name: str, text: str) -> bool:
+        try:
+            fd = os.open(self._dir(name) / "gateway.parked", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        except FileExistsError:
+            return False
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        return True
+
+    def remove_park_marker(self, name: str) -> None:
+        with contextlib.suppress(FileNotFoundError):
+            (self._dir(name) / "gateway.parked").unlink()
+
+    def _allowlist_of(self, cfg: dict) -> list:
+        raw = cfg.get("command_allowlist")
+        if isinstance(raw, str):  # old ``hermes config set`` wrote the list as a YAML string; Hermes still reads it
+            try:
+                raw = self._yaml().safe_load(raw)
+            except Exception:
+                raw = None
+        return raw if isinstance(raw, list) else []
+
+    def read_config(self, name: str) -> dict:
+        cfg = self._load_yaml(self._home(name) / "config.yaml")
+        if "command_allowlist" in cfg:
+            cfg["command_allowlist"] = self._allowlist_of(cfg)
+        return cfg
+
+    def revoke_allowlist(self, name: str, pattern: str) -> None:
+        """Drop ``pattern`` from config.yaml (atomic), then let Hermes re-read that profile's list so the next
+        command asks again without a restart. Session approvals ("always" also approves the running session) stay
+        until that session ends: Hermes keeps them in memory only."""
+        home = self._home(name)
+
+        def drop(cfg: dict) -> dict:
+            cfg = dict(cfg)
+            cfg["command_allowlist"] = [p for p in self._allowlist_of(cfg) if p != pattern]
+            return cfg
+
+        self._rmw_yaml(home / "config.yaml", drop)
+        self._resync_permanent(home, root=name == "default")
+
+    @staticmethod
+    def _resync_permanent(home: Path, *, root: bool) -> None:
+        """``tools.approval.load_permanent_allowlist()`` replaces the governing in-process set of the current home with
+        the file AND records its baseline, so a later "always" save cannot write the removed entry back. A routed
+        profile is governed under a home override; the root profile both unscoped (module-level set) and under an
+        override of the root home (the multiplexer runs the root's API-server turns that way)."""
+        try:
+            from tools import approval  # Hermes' approval state (in-process permanent allow-list)
+        except Exception as exc:  # no Hermes approval module in this process: the file is all there is
+            logger.debug("bots: no approval module to re-sync (%s)", type(exc).__name__)
+            return
+        load = getattr(approval, "load_permanent_allowlist", None)
+        if not callable(load):
+            return
+        _ss, hc = _scope_modules()
+        set_home = getattr(hc, "set_hermes_home_override", None)
+        reset_home = getattr(hc, "reset_hermes_home_override", None)
+        can_override = callable(set_home) and callable(reset_home)
+        if root:
+            if can_override:
+                token = set_home(None)  # explicitly unscoped, whatever the caller's context holds
+                try:
+                    load()
+                finally:
+                    with contextlib.suppress(Exception):
+                        reset_home(token)
+            else:
+                load()
+        if can_override:
+            with forced_profile_scope(str(home)):
+                load()
 
     def create(self, name: str, description: str) -> None:
         self._profiles().create_profile(name, clone_from="default", clone_config=True, description=description)

@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { randomBytes } from 'node:crypto';
 import { brotliCompressSync, crc32, deflateSync, gzipSync } from 'node:zlib';
 
 import { dmgSignatureRange, hermesStrings, isBinary, isHermesBytecode, isSignaturePath, isTestPath, loadAllowList, machoSignatureRanges, makeScanner, mask, parseDenylist } from './leak-guard.mjs';
@@ -677,6 +678,80 @@ test('CLI --path: .gz / .br are scanned decompressed, .zip entry by entry; a bro
   assert.doesNotMatch(r.err, /bundle\.js\.br/, 'clean brotli content has no finding');
 });
 
+// --- embedded web assets (docs/LEAK-GUARD.md "Embedded assets") -------------------------------------------------------
+// A gzip whose FEXTRA header field carries `term` deep inside (past the unmasked edge): the raw bytes hold the term by
+// chance, the decompressed content (random bytes, so the file is big) holds `plain` extra text if given.
+const chanceGz = (term, { size = 80 * 1024, plain = '' } = {}) => {
+  const gz = gzipSync(Buffer.concat([randomBytes(size), Buffer.from(plain)]));
+  const data = Buffer.concat([Buffer.from('XXXXXX'), Buffer.alloc(40, 0x2e), Buffer.from(`${term}\0`)]);
+  const extra = Buffer.concat([Buffer.from([0x41, 0x42, data.length & 255, data.length >> 8]), data]);
+  const head = Buffer.from(gz.subarray(0, 10));
+  head[3] |= 0x04; // FEXTRA
+  return Buffer.concat([head, Buffer.from([extra.length & 255, extra.length >> 8]), extra, gz.subarray(10)]);
+};
+const embedFixture = (blob, { before = Buffer.alloc(0), after = Buffer.alloc(0), asset = blob } = {}) => {
+  const web = tmp();
+  writeFileSync(join(web, 'entry.js.gz'), asset);
+  const app = tmp();
+  writeFileSync(join(app, 'app-binary'), Buffer.concat([randomBytes(2048), before, blob, after, randomBytes(2048)]));
+  return { web, app };
+};
+const embedRun = (f, extra = ['--assets']) => run(['--path', f.app, ...(extra[0] === '--assets' ? ['--assets', f.web] : extra)], { env: { HUI_PRIVATE_DIR: privateDir() } });
+
+test('embedded assets: an exact copy of a clean compressed asset is skipped in the binary and the skip is reported', () => {
+  const blob = chanceGz('zorblax');
+  const f = embedFixture(blob);
+  const without = embedRun(f, []);
+  assert.equal(without.code, 1, 'without --assets the chance hit in the compressed bytes is found');
+  const r = embedRun(f);
+  assert.equal(r.code, 0, r.err);
+  assert.match(r.err, /embedded asset skipped: app-binary @\d+ \+\d+ bytes \(byte-identical to entry\.js\.gz/);
+});
+
+test('embedded assets: a term in plain text next to the blob still hits', () => {
+  const f = embedFixture(chanceGz('zorblax'), { after: Buffer.from(' zorblax ') });
+  const r = embedRun(f);
+  assert.equal(r.code, 1, r.err);
+  assert.match(r.err, /app-binary/);
+});
+
+test('embedded assets: a blob that differs by one byte is not skipped', () => {
+  const blob = chanceGz('zorblax');
+  const other = Buffer.from(blob);
+  other[blob.length - 40] ^= 0x01; // inside the compressed data, away from the term
+  const f = embedFixture(other, { asset: blob });
+  const r = embedRun(f);
+  assert.equal(r.code, 1, r.err);
+  assert.doesNotMatch(r.err, /embedded asset skipped/);
+});
+
+test('embedded assets: a term in the decompressed asset hits and nothing is skipped', () => {
+  const blob = chanceGz('zorblax', { plain: ' zorblax in the bundle ' });
+  const f = embedFixture(blob);
+  const r = embedRun(f);
+  assert.equal(r.code, 1, r.err);
+  assert.match(r.err, /assets:entry\.js\.gz!gunzip/);
+  assert.doesNotMatch(r.err, /embedded asset skipped/);
+  assert.match(r.err, /app-binary/, 'the raw copy in the binary is scanned as before');
+});
+
+test('embedded assets: a short identical blob is not skipped', () => {
+  const blob = chanceGz('zorblax', { size: 4 * 1024 });
+  assert.ok(blob.length < 64 * 1024);
+  const f = embedFixture(blob);
+  const r = embedRun(f);
+  assert.equal(r.code, 1, r.err);
+  assert.doesNotMatch(r.err, /embedded asset skipped/);
+});
+
+test('embedded assets: $HUI_EMBEDDED_ASSETS works like --assets; a missing dir is an error', () => {
+  const f = embedFixture(chanceGz('zorblax'));
+  const viaEnv = run(['--path', f.app], { env: { HUI_PRIVATE_DIR: privateDir(), HUI_EMBEDDED_ASSETS: f.web } });
+  assert.equal(viaEnv.code, 0, viaEnv.err);
+  const missing = run(['--path', f.app, '--assets', join(f.web, 'nope')], { env: { HUI_PRIVATE_DIR: privateDir() } });
+  assert.equal(missing.code, 2, missing.err);
+});
+
 // --- gitleaks on Hermes bytecode: scan-artifact.sh gives gitleaks the decoded strings, one per line ----------------
 const GITLEAKS = [...(process.env.PATH ?? '').split(':'), join(process.env.HOME ?? '', '.local/bin')].map((d) => join(d, 'gitleaks')).find((p) => existsSync(p));
 
@@ -851,4 +926,14 @@ test('hermes-strings-dump: media get their payload zeroed for gitleaks, other fi
   assert.equal(masked.length, mp4.length);
   assert.ok(mp4.indexOf('x264 - core') > 0 && masked.indexOf('x264 - core') < 0, 'stream bytes are gone');
   assert.ok(masked.indexOf('Fixture clip') > 0, 'metadata is kept');
+});
+
+test('vendored pdf.js worker: e-mail lookalikes in its data tables are not findings, other rules and other files still are', () => {
+  const lookalike = 'x=0;mlnzqfb`kfp`vwwjmddqbujwzojef#jm' + '@' + 'kbswfq.pkbgltMlwbaof?,wg=;';
+  for (const p of ['pdfjs/pdf.worker.min.js', 'pdfjs/pdf.worker.min.js.br!brotli', 'pdfjs/pdf.worker.min.js.gz!gunzip'])
+    assert.equal(scan(p, lookalike).length, 0, p);
+  assert.equal(scan('pdfjs/other.js', lookalike).length, 1);
+  assert.deepEqual(rules(scan('pdfjs/pdf.worker.min.js', 'host zorblax')), ['denylist#1']);
+  // only its content: an e-mail in the file's own path is still one
+  assert.deepEqual(rules(scan(`${EMAIL}/pdfjs/pdf.worker.min.js`, 'x')), ['generic:email']);
 });

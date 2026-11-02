@@ -70,6 +70,11 @@ export function draftHasErrors(atts: readonly Attachment[]): boolean {
   return atts.some((a) => a.status === 'error');
 }
 
+/** Chips whose upload failed: tapping them (or the composer's "retry all" line) tries again. */
+export function failedUploadIds(atts: readonly DraftAttachment[]): string[] {
+  return atts.filter((a) => a.status === 'error' && a.errorSource === 'upload').map((a) => a.id);
+}
+
 /** What gets stored on the sent ChatMessage (drops draft-only fields). */
 export function toSent(att: DraftAttachment): Attachment {
   const { errorSource: _e, progress: _p, error: _err, ...rest } = att;

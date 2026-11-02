@@ -352,6 +352,8 @@ img, video, svg { display: block; }
 .film-head .no { display: block; color: var(--gilt); border-color: var(--gilt); width: 7rem; }
 .film-head h2 { margin-top: 1.5rem; font: 400 clamp(2.9rem, 6.4vw, 6rem)/0.92 var(--serif); letter-spacing: -0.03em; color: #f4f2ec; }
 .film-head p { margin-top: 1.2rem; color: rgba(244, 242, 236, 0.82); }
+.film-head .new-list { margin-top: 1.4rem; padding-left: 1.1rem; display: grid; gap: 0.7rem; color: rgba(244, 242, 236, 0.82); max-width: 44rem; }
+.film-head .new-list strong { color: #f4f2ec; font-weight: 600; }
 .film-head .credits { font-size: 0.85rem; color: rgba(244, 242, 236, 0.62); }
 .film a { color: var(--gilt); }
 .film a:hover { color: #fff3d6; text-decoration-color: var(--gilt); }

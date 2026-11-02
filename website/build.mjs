@@ -418,7 +418,7 @@ ${seal('seal-hero')}
 </div>
 </section>
 
-<section id="new" class="film film-new" aria-labelledby="h-new">
+${MINOR === '0.2' ? `<section id="new" class="film film-new" aria-labelledby="h-new">
 <div class="frame film-grid">
 <header class="film-head">
 ${no(1)}
@@ -433,7 +433,24 @@ ${no(1)}
 </video>
 </figure>
 </div>
-</section>
+</section>` : `<section id="new" class="film film-new" aria-labelledby="h-new">
+<div class="frame film-grid">
+<header class="film-head">
+${no(1)}
+<h2 id="h-new">New in ${esc(MINOR)}</h2>
+<p>One screen with one timeline for each of your bots. Lists and plans that Hermes keeps up to date now show what became of each of your changes. Cards say when their facts are model knowledge. Reply to a single message, and every chat keeps its draft and your reading position.</p>
+<ul class="new-list">
+<li><strong>Bots, one timeline each.</strong> What Hermes delivers (reminders, routine results) and your conversation with the bot sit in one place, in time order (Hermes v0.22.3 and newer).</li>
+<li><strong>Know what a bot is doing.</strong> A card shows its current steps, with Stop, also for a turn started on another device. “About” covers its memory, skills, routines and what it may always do.</li>
+<li><strong>Changes that report back.</strong> Under your message: “Saved in v4”, or “Hermes then did it differently” with a button to restore your edit.</li>
+<li><strong>Honest sources.</strong> “From model knowledge, no web source” instead of a source the model made up.</li>
+<li><strong>Reply, drafts, reading position.</strong> Quote one message, come back to the same line, keep what you were typing.</li>
+<li><strong>Bot groups (beta, off by default).</strong> 2 to 6 of your bots in one chat, started by the server owner.</li>
+</ul>
+<p class="credits">Some features need the bridge, the hermes-ui skill or the plugin on your server (<a href="${REPO}/releases/tag/v${esc(VERSION)}">release notes</a>). A video for this version is not recorded yet.</p>
+</header>
+</div>
+</section>`}
 
 <section id="features" class="sec feats frame" aria-labelledby="h-what">
 <header class="sec-head">

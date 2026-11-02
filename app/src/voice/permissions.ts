@@ -4,7 +4,7 @@
  * `expo-image-picker` with `microphonePermission: false` BLOCKS RECORD_AUDIO).
  */
 import { getRecordingPermissionsAsync, requestRecordingPermissionsAsync } from 'expo-audio';
-import { Linking } from 'react-native';
+import { Linking, Platform } from 'react-native';
 import { VoiceError } from './types';
 
 export type MicPermission = {
@@ -32,10 +32,25 @@ export function forgetMicPermission(): void {
   micGranted = false;
 }
 
+/**
+ * The permission as it stands, never a prompt. Web: only the Permissions API, because expo-audio's web
+ * getRecordingPermissionsAsync falls back to getUserMedia (a browser prompt) while the state is "prompt". No such API or
+ * name in this browser = not granted. canAskAgain stays true on web: only getUserMedia tells a blocked site.
+ */
+async function readMicPermission(): Promise<{ granted: boolean; canAskAgain: boolean }> {
+  if (Platform.OS !== 'web') return getRecordingPermissionsAsync();
+  try {
+    const status = await navigator.permissions.query({ name: 'microphone' as PermissionName });
+    return { granted: status.state === 'granted', canAskAgain: true };
+  } catch {
+    return { granted: false, canAskAgain: true };
+  }
+}
+
 export async function ensureMicPermission(): Promise<MicPermission> {
   if (micGranted) return { ok: true, blocked: false, prompted: false };
   try {
-    let p = await getRecordingPermissionsAsync();
+    let p = await readMicPermission();
     if (p.granted) {
       micGranted = true;
       return { ok: true, blocked: false, prompted: false };
@@ -55,7 +70,7 @@ export async function ensureMicPermission(): Promise<MicPermission> {
 /** Current microphone permission without prompting (false on errors). */
 export async function micPermissionGranted(): Promise<boolean> {
   try {
-    const granted = (await getRecordingPermissionsAsync()).granted;
+    const granted = (await readMicPermission()).granted;
     micGranted = granted;
     return granted;
   } catch {

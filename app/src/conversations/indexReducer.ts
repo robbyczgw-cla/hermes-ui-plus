@@ -3,7 +3,7 @@
  */
 import type { ConversationMeta, HermesChatOptions, IndexState, ProfileKind, ProfileRef, RemoteInfo } from './types.ts';
 import type { ModelLockState } from '../hermes/modelLock.ts';
-import { DEFAULT_TITLE } from './types.ts';
+import { DEFAULT_TITLE, isBotPlace } from './types.ts';
 import { cleanUserTitle, makeTitle } from './title.ts';
 import { botOf } from '../hermes/bots.ts';
 
@@ -35,6 +35,9 @@ export type IndexAction =
    * session (synced earlier as an ordinary chat) turned into it. `remote` = what the server reported for the session.
    */
   /** what the server reports for a bot's "Bot Chat" now (Bots tab refresh): newer activity is fetched on open */
+  | { type: 'botTalk'; id: string; profile: ProfileRef; bot?: string; sessionId: string; now: number; title: string }
+  | { type: 'botChatRetire'; id: string; title?: string; remoteCount?: number }
+  | { type: 'botTalkMoved'; id: string; nextId: string; sessionId: string; now: number; carried?: readonly string[] }
   | { type: 'botChatRemote'; id: string; lastActive?: number; remoteCount?: number; preview?: string }
   | { type: 'botChat'; id: string; profile: ProfileRef; bot?: string; sessionId: string; now: number; title: string; adopt?: boolean; remote?: RemoteInfo; preview?: string; messageCount?: number; activate?: boolean }
   | {
@@ -48,7 +51,8 @@ export type IndexAction =
       /** the size cap dropped older messages in this save */
       truncated?: boolean;
     }
-  | { type: 'pruneDrafts'; keep?: string }
+  /** `drafts`: empty chats with an unsent draft saved (chat/readingStore.ts): only "Neuer Chat" gets back to them, so they stay */
+  | { type: 'pruneDrafts'; keep?: string; drafts?: readonly string[] }
   // ---- Hermes session sync / per-chat options ----
   /** result of remoteSync.mergeRemoteSessions (whole item list) */
   | { type: 'mergeRemote'; items: ConversationMeta[] }
@@ -122,9 +126,51 @@ export function indexReducer(state: IndexState, a: IndexAction): IndexState {
       };
       return { ...state, items: [meta, ...state.items], activeId };
     }
-    case 'botChatRemote':
+    case 'botTalk': {
+      const bot = botOf(a.bot);
+      const meta: ConversationMeta = {
+        id: a.id,
+        title: a.title,
+        titleSource: 'remote',
+        profileId: a.profile.id,
+        profileKind: a.profile.kind,
+        hermesSessionId: a.sessionId,
+        createdAt: a.now,
+        updatedAt: a.now,
+        preview: '',
+        messageCount: 0,
+        botTalk: true,
+        ...(bot ? { hermesProfile: bot } : {}),
+      };
+      return { ...state, items: [meta, ...state.items] };
+    }
+    case 'botChatRetire':
       return mapOne(state, a.id, (c) => {
         if (!c.botChat) return c;
+        const { botChat: _b, ...rest } = c;
+        const remote = c.remote ? { ...c.remote } : undefined;
+        if (remote) {
+          if (a.title) remote.title = a.title;
+          else delete remote.title; // gone from the server: no longer "the session titled Bot Chat" (isBotChatEntry)
+        }
+        // never loaded here but with history on the server: not a draft, its transcript is fetched when it opens
+        const history = !c.messageCount && a.remoteCount ? { messageCount: a.remoteCount, preview: c.preview || '…', origin: 'remote' as const } : {};
+        return { ...rest, botChatRetired: true, ...(a.title ? { title: a.title, titleSource: 'remote' as const } : {}), ...(remote ? { remote } : {}), ...history };
+      });
+    case 'botTalkMoved': {
+      // the talk's session is gone or lives on under another id: what it holds stays as history, a new talk takes over
+      const old = state.items.find((c) => c.id === a.id && c.botTalk);
+      if (!old) return state;
+      const { botTalk: _t, ...rest } = old;
+      const { remote: _r, origin: _o, modelLock: _l, historyTruncated: _h, ...fresh } = rest;
+      const next: ConversationMeta = { ...fresh, id: a.nextId, hermesSessionId: a.sessionId, createdAt: a.now, updatedAt: a.now, preview: '', messageCount: 0, botTalk: true };
+      const kept = state.items.filter((c) => c.id !== a.id);
+      const history = old.messageCount > 0 ? [{ ...rest, botChatRetired: true as const, ...(a.carried?.length ? { carriedTurns: [...a.carried] } : {}) }] : [];
+      return { ...state, items: [next, ...history, ...kept], activeId: state.activeId === a.id ? a.nextId : state.activeId };
+    }
+    case 'botChatRemote':
+      return mapOne(state, a.id, (c) => {
+        if (!c.botChat && !c.botTalk) return c;
         const lastActive = Math.max(c.remote?.lastActive ?? 0, a.lastActive ?? 0) || undefined;
         const remote: RemoteInfo = { source: c.remote?.source ?? 'api_server', ...c.remote, ...(lastActive ? { lastActive } : {}), ...(a.remoteCount !== undefined ? { remoteCount: a.remoteCount } : {}) };
         const updatedAt = lastActive && lastActive > c.updatedAt + 1000 ? lastActive : c.updatedAt;
@@ -263,18 +309,21 @@ export function indexReducer(state: IndexState, a: IndexAction): IndexState {
       });
     case 'setActive':
       return state.activeId === a.id ? state : { ...state, activeId: a.id };
-    case 'saved':
-      return mapOne(state, a.id, (c) => ({
+    case 'saved': {
+      const next = mapOne(state, a.id, (c) => ({
         ...c,
         // auto title: first user message; never overwrite a user title
         title: c.titleSource === 'auto' && a.firstUserText ? makeTitle(a.firstUserText) : c.title,
-        preview: a.preview,
+        preview: botChatKeepsPreview(state, c, a.now) ? c.preview : a.preview,
         messageCount: a.messageCount,
         updatedAt: a.now,
         ...(a.truncated || c.historyTruncated ? { historyTruncated: true } : {}),
       }));
+      const talk = next.items.find((c) => c.id === a.id && c.botTalk);
+      return talk ? liftBotChat(next, talk) : next;
+    }
     case 'pruneDrafts': {
-      const items = state.items.filter((c) => c.messageCount > 0 || c.preview !== '' || c.botChat || c.id === a.keep);
+      const items = state.items.filter((c) => c.messageCount > 0 || c.preview !== '' || isBotPlace(c) || c.id === a.keep || a.drafts?.includes(c.id));
       return items.length === state.items.length ? state : { ...state, items };
     }
     default:
@@ -293,8 +342,22 @@ function mapOne(state: IndexState, id: string, fn: (c: ConversationMeta) => Conv
   return changed ? { ...state, items } : state;
 }
 
+const sameBot = (a: ConversationMeta, b: ConversationMeta) => a.profileId === b.profileId && botOf(a.hermesProfile) === botOf(b.hermesProfile);
+
+/** The bot's entry (Bots tab, drawer) shows the newest of both sources: a turn in the talk lifts it. */
+function liftBotChat(state: IndexState, talk: ConversationMeta): IndexState {
+  const chat = state.items.find((c) => c.botChat && sameBot(c, talk));
+  if (!chat || talk.updatedAt < chat.updatedAt) return state;
+  return mapOne(state, chat.id, (c) => (c.updatedAt === talk.updatedAt && c.preview === talk.preview ? c : { ...c, updatedAt: talk.updatedAt, preview: talk.preview }));
+}
+
+/** A fetched Bot Chat that holds nothing newer than the bot's talk doesn't take the entry's last line away. */
+function botChatKeepsPreview(state: IndexState, c: ConversationMeta, now: number): boolean {
+  return !!c.botChat && state.items.some((t) => t.botTalk && sameBot(t, c) && t.preview !== '' && t.updatedAt >= now);
+}
+
 /** Drafts (nothing sent yet) are not shown in the list. */
 export function isDraft(c: ConversationMeta): boolean {
-  // a bot's empty "Bot Chat" is a place, not a draft: never re-used for a new chat, rebound or pruned
-  return c.messageCount === 0 && c.preview === '' && !c.botChat;
+  // a bot's empty "Bot Chat" or talk is a place, not a draft: never re-used for a new chat, rebound or pruned
+  return c.messageCount === 0 && c.preview === '' && !isBotPlace(c);
 }

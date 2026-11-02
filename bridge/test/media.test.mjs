@@ -89,6 +89,19 @@ test('unicode file names: encoded Content-Disposition', async () => {
   assert.match(res.headers.get('content-disposition'), /filename\*=UTF-8''%C3%A4bericht%201\.pdf/);
 });
 
+test('download=1: the same file as an attachment (the app\'s "Sichern" fallback), type and name kept', async () => {
+  const res = await fetch(`${base}/bridge/media?path=${encodeURIComponent(join(root, 'images', 'äbericht 1.pdf'))}&download=1`, {
+    headers: { authorization: `Bearer ${TOKEN}` },
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-type'), 'application/pdf');
+  assert.match(res.headers.get('content-disposition'), /^attachment; filename="_bericht 1\.pdf"; filename\*=UTF-8''%C3%A4bericht%201\.pdf$/);
+  assert.equal(await res.text(), '%PDF-1.4');
+  const view = await get(join(root, 'images', 'äbericht 1.pdf'));
+  assert.match(view.headers.get('content-disposition'), /^inline;/);
+  await view.arrayBuffer();
+});
+
 test('active content is never inline', async () => {
   const res = await get(join(root, 'page.html'));
   assert.equal(res.status, 200);

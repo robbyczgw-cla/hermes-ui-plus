@@ -1,7 +1,7 @@
 import { isConversationVisible } from '../flavor';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { Suspense, lazy, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { StyleSheet, View, useWindowDimensions } from 'react-native';
+import { Suspense, lazy, type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { Platform, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { setActiveConversation } from '../actions/activeConversation.ts';
 import { markRead, shellState } from '../background/noticeState';
 import { keptSessions, mountedSessionIds, turnRegistry } from '../background/turnRegistry';
@@ -31,6 +31,7 @@ import { isDesktopApp, onDesktopCommand, requestComposerFocus } from '../desktop
 import { useWindowVibrancy } from '../desktop/chrome';
 import { deleteConversationState } from '../nodestate';
 import { useStarterPrompt } from '../onboarding/starterPrompt';
+import { moveReadingDraft } from './readingStore';
 import { useApprovalOpener, useInboxConnected, useInboxHandler } from '../push';
 import { useConnection } from '../settings/ConnectionProvider';
 import { usePreference, usePreferences } from '../settings/PreferencesProvider';
@@ -57,8 +58,13 @@ import { useQuickAvailability } from '../quick/hooks';
 import { closeQuick, useQuickOpen } from '../quick/nav';
 import { libraryApplies, libraryRoute } from '../library/source';
 import { useBotsTab } from '../bots/useBotsTab';
+import { onCloseDrawerRequest } from '../groups/drawer';
 import { setDrawerTab, useDrawerTab, useReportAttention, type DrawerTab } from '../bots/state';
 import { refreshBotChats } from '../bots/refresh';
+import { botScreenMode, defaultBotLookupApplies } from '../bots/core';
+import { useBotFeed } from '../bots/useBotFeed';
+import { deliveryContext, feedRows, goneTurnUser, markResendAfterMove, mergeBotTimeline, takeResendsAfterMove, talkMovesOn, withoutFeed } from '../bots/timeline';
+import type { ChatMessage } from '../hermes/types';
 import { DEFAULT_BOT } from '../hermes/bots';
 
 // the quick thread (⚡) is its own lazy chunk: nothing of it loads until it is opened once
@@ -85,6 +91,8 @@ export function ChatScreen() {
   const { active, profiles, ready: connReady, setActive } = useConnection();
   const convs = useConversations();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // bot groups (groups/): the group screen and the group rows close the drawer before they navigate
+  useEffect(() => onCloseDrawerRequest(() => setDrawerOpen(false)), []);
   // ≥ 900 px: persistent, collapsible sidebar instead of the drawer (state remembered, ui/lib/layout.ts)
   const { width: windowW } = useWindowDimensions();
   const wide = isWideWidth(windowW);
@@ -321,7 +329,7 @@ export function ChatScreen() {
   const lookUpBotChats = useCallback(
     (force: boolean) => {
       if (botsTab) refreshBots?.(force);
-      else if (active.kind === 'hermes' && active.bridge && active.apiKey) {
+      else if (defaultBotLookupApplies(active)) {
         refreshBotChats({ id: active.id, kind: 'hermes', baseUrl: active.baseUrl, apiKey: active.apiKey }, DEFAULT_ONLY, () => convsRef.current, force);
       }
     },
@@ -388,6 +396,7 @@ export function ChatScreen() {
     profileName,
     remote,
     older: sync.older,
+    listState: sync.listState,
     searchFocus,
     bots: botsTab ? { tab: botsTab, drawerTab, onTab: pickTab } : undefined,
   };
@@ -536,12 +545,50 @@ function HermesSession(props: SessionProps) {
   const bot = conv.meta?.hermesProfile;
   const botProfile = useMemo(() => withBot(props.profile, bot), [props.profile, bot]);
   const transcript = useRemoteTranscript(props.conversationId, botProfile);
+  const redirecting = useBotScreenRedirect(conv.meta, botProfile, props.profile);
   if (!conv.meta) return <View style={[styles.flex, { backgroundColor: t.colors.bg }]} />; // deleted / not in the index
-  if (!conv.ready) {
+  if (!conv.ready || redirecting) {
     const model = effectiveModel('hermes', conv.meta.model, props.profile.model);
     return <ChatViewPending profile={props.profile} model={model} onNewChat={props.onNewChat} onOpenDrawer={props.onOpenDrawer} />;
   }
   return <HermesSessionInner {...props} conv={conv} transcript={transcript} />;
+}
+
+/** how long a bot's first open waits for the capabilities before it treats the Bot Chat as writable (a send then explains itself) */
+const BOT_CAPS_WAIT_MS = 4000;
+
+/**
+ * Bots A+ (bots/timeline.ts): a bot's Bot Chat entry stays what the Bots tab, pushes and "Wartet auf dich" open; when
+ * Hermes owns that session the entry hands over to the bot's talk, the conversation that mounts and shows both.
+ * True while the frame should wait instead of showing the Bot Chat itself.
+ */
+function useBotScreenRedirect(meta: ConversationMeta | undefined, conn: { baseUrl: string; apiKey: string }, profile: ConnectionProfile): boolean {
+  const { activeId, setActiveId, ensureBotTalk, list } = useConversations();
+  const candidate = !!meta && (!!meta.botChat || !!meta.botChatRetired);
+  const caps = useHermesCapabilities(candidate ? conn : undefined);
+  const mode = candidate ? botScreenMode(meta, list, caps.caps) : 'thread';
+  // an answer without capabilities (older server, offline) ends the wait: only a slow one takes the full time
+  const [waited, setWaited] = useState(false);
+  const askedCaps = useRef(false);
+  useEffect(() => {
+    if (caps.loading) askedCaps.current = true;
+    else if (askedCaps.current) setWaited(true);
+  }, [caps.loading]);
+  useEffect(() => {
+    if (mode !== 'wait') return;
+    const t = setTimeout(() => setWaited(true), BOT_CAPS_WAIT_MS);
+    return () => clearTimeout(t);
+  }, [mode]);
+  const id = meta?.id;
+  const bot = meta?.hermesProfile;
+  useEffect(() => {
+    if (mode !== 'talk' || activeId !== id) return;
+    const talk = ensureBotTalk({ id: profile.id, kind: 'hermes' }, bot);
+    // a draft typed while this was the writable Bot Chat (Hermes updated meanwhile) goes along to the screen's composer
+    if (id) moveReadingDraft(id, talk.id);
+    setActiveId(talk.id);
+  }, [mode, activeId, id, bot, profile.id, ensureBotTalk, setActiveId]);
+  return mode === 'talk' || (mode === 'wait' && !waited);
 }
 
 function HermesSessionInner({ conv, transcript, profile, onNewChat, onOpenDrawer }: SessionProps & { conv: UseConversation; transcript: RemoteTranscript }) {
@@ -557,6 +604,7 @@ function HermesSessionInner({ conv, transcript, profile, onNewChat, onOpenDrawer
           apiKey: profile.apiKey,
           model,
           sessionKey: profile.sessionKey,
+          omitSessionKey: Platform.OS === 'web' && !profile.bridge,
           // the UI bridge injects the bootstrap system message itself and takes file uploads
           bootstrap: !profile.bridge,
           bridge: !!profile.bridge,
@@ -571,7 +619,8 @@ function HermesSessionInner({ conv, transcript, profile, onNewChat, onOpenDrawer
   const modelCaps = caps.modelCaps(model);
   const modelOptions = conv.meta?.modelOptions;
   // branched from an earlier answer: the copied turns go along as context until Hermes accepted a turn (answerMenu.ts)
-  const { setBranchSeed } = useConversations();
+  const convs = useConversations();
+  const { setBranchSeed } = convs;
   const convId = conv.meta?.id;
   const onBranchSeedUsed = useCallback(() => {
     if (convId) setBranchSeed(convId, undefined);
@@ -581,6 +630,13 @@ function HermesSessionInner({ conv, transcript, profile, onNewChat, onOpenDrawer
   const liveCards = useSessionsSupported(botConn) !== false;
   const liveRef = useRef<LiveController | null>(null);
   const liveOutgoing = useCallback((text: string) => (liveCards ? (liveRef.current?.outgoing(text) ?? null) : null), [liveCards]);
+  // Bots A+: on a bot's talk the Bot Chat's deliveries join the timeline, and the bot is told about the recent ones
+  const shellHidden = useContext(ChatShellContext)?.hidden;
+  const botFeed = useBotFeed(conv.meta, profile, !shellHidden);
+  const botChatRows = useRef(botFeed.botChat);
+  botChatRows.current = botFeed.botChat;
+  const isTalk = !!conv.meta?.botTalk;
+  const turnContext = useCallback((sent: ChatMessage[]) => (isTalk ? deliveryContext(botChatRows.current, sent, Date.now()) : null), [isTalk]);
   const chat = useHermesChat(conn, {
     ...sessionOptions(conv),
     modelOptions: effectiveChatOptions(modelOptions, modelCaps),
@@ -590,7 +646,30 @@ function HermesSessionInner({ conv, transcript, profile, onNewChat, onOpenDrawer
     onBranchSeedUsed,
     liveCards,
     liveOutgoing,
+    turnContext,
   });
+  // Hermes no longer knows the talk's session (deleted in another client): the talk goes on under a new one, the failed
+  // message with its attachments is stored there first and goes out again, so the user only sees it answered
+  const moveBotTalk = convs.moveBotTalk;
+  const talkId = isTalk ? convId : undefined;
+  const talkGone = !!talkId && chat.status !== 'streaming' && talkMovesOn(chat.messages, chat.sessionId);
+  useEffect(() => {
+    if (!talkGone || !talkId) return;
+    const rows = chat.messages;
+    const refused = goneTurnUser(rows);
+    if (refused) markResendAfterMove(refused.id);
+    void conv.flush().finally(() => moveBotTalk(talkId, undefined, rows));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [talkGone, talkId]);
+  const resendQueued = chat.queuedSend?.resend;
+  useEffect(() => {
+    // next tick, like a starter prompt: the session finishes mounting first. A busy chat keeps the visible queued bubble
+    for (const id of takeResendsAfterMove(chat.messages)) setTimeout(() => resendQueued?.(id), 0);
+  }, [chat.messages, resendQueued]);
+  const feedList = useMemo(() => feedRows(botFeed.feeds, chat.sessionId), [botFeed.feeds, chat.sessionId]);
+  const replaceTalk = chat.replaceMessages;
+  const replaceOnlyTalk = useCallback((m: ChatMessage[]) => replaceTalk?.(withoutFeed(m)) ?? false, [replaceTalk]);
+  const onScreen = useMemo(() => (feedList.length ? { ...chat, messages: mergeBotTimeline(chat.messages, feedList), replaceMessages: replaceOnlyTalk } : chat), [chat, feedList, replaceOnlyTalk]);
   // Hermes v0.22: the chat's own model pick is locked on its Hermes session (survives restarts, other Hermes clients)
   useHermesModelLock({
     conn,
@@ -652,7 +731,7 @@ function HermesSessionInner({ conv, transcript, profile, onNewChat, onOpenDrawer
   const view = (
     <>
       <ChatView
-        chat={chat}
+        chat={onScreen}
         profile={profile}
         // key / token rejected (401/403): like the other backends' credential problems – status text instead of "ist bereit"
         health={denied ? 'offline' : health}
@@ -663,8 +742,8 @@ function HermesSessionInner({ conv, transcript, profile, onNewChat, onOpenDrawer
         onNewChat={onNewChat}
         onOpenDrawer={onOpenDrawer}
         options={options}
-        notice={transcript.error ?? fallback.notice}
-        noticeAction={transcript.error ? undefined : fallback.noticeAction}
+        notice={botFeed.error ?? transcript.error ?? fallback.notice}
+        noticeAction={botFeed.error ? { label: tr('bots.feed.retry'), onPress: botFeed.retry } : transcript.error ? undefined : fallback.noticeAction}
         historyPending={historyPending}
       />
       {supportsOptions ? (

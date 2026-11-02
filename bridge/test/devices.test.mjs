@@ -130,7 +130,7 @@ test('lock: concurrent writers in separate processes never lose an update', asyn
   const victim = seed.redeem(seed.issue('victim').code);
   const worker = `
     const { createDeviceStore } = await import(${JSON.stringify(new URL('../src/devices.mjs', import.meta.url).href)});
-    const s = createDeviceStore({ dir: process.argv[1] });
+    const s = createDeviceStore({ dir: process.argv[1], lockWaitMs: 60_000 }); // a loaded machine: not what this tests
     const [mode] = process.argv.slice(2);
     if (mode === 'revoke') { s.revoke(${JSON.stringify(victim.id)}); }
     else for (let i = 0; i < 15; i++) { s.issue('w' + process.pid + '-' + i); }

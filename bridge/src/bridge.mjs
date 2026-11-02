@@ -15,6 +15,7 @@ import { createReplayStore, idempotencyKey, resumeOffset, RESUMABLE_HEADER } fro
 import { createJobsHandler, isJobsPath } from './jobs.mjs';
 import { createRoutinesRights } from './routines-rights.mjs';
 import { createProfiles, DEFAULT_PROFILE, isProfileName, PROFILES_PATH, splitProfilePath } from './profiles.mjs';
+import { createWebCaps, withWebCap } from './webcaps.mjs';
 import { corsHeaders } from './cors.mjs';
 
 const SAFE_ID = /^[A-Za-z0-9._:-]{1,128}$/;
@@ -97,9 +98,12 @@ const truthy = (v) => v === true || v === 1 || (typeof v === 'string' && /^(1|tr
  *   turns?: {begin: (sessionId: string, profile?: string|null) => () => void},
  *   approvals?: ReturnType<typeof import('./approvals.mjs').createApprovalWatcher>,
  *   profiles?: ReturnType<typeof import('./profiles.mjs').createProfiles>,
- *   routinesRights?: ReturnType<typeof import('./routines-rights.mjs').createRoutinesRights>}} deps
+ *   activity?: {begin: (profile: string|null, sessionId?: string) => {session: (id: string) => void, push: (chunk: Buffer) => void, end: () => void}},
+ *   routinesRights?: ReturnType<typeof import('./routines-rights.mjs').createRoutinesRights>,
+ *   webCaps?: ReturnType<typeof import('./webcaps.mjs').createWebCaps>|null}} deps
  *   turns: push watcher (src/push-hermes.mjs) skips what we stream; approvals: approval.request → inbox + push (src/approvals.mjs);
  *   profiles: Hermes profiles reachable under `/p/<name>/…` (src/profiles.mjs; default: from process.env)
+ *   activity: running turns + tool steps per bot for GET /bridge/bots/activity (src/bots-activity.mjs)
  */
 export function createBridgeHandler(config, deps) {
   const log = deps.logger ?? silentLogger;
@@ -112,6 +116,10 @@ export function createBridgeHandler(config, deps) {
   // from a byte offset (src/replay.mjs)
   const replay = config.resume?.enabled === false ? null : createReplayStore(config.resume ?? {});
   const profiles = deps.profiles ?? createProfiles(process.env);
+  // `web=on|off` on the caps line (src/webcaps.mjs): probed once per profile from Hermes' /v1/toolsets before its
+  // first app turn, then fixed (prompt cache); unknown = no key
+  const webCaps = deps.webCaps !== undefined ? deps.webCaps
+    : config.bootstrap ? createWebCaps({ baseUrl: config.upstream.baseUrl, apiKey: config.upstream.apiKey, setting: config.webTools, log }) : null;
   // router context memory per (profile, session): sessions are namespaced per Hermes profile
   const memoryKey = (profile, sid) => (profile ? `${profile}\0${sid}` : sid);
 
@@ -500,7 +508,10 @@ export function createBridgeHandler(config, deps) {
       const hintAllowed = config.hint.mode === 'on' || (config.hint.mode === 'auto' && !statelessMultiTurn);
       const hint = decision && hintAllowed ? buildHint(decision, config.hint) : null;
       if (hint || config.bootstrap) {
-        const messages = applySystemMessages(body.messages, { bootstrap: config.bootstrap, skill: config.skillInline, hint });
+        const web = webCaps && config.bootstrap ? await webCaps.get(profile) : null;
+        if (ac.signal.aborted) return false;
+        const bootstrap = withWebCap(config.bootstrap, web);
+        const messages = applySystemMessages(body.messages, { bootstrap, skill: config.skillInline, hint });
         outBody = Buffer.from(JSON.stringify({ ...body, messages }));
       }
       if (decision) log.debug('hint', { reqId, injected: Boolean(hint), statelessMultiTurn });
@@ -516,6 +527,7 @@ export function createBridgeHandler(config, deps) {
     ac.signal.addEventListener('abort', abortUpstream, { once: true });
     const headerTimer = setTimeout(() => up.destroy(Object.assign(new Error('response headers timed out'), { code: 'ETIMEDOUT' })), limits.chatHeaderTimeoutMs);
     endTurn = deps.turns?.begin(sessionHeader, profile) ?? (() => {});
+    const activity = deps.activity?.begin(profile, sessionHeader) ?? null; // GET /bridge/bots/activity (also detached)
     const runEntry = { reqId, up, runId: /** @type {string|null} */ (null), profile };
     const untrack = trackRun(sessionHeader && runKey(profile, sessionHeader), runEntry);
     // 'close' = the upstream request is over: response consumed (also while detached), error, or stopped
@@ -528,6 +540,7 @@ export function createBridgeHandler(config, deps) {
       unlink();
       untrack();
       endTurn();
+      activity?.end();
       release();
     });
     const routeHeader = decision ? { 'x-hermes-ui-route': asciiJson(publicDecision(decision)) } : {};
@@ -579,6 +592,11 @@ export function createBridgeHandler(config, deps) {
       if (watch) {
         upRes.on('data', (c) => watch.push(c));
         upRes.on('close', () => watch.end());
+      }
+      // tool steps of this turn for the activity view (also while detached)
+      if (activity) {
+        activity.session(String(upRes.headers['x-hermes-session-id'] ?? sessionHeader ?? ''));
+        if (isSse) upRes.on('data', (c) => activity.push(c));
       }
       const collect = memory && status === 200 && valid;
       const collector = collect && isSse ? createAssistantCollector(8000, { onOversize: (m) => log.warn('sse_frame_dropped', { reqId, ...m }) }) : null;
@@ -748,6 +766,7 @@ export function createBridgeHandler(config, deps) {
         hint: config.hint.mode,
         bootstrap: Boolean(config.bootstrap),
         caps: config.caps ?? null, // src/caps.mjs, what the bootstrap tells the model (e.g. image_search off)
+        web: webCaps ? webCaps.snapshot() : null, // src/webcaps.mjs, web=on|off per profile probed so far
         memorySessions: memory?.size ?? 0,
         resume: replay ? { enabled: true, ...replay.stats() } : { enabled: false },
       });

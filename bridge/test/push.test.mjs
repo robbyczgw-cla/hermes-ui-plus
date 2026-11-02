@@ -367,3 +367,45 @@ test('Bots: a reminder delivered into a Bot Chat (any source) is pushed with its
   assert.equal(fcm.calls.at(-1).n.body, 'Antwort für den Desktop');
   assert.equal(fcm.calls.at(-1).n.title, 'Hermes');
 });
+
+test('per-bot push levels: quiet / off skip answers and Bot Chat pushes of that bot; approvals still pushed; invalid names dropped', async () => {
+  const cfg = await (await call('/bridge/push/config')).json();
+  assert.equal(cfg.botLevels, true);
+  const QUIET = 'q'.repeat(40) + ':APA91b' + 'q'.repeat(100);
+  const OFF_OTHER = 'o'.repeat(40) + ':APA91b' + 'o'.repeat(100);
+  let r = await call('/bridge/push/register', { method: 'POST', body: { platform: 'fcm', token: QUIET, profileId: 'p-q', scope: { sources: ['api_server'], quietBots: ['default', 'Bad.Name', 'default'] } } });
+  assert.equal(r.status, 200);
+  r = await call('/bridge/push/register', { method: 'POST', body: { platform: 'fcm', token: OFF_OTHER, profileId: 'p-o', scope: { sources: ['api_server'], offBots: ['writer'] } } });
+  assert.equal(r.status, 200);
+  const regs = (await (await call('/bridge/push/registrations')).json()).data ?? [];
+  const q = regs.find((x) => x.profileId === 'p-q');
+  assert.deepEqual(q.scope, { sources: ['api_server'], quietBots: ['default'] }, 'only valid bot names, once');
+  assert.equal((await call('/bridge/push/register', { method: 'POST', body: { platform: 'fcm', token: QUIET, profileId: 'p-q', scope: { offBots: 'default' } } })).status, 400);
+
+  // an unsolicited answer of the default bot: not to the quiet registration, to the one that silenced another bot
+  addSession('hui-levels', 'api_server');
+  await pollFresh(); // first sight = baseline
+  const before = fcm.calls.length;
+  addMessage('hui-levels', 'assistant', 'Hintergrund fertig', { ts: nowSec() - 1 });
+  await pollFresh();
+  const answers = fcm.calls.slice(before).map((c) => c.token);
+  assert.ok(answers.includes(OFF_OTHER));
+  assert.ok(!answers.includes(QUIET), 'quiet: no answer push');
+
+  // Bot Chat of the default bot: same
+  const sid = '20261020_073521_fee558'; // the Bot Chat of the test above
+  const mid = fcm.calls.length;
+  addMessage(sid, 'user', 'Frage am Desktop 2', { ts: nowSec() - 1 });
+  addMessage(sid, 'assistant', 'Antwort 2', { ts: nowSec() });
+  await pollFresh();
+  const chats = fcm.calls.slice(mid).map((c) => c.token);
+  assert.ok(chats.includes(OFF_OTHER));
+  assert.ok(!chats.includes(QUIET), 'quiet: no Bot Chat push');
+
+  // approvals are never filtered by the level
+  const ap = fcm.calls.length;
+  ctx.push.approvals.request({ runId: 'run-levels', requestId: 'req-levels-1', sessionId: 'hui-levels', command: 'rm -rf build' });
+  for (let i = 0; i < 20 && !fcm.calls.slice(ap).some((c) => c.token === QUIET); i++) await new Promise((res) => setTimeout(res, 10));
+  assert.ok(fcm.calls.slice(ap).some((c) => c.token === QUIET && c.n.data.kind === 'approval'), 'approval reaches the quiet registration');
+  ctx.push.approvals.stop();
+});

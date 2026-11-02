@@ -28,6 +28,7 @@ import { LiveChecklistBody } from './LiveChecklistBody';
 import { LiveTripBody } from './LiveTripBody';
 import { LiveWatchBody } from './LiveWatchBody';
 import { LiveSeal, Tag, VersionChip, useTimeLabel } from './parts';
+import { SyncStatus } from './LiveSync';
 
 export function LiveCardSheet({ offline, onAsk }: { offline: boolean; onAsk: () => void }) {
   const live = useLive();
@@ -75,8 +76,6 @@ function CardPanel({ model, offline, onClose, onAsk }: { model: LiveCardModel; o
     }
   };
   const showConflicts = model.openConflicts > 0;
-  const count = model.pendingCount;
-  const status = count ? tr(offline ? 'live.sync.offline' : 'live.sync.pending', { count }) : tr(live.demo ? 'live.sync.demo' : 'live.sync.synced');
   const wide = width >= 900;
   const edit = (op: Parameters<typeof live.edit>[1]) => live.edit(model.id, op);
   const ask = () => {
@@ -156,12 +155,7 @@ function CardPanel({ model, offline, onClose, onAsk }: { model: LiveCardModel; o
 
         {/* footer: where the edits are, honestly */}
         <View style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.colors.border, paddingHorizontal: t.spacing.l, paddingTop: t.spacing.m, paddingBottom: t.spacing.l, gap: t.spacing.m }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing.s }} accessibilityLiveRegion="polite">
-            <SyncIcon t={t} synced={!count} />
-            <HText variant="caption" color="muted" style={{ flex: 1 }}>
-              {status}
-            </HText>
-          </View>
+          <SyncStatus t={t} model={model} offline={offline} />
           {showConflicts ? (
             <View style={{ flexDirection: 'row', gap: t.spacing.s }}>
               <View style={{ flex: 1 }}>
@@ -223,14 +217,6 @@ function HeaderButton({ t, label, onPress, children }: { t: Theme; label: string
   );
 }
 
-/** Cloud with a check (synced, sage) or a plain cloud (waiting, blue). */
-function SyncIcon({ t, synced }: { t: Theme; synced: boolean }) {
-  return (
-    <View aria-hidden style={{ width: 22, alignItems: 'center' }}>
-      <Icon name={synced ? 'cloudCheck' : 'cloud'} size={20} color={synced ? t.colors.success : t.colors.info} />
-    </View>
-  );
-}
 
 function Conflicts({ t, model }: { t: Theme; model: LiveCardModel }) {
   const tr = useT();

@@ -1,11 +1,19 @@
-"""Bots (Hermes profiles) made in the app: list, create, read and edit the three fields (Bots v2 slice 3).
+"""Bots (Hermes profiles) made in the app: list, create, read and edit the three fields (Bots v2 slice 3); a bot's
+"always allow" list (read, revoke one entry) and archive / restore (Bots v2 slice 4).
 
 Pure module: no Hermes imports. Everything Hermes-specific comes through a ``source`` object
 (``hermes_adapter.HermesBots`` in production, a fake in tests):
 
     source.names()                     -> named profiles (live, without ``default``)
     source.read_profile_yaml(name)     -> profile.yaml as a dict ({} when missing or broken)
-    source.is_parked(name)             -> bool
+    source.park_marker(name)           -> first line of the profile's gateway.parked ("" for an empty file), None when
+                                          the profile is not parked
+    source.write_park_marker(name, t)  -> create gateway.parked with text ``t``; False when a marker exists (never
+                                          overwrites one)
+    source.remove_park_marker(name)    -> delete gateway.parked
+    source.read_config(name)           -> config.yaml as a dict; ``name`` may be ``default`` (the root profile)
+    source.revoke_allowlist(name, p)   -> drop ``p`` from that config.yaml's command_allowlist (atomic) and from Hermes'
+                                          in-process permanent approvals of that profile
     source.create(name, description)   -> new profile cloned from the default one (config, .env, skills; Hermes strips
                                           messaging channels); FileExistsError / ValueError when Hermes refuses
     source.drop_memory(name)           -> remove the memory files the clone copied (a bot starts with its own memory)
@@ -21,6 +29,10 @@ Rules: a new bot is a clone of the default profile (model, provider keys, skills
 SOUL.md from the three fields, its own empty memory, a small toolset for the API server, manual approvals with an empty
 allow-list, the bridge's API_SERVER_KEY and Hermes Desktop's ``ui_meta['hermes-bots']``. The app's own fields live in
 ``ui_meta['hermes-ui-plus']``. Never the default profile, never a gateway restart.
+
+Slice 4 (root profile's plugin only): the allow-list of any profile including the default one, one entry at a time
+removable; archive = a ``gateway.parked`` marker whose first line is ``hermes-ui-plus: archived`` (Hermes stops serving
+the profile, files stay), restore removes only that marker, never one written by someone else or by a failed setup.
 """
 
 from __future__ import annotations
@@ -66,6 +78,12 @@ REASON_NOT_ROOT = "not_root_profile"
 REASON_MULTIPLEX = "multiplex_off"
 REASON_UNSUPPORTED = "hermes_unsupported"
 REASON_LIMIT = "limit"
+
+ARCHIVE_MARK = "hermes-ui-plus: archived"  # first line of gateway.parked when the app archived the bot
+SETUP_FAILED_MARK = "hermes-ui-plus: setup failed"  # a half-made bot (never restorable from the app)
+MAX_PATTERNS = 200  # allow-list entries shown at most
+MAX_PATTERN = 200  # characters per entry
+APPROVAL_MODES = ("manual", "smart", "off")
 
 SOUL_TEXT = {
     "de": {
@@ -269,7 +287,7 @@ def apply_ui_meta(doc: Any, updates: dict) -> dict:
     return doc
 
 
-def bot_view(name: str, doc: Any, *, parked: bool = False) -> dict:
+def bot_view(name: str, doc: Any, *, parked: bool = False, archived: bool = False) -> dict:
     """What the bridge gets for one bot: display fields only, never SOUL, config or keys."""
     doc = doc if isinstance(doc, dict) else {}
     meta = doc.get("ui_meta") if isinstance(doc.get("ui_meta"), dict) else {}
@@ -292,8 +310,10 @@ def bot_view(name: str, doc: Any, *, parked: bool = False) -> dict:
     for flag in ("pinned", "hidden"):
         if desk.get(flag) is True:
             out[flag] = True
-    if parked:
+    if parked or archived:
         out["parked"] = True
+    if archived:
+        out["archived"] = True
     if app is not None:
         out["app"] = True
         if app.get("template") in TEMPLATES:
@@ -319,6 +339,43 @@ def fields_view(name: str, doc: Any) -> dict:
     }
 
 
+def approval_mode(cfg: Any) -> Optional[str]:
+    """``approvals.mode`` of a config.yaml dict the way Hermes reads it (YAML 1.1 ``off`` is False, unknown values
+    mean ``manual``); None when the profile does not set one (Hermes' default, manual)."""
+    approvals = cfg.get("approvals") if isinstance(cfg, dict) else None
+    if not isinstance(approvals, dict) or "mode" not in approvals:
+        return None
+    mode = approvals["mode"]
+    if isinstance(mode, bool):
+        return "off" if mode is False else "manual"
+    if isinstance(mode, str) and mode.strip().lower() in APPROVAL_MODES:
+        return mode.strip().lower()
+    return "manual"
+
+
+def allowlist_view(name: str, cfg: Any) -> dict:
+    """``{name, entries: [{pattern}], mode}`` from a profile's config.yaml: string entries in file order, duplicates
+    once, at most 200 entries of at most 200 characters (``omitted`` counts the rest, only when there is a rest).
+    An entry is a Hermes pattern key (the description of a dangerous-command pattern, e.g. "recursive delete"), an
+    exact command or a glob; the text itself is what the app shows, so there is no separate description."""
+    raw = cfg.get("command_allowlist") if isinstance(cfg, dict) else None
+    entries: list[dict] = []
+    seen: set[str] = set()
+    omitted = 0
+    for p in raw if isinstance(raw, list) else []:
+        if not isinstance(p, str) or not p.strip() or p in seen:
+            continue
+        seen.add(p)
+        if len(p) > MAX_PATTERN or CONTROL.search(p) or len(entries) >= MAX_PATTERNS:
+            omitted += 1
+            continue
+        entries.append({"pattern": p})
+    out: dict = {"name": name, "entries": entries, "mode": approval_mode(cfg)}
+    if omitted:
+        out["omitted"] = omitted
+    return out
+
+
 def _title_key(s: str) -> str:
     return " ".join(s.split()).casefold()
 
@@ -342,8 +399,13 @@ class BotsService:
         for name in sorted(self._source.names())[:MAX_LIST]:
             if not NAME_RE.match(name) or name == "default":
                 continue
-            rows.append(bot_view(name, self._source.read_profile_yaml(name), parked=self._source.is_parked(name)))
+            rows.append(self._view(name))
         return rows
+
+    def _view(self, name: str) -> dict:
+        marker = self._source.park_marker(name)
+        return bot_view(name, self._source.read_profile_yaml(name), parked=marker is not None,
+                        archived=marker == ARCHIVE_MARK)
 
     def _create_state(self, count: int) -> dict:
         if not self.settings.bots_enabled:
@@ -454,6 +516,60 @@ class BotsService:
             logger.info("bots: edited %s", name)
             return bot_view(name, self._source.read_profile_yaml(name))
 
+    # -- slice 4: allow-list, archive, restore (root profile's plugin only) -----------------------------------
+
+    def _root_only(self) -> None:
+        if self.profile != "default":
+            raise _feature_off(REASON_NOT_ROOT, "only the default profile's plugin manages other profiles")
+
+    def _allowlist_target(self, name: str) -> None:
+        self._root_only()
+        if name != "default":
+            self._known(name)
+
+    def _allowlist(self, name: str) -> dict:
+        self._allowlist_target(name)
+        return allowlist_view(name, self._source.read_config(name))
+
+    def _revoke(self, name: str, pattern: str) -> dict:
+        with self._lock:
+            self._allowlist_target(name)
+            view = allowlist_view(name, self._source.read_config(name))
+            if not any(e["pattern"] == pattern for e in view["entries"]):
+                raise QuickError(404, "not_found", "this entry is not in the bot's allow-list")
+            self._source.revoke_allowlist(name, pattern)
+            logger.info("bots: allow-list entry revoked for %s (%d left)", name, len(view["entries"]) - 1)
+            return allowlist_view(name, self._source.read_config(name))
+
+    def _archive(self, name: str) -> dict:
+        with self._lock:
+            self._root_only()
+            self._known(name)
+            marker = self._source.park_marker(name)
+            if marker is None:
+                stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(self._now()))
+                if not self._source.write_park_marker(name, f"{ARCHIVE_MARK}\n{stamp}\n"):
+                    marker = self._source.park_marker(name)  # someone parked it in between
+                else:
+                    self._source.notify(name)
+                    logger.info("bots: archived %s", name)
+            if marker is not None and marker != ARCHIVE_MARK:
+                raise QuickError(409, "parked_elsewhere", "this bot was stopped on the server, not by the app")
+            return {"bot": self._view(name)}
+
+    def _restore(self, name: str) -> dict:
+        with self._lock:
+            self._root_only()
+            self._known(name)
+            marker = self._source.park_marker(name)
+            if marker is not None and marker != ARCHIVE_MARK:
+                raise QuickError(409, "parked_elsewhere", "this bot was stopped on the server, not by the app")
+            if marker is not None:
+                self._source.remove_park_marker(name)
+                self._source.notify(name)
+                logger.info("bots: restored %s", name)
+            return {"bot": self._view(name)}
+
     # -- async API used by the HTTP server ------------------------------------------------------------------
 
     async def _run(self, fn, *args):
@@ -486,3 +602,28 @@ class BotsService:
 
     async def patch(self, name: str, body: Any) -> dict:
         return await self._run(self._patch, name, body)
+
+    async def allowlist(self, name: str) -> dict:
+        if not self.settings.bots_enabled:
+            raise _feature_off(REASON_DISABLED, "bots are disabled")
+        return await self._run(self._allowlist, name)
+
+    async def revoke(self, name: str, body: Any) -> dict:
+        if not self.settings.bots_enabled:
+            raise _feature_off(REASON_DISABLED, "bots are disabled")
+        if not isinstance(body, dict):
+            raise QuickError(400, "invalid_json", "body must be a JSON object")
+        pattern = body.get("pattern")
+        if not isinstance(pattern, str) or not pattern.strip() or len(pattern) > MAX_PATTERN:
+            raise _bad("pattern", f"pattern is required (at most {MAX_PATTERN} characters)")
+        return await self._run(self._revoke, name, pattern)
+
+    async def archive(self, name: str) -> dict:
+        if not self.settings.bots_enabled:
+            raise _feature_off(REASON_DISABLED, "bots are disabled")
+        return await self._run(self._archive, name)
+
+    async def restore(self, name: str) -> dict:
+        if not self.settings.bots_enabled:
+            raise _feature_off(REASON_DISABLED, "bots are disabled")
+        return await self._run(self._restore, name)

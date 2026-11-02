@@ -15,8 +15,8 @@
  * predictable choice; the dialog says how many were skipped.
  */
 import type { IndexStore } from './store.ts';
-import { hiddenKey, isAppConversation } from './remoteSync.ts';
-import type { ConversationMeta } from './types.ts';
+import { hiddenKey, isAppConversation, isSyncedKind } from './remoteSync.ts';
+import { isBotPlace, type ConversationMeta } from './types.ts';
 
 // ------------------------------------------------------------------ selection
 
@@ -82,10 +82,12 @@ export function selectableIds(items: readonly ConversationMeta[], isRunning: (id
 
 // ------------------------------------------------------------------ plan
 
-/** May this chat ever be deleted on Hermes? Only the app's own Hermes sessions – never foreign or non-Hermes chats. */
+/** May this chat ever be deleted on its server? Only the app's own synced sessions – never foreign or local-only chats. */
 export function remoteDeletable(m: ConversationMeta): boolean {
   // a bot's Bot Chat is shared with Hermes Desktop (bots/): never deleted from here
-  return m.profileKind === 'hermes' && !!m.hermesSessionId && isAppConversation(m) && !m.botChat;
+  // an agent server's chat (OpenAI-compatible with the session list) only once that server listed it
+  if (m.profileKind !== 'hermes' && !m.remote) return false;
+  return isSyncedKind(m.profileKind) && !!m.hermesSessionId && isAppConversation(m) && !isBotPlace(m);
 }
 
 export type PlanOptions = {
@@ -120,7 +122,7 @@ export function planDelete(candidates: readonly ConversationMeta[], o: PlanOptio
   let skippedPinned = 0;
   for (const m of candidates) {
     // a bot's Bot Chat is not a chat of the list (Bots tab): "delete all chats" leaves it alone
-    if (m.botChat) continue;
+    if (isBotPlace(m)) continue;
     if (o.isRunning(m.id)) {
       skippedRunning++;
       continue;
@@ -131,9 +133,9 @@ export function planDelete(candidates: readonly ConversationMeta[], o: PlanOptio
     }
     metas.push(m);
     const synced = !!o.isSynced?.(m) || !!m.remote;
-    if (m.profileKind === 'hermes' && m.hermesSessionId && synced) hide.push(hiddenKey(m.profileId, m.hermesSessionId));
+    if (isSyncedKind(m.profileKind) && m.hermesSessionId && synced) hide.push(hiddenKey(m.profileId, m.hermesSessionId));
     if (remoteDeletable(m) && o.canDeleteRemote?.(m)) remote.push(m);
-    else if (synced && m.profileKind === 'hermes' && !isAppConversation(m)) foreign++;
+    else if (synced && isSyncedKind(m.profileKind) && !isAppConversation(m)) foreign++;
   }
   return { metas, remote, foreign, skippedRunning, skippedPinned, hide };
 }
@@ -161,7 +163,8 @@ export type PendingDelete = {
   remote: number;
 };
 
-export type DeleteReport = { batch: number; count: number; remoteOk: number; remoteFailed: number };
+/** `agent`: every chat that failed lives on an agent server, not on Hermes (the notice must not say "Hermes") */
+export type DeleteReport = { batch: number; count: number; remoteOk: number; remoteFailed: number; agent?: true };
 
 type Batch = {
   batch: number;
@@ -193,6 +196,7 @@ export function createBulkDeleter(d: BulkDeleteDeps) {
     await d.purge(b.metas.map((m) => m.id));
     let remoteOk = 0;
     let remoteFailed = 0;
+    let failedOnHermes = false;
     if (b.deleteRemote) {
       for (const m of b.remote) {
         // double guard: whatever the caller planned, foreign / non-Hermes chats never reach the server
@@ -202,10 +206,11 @@ export function createBulkDeleter(d: BulkDeleteDeps) {
           remoteOk++;
         } catch {
           remoteFailed++;
+          if (m.profileKind === 'hermes') failedOnHermes = true;
         }
       }
     }
-    const r = { batch: b.batch, count: b.metas.length, remoteOk, remoteFailed };
+    const r: DeleteReport = { batch: b.batch, count: b.metas.length, remoteOk, remoteFailed, ...(remoteFailed && !failedOnHermes ? { agent: true as const } : {}) };
     if (remoteFailed) {
       report = r;
       emit();
@@ -281,3 +286,8 @@ export function createBulkDeleter(d: BulkDeleteDeps) {
 }
 
 export type BulkDeleter = ReturnType<typeof createBulkDeleter>;
+
+/** i18n key of the notice for chats that could not be deleted on the server */
+  export function remoteFailedKey(_r: Pick<DeleteReport, 'agent'>): 'conversations.bulk.remoteFailed' {
+  return 'conversations.bulk.remoteFailed';
+}

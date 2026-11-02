@@ -74,6 +74,7 @@ const STUBBED = new Set([
   'expo-secure-store',
   'expo-audio',
   'expo-file-system',
+  'expo-sharing',
   'expo-speech',
   'expo-speech-recognition',
   'expo',

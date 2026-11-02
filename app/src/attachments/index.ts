@@ -28,7 +28,7 @@ export type { HermesContentPart } from './encodeHermes';
 export { DEFAULT_OPENAI_CAPS, parseOpenAICaps } from './openaiCaps';
 export type { OpenAIAttachmentCaps } from './openaiCaps';
 export { validateForTarget, checkAttachment } from './validate';
-export { draftHasErrors, toSent } from './draft';
+export { draftHasErrors, failedUploadIds, toSent } from './draft';
 export type { PendingUploads } from './pendingUploads';
 
 export { pickAttachments, openAppSettings } from './pickers';

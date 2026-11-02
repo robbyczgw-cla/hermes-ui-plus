@@ -111,13 +111,42 @@ export type ProvenanceInfo = {
   tone: 'neutral' | 'caution' | 'info';
   /** tappable http(s) URL if `source` is one */
   url?: string;
+  /**
+   * the chat's tools do not back the node's claim (EvidenceView): `model` = no web result at all, so the source /
+   * "Recherchiert" became "Aus Modellwissen"; `unretrieved` = the source URL is not among the web results
+   */
+  unbacked?: 'model' | 'unretrieved';
 };
 
-/** Chip content for `{basis?, source?}`; null when the node carries no provenance. */
-export function provenanceInfo(basis: unknown, source: unknown, S: ModuleStrings = S_DE): ProvenanceInfo | null {
+/**
+ * What the chat's tool calls up to this answer can back (chat/answers/evidence.ts). Absent = unknown (other data tools,
+ * cut history, demo, a node outside a chat): the chip shows what the node says, as before.
+ *  - `{web: false}`: no web search / page read and no other data tool ran: nothing the node calls a source was looked up
+ *  - `{web: true, retrieved}`: web tools ran; `retrieved(url)` = that page was among their results (undefined = unknown)
+ */
+export type EvidenceView = { web: false } | { web: true; retrieved?: (url: string) => boolean | undefined };
+
+/**
+ * Chip content for `{basis?, source?}`; null when the node carries no provenance.
+ * With `ev` the claim is checked against the chat's tools: without any web result a `source` / `basis:"sourced"` is
+ * never shown as one (no link, no "Quelle: Herstellerangaben") but as "Aus Modellwissen, ohne Webquelle"; a source URL
+ * no web tool returned loses its link. `factual` nodes (products, places, weather, product compares) get that badge
+ * even without any provenance field, because their facts need a lookup.
+ */
+export function provenanceInfo(basis: unknown, source: unknown, S: ModuleStrings = S_DE, ev?: EvidenceView, factual = false): ProvenanceInfo | null {
   const b = BASES.includes(basis as Basis) ? (basis as Basis) : undefined;
   const src = typeof source === 'string' ? source.trim() : '';
+  if (ev && !ev.web && b !== 'user' && (src || b === 'sourced' || (factual && !b))) {
+    // honest labels stay ("Schätzung", "Berechnet"); the claimed source / "Recherchiert" does not
+    const keep = b && b !== 'sourced' ? S.provenance[b] : '';
+    return { basis: b === 'sourced' ? undefined : b, label: [keep, S.provenance.modelKnowledge].filter(Boolean).join(' · '), tone: 'caution', unbacked: 'model' };
+  }
   if (!b && !src) return null;
+  if (ev?.web && src && isHttpUrl(src) && ev.retrieved?.(src) === false) {
+    const parts = b && b !== 'sourced' ? [S.provenance[b]] : [];
+    parts.push(S.provenance.notRetrieved(domainOf(src) || src));
+    return { basis: b, label: parts.join(' · '), tone: 'caution', unbacked: 'unretrieved' };
+  }
   const url = src && isHttpUrl(src) ? src : undefined;
   // B7: in free-text sources a full URL shows as its domain (complete, never ellipsised mid-host);
   // the long title/path part is what gets dropped, not the domain

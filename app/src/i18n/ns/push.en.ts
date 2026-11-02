@@ -5,7 +5,7 @@ export const push = {
   title: 'Notifications',
   profile: 'Profile: {name}',
   enable: 'Notifications for this profile',
-  enableSub: 'Messages {name} sends on its own (reminders, reports, late results) arrive as notifications – even when the app is closed.',
+  enableSub: 'Messages {name} sends on its own (reminders, reports, late results) arrive as notifications, even when the app is closed, if the server can send push (see below).',
   preview: 'Message preview',
   previewAuto: 'Automatic',
   previewOn: 'On',
@@ -22,7 +22,7 @@ export const push = {
   status: {
     checking: 'Checking the server …',
     unsupportedBridge: 'This profile does not support notifications. It needs the {bridge}.',
-    notConfigured: 'The server has no credentials for {platform} yet. New messages still arrive live while the app is open.',
+    notConfigured: 'The server has no credentials for {platform} yet, so no notification arrives while the app is in the background or closed. Open the app to see new messages; while it is open they arrive live.',
     registered: 'Active on this device ({platform}).',
     denied: 'Notifications are blocked in the system settings.',
     webUnsupported: 'This browser does not support web push notifications. iPhone/iPad: add the page to the home screen (iOS 16.4+) and open it from there.',

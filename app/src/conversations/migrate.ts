@@ -58,6 +58,11 @@ function optional(raw: Record<string, unknown>): Partial<ConversationMeta> {
   if (bot) out.hermesProfile = bot;
   // the offline demo's bots have Bot Chats too (onboarding/demo/bots.ts)
   if (raw.botChat === true && (raw.profileKind === 'hermes' || raw.profileKind === 'demo') && typeof raw.hermesSessionId === 'string') out.botChat = true;
+  if (raw.botTalk === true && raw.profileKind === 'hermes' && typeof raw.hermesSessionId === 'string') out.botTalk = true;
+  if (raw.botChatRetired === true && raw.profileKind === 'hermes' && !out.botChat && typeof raw.hermesSessionId === 'string') {
+    out.botChatRetired = true;
+    if (Array.isArray(raw.carriedTurns)) out.carriedTurns = raw.carriedTurns.filter((x): x is string => typeof x === 'string').slice(0, 20);
+  }
   if (typeof raw.branchSeed === 'number' && Number.isFinite(raw.branchSeed) && raw.branchSeed >= 1) out.branchSeed = Math.floor(raw.branchSeed);
   return out;
 }

@@ -25,7 +25,7 @@
 #                     tunnel, E2E_STORE_MOCK_PORT), languages L (e.g. en,de), light + dark, 1080x1920; PNGs in the report dir
 #     --store-only S  with --store-shots: only these scenes (e.g. web-card), --store-modes M: light, dark or light,dark
 #     --live FILE     extra stage: 2-3 harmless turns against a real bridge, FILE holds the pair link (never printed);
-#                     $E2E_LIVE_LINK_FILE works too. E2E_LIVE_EXTRA=bots,quick adds live bot and ⚡ checks (docs/E2E.md)
+#                     $E2E_LIVE_LINK_FILE works too. E2E_LIVE_EXTRA=bots,quick,chat adds live bot, ⚡ and normal-user chat checks (docs/E2E.md)
 #
 # Host rules (enforced here, not by the caller): refuses while Gradle or any other emulator/qemu runs, one smoke run
 # at a time (flock), the emulator runs in `systemd-run --user --scope -p MemoryMax=5G -p MemorySwapMax=0`, and the
@@ -136,7 +136,7 @@ if [ -n "$HOST" ] && [ "$LOCAL" = 0 ]; then
     rsync -a --exclude '__pycache__' --exclude '*.test.*' "$ROOT/scripts/e2e/" "$HOST:$RDIR/scripts/e2e/"
     rsync -a "$ROOT/scripts/demo-videos/scenarios.mjs" "$HOST:$RDIR/scripts/demo-videos/"
     rsync -a "$ROOT/scripts/lib/maclock.sh" "$ROOT/scripts/lib/hostmem.sh" "$HOST:$RDIR/scripts/lib/"   # macOS hosts: lock + memory watch
-    rsync -a "$ROOT/bridge/src/replay.mjs" "$HOST:$RDIR/bridge/src/"   # the mock resumes streams with the bridge's own code
+    rsync -a "$ROOT/bridge/src/" "$HOST:$RDIR/bridge/src/"   # the mock uses the bridge's own stream resume and group rounds
     RAPK=$RDIR/$(basename "$APK")   # keep the name: the report shows it and checks its commit against the version label
     rsync -a "$APK" "$HOST:$RAPK"
     RSCRIPTS=$RDIR/scripts/e2e
@@ -145,14 +145,14 @@ if [ -n "$HOST" ] && [ "$LOCAL" = 0 ]; then
   RPATH='PATH="$HOME/.local/node/bin:/opt/homebrew/bin:$PATH"'   # non-login ssh shell on a Mac: node lives here
   # optional live checks (suite.py LIVE_EXTRA): plain settings, no secrets
   envs=()
-  for v in E2E_LIVE_EXTRA E2E_LIVE_BOT E2E_LIVE_BOT_LABEL E2E_LIVE_BOT_MARK; do
+  for v in E2E_UPGRADE_APK E2E_LIVE_EXTRA E2E_LIVE_CHAT_ONLY E2E_LIVE_STOP_TRIALS E2E_LIVE_BOT E2E_LIVE_BOT_LABEL E2E_LIVE_BOT_MARK E2E_LIVE_API E2E_LIVE_KEY_FILE E2E_LIVE_BRIDGE E2E_LIVE_BRIDGE_TOKEN_FILE; do
     [ -n "${!v:-}" ] && envs+=("$v=$(printf %q "${!v}")")
   done
   if [ -n "$LIVE_FILE" ]; then
     # the link travels on the ssh stdin only (never in an argument, a file on the host or the output)
-    ssh "$HOST" "$RPATH ${envs[*]} bash $RSCRIPTS/smoke.sh ${args[*]} --live-stdin $RAPK" < "$LIVE_FILE" || rc=$?
+    ssh "$HOST" "$RPATH${envs[*]:+ ${envs[*]}} bash $RSCRIPTS/smoke.sh ${args[*]} --live-stdin $RAPK" < "$LIVE_FILE" || rc=$?
   else
-    ssh "$HOST" "$RPATH bash $RSCRIPTS/smoke.sh ${args[*]} $RAPK" < /dev/null || rc=$?
+    ssh "$HOST" "$RPATH${envs[*]:+ ${envs[*]}} bash $RSCRIPTS/smoke.sh ${args[*]} $RAPK" < /dev/null || rc=$?
   fi
   mkdir -p "$OUT"
   rsync -a "$HOST:$RDIR/out/" "$OUT/" || echo "!! could not fetch the report from $HOST:$RDIR/out" >&2

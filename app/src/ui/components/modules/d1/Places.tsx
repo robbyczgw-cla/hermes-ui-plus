@@ -122,7 +122,7 @@ export function Places({ node }: { node: Partial<HuiPlaces> }) {
                 {tr('ui.places.count', { n: model.items.length })}
               </HText>
             ) : null}
-            <ProvenanceChip basis={model.basis} source={model.source} />
+            <ProvenanceChip basis={model.basis} source={model.source} factual />
           </View>
           {mapNode && !capture ? <HeaderPill icon="map" label={showMap ? tr('ui.places.hideMap') : tr('ui.places.showMap')} onPress={() => setShowMap((v) => !v)} active={showMap} /> : null}
         </View>
@@ -306,6 +306,11 @@ function PlaceRow({ t, p, city, lang, now, saved, onOpen, act }: { t: Theme; p: 
           <MetaLine p={p} t={t} />
           {p.rating !== undefined ? <RatingRow rating={p.rating} reviews={p.reviews} lang={lang} /> : null}
           {open ? <OpenLine kind={open.kind} text={open.text} /> : null}
+          {p.note ? (
+            <HText variant="caption" color="muted" numberOfLines={2}>
+              {p.note}
+            </HText>
+          ) : null}
         </PressableScale>
       </View>
       <PlaceActions p={p} saved={saved} act={act} />
@@ -436,7 +441,7 @@ function PlaceDetails({ t, p, id, lang, now, saved, act, source, basis }: { t: T
           {tr('ui.places.reviews', { n: p.reviews, count: formatCount(p.reviews, lang) })}
         </HText>
       ) : null}
-      <ProvenanceChip basis={basis} source={source} />
+      <ProvenanceChip basis={basis} source={source} factual />
     </View>
   );
 }

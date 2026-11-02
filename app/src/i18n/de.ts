@@ -19,6 +19,7 @@ import { menus as menusNS } from './ns/menus.de.ts';
 import { desktop as desktopNS } from './ns/desktop.de.ts';
 import { bots as botsNS } from './ns/bots.de.ts';
 import { botCreate as botCreateNS } from './ns/botCreate.de.ts';
+import { groups as groupsNS } from './ns/groups.de.ts';
 import { quick as quickNS } from './ns/quick.de.ts';
 import { support as supportNS } from './ns/support.de.ts';
 import { share as shareNS } from './ns/share.de.ts';
@@ -51,6 +52,7 @@ export const de = {
   desktop: desktopNS,
   bots: botsNS,
   botCreate: botCreateNS,
+  groups: groupsNS,
   quick: quickNS,
   support: supportNS,
   share: shareNS,

@@ -6,11 +6,15 @@
  * its texts (i18n `whatsNew.items.<id>`) and what it opens (ITEMS in WhatsNewSheet.tsx).
  */
 
-export type WhatsNewItemId = 'liveCards' | 'skills' | 'memory';
+export type WhatsNewItemId = 'liveCards' | 'skills' | 'memory' | 'botTimeline' | 'replies' | 'botAbout' | 'pdfViewer';
 export type WhatsNewRelease = { version: string; items: readonly WhatsNewItemId[] };
 
 /** newest first is not required; `pickRelease` takes the newest that applies */
-export const WHATS_NEW: readonly WhatsNewRelease[] = [{ version: '0.2.0', items: ['liveCards', 'skills', 'memory'] }];
+export const WHATS_NEW: readonly WhatsNewRelease[] = [
+  { version: '0.2.0', items: ['liveCards', 'skills', 'memory'] },
+  // bot groups are left out on purpose: off by default, nothing in the app points to them until the server owner switches them on
+  { version: '0.3.0', items: ['botTimeline', 'replies', 'botAbout', 'pdfViewer'] },
+];
 
 /** `1.2.3` (also `1.2`, `v1.2.3-beta.1`, build suffixes) → [1, 2, 3]; null when it is no version */
 export function parseVersion(v: string | null | undefined): [number, number, number] | null {

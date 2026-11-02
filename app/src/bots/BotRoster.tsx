@@ -7,12 +7,13 @@ import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useLocale, useT } from '../i18n';
 import { localizePreview } from '../conversations/messages';
-import { HText, Icon, useTheme } from '../ui';
+import { Button, HText, Icon, useTheme } from '../ui';
 import { Loader } from '../ui/loaders';
 import { a11yState } from '../ui/lib/a11yState';
 import { BotAvatar } from './BotAvatar';
 import { BotCreateSheet } from './create/BotCreateSheet';
-import { BotsEmptyBox, NewBotButton } from './create/RosterCreate';
+import { BotsEmptyBox } from './create/RosterCreate';
+import { GroupsSection, RosterActions } from '../groups/GroupsSection';
 import type { RosterRow } from './core';
 import type { DrawerTab } from './state';
 import type { BotsTab } from './useBotsTab';
@@ -114,14 +115,15 @@ export function BotRoster({ tab, activeId, now }: { tab: BotsTab; activeId?: str
         </View>
       ) : null}
 
-      {tab.create?.kind === 'create' ? <NewBotButton onPress={() => setCreating(true)} /> : null}
+      {/* "Neuer Bot" and, when the owner switched groups on, "Gruppe" (groups/) */}
+      <RosterActions onNewBot={tab.create?.kind === 'create' ? () => setCreating(true) : undefined} tab={tab} />
 
       {tab.rows.map((row) => (
         <BotRow
           key={row.key}
           row={row}
           name={tab.nameOf(row.key)}
-          active={!!row.chat && row.chat.id === activeId}
+          active={!!activeId && (row.chat?.id === activeId || row.talkId === activeId)}
           opening={tab.opening === row.key}
           unreachable={tab.unreachable.has(row.key)}
           time={rowTime(row.time, now)}
@@ -129,11 +131,18 @@ export function BotRoster({ tab, activeId, now }: { tab: BotsTab; activeId?: str
         />
       ))}
 
+      <GroupsSection tab={tab} now={now} />
+
       {onlyDefault ? <BotsEmptyBox offer={tab.create} onCreate={() => setCreating(true)} /> : null}
 
-      <HText variant="caption" color="subtle" style={styles.footnote}>
-        {tab.demo ? tr('bots.roster.demoFoot') : tab.create?.kind === 'create' ? tr('botCreate.rosterFoot') : tr('bots.roster.footnote')}
-      </HText>
+      {tab.archived.length ? <ArchivedList tab={tab} /> : null}
+
+      {/* the empty box already says who makes new bots (e.g. only archived bots are left): no second time below */}
+      {onlyDefault && !tab.demo && tab.create?.kind !== 'create' ? null : (
+        <HText variant="caption" color="subtle" style={styles.footnote}>
+          {tab.demo ? tr('bots.roster.demoFoot') : tab.create?.kind === 'create' ? tr('botCreate.rosterFoot') : tr('bots.roster.footnote')}
+        </HText>
+      )}
     </ScrollView>
     {tab.create?.kind === 'create' ? (
       <BotCreateSheet
@@ -159,8 +168,13 @@ function BotRow({ row, name, active, opening, unreachable, time, onPress }: { ro
   const hasContent = !!chat && (chat.messageCount > 0 || chat.preview !== '');
   const preview = hasContent && chat.preview && chat.preview !== '…' ? localizePreview(chat.preview, tr) : '';
   // last line: working > not connected > last message > the bot's description > a hint
+  // working: the current step of its turn or the routine that runs (bots/activity.ts), else plain "arbeitet …"
   const line = row.working
-    ? tr('bots.status.working')
+    ? row.workingLine?.kind === 'step'
+      ? row.workingLine.text
+      : row.workingLine?.kind === 'routine'
+        ? tr('bots.working.routine', { name: row.workingLine.name })
+        : tr('bots.status.working')
     : unreachable
       ? tr('bots.roster.notConnected')
       : preview || row.bot.description || (isDefault ? tr('bots.roster.defaultHint') : tr('bots.roster.noChat'));
@@ -169,6 +183,7 @@ function BotRow({ row, name, active, opening, unreachable, time, onPress }: { ro
     name,
     isDefault ? tr('bots.roster.standard') : '',
     row.badge === 'approval' ? tr('bots.roster.approvalA11y') : '',
+    row.working && row.workingLine ? tr('bots.status.working') : '',
     unread ? tr('chat.background.unread') : '',
     line,
   ].filter(Boolean).join(', ');
@@ -220,7 +235,71 @@ function BotRow({ row, name, active, opening, unreachable, time, onPress }: { ro
   );
 }
 
+/** "Archiviert": bots archived from "Über <Name>" (gateway.parked), collapsed; each with "Zurückholen". */
+function ArchivedList({ tab }: { tab: BotsTab }) {
+  const t = useTheme();
+  const tr = useT();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  return (
+    <View style={styles.archived}>
+      <Pressable
+        onPress={() => setOpen((o) => !o)}
+        testID="bots-archived"
+        accessibilityRole="button"
+        {...a11yState({ expanded: open }, 'button')}
+        accessibilityLabel={tr('bots.archivedList.titleA11y', { count: tab.archived.length })}
+        style={({ pressed }) => [styles.archivedHead, pressed && { opacity: 0.6 }]}
+      >
+        <HText variant="caption" weight="600" color="muted" style={styles.flex}>
+          {`${tr('bots.archivedList.title')} · ${tab.archived.length}`}
+        </HText>
+        <Icon name={open ? 'chevronDown' : 'chevronRight'} size={14} color={t.colors.subtle} />
+      </Pressable>
+      {open
+        ? tab.archived.map((b) => {
+            const name = b.label ?? b.name;
+            return (
+              <View key={b.name} style={styles.archivedRow} testID={`bots-archived-${b.name}`}>
+                <BotAvatar name={name} bot={b.name} color={b.color} size={32} />
+                <HText variant="callout" color="muted" numberOfLines={1} style={styles.flex}>
+                  {name}
+                </HText>
+                <Button
+                  label={tr('bots.archivedList.restore')}
+                  variant="tertiary"
+                  size="small"
+                  loading={busy === b.name}
+                  accessibilityLabel={tr('bots.archivedList.restoreA11y', { name })}
+                  testID={`bots-restore-${b.name}`}
+                  onPress={() => {
+                    setBusy(b.name);
+                    setNote(null);
+                    void tab.restore(b.name).then((r) => {
+                      setBusy(null);
+                      setNote(r.ok ? tr('bots.archivedList.restored', { name }) : tr('bots.archivedList.restoreFailed', { name, reason: tr(`bots.info.fail.${r.failure}` as never, { name }) }));
+                    });
+                  }}
+                />
+              </View>
+            );
+          })
+        : null}
+      {note ? (
+        <HText variant="caption" color="subtle" style={styles.archivedNote} accessibilityLiveRegion="polite">
+          {note}
+        </HText>
+      ) : null}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  archived: { marginTop: 14, marginHorizontal: 6 },
+  archivedHead: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 40, paddingHorizontal: 10 },
+  archivedRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 48, paddingHorizontal: 10 },
+  archivedNote: { paddingHorizontal: 10, paddingTop: 4 },
   flex: { flex: 1 },
   shrink: { flexShrink: 1 },
   tabs: { flexDirection: 'row', padding: 3, gap: 3 },

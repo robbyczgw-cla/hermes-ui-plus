@@ -255,7 +255,7 @@ SKILL.md itself is unchanged and still works as a normal Hermes skill. Backgroun
 The bootstrap message the bridge injects ends with one more line that tells the model what this bridge can do:
 
 ```
-[hermes-ui-caps] image_search=off
+[hermes-ui-caps] image_search=off web=off
 ```
 
 - **`image_search`:** `on` when the bridge has web image search (a `SERPER_API_KEY` or `BRAVE_API_KEY` for a provider
@@ -264,14 +264,24 @@ The bootstrap message the bridge injects ends with one more line that tells the 
   `image_search=off` the skill (SKILL.md "Images", `references/products.md` "Photos without web image search") tells
   the model to use image URLs its own extract tool returned (`{url, caption}` items) or text links instead, so a
   "Photos?" question no longer ends in a gallery nothing can fill.
-- **Prompt cache:** computed once at startup from the environment and appended to the bootstrap text then, so the
-  message stays byte-identical on every turn. Changing an image key takes a bridge restart (as before).
+- **`web`:** whether the model of this Hermes profile can search or read the web. The bridge has no web tools itself, so
+  it asks Hermes once per profile, right before that profile's first app turn: `GET /v1/toolsets` (bots:
+  `/p/<name>/v1/toolsets`). `on` when an enabled and configured toolset carries a web search / page read tool (`web`, a
+  search plugin's toolset such as Web Search Plus, `browser`), else `off`. If Hermes does not answer (older Hermes, an
+  error, 3 s timeout) the key is left out (= unknown, like an older bridge) and asked again at most once a minute.
+  `BRIDGE_WEB_TOOLS=on|off` pins it without asking (for web search that only comes from an MCP server, which
+  `/v1/toolsets` does not list); `auto` (default) asks. With `web=off` the skill (SKILL.md "Evidence") labels facts as
+  model knowledge and names no source; `references/evidence.md` has the details.
+- **Prompt cache:** computed once (image search at startup from the environment, web per profile at its first turn)
+  and kept for the process lifetime, so the message stays byte-identical on every turn. Changing an image key or a
+  Hermes toolset takes a bridge restart.
 - **When there is no line:** bootstrap off, a direct connection to Hermes, or a client that sends its own
   `[hermes-ui-app] Client:` bootstrap (the bridge then injects no bootstrap, so no caps line either; the current app
   does not send it on bridge connections). The skill treats a missing line like `image_search=on`, as before. A custom
   `BRIDGE_BOOTSTRAP_FILE` that already contains a `[hermes-ui-caps]` line is sent unchanged.
-- **Where to see it:** the `skill` line of the startup summary (`caps image_search=off`), the `imageSearch` field of the
-  `listening` log line and `caps` in `GET /bridge/status`.
+- **Where to see it:** the `skill` line of the startup summary (`caps image_search=off web=<from Hermes toolsets>`), the
+  `imageSearch` field of the `listening` log line, `caps` and `web` (per profile asked so far) in `GET /bridge/status`,
+  and the `web_caps` / `web_caps_unknown` log lines.
 
 ## Hermes profiles (bots)
 
@@ -328,7 +338,8 @@ projections of the `hermes-ui-plus` plugin's `/library/*` answers ([SKILLS-MEMOR
 same `BRIDGE_HERMES_PLUGIN_URL` / `BRIDGE_HERMES_PLUGIN_SECRET_FILE` as quick answers; `BRIDGE_QUICK=off` does not
 affect them. `BRIDGE_LIBRARY=off` turns them off (reason `bridge_off`). Only known fields reach the app, with capped
 sizes (2000 skills, 256 KiB per SKILL.md, 200 memory entries); plugin error text is never passed on. Without the plugin,
-for a bot the plugin does not serve (`other_bot`) or when the plugin switches a feature off, the data routes answer
+for a bot the plugin does not serve (`other_bot`; a root-profile plugin 0.3 with `profiles: true` serves the other bots
+through `?profile=<bot>`) or when the plugin switches a feature off, the data routes answer
 `404 feature_off` with a `reason`; an unknown bot gets `404 unknown_profile`, an unknown skill `404 skill_not_found`,
 plugin failures `502 upstream_error` / `504 timeout`. The plugin config probe is cached for 30 s
 (`BRIDGE_LIBRARY_PROBE_TTL_MS`); timeouts `BRIDGE_LIBRARY_PROBE_TIMEOUT_MS` (1.5 s) and `BRIDGE_LIBRARY_TIMEOUT_MS` (10 s).

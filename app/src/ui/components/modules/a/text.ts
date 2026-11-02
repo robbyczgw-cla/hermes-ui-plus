@@ -180,6 +180,8 @@ export function makeS(t: TFn) {
       estimate: t('ui.provenance.estimate'),
       illustrative: t('ui.provenance.illustrative'),
       source: (s: string) => t('ui.provenance.source', { s }),
+      modelKnowledge: t('ui.provenance.modelKnowledge'),
+      notRetrieved: (s: string) => t('ui.provenance.notRetrieved', { s }),
       a11y: (label: string) => t('ui.provenance.a11y', { label }),
     },
     time: {

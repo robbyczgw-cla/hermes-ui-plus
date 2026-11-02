@@ -520,6 +520,12 @@ export interface UserBatch {
   create?: LiveCardType;
   /** batch id: a retried send never applies twice */
   bid?: string;
+  /**
+   * batches this one sends again (their turn never finished on the sending device: error, stop). Every device skips
+   * those where they stand and applies this one instead, so an edit is never lost and never applied twice, whether
+   * Hermes stored the broken turn or not.
+   */
+  re?: string[];
   /** the message is about this card ("Hermes fragen") */
   focus?: boolean;
 }
@@ -548,7 +554,7 @@ export type LiveEvent =
    */
   | { kind: 'plain'; key: string; at: number; node: string; full: LiveFull; turn: LiveTurn; excerpt?: string; said?: string }
   /** a finished answer without any card block after a turn about a card: "„Einkauf“ wurde nicht geändert" */
-  | { kind: 'quiet'; key: string; at: number; turn: LiveTurn };
+  | { kind: 'quiet'; key: string; at: number; turn: LiveTurn; broken?: true };
 
 export interface LiveVersion {
   /** 1-based position in the card's fold order (display only, identical on every device) */
@@ -597,6 +603,15 @@ export interface MessageMark {
   withheld?: string[];
   /** an answer without a block after a turn about this card: the card stayed as it was */
   quiet?: true;
+  /** quiet because the answer broke off (error, stop) */
+  broken?: true;
+  /** user batches: sent again with a later message (`UserBatch.re`), its edits count there */
+  resent?: true;
+  /**
+   * ops that did not apply because their item is not in the card (Hermes removed it meanwhile, a patch named an id
+   * the card does not have): the receipt names them, nothing is dropped silently
+   */
+  missed?: LiveOp[];
 }
 
 export interface LiveFold {
@@ -622,11 +637,40 @@ export function patchesSinceFull(card: LiveCard): number {
   return n;
 }
 
-/** Fold a transcript's live events (in transcript order) into cards and versions. Pure and deterministic. */
-export function foldLive(events: readonly LiveEvent[]): LiveFold {
+/** Batch ids that a later batch of the events sends again (`UserBatch.re`): the fold skips them where they stand. */
+export function resentBids(events: readonly LiveEvent[]): Set<string> {
+  const out = new Set<string>();
+  for (const ev of events) if (ev.kind === 'user') for (const b of ev.batch.re ?? []) out.add(b);
+  return out;
+}
+
+/**
+ * Ops that changed nothing because their target item is not in `state` (not: a tick that is already there, nor
+ * deleting what is gone anyway). Checked op by op against the state before each, like applyOps. `dels`: count a delete of a missing item too
+ * (a Hermes patch that removes something the card does not have did not do what its text says).
+ */
+export function missedOps(state: LiveCardState, ops: readonly LiveOp[], dels = false): LiveOp[] {
+  const out: LiveOp[] = [];
+  let s = state;
+  for (const op of ops) {
+    const r = applyOp(s, op);
+    if (r.applied) s = r.state;
+    else if ((dels || !('del' in op)) && !opIsNoop(s, op)) out.push(op);
+  }
+  return out;
+}
+
+/**
+ * Fold a transcript's live events (in transcript order) into cards and versions. Pure and deterministic.
+ * `skip`: more batch ids to skip (this device is about to send them again, LiveProvider); the transcript's own
+ * `re` lists are always honoured.
+ */
+export function foldLive(events: readonly LiveEvent[], opts: { skip?: ReadonlySet<string> } = {}): LiveFold {
   const cards = new Map<string, LiveCard>();
   const marks = new Map<string, MessageMark[]>();
   const bids = new Set<string>();
+  const resent = resentBids(events);
+  for (const b of opts.skip ?? []) resent.add(b);
   // other ids a card was continued under (a plain list `einkaufsliste_samstag` that became card `liste`)
   const aliases = new Map<string, Set<string>>();
   const mark = (key: string, m: MessageMark) => {
@@ -675,14 +719,14 @@ export function foldLive(events: readonly LiveEvent[]): LiveFold {
       const head = headOf(card);
       const ops = resolvePatchIds(head.state, ev.ops.slice(0, MAX_PATCH_OPS));
       const { state, applied } = applyOps(head.state, ops);
+      // ops on items the card does not have: named on the receipt ("nicht übernommen"), never dropped silently
+      const missed = missedOps(head.state, ops, true);
       if (!applied.length) {
-        // ops on items the card does not have (or no change at all): say which of the two it was
-        const failed = ops.some((op) => !applyOp(head.state, op).applied && !opIsNoop(head.state, op));
-        mark(ev.key, { card: card.id, n: head.n, unchanged: true, ...(failed ? { failed: true as const } : {}) });
+        mark(ev.key, { card: card.id, n: head.n, unchanged: true, ...(missed.length ? { failed: true as const, missed } : {}) });
         continue;
       }
       const n = push(card, { key: ev.key, author: 'hermes', at: ev.at, ops: applied, state, patch: true, ...(ev.excerpt ? { excerpt: ev.excerpt } : {}) });
-      mark(ev.key, { card: card.id, n });
+      mark(ev.key, { card: card.id, n, ...(missed.length ? { missed } : {}) });
       continue;
     }
     if (ev.kind === 'plain') {
@@ -709,11 +753,19 @@ export function foldLive(events: readonly LiveEvent[]): LiveFold {
     if (ev.kind === 'quiet') {
       const id = turnTarget(cards, ev.turn, undefined, true);
       const card = id ? cards.get(id) : undefined;
-      if (card && !headOf(card).state.closed) mark(ev.key, { card: card.id, n: headOf(card).n, unchanged: true, quiet: true });
+      if (card && !headOf(card).state.closed) mark(ev.key, { card: card.id, n: headOf(card).n, unchanged: true, quiet: true, ...(ev.broken ? { broken: true as const } : {}) });
       continue;
     }
     const b = ev.batch;
     if (b.bid && bids.has(b.bid)) continue;
+    if (b.bid && resent.has(b.bid)) {
+      // sent again with a later message: its edits count there (never twice, never lost)
+      bids.add(b.bid);
+      const c = cards.get(ev.card);
+      mark(ev.key, { card: ev.card, n: c ? headOf(c).n : 0, unchanged: true, resent: true, sent: b.ops ?? [] });
+      continue;
+    }
+    for (const r of b.re ?? []) bids.add(r);
     const card = cards.get(ev.card);
     if (!card) {
       // "Als Live-Karte weiterführen": the user's batch is the card's first version
@@ -728,12 +780,14 @@ export function foldLive(events: readonly LiveEvent[]): LiveFold {
     const head = headOf(card);
     const ops = b.state ? snapshotOps(head.state, b.state, card.type) : (b.ops ?? []).slice(0, MAX_USER_OPS);
     const { state, applied } = applyOps(head.state, ops);
+    const missed = b.state ? [] : missedOps(head.state, ops);
+    const miss = missed.length ? { missed } : {};
     if (!applied.length) {
-      if (b.ops?.length || b.state) mark(ev.key, { card: card.id, n: head.n, unchanged: true, sent: ops });
+      if (b.ops?.length || b.state) mark(ev.key, { card: card.id, n: head.n, unchanged: true, sent: ops, ...miss });
       continue;
     }
     const n = push(card, { key: ev.key, author: 'user', at: ev.at, ops: applied, state, ...(b.bid ? { bid: b.bid } : {}), ...(b.state ? { snapshot: true as const } : {}) });
-    mark(ev.key, { card: card.id, n, sent: applied });
+    mark(ev.key, { card: card.id, n, sent: applied, ...miss });
   }
   return { cards, marks, bids };
 }

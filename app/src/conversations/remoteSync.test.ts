@@ -38,6 +38,14 @@ test('labels and ids', () => {
   assert.equal(cleanRemoteTitle('  Gateway   Restart '), 'Gateway Restart');
 });
 
+test('merge: the preview of an agent file link is the file name, also when the server cut the link off', () => {
+  const run = (preview: string) =>
+    mergeRemoteSessions([], { profile, sessions: [sess('a1', { preview })], hidden: [], filter: { foreign: true } }).items[0].preview;
+  assert.equal(run('[Einkaufsliste.pdf](/v1/attachments/eyJhIjoxfQ.sig) (2 KB)'), 'Einkaufsliste.pdf (2 KB)');
+  assert.equal(run('[Einkaufsliste.pdf](/v1/attachments/eyJhIjoxfQ.si'), 'Einkaufsliste.pdf');
+  assert.equal(run('Doku: [Doku](https://example.com/d)'), 'Doku: [Doku](https://example.com/d)');
+});
+
 test('merge: new sessions from other platforms become remote entries; filters', () => {
   const r = mergeRemoteSessions([], {
     profile,
@@ -424,4 +432,14 @@ test('Sol F06: remote turns between two locally known turns are merged in, in st
   // turns before the first known one (a capped local history) are not brought back
   const capped = local.slice(2);
   assert.equal(reconcileTranscript(capped, remote), capped);
+});
+
+test('a plain chat an old app made of a bot talk session leaves the list after the update, the talk itself stays', () => {
+  const plain = local('old', { hermesSessionId: 'hui-bot-default--abc', title: 'Greeting', origin: 'remote' });
+  const talk = local('talk', { hermesSessionId: 'hui-bot-default', botTalk: true });
+  const other = local('other', { hermesSessionId: 'hui-other' });
+  const r = mergeRemoteSessions([plain, talk, other], { profile, sessions: [sess('hui-bot-default--abc', { source: 'api_server' })], hidden: [], filter: {} });
+  assert.deepEqual(r.removed, ['old']);
+  assert.deepEqual(r.items.map((c) => c.id), ['talk', 'other']);
+  assert.equal(mergeRemoteSessions([{ ...plain, origin: undefined }], { profile, sessions: [], hidden: [], filter: {}, activeId: 'old' }).removed.length, 0, 'the open chat is never pulled away');
 });

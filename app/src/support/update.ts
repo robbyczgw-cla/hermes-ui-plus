@@ -166,7 +166,12 @@ export function updateTarget(e: UpdateEnv): UpdateTarget {
     // self-built personal builds have their own app id: the public APK would install a second app
     return e.flavor === 'hermes' ? 'apk' : 'release';
   }
-  if (e.os === 'web') return e.desktop ? 'release' : 'web';
+  if (e.os === 'web') {
+    if (e.desktop) return 'release';
+    // a private web brand is served from its own site and updates itself: a notice about the public release is
+    // one its user cannot act on
+    return 'web';
+  }
   return 'none';
 }
 

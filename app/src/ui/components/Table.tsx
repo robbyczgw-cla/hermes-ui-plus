@@ -13,6 +13,7 @@ import { NARROW_TEXT_PROPS } from '../lib/textWrap';
 import type { HuiTable } from '../types';
 import type { NodeProps } from './content';
 import { ProvenanceChip } from './modules/ProvenanceChip';
+import { tableNamesProducts } from './compareProducts';
 import { useLocale, useT } from '../../i18n';
 
 const MAX_COLS = 12;
@@ -131,6 +132,7 @@ export function Table({ node, bare }: NodeProps<HuiTable> & { bare?: boolean }) 
   const visible = sorted.slice(0, visibleTableRows(sorted.length, expanded));
   const hidden = sorted.length - visible.length;
   const caption = asOptString(node.caption);
+  const note = asOptString(node.note);
   const overflowRight = contentW > viewport + 2 && !scrollEdges(scrollX.current, viewport, contentW).atEnd;
 
   // Fill mode: explicit basis 0 so every row splits the width by `widths` alone. With bare
@@ -353,7 +355,9 @@ export function Table({ node, bare }: NodeProps<HuiTable> & { bare?: boolean }) 
     <View style={{ gap: t.spacing.s }}>
       {caption ? <InlineText variant="bodyStrong" text={caption} /> : null}
       {bare ? table : <Surface padded={false}>{table}</Surface>}
-      <ProvenanceChip node={node} />
+      {note ? <InlineText variant="caption" color="muted" text={note} /> : null}
+      {/* a table about products (iPhone 16 vs Pixel 9) states facts that need a lookup: without one, say so */}
+      <ProvenanceChip node={node} factual={tableNamesProducts(node.columns, node.rows)} />
     </View>
   );
 }

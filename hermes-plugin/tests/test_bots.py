@@ -19,7 +19,7 @@ class FakeHermes:
 
     def __init__(self, names=("writer",), multiplex=True, fail_at=None):
         self.profiles = {n: {"profile.yaml": {}, "config.yaml": {"model": {"default": "m"}}, "SOUL.md": "",
-                             "memories": {}, ".env": [], "parked": False} for n in names}
+                             "memories": {}, ".env": [], "parked": None} for n in names}
         self.default_config = {"model": {"provider": "p", "default": "m"}, "command_allowlist": ["delete in root path"],
                                "platform_toolsets": {"api_server": ["hermes-api-server"], "cli": ["web"]},
                                "approvals": {"mode": "smart", "timeout": 60}}
@@ -35,7 +35,30 @@ class FakeHermes:
         return copy.deepcopy(self.profiles[name]["profile.yaml"])
 
     def is_parked(self, name):
-        return self.profiles[name]["parked"]
+        return self.profiles[name]["parked"] is not None
+
+    def park_marker(self, name):
+        m = self.profiles[name]["parked"]
+        return None if m is None else (m.splitlines() or [""])[0]
+
+    def write_park_marker(self, name, text):
+        self.calls.append(("write_park_marker", name))
+        if self.profiles[name]["parked"] is not None:
+            return False
+        self.profiles[name]["parked"] = text
+        return True
+
+    def remove_park_marker(self, name):
+        self.calls.append(("remove_park_marker", name))
+        self.profiles[name]["parked"] = None
+
+    def read_config(self, name):
+        return copy.deepcopy(self.default_config if name == "default" else self.profiles[name]["config.yaml"])
+
+    def revoke_allowlist(self, name, pattern):
+        self.calls.append(("revoke", name, pattern))
+        cfg = self.default_config if name == "default" else self.profiles[name]["config.yaml"]
+        cfg["command_allowlist"] = [p for p in cfg.get("command_allowlist", []) if p != pattern]
 
     def create(self, name, description):
         self.calls.append(("create", name))
@@ -43,7 +66,7 @@ class FakeHermes:
             raise FileExistsError(name)
         self.profiles[name] = {"profile.yaml": {"description": description}, "config.yaml": copy.deepcopy(self.default_config),
                                "SOUL.md": "default soul", "memories": {"MEMORY.md": "x", "USER.md": "secret of default"},
-                               ".env": ["OPENAI_API_KEY=sk-test"], "parked": False}
+                               ".env": ["OPENAI_API_KEY=sk-test"], "parked": None}
 
     def _maybe_fail(self, step):
         if self.fail_at == step:
@@ -71,7 +94,7 @@ class FakeHermes:
         self.profiles[name][".env"] = env + [f"{key}={value}"]
 
     def park(self, name):
-        self.profiles[name]["parked"] = True
+        self.profiles[name]["parked"] = "hermes-ui-plus: setup failed\n"
 
     def notify(self, name):
         self.notified.append(name)
@@ -233,7 +256,7 @@ class ServiceTest(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(Exception) as cm:
                     await s.create(BODY)
                 self.assertEqual((cm.exception.status, cm.exception.code), (500, "create_failed"))
-                self.assertTrue(src.profiles["scout"]["parked"])
+                self.assertTrue(src.is_parked("scout"))
                 self.assertEqual(src.notified, [])
 
     async def test_get_and_patch(self):
@@ -265,7 +288,7 @@ class ServiceTest(unittest.IsolatedAsyncioTestCase):
     async def test_list(self):
         src = FakeHermes(names=("writer", "z-hidden"))
         src.profiles["z-hidden"]["profile.yaml"] = {"ui_meta": {"hermes-bots": {"hidden": True}}}
-        src.profiles["writer"]["parked"] = True
+        src.profiles["writer"]["parked"] = "stopped by hand"
         s, _ = self.svc(src)
         got = await s.list()
         self.assertEqual(got["data"], [{"name": "writer", "parked": True}, {"name": "z-hidden", "hidden": True}])
@@ -372,3 +395,281 @@ class AdapterFilesTest(unittest.TestCase):
         self.assertTrue(hb.is_parked("scout"))
         self.assertEqual(hb.read_profile_yaml("missing"), {})
         self.assertEqual([p.name for p in self.dir.iterdir() if p.name.endswith(".hui-tmp")], [])
+
+
+ARCHIVED = "hermes-ui-plus: archived"
+
+
+class Slice4PureTest(unittest.TestCase):
+    def test_approval_mode_like_hermes(self):
+        from hermes_ui_plus.bots import approval_mode
+        for cfg, want in (({}, None), ({"approvals": {}}, None), ({"approvals": "x"}, None),
+                          ({"approvals": {"mode": False}}, "off"), ({"approvals": {"mode": True}}, "manual"),
+                          ({"approvals": {"mode": " Smart "}}, "smart"), ({"approvals": {"mode": "auto"}}, "manual"),
+                          ({"approvals": {"mode": None}}, "manual"), (None, None)):
+            with self.subTest(cfg=cfg):
+                self.assertEqual(approval_mode(cfg), want)
+
+    def test_allowlist_view_caps(self):
+        from hermes_ui_plus.bots import allowlist_view
+        raw = ["recursive delete", "recursive delete", 7, None, "", "  ", "git push *", "x" * 201, "a\x00b"] + \
+              [f"cmd-{i}" for i in range(205)]
+        v = allowlist_view("scout", {"command_allowlist": raw, "approvals": {"mode": "manual"}})
+        self.assertEqual(v["name"], "scout")
+        self.assertEqual(v["mode"], "manual")
+        self.assertEqual(len(v["entries"]), 200)
+        self.assertEqual(v["entries"][:3], [{"pattern": "recursive delete"}, {"pattern": "git push *"},
+                                            {"pattern": "cmd-0"}])
+        self.assertEqual(v["omitted"], 2 + 7)  # too long, control char, 7 beyond the cap
+        self.assertEqual(allowlist_view("x", {}), {"name": "x", "entries": [], "mode": None})
+        self.assertEqual(allowlist_view("x", {"command_allowlist": "not a list"})["entries"], [])
+
+    def test_bot_view_archived(self):
+        self.assertEqual(bot_view("x", {}, parked=True, archived=True), {"name": "x", "parked": True, "archived": True})
+        self.assertEqual(bot_view("x", {}, parked=True), {"name": "x", "parked": True})
+
+
+class Slice4ServiceTest(unittest.IsolatedAsyncioTestCase):
+    def svc(self, src=None, profile="default", **settings):
+        src = src or FakeHermes()
+        src.profiles["writer"]["config.yaml"] = {"command_allowlist": ["recursive delete", "npm test"],
+                                                 "approvals": {"mode": "smart"}}
+        return BotsService(settings_from_mapping({"bots": settings}), src, profile, now=lambda: 1_790_000_000.0), src
+
+    async def code(self, coro):
+        with self.assertRaises(Exception) as cm:
+            await coro
+        e = cm.exception
+        return e.status, e.code, getattr(e, "reason", None)
+
+    async def test_allowlist_of_a_bot_and_of_default(self):
+        s, src = self.svc()
+        self.assertEqual(await s.allowlist("writer"), {"name": "writer", "mode": "smart", "entries": [
+            {"pattern": "recursive delete"}, {"pattern": "npm test"}]})
+        self.assertEqual(await s.allowlist("default"), {"name": "default", "mode": "smart",
+                                                        "entries": [{"pattern": "delete in root path"}]})
+        self.assertEqual(await self.code(s.allowlist("nope")), (404, "unknown_bot", None))
+        self.assertEqual(await self.code(s.allowlist("../x")), (404, "unknown_bot", None))
+
+    async def test_revoke(self):
+        s, src = self.svc()
+        with self.assertLogs("hermes_ui_plus.bots", level="INFO") as logs:
+            out = await s.revoke("writer", {"pattern": "npm test"})
+        self.assertNotIn("npm test", "\n".join(logs.output))  # names and counts only
+        self.assertEqual(out["entries"], [{"pattern": "recursive delete"}])
+        self.assertEqual(src.profiles["writer"]["config.yaml"]["command_allowlist"], ["recursive delete"])
+        self.assertEqual(await self.code(s.revoke("writer", {"pattern": "npm test"})), (404, "not_found", None))
+        out = await s.revoke("default", {"pattern": "delete in root path"})
+        self.assertEqual((out["name"], out["entries"]), ("default", []))
+        for body in ({}, {"pattern": ""}, {"pattern": 3}, {"pattern": "x" * 201}):
+            with self.subTest(body=body):
+                self.assertEqual(await self.code(s.revoke("writer", body)), (400, "invalid_field", "pattern"))
+        self.assertEqual((await self.code(s.revoke("writer", [])))[1], "invalid_json")
+        self.assertEqual(await self.code(s.revoke("ghost", {"pattern": "x"})), (404, "unknown_bot", None))
+        self.assertEqual([c for c in src.calls if c[0] == "revoke"],
+                         [("revoke", "writer", "npm test"), ("revoke", "default", "delete in root path")])
+
+    async def test_archive_and_restore(self):
+        s, src = self.svc()
+        out = await s.archive("writer")
+        self.assertEqual(out, {"bot": {"name": "writer", "parked": True, "archived": True}})
+        self.assertEqual(src.profiles["writer"]["parked"], ARCHIVED + "\n2026-09-21T14:13:20Z\n")
+        self.assertEqual(src.notified, ["writer"])
+        self.assertEqual((await s.list())["data"], [{"name": "writer", "parked": True, "archived": True}])
+        self.assertEqual(await s.archive("writer"), out)  # again: idempotent, nothing rewritten
+        self.assertEqual(src.notified, ["writer"])
+        out = await s.restore("writer")
+        self.assertEqual(out, {"bot": {"name": "writer"}})
+        self.assertIsNone(src.profiles["writer"]["parked"])
+        self.assertEqual(src.notified, ["writer", "writer"])
+        self.assertEqual(await s.restore("writer"), {"bot": {"name": "writer"}})  # not parked: 200, no-op
+        self.assertEqual(src.notified, ["writer", "writer"])
+
+    async def test_foreign_markers_are_never_ours(self):
+        for marker in ("hermes-ui-plus: setup failed\n", "", "stopped by hand\n", " hermes-ui-plus: archived\n",
+                       "hermes-ui-plus: archived later\n"):
+            with self.subTest(marker=marker):
+                s, src = self.svc()
+                src.profiles["writer"]["parked"] = marker
+                self.assertEqual(await self.code(s.restore("writer")), (409, "parked_elsewhere", None))
+                self.assertEqual(await self.code(s.archive("writer")), (409, "parked_elsewhere", None))
+                self.assertEqual(src.profiles["writer"]["parked"], marker)
+                self.assertNotIn(("remove_park_marker", "writer"), src.calls)
+                row = (await s.list())["data"][0]
+                self.assertEqual((row.get("parked"), row.get("archived")), (True, None))
+
+    async def test_refusals(self):
+        s, src = self.svc()
+        for call in (s.archive, s.restore):
+            self.assertEqual(await self.code(call("default")), (403, "default_bot", None))
+            self.assertEqual(await self.code(call("ghost")), (404, "unknown_bot", None))
+        s, src = self.svc(profile="writer")
+        for coro in (s.archive("writer"), s.restore("writer"), s.allowlist("default"),
+                     s.revoke("writer", {"pattern": "npm test"})):
+            self.assertEqual(await self.code(coro), (404, "feature_off", "not_root_profile"))
+        s, src = self.svc(enabled=False)
+        for coro in (s.archive("writer"), s.restore("writer"), s.allowlist("writer"),
+                     s.revoke("writer", {"pattern": "npm test"})):
+            self.assertEqual(await self.code(coro), (404, "feature_off", "disabled_by_config"))
+        self.assertEqual([c for c in src.calls if c[0] != "create"], [])
+
+
+class Slice4HttpTest(unittest.TestCase):
+    def setUp(self):
+        src = FakeHermes()
+        src.profiles["writer"]["config.yaml"] = {"command_allowlist": ["npm test"]}
+        self.src = src
+        self.r = Running(FakeBackend(), bots_source=src)
+        self.addCleanup(self.r.close)
+
+    def call(self, method, path, body=None, **kw):
+        status, headers, payload = self.r.request(method, path, body, **kw)
+        return status, json.loads(payload), headers
+
+    def test_routes(self):
+        status, body, _ = self.call("GET", "/bots/writer/allowlist")
+        self.assertEqual((status, body), (200, {"name": "writer", "entries": [{"pattern": "npm test"}], "mode": None}))
+        status, body, _ = self.call("GET", "/bots/default/allowlist")
+        self.assertEqual((status, body["mode"]), (200, "smart"))
+        status, body, _ = self.call("POST", "/bots/writer/allowlist/revoke", {"pattern": "npm test"})
+        self.assertEqual((status, body["entries"]), (200, []))
+        status, body, _ = self.call("POST", "/bots/writer/allowlist/revoke", {"pattern": "npm test"})
+        self.assertEqual((status, body["error"]["code"]), (404, "not_found"))
+        status, body, _ = self.call("POST", "/bots/writer/archive")
+        self.assertEqual((status, body), (200, {"bot": {"name": "writer", "parked": True, "archived": True}}))
+        status, body, _ = self.call("POST", "/bots/writer/restore", {})
+        self.assertEqual((status, body), (200, {"bot": {"name": "writer"}}))
+        status, body, _ = self.call("POST", "/bots/default/archive")
+        self.assertEqual((status, body["error"]["code"]), (403, "default_bot"))
+        status, body, _ = self.call("POST", "/bots/ghost/restore")
+        self.assertEqual((status, body["error"]["code"]), (404, "unknown_bot"))
+        self.src.profiles["writer"]["parked"] = "hermes-ui-plus: setup failed\n"
+        status, body, _ = self.call("POST", "/bots/writer/restore")
+        self.assertEqual((status, body["error"]["code"]), (409, "parked_elsewhere"))
+
+    def test_methods_auth_and_unknown_paths(self):
+        for method, path, allow in (("POST", "/bots/writer/allowlist", "GET"),
+                                    ("GET", "/bots/writer/allowlist/revoke", "POST"),
+                                    ("GET", "/bots/writer/archive", "POST"), ("DELETE", "/bots/writer/restore", "POST")):
+            status, _, headers = self.call(method, path)
+            self.assertEqual((status, headers.get("allow")), (405, allow), path)
+        for method, path in (("GET", "/bots/writer/allowlist"), ("POST", "/bots/writer/allowlist/revoke"),
+                             ("POST", "/bots/writer/archive"), ("POST", "/bots/writer/restore")):
+            self.assertEqual(self.call(method, path, {"pattern": "npm test"}, auth=False)[0], 401, path)
+        for path in ("/bots/writer/nope", "/bots/writer/allowlist/x", "/bots//archive", "/bots/writer/archive/",
+                     "/bots/writer/"):
+            self.assertEqual(self.call("POST", path)[0], 404, path)
+        status, body, _ = self.call("POST", "/bots/writer/allowlist/revoke", raw_body=b"{nope")
+        self.assertEqual((status, body["error"]["code"]), (400, "invalid_json"))
+        self.assertIsNone(self.src.profiles["writer"]["parked"])
+        self.assertEqual(self.src.profiles["writer"]["config.yaml"]["command_allowlist"], ["npm test"])
+
+
+class Slice4AdapterTest(unittest.TestCase):
+    """HermesBots slice-4 file work on a temp root: allow-list revoke + Hermes re-sync, archive markers."""
+
+    def setUp(self):
+        import contextvars
+        import sys
+        import tempfile
+        import types
+        from pathlib import Path
+        from unittest import mock
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = root = Path(self.tmp.name)
+        self.dir = root / "profiles" / "scout"
+        self.dir.mkdir(parents=True)
+        (root / "config.yaml").write_text(json.dumps({"model": {"default": "m"}, "approvals": {"mode": "manual"},
+                                                      "command_allowlist": ["delete in root path", "npm test"]}))
+        (self.dir / "config.yaml").write_text(json.dumps({"command_allowlist": ["recursive delete", "git push *",
+                                                                                  "recursive delete"]}))
+        hy = types.ModuleType("hermes_yaml")
+        hy.safe_load = lambda text: json.loads(text) if str(text).strip() else None
+        hy.safe_dump = lambda data, sort_keys=True, allow_unicode=True, width=80: json.dumps(data)
+        profiles = types.ModuleType("hermes_cli.profiles")
+        profiles.get_profile_dir = lambda n: root if n == "default" else root / "profiles" / n
+        profiles.list_profile_names = lambda: ["default", "scout"]
+        cli = types.ModuleType("hermes_cli")
+        cli.profiles = profiles
+        self.home = contextvars.ContextVar("home", default="ambient-override")  # whatever the caller's context holds
+        hc = types.ModuleType("hermes_constants")
+        hc.set_hermes_home_override = lambda p: self.home.set(p)
+        hc.reset_hermes_home_override = lambda t: self.home.reset(t)
+        self.loads = []
+        approval = types.ModuleType("tools.approval")
+
+        def load_permanent_allowlist():
+            h = self.home.get()
+            cfg = json.loads(((Path(h) if h else root) / "config.yaml").read_text())
+            self.loads.append((h, list(cfg.get("command_allowlist", []))))
+            return set(cfg.get("command_allowlist", []))
+        approval.load_permanent_allowlist = load_permanent_allowlist
+        tools = types.ModuleType("tools")
+        tools.approval = approval
+        self.mods = {"hermes_cli": cli, "hermes_cli.profiles": profiles, "hermes_yaml": hy, "hermes_constants": hc,
+                     "tools": tools, "tools.approval": approval, "agent": None}  # no agent.secret_scope here
+        patcher = mock.patch.dict(sys.modules, self.mods)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        from hermes_ui_plus.hermes_adapter import HermesBots
+        self.hb = HermesBots()
+
+    def test_read_config_of_bot_and_root(self):
+        self.assertEqual(self.hb.read_config("scout")["command_allowlist"], ["recursive delete", "git push *",
+                                                                             "recursive delete"])
+        self.assertEqual(self.hb.read_config("default")["approvals"], {"mode": "manual"})
+        (self.dir / "config.yaml").write_text(json.dumps({"command_allowlist": '["legacy entry"]'}))
+        self.assertEqual(self.hb.read_config("scout")["command_allowlist"], ["legacy entry"])
+
+    def test_revoke_bot_resyncs_under_its_home(self):
+        self.hb.revoke_allowlist("scout", "recursive delete")
+        self.assertEqual(json.loads((self.dir / "config.yaml").read_text())["command_allowlist"], ["git push *"])
+        self.assertEqual(self.loads, [(str(self.dir), ["git push *"])])
+        self.assertEqual(self.home.get(), "ambient-override")  # reset afterwards
+
+    def test_revoke_root_resyncs_unscoped_and_under_the_root_home(self):
+        self.hb.revoke_allowlist("default", "npm test")
+        cfg = json.loads((self.root / "config.yaml").read_text())
+        self.assertEqual((cfg["command_allowlist"], cfg["model"]), (["delete in root path"], {"default": "m"}))
+        self.assertEqual(self.loads, [(None, ["delete in root path"]), (str(self.root), ["delete in root path"])])
+        self.assertEqual(self.home.get(), "ambient-override")
+
+    def test_revoke_without_hermes_approval_module_only_edits_the_file(self):
+        import sys
+        sys.modules["tools"] = None
+        sys.modules["tools.approval"] = None
+        self.hb.revoke_allowlist("scout", "git push *")
+        self.assertEqual(json.loads((self.dir / "config.yaml").read_text())["command_allowlist"],
+                         ["recursive delete", "recursive delete"])
+        self.assertEqual(self.loads, [])
+
+    def test_park_markers(self):
+        hb = self.hb
+        self.assertIsNone(hb.park_marker("scout"))
+        self.assertTrue(hb.write_park_marker("scout", ARCHIVED + "\n2026-01-01T00:00:00Z\n"))
+        self.assertEqual(hb.park_marker("scout"), ARCHIVED)
+        self.assertTrue(hb.is_parked("scout"))
+        self.assertFalse(hb.write_park_marker("scout", "other\n"))  # never overwrites
+        self.assertEqual((self.dir / "gateway.parked").read_text().splitlines()[0], ARCHIVED)
+        hb.remove_park_marker("scout")
+        self.assertFalse(hb.is_parked("scout"))
+        hb.remove_park_marker("scout")  # gone already: fine
+        hb.park("scout")
+        self.assertEqual(hb.park_marker("scout"), "hermes-ui-plus: setup failed")
+        (self.dir / "gateway.parked").write_text("")
+        self.assertEqual(hb.park_marker("scout"), "")
+        with self.assertRaises(ValueError):
+            hb.park_marker("../evil")  # only profile directories
+
+    def test_service_end_to_end_on_files(self):
+        import asyncio
+        s = BotsService(settings_from_mapping({}), self.hb, "default", now=lambda: 1_790_000_000.0)
+        out = asyncio.run(s.archive("scout"))
+        self.assertEqual(out["bot"], {"name": "scout", "parked": True, "archived": True})
+        self.assertEqual((self.dir / "gateway.parked").read_text(), ARCHIVED + "\n2026-09-21T14:13:20Z\n")
+        self.assertEqual(asyncio.run(s.restore("scout"))["bot"], {"name": "scout"})
+        self.assertFalse((self.dir / "gateway.parked").exists())
+        got = asyncio.run(s.allowlist("scout"))
+        self.assertEqual(got, {"name": "scout", "mode": None, "entries": [{"pattern": "recursive delete"},
+                                                                          {"pattern": "git push *"}]})

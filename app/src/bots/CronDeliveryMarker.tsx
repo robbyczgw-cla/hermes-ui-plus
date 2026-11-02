@@ -11,7 +11,7 @@ import { cronPlainText, type CronDelivery } from './core';
 
 const FOLD_LINES = 8;
 
-export const CronDeliveryMarker = memo(function CronDeliveryMarker({ delivery, at }: { delivery: CronDelivery; at?: number }) {
+export const CronDeliveryMarker = memo(function CronDeliveryMarker({ delivery, at, onReply }: { delivery: CronDelivery; at?: number; /** a visible "Antworten": answer this delivery (a bot's timeline) */ onReply?: () => void }) {
   const t = useTheme();
   const tr = useT();
   const { formatDate } = useLocale();
@@ -20,8 +20,9 @@ export const CronDeliveryMarker = memo(function CronDeliveryMarker({ delivery, a
   const text = delivery.silent ? tr('bots.cron.silent') : cronPlainText(delivery.output);
   const name = delivery.name || tr('bots.cron.unnamed');
   const long = text.split('\n').length > FOLD_LINES || text.length > 600;
-  return (
-    <View style={styles.wrap} accessible accessibilityLabel={tr('bots.cron.a11y', { name, time, text })}>
+  const a11y = { accessible: true, accessibilityLabel: tr('bots.cron.a11y', { name, time, text }) };
+  const body = (
+    <>
       <View style={[styles.pill, { backgroundColor: t.colors.surfaceAlt, borderRadius: t.radii.pill }]}>
         <Icon name="reset" size={13} color={t.colors.muted} />
         <HText variant="caption" color="muted" numberOfLines={1} style={styles.shrink}>
@@ -41,6 +42,18 @@ export const CronDeliveryMarker = memo(function CronDeliveryMarker({ delivery, a
             </Pressable>
           ) : null}
         </View>
+      ) : null}
+    </>
+  );
+  return (
+    <View style={styles.wrap} {...a11y} {...(onReply ? { accessibilityActions: [{ name: 'reply', label: tr('chat.quote.reply') }], onAccessibilityAction: onReply } : {})}>
+      {body}
+      {onReply ? (
+        <Pressable onPress={onReply} hitSlop={8} accessibilityRole="button" accessibilityLabel={tr('chat.quote.reply')} style={styles.more}>
+          <HText variant="caption" weight="600" color="accent">
+            {tr('chat.quote.reply')}
+          </HText>
+        </Pressable>
       ) : null}
     </View>
   );

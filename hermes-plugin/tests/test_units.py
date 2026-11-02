@@ -454,7 +454,11 @@ class FakeCtx:
         self.settings = settings or {}
         self.aux = []
         self.unload = []
+        self.hooks = []
         self.aux_raises = aux_raises
+
+    def register_hook(self, name, cb):
+        self.hooks.append((name, cb))
 
     def register_auxiliary_task(self, key, **kw):
         if self.aux_raises:
@@ -499,6 +503,7 @@ class RegisterTest(unittest.TestCase):
         self.assertEqual(ctx.aux[0][1]["inherit_from"], "title_generation")
         self.assertEqual(ctx.aux[0][1]["defaults"]["reasoning_effort"], "low")
         self.assertEqual(len(ctx.unload), 1)
+        self.assertEqual([n for n, _ in ctx.hooks], ["pre_llm_call"])  # cron review notes (cronreview.py)
         with socket.create_connection(("127.0.0.1", port), timeout=2) as s:
             s.sendall(b"GET /health HTTP/1.1\r\nHost: x\r\n\r\n")
             self.assertIn(b"200 OK", s.recv(200))
@@ -554,7 +559,7 @@ class RegisterTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {cfgmod.KILL_SWITCH_ENV: "1"}):
             ctx = FakeCtx()
             hermes_ui_plus.register(ctx)
-        self.assertEqual((ctx.aux, ctx.unload), ([], []))
+        self.assertEqual((ctx.aux, ctx.unload, ctx.hooks), ([], [], []))
 
     def test_old_hermes_without_hook(self):
         hermes_ui_plus.register(object())  # no register_auxiliary_task: logs, no exception
@@ -562,6 +567,17 @@ class RegisterTest(unittest.TestCase):
     def test_registration_error_never_raises(self):
         with self.assertLogs("hermes_ui_plus", logging.WARNING):
             hermes_ui_plus.register(FakeCtx(aux_raises=True))
+
+    def test_a_refused_hook_leaves_the_rest_of_the_plugin_on(self):
+        class Refuses(FakeCtx):
+            def register_hook(self, name, cb):
+                raise ValueError("no such hook")
+
+        ctx = Refuses()
+        with self.assertLogs("hermes_ui_plus", logging.WARNING) as logs:
+            hermes_ui_plus.register(ctx)
+        self.assertEqual(len(ctx.aux), 1, "quick answers still registered")
+        self.assertIn("cron review", "\n".join(logs.output))
 
     def test_no_secret_no_listener(self):
         port = free_port()

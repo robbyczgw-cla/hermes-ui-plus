@@ -49,3 +49,32 @@ test('ChatView puts the note in place of the composer and sends starters to a ne
   assert.match(bar, /tr\('bots\.chat\.readOnly'/);
   assert.match(bar, /tr\('bots\.chat\.readOnlyNewChat'/);
 });
+
+test('read-only Bot Chat with 0.3 bot activity: the stopped-run retry goes to a new chat, the working card and its Stop stay', () => {
+  const src = readFileSync(new URL('../chat/ChatView.tsx', import.meta.url), 'utf8');
+  // "Jetzt mit Freigabe nachholen" (StoppedRunCard) would be a turn in the gateway's chat: permission_denied on v0.22.3+
+  const retry = src.slice(src.indexOf('const retryStopped = useCallback('), src.indexOf('const stopRemote = useCallback('));
+  assert.match(retry, /if \(botReadOnly\) chatWithBot\(prompt\);\s*else sendText\(prompt\);/);
+  assert.match(retry, /\[botReadOnly, chatWithBot, sendText, tr\]/);
+  assert.match(src, /onRetry=\{retryStopped\}/);
+  // a routine or another device's turn keeps its "<Name> is working" card with Stop (through the bridge, not the chat)
+  const cards = src.slice(src.indexOf('{streamingAnswer ? ('), src.indexOf('<LiveAskChip />'));
+  assert.match(cards, /<RemoteWorkingCard turn=\{remoteTurn\}[^>]*onStop=\{stopRemote\}/);
+  assert.doesNotMatch(cards, /botReadOnly/, 'only the composer is swapped for the note');
+  assert.doesNotMatch(src.slice(src.indexOf('const remoteTurn ='), src.indexOf('const botWorking =')), /botReadOnly/);
+});
+
+test('read-only Bot Chat has no composer: "Antworten" is not offered (it toasted "too many quotes"), tapping a quote still jumps', () => {
+  const view = readFileSync(new URL('../chat/ChatView.tsx', import.meta.url), 'utf8');
+  const actions = view.slice(view.indexOf('const replyActions = useMemo'), view.indexOf('"Im Chat suchen"'));
+  assert.match(actions, /canQuote: !botReadOnly,/);
+  assert.match(actions, /\[toast, tr, historyTruncated, botReadOnly\]/);
+  assert.match(actions, /jump: \(fromId, quote\) =>/);
+  const item = readFileSync(new URL('../chat/MessageItem.tsx', import.meta.url), 'utf8');
+  // every way to "Antworten": long-press, answer menu, web hover button, swipe in the list
+  assert.match(item, /const canReply = !!replyCtx\?\.canQuote/);
+  assert.match(item, /canReply: !!replyCtx\?\.canQuote && /);
+  assert.match(item, /Platform\.OS === 'web' && replyCtx\?\.canQuote && !ownLocal/);
+  const list = readFileSync(new URL('../chat/MessageList.tsx', import.meta.url), 'utf8');
+  assert.match(list, /const canQuote = !!replyCtx\?\.canQuote;/);
+});

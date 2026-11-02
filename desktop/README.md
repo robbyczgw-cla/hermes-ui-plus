@@ -156,7 +156,7 @@ Set in `tauri.conf.json` (`app.security.csp`):
 | `style-src` | `'self' 'unsafe-inline'` + CDNs | React Native Web inline styles, widget styles |
 | `font-src` | `'self' data:` + CDNs | |
 | `img-src`, `media-src` | `'self' data: blob: https:` | image trust policy lives in the app (`app/src/images/trust.ts`: trusted hosts load, unknown hosts tap-to-load), so any https image may be needed; no plain http |
-| `connect-src` | `'self' ipc: http://ipc.localhost https:` | Tauri IPC + any https server the user configures (tailnet bridge `https://hermes-host.example.ts.net:8790`, OpenAI-compatible providers, …). Plain `http://` servers are not allowed. |
+| `connect-src` | `'self' blob: ipc: http://ipc.localhost https:` | a picked file read through its own blob URL, Tauri IPC + any https server the user configures (tailnet bridge `https://hermes-host.example.ts.net:8790`, OpenAI-compatible providers, …). Plain `http://` servers are not allowed. |
 | `worker-src` | `'self' blob:` | widget workers |
 | `frame-src` | `'self' blob: data:` | srcdoc frames need no entry |
 | `object-src` / `form-action` | `'none'` | |

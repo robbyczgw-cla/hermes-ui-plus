@@ -6,6 +6,7 @@
  *   errors: {error:{message,type,code}}; 404 code feature_off = bridge has no ANTHROPIC_API_KEY.
  */
 import type { HuiNode } from '../protocol/types.ts';
+import { stripQuotes } from '../chat/quoteWire.ts';
 
 export type MetaWant = 'title' | 'followups';
 export type MetaTurn = { role: 'user' | 'assistant'; content: string };
@@ -64,7 +65,7 @@ export function buildMetaMessages(messages: readonly MetaMessage[]): MetaTurn[] 
   for (const m of messages) {
     if (m.role !== 'user' && m.role !== 'assistant') continue;
     if (m.role === 'assistant' && m.status !== 'done') continue;
-    const content = clip(plainText(m.text), META_LIMITS.charsPerTurn);
+    const content = clip(plainText(m.role === 'user' ? stripQuotes(m.text) : m.text), META_LIMITS.charsPerTurn);
     if (content) turns.push({ role: m.role, content });
   }
   return turns.slice(-META_LIMITS.turns);

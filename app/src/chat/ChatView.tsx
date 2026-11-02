@@ -5,24 +5,33 @@ import { Text } from '../ui/primitives/Text';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ActionRunnerProvider, ActiveTimersBar, listBus, useActionRunner, type ListBusEvent } from '../actions';
 import { ApprovalStack } from '../approvals';
+import { useGroupApprovals } from '../groups/useGroups';
 import type { ApprovalChoice, ApprovalRequest } from '../hermes/types';
 import type { Attachment, PendingUploads } from '../attachments';
 import { useConversations } from '../conversations';
 import { displayTitle, renameUnique, uniqueTitle } from '../conversations/title';
+import { isBotPlace } from '../conversations/types';
 import type { ChatMessage, UseHermesChat } from '../hermes';
 import { useHermesCapabilities } from '../hermes/useHermesCapabilities';
 import { useHermesBots } from '../hermes/useHermesBots';
 import { botBadge, botOf, withBot } from '../hermes/bots';
-import { botChatReadOnly, botStatusKind } from '../bots/core';
+import { botChatReadOnly, botStatusKind, cronDelivery } from '../bots/core';
 import { BotChatReadOnly } from '../bots/BotChatReadOnly';
 import { askInNewChat } from '../library/askHermes';
 import { deliverShare } from '../share/inbox';
 import { BotEmptyState } from '../bots/BotEmptyState';
 import { BotInfoSheet } from '../bots/BotInfoSheet';
+import { LocalWorkingCard, RemoteWorkingCard } from '../bots/BotWorkingCard';
+import { StoppedRunsProvider, type DeliveryRow } from '../bots/StoppedRunCard';
+import { stoppedWhat, type StoppedRun } from '../bots/stoppedRuns';
+import { remoteTurnOf, workingOf } from '../bots/activity';
+import { levelOf } from '../bots/notify';
+import { refreshActivity, stopBridgeTurn, useActivity } from '../bots/useActivity';
+import { usePushSettingsState } from '../push/settingsStore';
 import type { HermesChatOptions } from '../hermes/capabilities';
 import type { TurnOverride } from '../hermes/turnOverride';
 import { shellState } from '../background/noticeState';
-import { useT } from '../i18n';
+import { useT, type TFn } from '../i18n';
 import { metaConnFromProfile, useAutoTitle, useFollowups } from '../meta';
 import { useConnection } from '../settings/ConnectionProvider';
 import { usePreferences } from '../settings/PreferencesProvider';
@@ -35,7 +44,8 @@ import type { HuiAction } from '../protocol/types';
 import type { ConnectionProfile } from '../settings/profiles';
 import { Button, columnMaxWidth, useKeyboardShortcuts, useTheme } from '../ui';
 import { stopSpeaking, useAutoRead, useStopSpeakingOn, voiceConnFromProfile } from '../voice';
-import { lightHaptic, useChatActionHandler } from './actions';
+import { lightHaptic, useChatActionHandler, type ChatActionDeps } from './actions';
+import { feedActionDeps } from '../bots/feedActions';
 import { buildAskMessage } from './ask';
 import { ChatHeader } from './ChatHeader';
 import { useChatShell } from './ChatShellContext';
@@ -76,6 +86,8 @@ import { AnswerAnnouncer } from './AnswerAnnouncer';
 import { answerModelInfo, planRetry, retryModel, type RetryVariant } from './answerMenu';
 import { ChatMenu } from './ChatMenu';
 import { FindBar } from './FindBar';
+import { ReplyContext, type ReplyActions } from './replyContext';
+import { quoteOf, resolveQuote, stripQuotes } from './quote';
 import { FindContext, type FindState } from './findContext';
 import { findInMessages, foldText, normalizeQuery, NO_FIND, searchableText, stepMatch } from './findInChat';
 import { reformatMessage } from './reformat';
@@ -303,7 +315,7 @@ function ChatViewInner({
       if (isBusy()) return false;
       // history still loading: the draft stays, the user sees why
       if (live.current.historyPending) {
-        toast(tr('conversations.sync.loading'));
+        toast(historyLoadingText(profile.kind, tr));
         return false;
       }
       // the hook refuses while its own turn runs or after unmount → report it (nodes stay open, draft stays)
@@ -407,7 +419,8 @@ function ChatViewInner({
     },
     [conversationId],
   );
-  const onAction = useChatActionHandler({ send: sendText, isBusy, run: runAction, buildAsk });
+  const forMessage = useCallback((deps: ChatActionDeps, messageId: string | undefined) => feedActionDeps(deps, () => live.current.messages, messageId), []);
+  const onAction = useChatActionHandler({ send: sendText, isBusy, run: runAction, buildAsk, forMessage });
 
   const retryWith = useCallback(
     (override?: TurnOverride) => {
@@ -469,11 +482,11 @@ function ChatViewInner({
     bridge: metaConn,
     conversationKey: conversationId,
     // a bot's Bot Chat keeps its title: Hermes Desktop finds the thread by it (bots/core.ts)
-    hasTitle: !!meta && (meta.titleSource !== 'auto' || !!meta.botChat),
+    hasTitle: !!meta && (meta.titleSource !== 'auto' || isBotPlace(meta)),
     onTitle: (newTitle) => {
       if (!conversationId) return;
       const cur = convs.get(conversationId);
-      if (!cur || cur.titleSource === 'user' || cur.botChat) return; // the user renamed it meanwhile
+      if (!cur || cur.titleSource === 'user' || isBotPlace(cur)) return; // the user renamed it meanwhile
       // N8: Hermes titles are unique per server → pick a free variant ("… #2") up front, retry on a conflict
       const taken = convs.list.filter((c) => c.id !== conversationId).flatMap((c) => [c.title, c.remote?.title]);
       const title = uniqueTitle(newTitle, taken);
@@ -521,13 +534,18 @@ function ChatViewInner({
   // Approval sheet (Hermes only). Hidden locally via "Schließen" (e.g. after a 409); a chip re-opens it.
   // Approval cards (Hermes; demo/other backends only have the single `approval`). Queue, hide chip, expiry: ApprovalStack.
   // same requests → same array: useHermesChat derives them from `messages`, i.e. a new array on every streaming update
-  const approvals = useStableList(useMemo(() => chat.approvals ?? (chat.approval ? [chat.approval] : []), [chat.approvals, chat.approval]));
+  // bot groups (groups/): an approval a group member asked for shows here, in that bot's own chat, never in the group
+  const groupApprovals = useGroupApprovals(profile.kind === 'hermes' ? profile : undefined, meta?.hermesProfile, !!meta?.botChat || !!meta?.botTalk);
+  const ownApprovals = useMemo(() => chat.approvals ?? (chat.approval ? [chat.approval] : []), [chat.approvals, chat.approval]);
+  const approvals = useStableList(useMemo(() => (groupApprovals.approvals.length ? [...ownApprovals, ...groupApprovals.approvals] : ownApprovals), [ownApprovals, groupApprovals.approvals]));
   const respondApprovalFor = chat.respondApprovalFor;
   const respondSingle = chat.respondApproval;
   const onApprovalRespond = useCallback(
-    (a: ApprovalRequest, c: ApprovalChoice) => (respondApprovalFor ? respondApprovalFor(a, c) : respondSingle(c)),
-    [respondApprovalFor, respondSingle],
+    (a: ApprovalRequest, c: ApprovalChoice) => (groupApprovals.owns(a) ? groupApprovals.respond(a, c) : respondApprovalFor ? respondApprovalFor(a, c) : respondSingle(c)),
+    [respondApprovalFor, respondSingle, groupApprovals],
   );
+  const dismissApproval = chat.dismissApproval;
+  const onApprovalClose = useCallback((a: ApprovalRequest) => (groupApprovals.owns(a) ? groupApprovals.dismiss(a) : dismissApproval?.(a)), [groupApprovals, dismissApproval]);
 
   // backends that resend the history: attachments already in this chat share the request budget
   const resendsHistory = profile.kind !== 'hermes';
@@ -544,7 +562,8 @@ function ChatViewInner({
   // ("Bot Chat", bots/) gets the bot header, the bot's approval card and its start screen; bots are picked in the
   // drawer's Bots tab, not in the model menu
   const chatBot = meta?.hermesProfile;
-  const botChat = !!meta?.botChat;
+  // the bot's screen: its writable Bot Chat, or under Hermes v0.22.3+ its talk with the Bot Chat merged in (bots/timeline.ts)
+  const botChat = !!meta?.botChat || !!meta?.botTalk;
   const { bots } = useHermesBots(profile.kind === 'hermes' || profile.kind === 'demo' ? profile : undefined, chatBot);
   const botEntry = bots.find((b) => (chatBot ? b.name === chatBot : b.default));
   const botName = botBadge(chatBot, bots) ?? (botChat ? botEntry?.label : undefined);
@@ -584,7 +603,7 @@ function ChatViewInner({
   const hermesCaps = useHermesCapabilities(hermesConn);
   const serverDefault = hermesCaps.catalog?.currentModel;
   // Hermes v0.22.3+: the Bot Chat belongs to the gateway (readable, not writable from the app): new chats with the bot
-  const botReadOnly = botChat && profile.kind === 'hermes' && botChatReadOnly(hermesCaps.caps?.flags);
+  const botReadOnly = !!meta?.botChat && profile.kind === 'hermes' && botChatReadOnly(hermesCaps.caps?.flags);
   const chatWithBot = useCallback(
     (text?: string) => {
       const bot = botOf(chatBot);
@@ -622,8 +641,9 @@ function ChatViewInner({
         }
       },
       questionFor: (id) => {
-        const raw = questionBefore(getMessages(), id);
-        if (!raw) return null;
+        const asked = questionBefore(getMessages(), id);
+        if (!asked) return null;
+        const raw = stripQuotes(asked);
         // protocol replies (`[choice:…] …`) as the chat shows them: free text + the chip texts
         const reply = parseReplyMessage(raw, tr);
         return reply ? replyCopyText(reply) : raw;
@@ -632,6 +652,26 @@ function ChatViewInner({
         answerModelInfo({ kind: profile.kind, reported: m.metrics?.model ?? (m as { model?: string }).model, selected: model, serverDefault, effort }),
     }),
     [profile.kind, conversationId, quickMode, botChat, quick?.handOff, branchFrom, isBusy, toast, tr, retryWith, sendText, model, serverDefault, effort, getMessages],
+  );
+
+  // ---- "Antworten" (quote.ts): a message quoted into the composer; a tapped quote shows the cited message
+  const historyTruncated = !!meta?.historyTruncated;
+  const replyActions = useMemo<ReplyActions>(
+    () => ({
+      canQuote: !botReadOnly,
+      reply: (messageId, selection) => {
+        const m = live.current.messages.find((x) => x.id === messageId);
+        const q = m ? quoteOf(m, selection) : null;
+        if (!q) return toast(tr('chat.quote.empty'));
+        if (!composerRef.current?.addQuote(q)) toast(tr('chat.quote.full'));
+      },
+      jump: (fromId, quote) => {
+        const id = resolveQuote(live.current.messages, quote, fromId);
+        if (id) listRef.current?.scrollToMessage(id, true);
+        else toast(tr(historyTruncated ? 'chat.quote.goneOlder' : 'chat.quote.gone'));
+      },
+    }),
+    [toast, tr, historyTruncated, botReadOnly],
   );
 
   // ---- "Im Chat suchen" (chat menu, ⌘/Ctrl+F): find bar, highlighted matches, scroll to the current one
@@ -777,6 +817,42 @@ function ChatViewInner({
 
   // a bot's Bot Chat: header status (waiting > working > its description / model) and the bot's approval card
   const waitingApproval = approvals.some((a) => !a.expired);
+  // slice 5: what the bridge runs for this bot (a turn of another device / a lost stream, a routine; bots/activity.ts)
+  const botActivity = useActivity(profile.kind === 'hermes' ? profile : undefined, botChat);
+  const routinesOn = prefs.routines;
+  const remoteTurn = botChat && !waitingApproval ? remoteTurnOf(botActivity, chatBot, meta?.hermesSessionId, streaming) : null;
+  const botWorking = botChat && workingOf(botActivity, chatBot, { localRunning: streaming, botChatSession: meta?.hermesSessionId, routinesOn }).working;
+  const botLevel = levelOf(usePushSettingsState().profiles[profile.id]?.bots, chatBot);
+  // while an approval waits the bot is not working but waiting for the user: the approval card says so, no working card
+  const streamingAnswer = botChat && streaming && !waitingApproval ? [...messages].reverse().find((m) => m.role === 'assistant' && m.status === 'streaming') : undefined;
+  // "Jetzt mit Freigabe nachholen": the skipped step as a normal turn here, so the normal approval card comes
+  // the Bot Chat's job deliveries: a stopped routine run gets its card under the one closest delivery (bots/stoppedRuns.ts)
+  const deliveries = useMemo<DeliveryRow[]>(() => {
+    if (!botChat || !routinesOn) return [];
+    const out: DeliveryRow[] = [];
+    for (const m of messages) {
+      const c = cronDelivery(m.text);
+      if (c) out.push({ key: m.id, name: c.name, at: m.createdAt });
+    }
+    return out;
+  }, [botChat, routinesOn, messages]);
+  const retryStopped = useCallback(
+    (r: StoppedRun) => {
+      const what = stoppedWhat(r) ?? tr('bots.blocked.whatUnknown');
+      const prompt = tr('bots.blocked.retryPrompt', { routine: r.routine, what });
+      // Hermes v0.22.3+: the Bot Chat takes no turns from the app, the retry runs in a new chat with the bot
+      if (botReadOnly) chatWithBot(prompt);
+      else sendText(prompt);
+    },
+    [botReadOnly, chatWithBot, sendText, tr],
+  );
+  const stopRemote = useCallback(async () => {
+    const sid = meta?.hermesSessionId;
+    if (!sid) return false;
+    const r = await stopBridgeTurn({ baseUrl: profile.baseUrl, apiKey: profile.apiKey }, chatBot, sid);
+    refreshActivity(profile.id);
+    return r.ok && r.stopped > 0;
+  }, [meta?.hermesSessionId, profile.baseUrl, profile.apiKey, profile.id, chatBot]);
   const headerBot = useMemo(
     () =>
       botChat
@@ -784,12 +860,12 @@ function ChatViewInner({
             name: shownTitle,
             bot: chatBot,
             color: botEntry?.color,
-            status: botStatusKind({ working: streaming, waiting: waitingApproval }),
+            status: botStatusKind({ working: streaming || !!botWorking, waiting: waitingApproval }),
             detail: botEntry?.description ?? headerModelLabel(profile, model) ?? undefined,
             onInfo: openBotInfo,
           }
         : undefined,
-    [botChat, shownTitle, chatBot, botEntry?.color, botEntry?.description, streaming, waitingApproval, profile, model, openBotInfo],
+    [botChat, shownTitle, chatBot, botEntry?.color, botEntry?.description, streaming, botWorking, waitingApproval, profile, model, openBotInfo],
   );
   const approvalBot = useMemo(
     () => (botChat ? { name: shownTitle, bot: chatBot, color: botEntry?.color, scoped: !!chatBot } : undefined),
@@ -853,9 +929,11 @@ function ChatViewInner({
       <KeyboardAvoidingView style={styles.flex} behavior="padding">
         {area === 'list' ? (
           <AnswerActionsContext.Provider value={answerActions}>
+            <ReplyContext.Provider value={replyActions}>
             <FindContext.Provider value={findState}>
               <PendingSendContext.Provider value={pendingBubble}>
               <QueuedSendContext.Provider value={queuedBubble}>
+              <StoppedRunsProvider profile={profile} bot={chatBot} enabled={botChat && routinesOn} name={shownTitle} deliveries={deliveries} onRetry={retryStopped} onAllow={openBotInfo}>
               {perfWrap('MessageList', <MessageList
                 ref={listRef}
                 messages={messages}
@@ -865,14 +943,17 @@ function ChatViewInner({
                 voiceConn={voiceConn}
                 followups={followups}
                 historyTruncated={!!meta?.historyTruncated}
+                checkEvidence={profile.kind !== 'demo'}
                 onAwayChange={setTrayCollapsed}
               />)}
+              </StoppedRunsProvider>
               </QueuedSendContext.Provider>
               </PendingSendContext.Provider>
             </FindContext.Provider>
+            </ReplyContext.Provider>
           </AnswerActionsContext.Provider>
         ) : area === 'placeholder' ? (
-          <HistoryPlaceholder />
+          <HistoryPlaceholder label={historyLoadingText(profile.kind, tr)} />
         ) : quick ? (
           <QuickEmptyState onPick={sendText} model={quick.model} />
         ) : botChat ? (
@@ -889,8 +970,17 @@ function ChatViewInner({
           />
         )}
         <TimersBar onTimerDone={onTimerDone} />
+        {streamingAnswer ? (
+          <View style={[styles.workingCol, columnStyle]}>
+            <LocalWorkingCard message={streamingAnswer} name={shownTitle} level={botLevel} onStop={stop} />
+          </View>
+        ) : remoteTurn ? (
+          <View style={[styles.workingCol, columnStyle]}>
+            <RemoteWorkingCard turn={remoteTurn} name={shownTitle} level={botLevel} onStop={stopRemote} />
+          </View>
+        ) : null}
         <View style={[styles.approvalCol, columnStyle]}>
-          <ApprovalStack approvals={approvals} onRespond={onApprovalRespond} onClose={chat.dismissApproval} focus={chat.approvalFocus} bot={approvalBot} style={styles.sheet} />
+          <ApprovalStack approvals={approvals} onRespond={onApprovalRespond} onClose={onApprovalClose} focus={chat.approvalFocus} bot={approvalBot} style={styles.sheet} />
         </View>
         {!quick ? <LiveAskChip /> : null}
         {botReadOnly ? (
@@ -932,6 +1022,10 @@ function ChatViewInner({
           description={botEntry?.description}
           model={headerModelLabel(profile, model)}
           onPickModel={openModel}
+          onArchived={() => {
+            toast(tr('bots.info.archived', { name: shownTitle }));
+            newChat();
+          }}
         />
       ) : null}
       <LiveCardSheet offline={health === 'offline'} onAsk={focusComposer} />
@@ -1020,6 +1114,11 @@ export function SessionPending({
 
 /** folded searchable text per message object ("Im Chat suchen"): streaming only re-folds the growing answer */
 const foldCache = new WeakMap<object, string>();
+/** "Loading the chat from Hermes…" – agent servers with a synced chat list have their own wording */
+function historyLoadingText(kind: string, tr: TFn): string {
+  return tr('conversations.sync.loading');
+}
+
 function foldedSearchText(m: Pick<ChatMessage, 'id' | 'role' | 'text'>): string {
   let f = foldCache.get(m);
   if (f === undefined) {
@@ -1071,6 +1170,7 @@ const styles = StyleSheet.create({
   sheet: { marginHorizontal: 12, marginBottom: 8 },
   /** may shrink below the approval card's height (large text): the card scrolls inside ApprovalStack */
   approvalCol: { flexShrink: 1 },
+  workingCol: { paddingHorizontal: 12, paddingBottom: 6 },
   notice: { textAlign: 'center', paddingHorizontal: 16, paddingVertical: 6 },
   noticeRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 6 },
   noticeText: { flex: 1 },

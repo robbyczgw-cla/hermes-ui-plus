@@ -19,9 +19,9 @@ import { isNotFoundError, isUnsupportedError, sessionErrorText, type RemoteSessi
 import { serverKey, sessionsSupported, setSessionsSupported, subscribeSupport } from '../hermes/support';
 import type { ChatMessage } from '../hermes/types';
 import { useConversationsInternals } from './ConversationsProvider';
-import { applyRemoteSnapshot, isAppConversation, needsRemoteLoad, remoteLoadedAt, SNAPSHOT_SAVE, sourceLabel, syncSources, type SyncFilter } from './remoteSync';
+import { applyRemoteSnapshot, isAppConversation, isSyncedKind, needsRemoteLoad, remoteLoadedAt, SNAPSHOT_SAVE, sourceLabel, syncSources, type SyncFilter } from './remoteSync';
 import { inChatScope } from './chatScope';
-import { afterFirstPage, hasOlder, loadOlderSessions, pagedSources, SESSION_PAGE, type Cursors } from './sessionPaging';
+import { afterFirstPage, hasOlder, loadOlderSessions, mergeOlderPage, pagedSources, SESSION_PAGE, type Cursors } from './sessionPaging';
 import {
   createAttemptLog,
   createSharedRequests,
@@ -35,10 +35,11 @@ import {
 import { afterIdle } from './idle';
 import { isMeteredConnection } from '../images/policy';
 import type { ChatScope } from './chatScope';
-import type { ConversationMeta } from './types';
+import { isBotPlace, type ConversationMeta, type ProfileKind } from './types';
 import { emitAnswerReady, recoveredAnswers } from '../background/noticeState';
 import { botNames, withBot } from '../hermes/bots';
 import { botStore, botsNow, ensureBots } from '../hermes/useHermesBots';
+import { hermesJsonRequest } from '../hermes/client';
 
 /** Structural subset of settings' ConnectionProfile (+ the new optional `syncSessions` flag). */
 export type SyncProfile = {
@@ -56,9 +57,16 @@ export type SyncProfile = {
   bridge?: boolean;
   /** Hermes profiles ("bots") entered by hand (hermes/bots.ts) */
   hermesBots?: readonly string[];
+  /** default model (OpenAI-compatible agent servers: the agent a chat without its own pick talks to) */
+  model?: string;
+  /** extra request headers of OpenAI-compatible profiles (their capability probe sends them too) */
+  headers?: Record<string, string>;
 };
 
 /** The profile's session filter (remoteSync.SyncFilter); both default off. */
+/** first page per sync of an agent server (the adapter's maximum) */
+const AGENT_PAGE = 200;
+
 export function syncFilterOf(p: Pick<SyncProfile, 'showForeignChats' | 'showCronReports'> | undefined): SyncFilter {
   return { foreign: p?.showForeignChats === true, cron: p?.showCronReports === true };
 }
@@ -73,6 +81,13 @@ export type SessionSyncOptions = {
 };
 
 export type SyncStatus = 'off' | 'idle' | 'syncing' | 'error' | 'unsupported';
+
+/**
+ * Visible state of the chat-list sync with OpenAI-compatible agent servers (the drawer's status row); Hermes servers
+ * report nothing here. `syncing` only until the first sync went through (initial import + list), `error` with a retry,
+ * `unsupported` = the server is an agent server without the session list (older adapter): chats stay on this device.
+ */
+export type ListSyncState = { state: 'syncing' | 'error' | 'unsupported'; error?: string; retry(): void } | undefined;
 
 /** What the drawer needs to propagate changes (prop `remote` of ConversationDrawer/ConversationList). */
 export type RemoteActions = {
@@ -110,10 +125,22 @@ export type HermesSessionSync = {
   refresh(force?: boolean): Promise<void>;
   remote: RemoteActions;
   older: OlderSessions;
+  /** agent servers only (see ListSyncState); undefined = nothing to show */
+  listState?: ListSyncState;
 };
 
+/** A profile the sync may look at: Hermes, or (personal flavor) an OpenAI-compatible server before its capability probe. */
+function syncCandidate(p: SyncProfile | undefined): p is SyncProfile {
+  return !!p && isSyncedKind(p.kind) && p.syncSessions !== false && !!p.apiKey && /^https?:\/\//i.test(p.baseUrl);
+}
+
+/**
+ * Session sync on for this profile? Hermes: unless switched off (a server without the API turns itself off on the first
+ * 404). OpenAI-compatible agent servers only after their capabilities said `features.sessions_list` (they are never
+ * probed with /api/sessions otherwise).
+ */
 export function syncEnabled(p: SyncProfile | undefined): p is SyncProfile {
-  return !!p && p.kind === 'hermes' && p.syncSessions !== false && !!p.apiKey && /^https?:\/\//i.test(p.baseUrl);
+  return syncCandidate(p) && (p.kind === 'hermes' || sessionsSupported(p) === true);
 }
 
 function useSupportVersion(): number {
@@ -127,7 +154,7 @@ function useSupportVersion(): number {
 
 /** Pull GET /api/sessions per source for every sync-enabled Hermes profile and merge into the drawer. */
 export function useHermesSessionSync(profiles: SyncProfile[], options: SessionSyncOptions = {}): HermesSessionSync {
-  const { controller, ready, remoteActionsRef } = useConversationsInternals();
+  const { controller, ready, remoteActionsRef, store } = useConversationsInternals();
   const tr = useT();
   // the app language for sync error banners, read by callbacks that must not change identity when it changes
   const trRef = useRef(tr);
@@ -147,7 +174,7 @@ export function useHermesSessionSync(profiles: SyncProfile[], options: SessionSy
   const targets = useMemo(() => {
     const seen = new Set<string>();
     return profiles.filter((p) => {
-      if (!syncEnabled(p)) return false;
+      if (!syncCandidate(p)) return false;
       const k = serverKey(p);
       if (seen.has(k)) return false;
       seen.add(k);
@@ -175,7 +202,7 @@ export function useHermesSessionSync(profiles: SyncProfile[], options: SessionSy
     const key = serverKey(p);
     return (pid: string) => {
       const o = ref.current.profiles.find((x) => x.id === pid);
-      return !o || (o.kind === 'hermes' && serverKey(o) === key); // unknown (deleted) profile: legacy match
+      return !o || (o.kind === p.kind && serverKey(o) === key); // unknown (deleted) profile: legacy match
     };
   }, []);
 
@@ -188,29 +215,44 @@ export function useHermesSessionSync(profiles: SyncProfile[], options: SessionSy
     }
   }, [ready, filterKey, controller]);
 
+  // agent servers (OpenAI-compatible with the session list): the drawer's status row; `synced` = first sync went through
+  const [listState, setListState] = useState<{ state: 'syncing' | 'error' | 'unsupported'; error?: string } | undefined>();
+  const agentSynced = useRef(new Set<string>());
+  const agentRun = useRef<{ old: boolean; importFailure?: string }>({ old: false });
+  /** after a refresh: the agent servers' status row (`synced` = server keys whose list sync went through) */
+  const finishAgents = (synced: string[], listFailure?: string) => {
+    const agents = ref.current.targets.filter((p) => p.kind !== 'hermes');
+    if (!agents.length) return setListState(undefined);
+    for (const k of synced) agentSynced.current.add(k);
+    const on = agents.filter((p) => sessionsSupported(p) === true).map(serverKey);
+  };
+
   const refresh = useCallback(
     async (force = false) => {
       const { targets: list, enabled: on, ready: rdy, minIntervalMs } = ref.current;
       if (!on || !rdy || running.current) return;
       if (!force && Date.now() - lastRun.current < minIntervalMs) return;
-      const active = list.filter((p) => sessionsSupported(p) !== false);
+      // Hermes: on until a server answered 404; agent servers only after their capabilities said so
+      const active = list.filter((p) => (p.kind === 'hermes' ? sessionsSupported(p) !== false : sessionsSupported(p) === true));
       if (!active.length) {
         setStatus(list.length ? 'unsupported' : 'off');
+        finishAgents([]);
         return;
       }
       running.current = true;
       lastRun.current = Date.now();
       setStatus('syncing');
       let failure: string | undefined;
+      const agentFailed: string[] = [];
       try {
         for (const p of active) {
           const filter = syncFilterOf(p);
           const srcs = syncSources(filter);
           const sameServer = sameServerAs(p);
           // the default profile first, then every known bot (bridge list + manual list), each under /p/<bot>/ with
-          // its own paging cursors (the bot's base URL gives it its own cursor key)
-          await ensureBots(p);
-          for (const bot of [undefined, ...botNames(botsNow(p))]) {
+          // its own paging cursors (the bot's base URL gives it its own cursor key); agent servers have no bots
+          if (p.kind === 'hermes') await ensureBots(p);
+          for (const bot of p.kind === 'hermes' ? [undefined, ...botNames(botsNow(p))] : [undefined]) {
             const conn = withBot(p, bot);
             if (bot && sessionsSupported(conn) === false) continue; // unknown bot (404): skipped until restart
             const client = hermesSessions(conn, 12000);
@@ -220,7 +262,8 @@ export function useHermesSessionSync(profiles: SyncProfile[], options: SessionSy
             try {
               const firstPages: { source: string; count: number; hasMore: boolean }[] = [];
               for (const source of srcs) {
-                const page = await client.list({ source, limit: SESSION_PAGE });
+                // agent servers list no previews: one page of 200 keeps the list complete (deletes elsewhere propagate)
+                const page = await client.list({ source, limit: p.kind === 'hermes' ? SESSION_PAGE : AGENT_PAGE });
                 sessions.push(...page.sessions);
                 if (!page.hasMore) complete.push(source);
                 firstPages.push({ source, count: page.sessions.length, hasMore: page.hasMore });
@@ -233,10 +276,11 @@ export function useHermesSessionSync(profiles: SyncProfile[], options: SessionSy
             } catch (e) {
               if (isUnsupportedError(e)) setSessionsSupported(conn, false);
               else failure = sessionErrorText(e, trRef.current);
+              if (p.kind !== 'hermes') agentFailed.push(serverKey(p));
               if (!bot) break; // the server itself failed: its bots would too
               continue;
             }
-            controller.mergeRemote({ id: p.id, kind: 'hermes' }, sessions, { completeSources: complete, filter, sameServer, bot });
+            controller.mergeRemote({ id: p.id, kind: p.kind as ProfileKind }, sessions, { completeSources: complete, filter, sameServer, bot });
           }
         }
       } finally {
@@ -244,8 +288,10 @@ export function useHermesSessionSync(profiles: SyncProfile[], options: SessionSy
         setLastSyncAt(Date.now());
         setError(failure);
         setStatus(failure ? 'error' : 'idle');
+        finishAgents(active.filter((p) => p.kind !== 'hermes' && !agentFailed.includes(serverKey(p))).map(serverKey), failure);
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- finishAgents / agentImportEntries only read refs
     [controller, setCursor, sameServerAs]
   );
 
@@ -262,7 +308,6 @@ export function useHermesSessionSync(profiles: SyncProfile[], options: SessionSy
       outer: for (const p of list) {
         const filter = syncFilterOf(p);
         const sources = pagedSources(filter, sc);
-        const profile = { id: p.id, kind: 'hermes' as const };
         const sameServer = sameServerAs(p);
         // the default profile first, then the bots, each with its own cursors (see refresh)
         for (const bot of [undefined, ...botNames(botsNow(p))]) {
@@ -276,11 +321,7 @@ export function useHermesSessionSync(profiles: SyncProfile[], options: SessionSy
               cursors: cur,
               sources,
               fetch: (source, offset, limit) => client.list({ source, offset, limit }),
-              merge: (sessions) =>
-                controller
-                  .mergeRemote(profile, sessions, { filter, sameServer, bot })
-                  .added.map((id) => controller.get(id))
-                  .filter((c): c is ConversationMeta => !!c && !c.archived && inChatScope(c, sc)),
+              merge: (sessions) => mergeOlderPage(controller, p, sessions, { filter, sameServer, bot }, (c) => !c.archived && inChatScope(c, sc)),
             });
             setCursor(ck, r.cursors);
             if (r.added > 0) break outer;
@@ -322,9 +363,9 @@ export function useHermesSessionSync(profiles: SyncProfile[], options: SessionSy
 
   const profileFor = useCallback(
     (meta: ConversationMeta): SyncProfile | undefined => {
-      if (meta.profileKind !== 'hermes' || !meta.hermesSessionId) return undefined;
+      if (!isSyncedKind(meta.profileKind) || !meta.hermesSessionId) return undefined;
       const p = profiles.find((x) => x.id === meta.profileId);
-      return syncEnabled(p) && sessionsSupported(p) !== false ? p : undefined;
+      return syncEnabled(p) && p.kind === meta.profileKind && sessionsSupported(p) !== false ? p : undefined;
     },
     // supportVer: re-evaluate when a server turned out to be unsupported
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -338,7 +379,7 @@ export function useHermesSessionSync(profiles: SyncProfile[], options: SessionSy
       async rename(meta, title) {
         const p = profileFor(meta);
         // a bot's Bot Chat keeps its title on Hermes (Hermes Desktop finds the thread by it, bots/core.ts)
-        if (!p || !meta.hermesSessionId || meta.botChat) return;
+        if (!p || !meta.hermesSessionId || isBotPlace(meta)) return;
         try {
           await hermesSessions(withBot(p, meta.hermesProfile)).rename(meta.hermesSessionId, title);
         } catch (e) {
@@ -348,7 +389,7 @@ export function useHermesSessionSync(profiles: SyncProfile[], options: SessionSy
           throw Object.assign(new Error(sessionErrorText(e, tr)), typeof code === 'string' ? { code } : {});
         }
       },
-      canDeleteRemote: (meta) => !!profileFor(meta) && isAppConversation(meta) && !meta.botChat,
+      canDeleteRemote: (meta) => !!profileFor(meta) && isAppConversation(meta) && !isBotPlace(meta),
       async deleteRemote(meta) {
         const p = profileFor(meta);
         if (!p || !meta.hermesSessionId) throw new Error(tr('conversations.sync.notSynced'));
@@ -366,6 +407,7 @@ export function useHermesSessionSync(profiles: SyncProfile[], options: SessionSy
     [profileFor, controller, tr]
   );
 
+
   // bulk delete (Settings → "Alle Chats löschen" has no sync of its own) uses the current remote actions
   useEffect(() => {
     remoteActionsRef.current = remote;
@@ -374,7 +416,12 @@ export function useHermesSessionSync(profiles: SyncProfile[], options: SessionSy
     };
   }, [remote, remoteActionsRef]);
 
-  return { status, error, lastSyncAt, refresh, remote, older };
+  const listStateOut = useMemo<ListSyncState>(
+    () => (listState ? { ...listState, retry: () => void refresh(true) } : undefined),
+    [listState, refresh],
+  );
+
+  return { status, error, lastSyncAt, refresh, remote, older, listState: listStateOut };
 }
 
 /** paging cursors belong to one profile on one server and bot (a changed URL starts over; a bot's URL has /p/<bot>) */
@@ -464,7 +511,8 @@ export function useRemoteTranscript(conversationId: string | undefined, profile:
       setS((p) => (p.id === id ? { ...p, loading: false, error: undefined, done: true, remote, ack, revision: p.revision + 1 } : p));
     } catch (e) {
       if (isUnsupportedError(e)) setSessionsSupported(profile, false);
-      const error = isNotFoundError(e) ? tr('conversations.sync.sessionGone') : sessionErrorText(e, tr);
+      const gone = tr('conversations.sync.sessionGone');
+      const error = isNotFoundError(e) ? gone : sessionErrorText(e, tr);
       if (isNotFoundError(e)) controller.markRemoteLoaded(id, Date.now());
       setS((p) => (p.id === id ? { ...p, loading: false, error, done: true } : p));
     } finally {

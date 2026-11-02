@@ -38,6 +38,7 @@ const BODY = { title: 'Scout', job: 'Preise im Blick behalten', how: 'Kurz und s
 async function fakePlugin(o = {}) {
   const bots = [{ name: 'writer', title: 'Quill', description: 'Schreibt kurz', parked: false }, ...(o.extra ?? [])];
   const seen = [];
+  const allow = o.allow ?? {};
   const json = (res, status, body) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
   const url = await listen(async (req, res) => {
     let raw = '';
@@ -54,6 +55,27 @@ async function fakePlugin(o = {}) {
       const row = { name: body.title.toLowerCase(), title: body.title, description: body.job, color: body.color, app: true, template: body.template, secret: 'never' };
       bots.push(row);
       return json(res, 201, row);
+    }
+    if (o.old && /\/(allowlist|archive|restore)/.test(req.url)) return json(res, 404, { error: { code: 'not_found', message: 'not found' } });
+    if (o.rootOnly && /\/(allowlist|archive|restore)/.test(req.url)) return json(res, 404, { error: { code: 'feature_off', reason: 'not_root_profile', message: 'free text' } });
+    const al = /^\/bots\/([^/]+)\/allowlist(\/revoke)?$/.exec(req.url);
+    if (al) {
+      if (al[1] !== 'default' && !bots.some((x) => x.name === al[1])) return json(res, 404, { error: { code: 'unknown_bot' } });
+      const list = allow[al[1]] ??= [];
+      if (al[2]) {
+        const i = list.indexOf(body?.pattern);
+        if (i === -1) return json(res, 404, { error: { code: 'not_found', message: 'free text /home/someone' } });
+        list.splice(i, 1);
+      }
+      return json(res, 200, { name: al[1], entries: list.map((p) => (p.startsWith('rm') ? { pattern: p, description: 'recursive\ndelete', extra: 1 } : { pattern: p })), mode: 'manual', ...(o.omitted ? { omitted: o.omitted } : {}) });
+    }
+    const ar = /^\/bots\/([^/]+)\/(archive|restore)$/.exec(req.url);
+    if (ar && req.method === 'POST') {
+      const b = bots.find((x) => x.name === ar[1]);
+      if (!b) return json(res, 404, { error: { code: 'unknown_bot' } });
+      if (ar[2] === 'restore' && b.parked && !b.archived) return json(res, 409, { error: { code: 'parked_elsewhere', message: 'marker: /home/someone' } });
+      Object.assign(b, ar[2] === 'archive' ? { parked: true, archived: true } : { parked: false, archived: false });
+      return json(res, 200, { bot: { ...b, secret: 'never' } });
     }
     const m = /^\/bots\/([^/]+)$/.exec(req.url);
     if (m && req.method === 'GET') {
@@ -123,7 +145,7 @@ test('rights: off by default, owner switch, admin yes, device only with a grant;
   const { call, pair } = await bridge({ BRIDGE_STATE_DIR: tmp('bots-rights-') }, plugin);
   const phone = pair('Phone');
   let r = await call('/bridge/bots');
-  assert.deepEqual([r.status, r.data], [200, { create: { allowed: false, reason: 'owner_off' }, admin: true, limit: 50, count: 1 }]);
+  assert.deepEqual([r.status, r.data], [200, { create: { allowed: false, reason: 'owner_off' }, manage: { allowed: false, reason: 'owner_off' }, admin: true, limit: 50, count: 1, archived: [] }]);
   r = await call('/bridge/bots', { method: 'POST', body: BODY });
   assert.deepEqual([r.status, r.data.error.code, r.data.error.reason], [404, 'bots_unavailable', 'owner_off']);
   assert.equal(plugin.seen.filter((s) => s.method === 'POST').length, 0, 'never upstream while off');
@@ -257,6 +279,120 @@ test('edit: GET fields, PATCH three fields; default and unknown refused', async 
   assert.equal(r.status, 405);
 });
 
+test('GET /bridge/bots: manage (limit does not close it), archived only with manage or admin', async () => {
+  const plugin = await fakePlugin({ create: { available: false, reason: 'limit' }, extra: [{ name: 'old', title: 'Old One', color: '#112233', parked: true, archived: true, app: true }, { name: 'stuck', parked: true }] });
+  const { call, pair, ctx } = await bridge({ BRIDGE_BOTS_CREATE: 'on', BRIDGE_STATE_DIR: tmp('bots-manage-view-') }, plugin);
+  const phone = pair('Phone');
+  let r = await call('/bridge/bots');
+  assert.deepEqual([r.data.create, r.data.manage], [{ allowed: false, reason: 'limit' }, { allowed: true }]);
+  assert.deepEqual(r.data.archived, [{ name: 'old', label: 'Old One', color: '#112233' }], 'parked elsewhere is not "archived"');
+  r = await call('/bridge/bots', { auth: phone.token });
+  assert.deepEqual([r.data.manage, r.data.archived], [{ allowed: false, reason: 'device_forbidden' }, []]);
+  ctx.devices.setBots({ devices: { [phone.id]: true } });
+  r = await call('/bridge/bots', { auth: phone.token });
+  assert.deepEqual([r.data.manage, r.data.archived.map((b) => b.name)], [{ allowed: true }, ['old']]);
+  // the owner switch off: admin still sees the archived bots, manage closed
+  const off = await bridge({ BRIDGE_BOTS_CREATE: 'off' }, plugin);
+  r = await off.call('/bridge/bots');
+  assert.deepEqual([r.data.manage, r.data.archived.map((b) => b.name)], [{ allowed: false, reason: 'bridge_off' }, ['old']]);
+  assert.ok(!(await off.call('/bridge/profiles')).data.data.some((b) => b.name === 'old' || b.name === 'stuck'), 'parked bots never listed');
+});
+
+test('allowlist: any credential reads (default too), revoke needs bots.manage, answers projected', async () => {
+  const plugin = await fakePlugin({ allow: { default: ['rm -rf', 'git push', 'x'.repeat(201), 'bad\u0007ctl'], writer: ['curl'] } });
+  const { call, pair } = await bridge({ BRIDGE_STATE_DIR: tmp('bots-allow-') }, plugin);
+  const phone = pair('Phone');
+  let r = await call('/bridge/bots/default/allowlist', { auth: phone.token });
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.data, { entries: [{ pattern: 'rm -rf', description: 'recursive delete' }, { pattern: 'git push' }], omitted: 2, manage: { allowed: false, reason: 'owner_off' } });
+  assert.ok(!r.text.includes('extra') && !r.text.includes('manual'));
+  r = await call('/bridge/bots/writer/allowlist');
+  assert.deepEqual(r.data.entries, [{ pattern: 'curl' }]);
+  assert.equal(r.data.omitted, undefined, 'nothing left out: no omitted');
+  r = await call('/bridge/bots/ghost/allowlist');
+  assert.deepEqual([r.status, r.data.error.code], [404, 'unknown_bot']);
+  r = await call('/bridge/bots/Bad!/allowlist');
+  assert.deepEqual([r.status, r.data.error.code], [404, 'unknown_bot']);
+  r = await call('/bridge/bots/writer/allowlist', { method: 'POST', body: {} });
+  assert.equal(r.status, 405);
+  r = await call('/bridge/bots/writer/nope');
+  assert.deepEqual([r.status, r.data.error.code], [404, 'not_found']);
+  assert.equal((await call('/bridge/bots/default/allowlist', { auth: null })).status, 401);
+
+  // revoke: closed while the owner switch is off, and for a device without a grant
+  r = await call('/bridge/bots/default/allowlist/revoke', { method: 'POST', body: { pattern: 'git push' } });
+  assert.deepEqual([r.status, r.data.error.reason], [404, 'owner_off']);
+  await call('/bridge/bots/rights', { method: 'PUT', body: { enabled: true } });
+  r = await call('/bridge/bots/default/allowlist/revoke', { method: 'POST', body: { pattern: 'git push' }, auth: phone.token });
+  assert.deepEqual([r.status, r.data.error.code], [403, 'bots_forbidden']);
+  for (const body of [{}, { pattern: '' }, { pattern: 7 }, { pattern: 'x'.repeat(201) }, { pattern: 'a\nb' }, { pattern: 'a', more: 1 }]) {
+    r = await call('/bridge/bots/default/allowlist/revoke', { method: 'POST', body });
+    assert.equal(r.status, 400, JSON.stringify(body));
+  }
+  assert.equal(plugin.seen.filter((s) => s.url.endsWith('/revoke')).length, 0, 'nothing invalid reaches the plugin');
+  r = await call('/bridge/bots/default/allowlist/revoke', { method: 'POST', body: { pattern: 'git push' } });
+  assert.deepEqual([r.status, r.data], [200, { entries: [{ pattern: 'rm -rf', description: 'recursive delete' }], omitted: 2, manage: { allowed: true } }]);
+  r = await call('/bridge/bots/default/allowlist/revoke', { method: 'POST', body: { pattern: 'git push' } });
+  assert.deepEqual([r.status, r.data.error.code], [404, 'not_found']);
+  assert.ok(!r.text.includes('/home/someone'));
+  r = await call('/bridge/bots/default/allowlist/revoke', { method: 'GET' });
+  assert.equal(r.status, 405);
+
+  // an older plugin without the routes: unsupported, not an upstream error
+  const old = await bridge({ BRIDGE_BOTS_CREATE: 'on' }, await fakePlugin({ old: true }));
+  r = await old.call('/bridge/bots/default/allowlist');
+  assert.deepEqual([r.status, r.data.error.code, r.data.error.reason], [404, 'bots_unavailable', 'plugin_unsupported']);
+  r = await old.call('/bridge/bots/writer/archive', { method: 'POST' });
+  assert.deepEqual([r.status, r.data.error.reason], [404, 'plugin_unsupported']);
+  // the plugin's caps count, plus its root-only refusal
+  const capped = await bridge({ BRIDGE_BOTS_CREATE: 'on' }, await fakePlugin({ allow: { writer: ['curl'] }, omitted: 3 }));
+  assert.deepEqual((await capped.call('/bridge/bots/writer/allowlist')).data, { entries: [{ pattern: 'curl' }], omitted: 3, manage: { allowed: true } });
+  const side = await bridge({ BRIDGE_BOTS_CREATE: 'on' }, await fakePlugin({ create: { available: true }, rootOnly: true }));
+  r = await side.call('/bridge/bots/default/allowlist');
+  assert.deepEqual([r.status, r.data.error.code, r.data.error.reason], [404, 'bots_unavailable', 'not_root_profile']);
+});
+
+test('archive / restore: bots.manage, never default; archived bots leave /bridge/profiles, restored ones come back', async () => {
+  const plugin = await fakePlugin({ extra: [{ name: 'stuck', parked: true }] });
+  const { call, pair } = await bridge({ BRIDGE_BOTS_CREATE: 'on', BRIDGE_STATE_DIR: tmp('bots-archive-') }, plugin);
+  const phone = pair('Phone');
+  let r = await call('/bridge/bots/default/archive', { method: 'POST' });
+  assert.deepEqual([r.status, r.data.error.code], [403, 'default_bot']);
+  r = await call('/bridge/bots/writer/archive', { method: 'POST', auth: phone.token });
+  assert.deepEqual([r.status, r.data.error.code], [403, 'bots_forbidden']);
+  r = await call('/bridge/bots/writer/archive');
+  assert.deepEqual([r.status, r.headers.get('allow')], [405, 'POST']);
+
+  // an app-made bot in `list` mode (BRIDGE_PROFILES=writer) and the listed writer
+  r = await call('/bridge/bots', { method: 'POST', body: BODY });
+  assert.equal(r.status, 201);
+  assert.deepEqual((await call('/bridge/profiles')).data.data.map((b) => b.name), ['default', 'writer', 'scout']);
+  for (const name of ['writer', 'scout']) {
+    r = await call(`/bridge/bots/${name}/archive`, { method: 'POST' });
+    assert.equal(r.status, 200, name);
+    assert.equal(r.data.bot.name, name);
+    assert.deepEqual([r.data.bot.parked, r.data.bot.archived], [true, true]);
+    assert.ok(!r.text.includes('never'));
+  }
+  assert.deepEqual((await call('/bridge/profiles')).data.data.map((b) => b.name), ['default']);
+  assert.deepEqual([(await call('/p/scout/v1/models')).status, (await call('/p/writer/v1/models')).status], [404, 404]);
+  assert.deepEqual((await call('/bridge/bots')).data.archived.map((b) => b.name), ['writer', 'scout']);
+
+  r = await call('/bridge/bots/scout/restore', { method: 'POST' });
+  assert.deepEqual([r.status, r.data.bot], [200, { name: 'scout', label: 'Scout', description: BODY.job, color: '#3f7d6e', template: 'deals', parked: false, archived: false }]);
+  r = await call('/bridge/bots/writer/restore', { method: 'POST' });
+  assert.equal(r.status, 200);
+  assert.deepEqual((await call('/bridge/profiles')).data.data.map((b) => b.name), ['default', 'writer', 'scout']);
+  assert.notEqual((await call('/p/scout/v1/models')).data?.error?.code, 'unknown_profile');
+  assert.deepEqual((await call('/bridge/bots')).data.archived, []);
+
+  r = await call('/bridge/bots/stuck/restore', { method: 'POST' });
+  assert.deepEqual([r.status, r.data.error.code], [409, 'parked_elsewhere']);
+  assert.ok(!r.text.includes('/home/someone'));
+  r = await call('/bridge/bots/ghost/archive', { method: 'POST' });
+  assert.deepEqual([r.status, r.data.error.code], [404, 'unknown_bot']);
+});
+
 test('profiles: plugin bots per mode (auto adds, any lists them, list adds app bots, off ignores); parked never', () => {
   const rows = [{ name: 'scout', title: 'Scout', app: true, template: 'deals' }, { name: 'desk', title: 'Desk' }, { name: 'old', parked: true, app: true }];
   const home = tmp('bots-profiles-');
@@ -284,6 +420,18 @@ test('profiles: plugin bots per mode (auto adds, any lists them, list adds app b
   fs.writeFileSync(path.join(home, 'profiles', 'writer', 'profile.yaml'), "ui_meta:\n  hermes-ui-plus:\n    template: code\n  hermes-bots:\n    title: Quill\n");
   const fresh = createProfiles({ HERMES_HOME: home }, { home });
   assert.deepEqual(fresh.list().find((b) => b.name === 'writer'), { name: 'writer', default: false, label: 'Quill', model: 'm', template: 'code' });
+  // a gateway.parked marker hides a scanned profile; a parked plugin row hides a listed / scanned one
+  fs.mkdirSync(path.join(home, 'profiles', 'shelf'), { recursive: true });
+  fs.writeFileSync(path.join(home, 'profiles', 'shelf', 'gateway.parked'), 'hermes-ui-plus: archived\n');
+  const marked = createProfiles({ HERMES_HOME: home }, { home });
+  assert.deepEqual(marked.names(), ['writer']);
+  marked.setExternal([{ name: 'writer', parked: true }]);
+  assert.deepEqual(marked.names(), []);
+  const listed = createProfiles({ BRIDGE_PROFILES: 'writer', HERMES_HOME: path.join(home, 'missing') });
+  listed.setExternal([{ name: 'writer', parked: true }]);
+  assert.equal(listed.allowed('writer'), false);
+  listed.setExternal([{ name: 'writer' }]);
+  assert.equal(listed.allowed('writer'), true, 'restored');
   fs.rmSync(home, { recursive: true });
 });
 

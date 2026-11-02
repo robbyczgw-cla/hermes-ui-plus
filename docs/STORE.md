@@ -339,7 +339,7 @@ No accounts, no ads, no analytics, no tracking, and no server run by the develop
 
 GOOD TO KNOW (alpha)
 • You need your own self-hosted Hermes Agent (v0.21 or newer, open source). Without one, only the demo works.
-• There is no remote push notification on Android yet. You see a finished answer or an approval request when you open the app. While an answer is running, a notification shows its progress.
+• There is no remote push notification on Android yet. You see a finished answer, a reminder or an approval request when you open the app. While an answer is running, a notification shows its progress.
 • Expect rough edges and changes between alpha versions.
 
 HUI+ is an unofficial community client. It is not affiliated with, endorsed by, or supported by Nous Research.

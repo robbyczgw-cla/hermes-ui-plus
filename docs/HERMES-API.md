@@ -34,8 +34,10 @@ CORS (AS:797-800, 1470-1493, 811-826): **browsers get 403 for every request carr
 unless `platforms.api_server.extra.cors_origins` / `API_SERVER_CORS_ORIGINS` lists the origin (or `*`) –
 not set by default. Native apps send no `Origin`, so they are unaffected. Even when enabled:
 `Access-Control-Allow-Headers` is only `Authorization, Content-Type, Idempotency-Key, X-Hermes-Session-Id`
-(**no `X-Hermes-Session-Key`**) and there is **no `Access-Control-Expose-Headers`**, so a web page can neither send
-the session key nor read `X-Hermes-Session-Id`. => Web preview must use the mock server (or a bridge/proxy).
+(**no `X-Hermes-Session-Key`**), methods only `GET, POST, DELETE, OPTIONS` (**no `PATCH`**), and there is **no
+`Access-Control-Expose-Headers`**, so a web page can neither send the session key nor read `X-Hermes-Session-Id`. The app
+therefore leaves the session key out in a browser without the bridge (`omitSessionKey`): chat works, memory is not
+separated per channel. A rename (`PATCH`) stays impossible there. The bridge has none of these limits.
 Set `API_SERVER_CORS_ORIGINS` only if a web build must talk to Hermes directly; the bridge serves the web app on its
 own origin instead.
 
@@ -139,6 +141,13 @@ Telegram scope. The global files (MEMORY.md/USER.md/SOUL.md) are still part of t
   folds the same history; the app cuts it (and `[hui:note]` / `[hui:context]`) from what it shows. Hermes is told about
   live cards only by the constant system line `[hermes-ui-app] Features: live-cards. …` (sent on chats with the session
   API; older apps never send it, so Hermes writes plain checklists for them).
+- Quote / reply ("Antworten", `app/src/chat/quoteWire.ts`): a reply to an earlier message carries the quoted excerpt in front
+  of the typed text, one block per quote (at most three, in order):
+  `[hui:quote ref=<app message id> from=assistant|user]` / `> <excerpt, one line, ≤ 280 chars>` / `[/hui:quote]`. A Markdown
+  quote inside a tagged block, so a model without the skill reads it as a quotation; no tool call, no extra message. It is
+  part of the stored user message (every device shows the quote and can jump to the cited message; `ref` is a hint only,
+  the excerpt finds the message on another device). The app cuts the blocks from the bubble, the chat list preview, the
+  search and the auto title.
 
 ### Non-streaming response (`stream` false/omitted)
 `200 {"id","object":"chat.completion","created","model","choices":[{"index":0,"message":{"role":"assistant","content":"…","reasoning_content"?:"…"},"finish_reason":"stop|length|error"}],"usage":{prompt_tokens,completion_tokens,total_tokens},"hermes"?:{completed,partial,failed,error,error_code}}`.

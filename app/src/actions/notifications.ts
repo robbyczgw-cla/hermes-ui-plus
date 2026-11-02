@@ -79,8 +79,23 @@ export function ensureNotificationPermission(): Promise<NotificationPermission> 
 
 export type ScheduleResult = { ok: true; id: string } | { ok: false; reason: 'denied' | 'unsupported' | 'error' };
 
-/** Schedule one local notification at an absolute time. `data` tags it (string values; read back by listLocalNotifications). */
-export async function scheduleLocalNotification(o: { title: string; body?: string; at: Date; data?: Record<string, string> }): Promise<ScheduleResult> {
+/** Granted already? Never shows the system prompt (for notifications the user did not ask for just now). */
+export async function notificationPermissionGranted(): Promise<boolean> {
+  const N = await loadModule();
+  if (!N) return false;
+  try {
+    return (await N.getPermissionsAsync()).granted === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Schedule one local notification at an absolute time. `data` tags it (string values; read back by
+ * listLocalNotifications). `ask: false`: only with a permission granted before (no system prompt).
+ */
+export async function scheduleLocalNotification(o: { title: string; body?: string; at: Date; data?: Record<string, string>; ask?: boolean }): Promise<ScheduleResult> {
+  if (o.ask === false && !(await notificationPermissionGranted())) return { ok: false, reason: 'denied' };
   const perm = await ensureNotificationPermission();
   if (perm !== 'granted') return { ok: false, reason: perm };
   const N = await loadModule();

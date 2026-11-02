@@ -21,6 +21,16 @@ Requirements: a Chromium via playwright-core (resolved like the demo-video recor
 `PLAYWRIGHT_CORE`, a local install, or the npx cache) and enough free RAM for the web build when
 `dist/web` has to be produced.
 
+## A file through the web app the bridge serves
+
+```bash
+node scripts/ux-check/web-attach.mjs [--web-dir=dist/web] [--out=dist/web-attach]
+```
+
+Real browser, the default bridge with `BRIDGE_WEB_DIR`, a fake Hermes behind it, no model. Picks a file and checks that
+no content-policy violation occurs, that it uploads, that the turn carries its server path and that the bytes at that
+path are the file's. Pre-release step, see docs/RELEASING.md.
+
 ## Render sweep: every node type with missing data
 
 ```bash

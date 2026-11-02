@@ -290,6 +290,8 @@ export const ui = {
     estimate: 'Estimate',
     illustrative: 'Sample values',
     source: 'Source: {s}',
+    modelKnowledge: 'From model knowledge, no web source',
+    notRetrieved: 'Not in the search results: {s}',
     a11y: 'Data origin: {label}',
   },
   time: {

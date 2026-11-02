@@ -25,6 +25,16 @@ test('SKILL.md: missing details get a default card, not a question in prose', ()
   assert.match(skill, /Details missing[^\n]*sensible defaults[^\n]*offer to adjust; no questions in prose/);
 });
 
+// skill 0.8.0: rules the 11000-char budget had blocked (chat-reading quotes, 0.2.1 QA R4-06, personal QA one-shot P2)
+test('SKILL.md: reply quotes, weekdays from the calendar, one-shot reminders without schedule claims', () => {
+  assert.match(skill, /`\[hui:quote … from=assistant\|user\]`[^\n]*answer about exactly that part, never repeat the tags/);
+  assert.match(skill, /Weekday next to a date only if the calendar agrees[^\n]*Unsure: date alone\./);
+  const rule = skill.split('\n').find((l) => l.startsWith('- Reminders'));
+  assert.match(rule, /One-shot `prompt` \(its run has no chat context\): `Reply with only this line: ⏰ <the reminder in the user's language>`/);
+  assert.match(rule, /`\[Cronjob "…" output …\]` turn: relay the reminder only, no claims about its schedule \(never "still scheduled"\/"may fire again"\)/);
+  assert.ok(skill.length <= 10500, `SKILL.md ${skill.length} chars: keep headroom under the 11000 budget`);
+});
+
 test('reference examples: every example node shows English text only', () => {
   const bad = [];
   let nodes = 0;

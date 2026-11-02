@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { streamChatCore, respondApprovalCore, HermesError, isHermesError } from './stream.ts';
+import { buildRequest, streamChatCore, respondApprovalCore, HermesError, isHermesError } from './stream.ts';
 import { BOOTSTRAP_SYSTEM_MESSAGE } from './bootstrap.ts';
 import { userTimeZoneMessage } from './timeZone.ts';
 
@@ -665,4 +665,22 @@ test('an in-stream reconnect retains the original live server-clock anchor on an
   const event = events.find(e => e.type === 'approval');
   assert.ok(event?.type === 'approval');
   assert.ok(Math.abs(event.approval.serverNowMs! - (now + skew)) < 1200);
+});
+
+test('buildRequest: omitSessionKey leaves the header out (a browser cannot send it to Hermes directly), everything else stays', () => {
+  const direct = buildRequest({ ...conn, omitSessionKey: true }, 'hi', 's1');
+  assert.equal(direct.headers['X-Hermes-Session-Key'], undefined);
+  assert.equal(direct.headers['X-Hermes-Session-Id'], 's1');
+  assert.equal(buildRequest(conn, 'hi', 's1').headers['X-Hermes-Session-Key'], 'hermes-ui-dev');
+});
+
+test('buildRequest: a turn context goes last among the system messages, only when there is one', () => {
+  const conn = { baseUrl: 'http://x/v1', apiKey: 'k', bootstrap: false };
+  const body = (ctx?: string) => JSON.parse(buildRequest(conn, 'und morgen?', 's', undefined, true, undefined, true, undefined, '[time]', ctx).body).messages as { role: string; content: string }[];
+  const withCtx = body('[hermes-ui-bot-deliveries] x');
+  assert.deepEqual(withCtx.map((m) => m.content).slice(-3), ['[time]', '[hermes-ui-bot-deliveries] x', 'und morgen?']);
+  assert.deepEqual(withCtx.at(-2)?.role, 'system');
+  assert.equal(body().filter((m) => m.content.includes('deliveries')).length, 0);
+  // the constant lines in front stay byte-identical, with or without it
+  assert.deepEqual(body('[hermes-ui-bot-deliveries] x').slice(0, -2), body().slice(0, -1));
 });

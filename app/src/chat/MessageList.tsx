@@ -1,5 +1,6 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import {
+  AccessibilityInfo,
   Animated,
   FlatList,
   Platform,
@@ -9,6 +10,7 @@ import {
   type ListRenderItem,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
+  type ViewToken,
 } from 'react-native';
 import { Text } from '../ui/primitives/Text';
 import { useT } from '../i18n';
@@ -24,19 +26,27 @@ import { dragScrollStep } from './dragScroll';
 import { Icon } from './icons';
 import { MessageBoundary } from './MessageBoundary';
 import { AssistantMessage, UserMessage, type ActionHandler } from './MessageItem';
+import { createEvidenceDerive } from './answers/evidence';
+import { isLocalMessage } from './localMessages';
+import type { EvidenceView } from '../ui/components/modules/a/misc';
 import { createListDerive, createReversedList } from './listDerive';
 import { initialRenderCount } from './messageArea';
 import { perfWrap, usePerfOpen } from '../perf/react';
 import { createStick, STICK_AWAY_PX } from './stickToBottom';
 import { clearPill, pillStore, setNearBottom } from '../background/noticeState';
+import { flashMessage, useFlashed, useReply } from './replyContext';
+import { SwipeReply } from './SwipeReply';
+import { getReading, updateReading, useReadingLoaded } from './readingStore';
+import { seenCandidate, unreadAfter } from './readingState';
+import { restoreTarget } from './readingPosition';
 
 export type MessageListHandle = {
   /** also pins the bottom for the next content changes (stickToBottom.ts) */
   scrollToBottom(animated?: boolean): void;
   /** a send failed: show the error card unless the user scrolled away since the send */
   revealLatest(): void;
-  /** "Im Chat suchen": bring a message into the middle of the view */
-  scrollToMessage(id: string): void;
+  /** "Im Chat suchen" / a tapped quote: bring a message into the middle of the view (`flash`: mark it briefly) */
+  scrollToMessage(id: string, flash?: boolean): void;
 };
 
 type Props = {
@@ -50,18 +60,27 @@ type Props = {
   followups?: HuiNode | null;
   /** older messages of this chat were dropped by the storage cap → subtle marker at the top */
   historyTruncated?: boolean;
+  /**
+   * check data cards against the chat's tool calls (chat/answers/evidence.ts: no web result → a model-written source
+   * shows as "Aus Modellwissen"); off for the scripted demo
+   */
+  checkEvidence?: boolean;
   /** the user scrolled away from the newest message / came back (the live-card tray collapses meanwhile) */
   onAwayChange?: (away: boolean) => void;
 };
 
 const SHOW_JUMP_AT = STICK_AWAY_PX;
+/** how long a restored reading offset is re-applied while the rows up to it get measured */
+const RESTORE_MS = 1500;
 
 /**
  * Inverted FlatList: offset 0 == bottom, so a streaming answer stays pinned to the bottom for
  * free. When the user has scrolled up, `maintainVisibleContentPosition` (native) keeps the
  * visible content still while the newest message grows (web: browser scroll anchoring).
  */
-export const MessageList = forwardRef<MessageListHandle, Props>(function MessageList({ messages, onAction, onRetry, conversationId, voiceConn = null, followups = null, historyTruncated = false, onAwayChange }, ref) {
+const NO_EVIDENCE = new Map<string, EvidenceView | undefined>();
+
+export const MessageList = forwardRef<MessageListHandle, Props>(function MessageList({ messages, onAction, onRetry, conversationId, voiceConn = null, followups = null, historyTruncated = false, checkEvidence = false, onAwayChange }, ref) {
   const t = useTheme();
   const tr = useT();
   const list = useRef<FlatList<ChatMessage>>(null);
@@ -104,6 +123,9 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
     reformRef.current = key !== reformRef.current.key ? { src: set, key, set } : { ...reformRef.current, src: set };
     return reformRef.current.set;
   }, [derived]);
+  // what the chat's tools back per answer (honest evidence); same map while no verdict changes
+  const [deriveEvidence] = useState(createEvidenceDerive);
+  const evidence = useMemo(() => (checkEvidence ? deriveEvidence(messages, historyTruncated) : NO_EVIDENCE), [checkEvidence, deriveEvidence, messages, historyTruncated]);
   // Settings: Darstellung → Dichte / Chatbreite, Chat → Auto-Scroll
   const { prefs } = usePreferences();
   const maxWidth = chatMaxWidth(prefs);
@@ -137,13 +159,17 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
     dataRef.current = data;
   }, [data]);
   const retryRef = useRef(0);
-  const scrollToMessage = useCallback((id: string) => {
+  const scrollToMessage = useCallback((id: string, flash = false) => {
     const index = dataRef.current.findIndex((m) => m.id === id);
     if (index < 0) return;
     stick.release();
     retryRef.current = 0;
     list.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
-  }, [stick]);
+    if (flash) {
+      flashMessage(id);
+      AccessibilityInfo.announceForAccessibility(tr('chat.quote.jumped'));
+    }
+  }, [stick, tr]);
   // rows far away are not measured yet: jump close by the average height, then once more precisely
   const onScrollToIndexFailed = useCallback((info: { index: number; averageItemLength: number }) => {
     list.current?.scrollToOffset({ offset: Math.max(0, info.averageItemLength * info.index), animated: false });
@@ -188,19 +214,111 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
     [jumpAnim, conversationId],
   );
 
+  // ---- reading state per chat (readingStore.ts): the newest message seen (unread count on the jump button) and the
+  // reading position while scrolled up, both kept across chat switches and app restarts
+  const readingLoaded = useReadingLoaded();
+  const [seen, setSeen] = useState<string | undefined>(undefined);
+  // the stored position is applied (or there was none): only then does "at the bottom" overwrite the stored state
+  const [positioned, setPositioned] = useState(false);
+  // the end of the newest message is in the lower half of the view (then it counts as seen, see below)
+  const [endInView, setEndInView] = useState(true);
+  const viewable = useRef<string[]>([]);
+  const awayNow = useRef(false);
+  const convRef = useRef(conversationId);
+  useEffect(() => {
+    convRef.current = conversationId;
+  }, [conversationId]);
+  const saveAnchor = () => {
+    const ids = viewable.current;
+    if (ids.length) updateReading(convRef.current, { anchor: { id: ids[Math.floor(ids.length / 2)], offset: offset.current, count: dataRef.current.length } });
+  };
+  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken<ChatMessage>[] }) => {
+    viewable.current = viewableItems.filter((v) => v.isViewable && v.item).map((v) => v.item!.id);
+    if (awayNow.current) saveAnchor();
+  }).current;
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const restoreTries = useRef(0);
+  const restoreOffset = useRef<{ y: number; until: number } | null>(null);
+  const userMoved = useRef(false);
+  useEffect(() => {
+    if (positioned || !readingLoaded) return;
+    const saved = getReading(conversationId);
+    const target = userMoved.current ? null : restoreTarget(dataRef.current, saved);
+    // the anchor is not in the list yet: the history may still arrive (remote sync); a few renders, then give up
+    if (target === 'wait' && ++restoreTries.current <= 6) return;
+    // nothing stored (first open): everything in the chat counts as seen
+    setSeen(saved?.seen ?? seenCandidate(dataRef.current.slice().reverse()));
+    if (target && target !== 'wait') {
+      stick.release();
+      retryRef.current = 0;
+      awayNow.current = true;
+      setJump(true);
+      setEndInView(false);
+      const { index, offset: y } = target;
+      // the exact offset: the rows up to it are measured over the next frames, so it is applied again on each content
+      // change for a moment (until the user scrolls); otherwise the anchor message in the middle of the view
+      if (y !== undefined) restoreOffset.current = { y, until: Date.now() + RESTORE_MS };
+      requestAnimationFrame(() => {
+        if (userMoved.current) return;
+        if (y !== undefined) list.current?.scrollToOffset({ offset: y, animated: false });
+        else list.current?.scrollToIndex({ index, animated: false, viewPosition: 0.5 });
+      });
+    }
+    setPositioned(true);
+  }, [positioned, readingLoaded, data, conversationId, stick, lastId, setJump]);
+  // at the newest message: it is seen once it is complete (an answer still streaming when the user scrolls up counts
+  // as new until they come back down); scrolled up: the mark stays where the user left
+  const seenNow = seenCandidate(messages);
+  // "seen" = the end of the newest message is in the lower half of the view: a little above the bottom (the jump
+  // button already shows) with the answer's last lines on screen gives no "1 new answer" for it
+  useEffect(() => {
+    if (!positioned || !endInView || !seenNow) return;
+    setSeen(seenNow);
+    updateReading(conversationId, { seen: seenNow });
+  }, [positioned, endInView, seenNow, conversationId]);
+  // back at the newest message: no reading position to restore
+  useEffect(() => {
+    if (positioned && !showJump) updateReading(conversationId, { anchor: null });
+  }, [positioned, showJump, conversationId]);
+  const unread = showJump ? unreadAfter(messages, seen) : 0;
+
   const onScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
       const y = e.nativeEvent.contentOffset.y;
       offset.current = y;
       stick.scrolled(y, Date.now());
-      setJump(y > SHOW_JUMP_AT);
+      const away = y > SHOW_JUMP_AT;
+      awayNow.current = away;
+      setJump(away);
+      setEndInView(y < Math.max(SHOW_JUMP_AT, viewH.current / 2));
+      // the position once the scroll rests (wheel / fling: no drag-end event on web)
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saveTimer.current = away ? setTimeout(saveAnchor, 300) : null;
     },
     [setJump, stick],
   );
+  const onUserScroll = useCallback(() => {
+    userMoved.current = true;
+    restoreOffset.current = null;
+    stick.release();
+  }, [stick]);
+  // leaving the chat while scrolled up: the position of this moment
+  useEffect(() => () => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    if (awayNow.current) saveAnchor();
+  }, []);
+
+  const replyCtx = useReply();
+  const replyRef = useRef(replyCtx);
+  useEffect(() => {
+    replyRef.current = replyCtx;
+  }, [replyCtx]);
+  const canQuote = !!replyCtx?.canQuote;
 
   const renderItem = useCallback<ListRenderItem<ChatMessage>>(
     ({ item }) => (
-      <View style={item.role === 'user' ? itemStyles.user : itemStyles.assistant}>
+      <FlashRow id={item.id} style={item.role === 'user' ? itemStyles.user : itemStyles.assistant}>
+        <SwipeReply onReply={canQuote && quotable(item) ? () => replyRef.current?.reply(item.id) : undefined}>
         <MessageBoundary message={item}>
           {item.role === 'user' ? (
             <UserMessage message={item} />
@@ -216,12 +334,14 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
               followups={item.id === lastId ? followups : null}
               compareBefore={editPairs.get(item.id)}
               reformatted={reformatted.has(item.id)}
+              evidence={isLocalMessage(item) ? undefined : evidence.get(item.id)}
             />)
           )}
         </MessageBoundary>
-      </View>
+        </SwipeReply>
+      </FlashRow>
     ),
-    [lastId, firstAssistantId, onAction, onRetry, conversationId, voiceConn, followups, itemStyles, editPairs, reformatted],
+    [lastId, firstAssistantId, onAction, onRetry, conversationId, voiceConn, followups, itemStyles, editPairs, reformatted, canQuote, evidence],
   );
 
   // inverted list: the footer sits visually at the top, above the oldest stored message
@@ -257,8 +377,12 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
           contentH.current = h;
           // mvcp keeps the previously visible row still → re-pin the bottom right after a send
           if (stick.follow(Date.now())) list.current?.scrollToOffset({ offset: 0, animated: false });
+          const r = restoreOffset.current;
+          if (r && !userMoved.current && Date.now() < r.until && Math.abs(offset.current - r.y) > 1) list.current?.scrollToOffset({ offset: r.y, animated: false });
         }}
-        onScrollBeginDrag={stick.release}
+        onScrollBeginDrag={onUserScroll}
+        onViewableItemsChanged={onViewableItemsChanged}
+        viewabilityConfig={VIEWABILITY}
         scrollEventThrottle={32}
         maintainVisibleContentPosition={mvcp}
         onScrollToIndexFailed={onScrollToIndexFailed}
@@ -287,16 +411,21 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
             scrollToBottom(true);
           }}
           accessibilityRole="button"
-          accessibilityLabel={newAnswer ? tr('chat.list.newAnswer') : tr('chat.list.scrollToBottom')}
+          accessibilityLabel={unread > 0 ? tr('chat.list.jumpLatestUnread', { count: unread }) : newAnswer ? tr('chat.list.newAnswer') : tr('chat.list.scrollToBottom')}
+          testID="chat-jump-latest"
           style={({ pressed }) => [
             styles.jump,
-            newAnswer && styles.jumpPill,
+            (newAnswer || unread > 0) && styles.jumpPill,
             { backgroundColor: t.dark ? t.colors.surfaceAlt : t.colors.bg, borderColor: t.colors.borderControl },
             t.shadows.md,
             pressed && { opacity: 0.8 },
           ]}
         >
-          {newAnswer ? <Text style={[t.typography.caption, styles.pillText, { color: t.colors.text }]}>{tr('chat.list.newAnswer')}</Text> : null}
+          {unread > 0 ? (
+            <Text style={[t.typography.caption, styles.pillText, { color: t.colors.text }]}>{tr('chat.list.newAnswers', { count: unread })}</Text>
+          ) : newAnswer ? (
+            <Text style={[t.typography.caption, styles.pillText, { color: t.colors.text }]}>{tr('chat.list.newAnswer')}</Text>
+          ) : null}
           <Icon name="arrowDown" size={18} color={t.colors.text} strokeWidth={2} />
         </Pressable>
       </Animated.View>
@@ -307,6 +436,29 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
 });
 
 const keyOf = (m: ChatMessage) => m.id;
+const VIEWABILITY = { itemVisiblePercentThreshold: 10, minimumViewTime: 250 };
+
+/** a finished message with something to quote ("Antworten" by swipe; the menus check the text themselves) */
+const quotable = (m: ChatMessage) =>
+  m.status !== 'streaming' && m.status !== 'error' && !m.sendPending && !m.sendQueued && !isLocalMessage(m) && !!m.text.trim();
+
+/** a row that flashes briefly after a jump to it (a tapped quote) */
+function FlashRow({ id, style, children }: { id: string; style: object; children: ReactNode }) {
+  const t = useTheme();
+  const on = useFlashed(id);
+  const [anim] = useState(() => new Animated.Value(0));
+  useEffect(() => {
+    if (!on) return;
+    anim.setValue(1);
+    Animated.timing(anim, { toValue: 0, duration: 1600, delay: 300, useNativeDriver: Platform.OS !== 'web' }).start();
+  }, [on, anim]);
+  return (
+    <View style={style}>
+      {on ? <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.flash, { backgroundColor: t.colors.accentSoft, opacity: anim }]} /> : null}
+      {children}
+    </View>
+  );
+}
 
 // FlatList.js has `strictMode` (memoizes the item renderer, react-native/Libraries/Lists/FlatList.js), the legacy
 // typings miss it
@@ -329,5 +481,6 @@ const styles = StyleSheet.create({
   // "Neue Antwort ↓": the same button, widened with a label
   jumpPill: { width: 'auto', flexDirection: 'row', gap: 6, paddingHorizontal: 14 },
   pillText: { fontWeight: '600' },
+  flash: { borderRadius: 12, marginHorizontal: -8 },
   historyMarker: { textAlign: 'center', paddingTop: 14, paddingBottom: 4, paddingHorizontal: 24 },
 });

@@ -48,7 +48,7 @@ const KIND_TONE: Record<ProfileKind, 'accent' | 'neutral' | 'success' | 'warning
   hermes: 'accent',
   demo: 'neutral',
 };
-import type { OlderSessions, RemoteActions } from './hermesSync';
+import type { ListSyncState, OlderSessions, RemoteActions } from './hermesSync';
 import { useEscapeToClose } from '../ui/lib/useEscapeToClose';
 
 
@@ -78,6 +78,11 @@ export type ConversationListProps = {
    * by the "Ältere Chats laden" row at the bottom. Omit = no paging.
    */
   older?: OlderSessions;
+  /**
+   * chat-list sync with agent servers (`useHermesSessionSync(...).listState`): a status row above the list while the
+   * first sync runs, when it failed (retry) or when the server cannot sync the list (it stays on this device)
+   */
+  listState?: ListSyncState;
   /** bump to focus the search field (⌘/Ctrl+K) */
   searchFocus?: number;
   /** row above the search field (wide-screen sidebar: collapse button) */
@@ -96,7 +101,7 @@ type Dialog =
   | { kind: 'notice'; meta: ConversationMeta; text: string }
   | null;
 
-export function ConversationList({ onSelect, onNewChat, onDeleted, activeId, profileName, safeArea = true, onOpenSettings, onOpenLibrary, remote, older, searchFocus, header, onArchived, bots }: ConversationListProps) {
+export function ConversationList({ onSelect, onNewChat, onDeleted, activeId, profileName, safeArea = true, onOpenSettings, onOpenLibrary, remote, older, listState, searchFocus, header, onArchived, bots }: ConversationListProps) {
   const t = useTheme();
   const tr = useT();
   const api = useConversations();
@@ -215,7 +220,9 @@ export function ConversationList({ onSelect, onNewChat, onDeleted, activeId, pro
   const surfaceBg = useSurfaceBackground(t.colors.bg);
   const searching = query.trim().length > 0;
   // empty state: first line is the title, the rest a hint ("No chats yet.\nStart with “New chat”.")
-  const [emptyTitle, ...emptyRest] = (searching ? tr('conversations.list.noHits') : tr('conversations.list.empty')).split('\n');
+  // the first sync with an agent server is still bringing the chats of the other devices: no "no chats yet"
+  const emptyText = searching ? tr('conversations.list.noHits') : tr('conversations.list.empty');
+  const [emptyTitle, ...emptyRest] = emptyText.split('\n');
   const emptyBody = emptyRest.join(' ').trim();
   // older chats on the server: not while searching / selecting (the row would page for results nobody sees)
   const pager = older?.available && !hits && !sel.active ? older : undefined;
@@ -425,6 +432,7 @@ export function ConversationList({ onSelect, onNewChat, onDeleted, activeId, pro
   );
 }
 
+
 /** "Ältere Chats laden" at the end of the list (pages through older Hermes sessions, sessionPaging.ts) */
 function OlderRow({ loading, error, onPress }: { loading: boolean; error?: string; onPress: () => void }) {
   const t = useTheme();
@@ -493,7 +501,7 @@ function Row({
   // the default bot's thread before its transcript is here: what it holds instead of "…"
   const sub = meta.botChat && meta.preview === '…' && !snippet ? tr('bots.roster.threadHint') : localizePreview(snippet ?? meta.preview, tr);
   // the default bot's thread is "Hermes" (its Hermes title "Bot Chat" is a convention, not a name)
-  const title = meta.botChat ? tr('bots.roster.defaultName') : displayTitle(meta.title, tr('conversations.list.newChat'));
+  const title = meta.botChat ? tr('bots.roster.defaultName') : meta.botChatRetired ? tr('bots.roster.retiredName') : displayTitle(meta.title, tr('conversations.list.newChat'));
   // "neue Antwort" until the chat is opened (background/noticeState); "läuft" while its turn streams
   const unreadSet = useSyncExternalStore(unreadStore.subscribe, unreadStore.get, unreadStore.get);
   const unread = !active && unreadSet.has(meta.id);
@@ -600,6 +608,8 @@ function Dialogs({
   useEscapeToClose(!!dialog, close); // web: Esc closes the menu / dialog before the drawer
   if (!dialog) return null;
   const m = dialog.meta;
+  const removeLocalLabel = tr('conversations.delete.removeLocal');
+  const remoteLabel = tr('conversations.delete.remoteAction');
 
   const item = (label: string, icon: 'edit' | 'pin' | 'trash' | 'select' | 'archive', onPress: () => void, danger = false) => (
     <Pressable
@@ -675,11 +685,11 @@ function Dialogs({
                             : 'conversations.delete.sourceOther',
                       ),
                     })
-                  : tr('conversations.delete.inHermes', { title: m.title, remoteAction: tr('conversations.delete.remoteAction') })}
+                    : tr('conversations.delete.inHermes', { title: m.title, remoteAction: remoteLabel })}
               </HText>
               <View style={styles.btnCol}>
                 <Button
-                  label={tr('conversations.delete.removeLocal')}
+                  label={removeLocalLabel}
                   numberOfLines={2}
                   disabled={busy}
                   onPress={() => {
@@ -689,7 +699,7 @@ function Dialogs({
                 />
                 {canDeleteRemote(m) ? (
                   <Button
-                    label={busy ? tr('conversations.delete.remoteBusy') : tr('conversations.delete.remoteAction')}
+                    label={busy ? tr('conversations.delete.remoteBusy') : remoteLabel}
                     variant="primary"
                     tone="seal"
                     numberOfLines={2}
@@ -825,6 +835,9 @@ const styles = StyleSheet.create({
   archiveHead: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, marginTop: 12, marginHorizontal: 6, paddingHorizontal: 12 },
   empty: { alignItems: 'center', gap: 10, paddingTop: 48, paddingHorizontal: 24 },
   olderWrap: { paddingHorizontal: 12, paddingTop: 8, gap: 6 },
+  syncRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 6 },
+  syncText: { flex: 1 },
+  syncRetry: { paddingHorizontal: 12, paddingVertical: 4 },
   olderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 40, paddingVertical: 6, paddingHorizontal: 16 },
   footer: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, minHeight: 52, paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth },
   scrim: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },

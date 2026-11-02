@@ -288,6 +288,8 @@ export const ui = {
     estimate: 'Schätzung',
     illustrative: 'Beispielwerte',
     source: 'Quelle: {s}',
+    modelKnowledge: 'Aus Modellwissen, ohne Webquelle',
+    notRetrieved: 'Nicht in den Suchergebnissen: {s}',
     a11y: 'Datenherkunft: {label}',
   },
   time: {

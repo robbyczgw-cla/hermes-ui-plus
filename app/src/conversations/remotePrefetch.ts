@@ -19,7 +19,7 @@ import type { ChatMessage } from '../hermes/types.ts';
 import { sortByRecency } from './group.ts';
 import { isDraft } from './indexReducer.ts';
 import { inChatScope, type ChatScope } from './chatScope.ts';
-import { applyRemoteSnapshot, remoteLoadedAt, sessionAllowed, SNAPSHOT_SAVE, type SyncFilter } from './remoteSync.ts';
+import { applyRemoteSnapshot, isSyncedKind, remoteLoadedAt, sessionAllowed, SNAPSHOT_SAVE, type SyncFilter } from './remoteSync.ts';
 import type { ConversationMeta } from './types.ts';
 
 /** transcripts fetched ahead per run (the most recent chats in the drawer) */
@@ -52,12 +52,12 @@ export function remotePrefetchCandidates(items: readonly ConversationMeta[], o: 
   if (limit <= 0) return [];
   const pool = items.filter(
     (c) =>
-      c.profileKind === 'hermes' &&
+      isSyncedKind(c.profileKind) &&
       c.profileId === o.profileId &&
       !c.archived &&
       !isDraft(c) &&
       isUncachedRemote(c) &&
-      sessionAllowed(c.remote?.source, c.hermesSessionId, o.filter) &&
+      sessionAllowed(c.remote?.source, c.hermesSessionId, o.filter, c.profileKind) &&
       inChatScope(c, o.scope ?? 'all') &&
       !o.exclude?.(c.id) &&
       !o.skip?.(c.id),

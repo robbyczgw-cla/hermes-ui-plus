@@ -136,5 +136,22 @@ class InstallUpdate(unittest.TestCase):
         self.assertEqual(manifest_version(self.home), current_version())
 
 
+class VersionCoherence(unittest.TestCase):
+    """One plugin version: the manifest install.py compares and the VERSION /library/config reports (both are edited
+    by hand and merged across release lines)."""
+
+    def test_manifest_and_code_agree(self) -> None:
+        sys.path.insert(0, str(PLUGIN))
+        try:
+            from hermes_ui_plus.config import VERSION
+        finally:
+            sys.path.remove(str(PLUGIN))
+        self.assertEqual(VERSION, current_version())
+
+    def test_not_older_than_the_last_released_plugin(self) -> None:
+        # 0.2.1 shipped with HUI+ 0.2.2; an older copy would be "updated" over a newer install (install.py compares)
+        self.assertGreaterEqual(tuple(int(x) for x in current_version().split(".")), (0, 2, 1))
+
+
 if __name__ == "__main__":
     unittest.main()

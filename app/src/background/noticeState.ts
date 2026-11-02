@@ -34,6 +34,8 @@ export function createStore<T>(initial: T) {
 
 export const shellState = {
   openConversationId: null as string | null,
+  /** the Bot Chat merged into the open bot's screen (bots/useBotFeed.ts): news there is seen, not unread */
+  openBotChatId: null as string | null,
   chatFocused: true,
   /** conversation id → list scrolled to the newest message */
   nearBottom: new Map<string, boolean>(),

@@ -1,6 +1,6 @@
 # Privacy policy
 
-_Last updated: 2026-10-16. Applies to the Hermes Interactive UI+ apps ("HUI+" on the home screen, "HUI+ for Hermes Agent" in the stores; Android, iOS, web, macOS) and the Hermes UI+ bridge._
+_Last updated: 2026-11-01. Applies to the Hermes Interactive UI+ apps ("HUI+" on the home screen, "HUI+ for Hermes Agent" in the stores; Android, iOS, web, macOS) and the Hermes UI+ bridge._
 
 Hermes Interactive UI+ is an unofficial, open-source community client for the Hermes Agent. It is not affiliated with Nous Research.
 
@@ -44,6 +44,8 @@ The bridge prints which of these are active when it starts. Their privacy polici
 The bridge's logs contain routing metadata, not message content, at the default log level. You control the retention of uploaded files on your bridge (7 days by default).
 
 Routines: for each bot on which you turn routines on, the bridge keeps a copy of every finished run's result (routine name, time, status, the final answer up to 16 KB, any error text) in its state directory (`routines-inbox.json`, readable only by the bridge's user). Entries are deleted after 30 days, and the file holds at most 300 entries; the operator can lower or raise both limits. The copy stays on your server and goes nowhere else. A push about a new result carries no result text unless previews are on.
+
+Bot timeline (Hermes v0.22.3 and newer): so that a bot knows what Hermes delivered to it last (a reminder, a routine result), the app sends up to three of those deliveries from the past three days with your message to your Hermes, as a system message. Hermes does not show it in the chat history, the title or the session list, but it keeps it in its own database (`state.db`, table `session_admissions`) like every system message, until the bot's chat session is deleted. It stays on your server and goes only to the model providers you configured in Hermes, as part of that turn.
 
 ## Push notifications
 

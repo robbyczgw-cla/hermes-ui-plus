@@ -347,6 +347,9 @@ $INSTALL_STEPS
 <p><small>Nur im Tailnet erreichbar.</small></p>
 </body></html>
 HTML
+# the app embeds the compressed files of $WEB_OUT byte for byte: the gate scans them by content and skips only exact copies
+# of clean ones in the binary, reporting each (docs/LEAK-GUARD.md "Embedded assets")
+export HUI_EMBEDDED_ASSETS="$WEB_OUT"
 if [ "$FLAVOR" = hermes ]; then
   t "release gate (unpacked app, download page)"
   APPX="$(mktemp -d "${TMPDIR:-/tmp}/hui-desktop-app.XXXXXX")"

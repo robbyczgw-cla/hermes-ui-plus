@@ -248,6 +248,7 @@ export const settings = {
     sessionKey: 'Session-Key',
     sessionKeyPh: 'optional, z. B. hermes-ui',
     hermesFootnote: 'Session-Key (X-Hermes-Session-Key) trennt das Gedächtnis pro Kanal. Modell leer lassen, um den Standard des Servers zu nutzen.',
+    sessionKeyWebDirect: 'Im Browser ohne Bridge wird der Session-Key nicht gesendet: Hermes erlaubt diesen Header aus dem Browser nicht, das Gedächtnis wird hier also nicht pro Kanal getrennt.',
     savedAs: 'Gespeichert wird: {url}',
     advanced: 'Erweitert',
     bridge: 'UI-Bridge',

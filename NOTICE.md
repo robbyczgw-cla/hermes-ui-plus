@@ -85,6 +85,16 @@ SOFTWARE.
   needs no network access to morph the DOM. The file header names the source.
 - License: BSD 2-Clause "Simplified" License. The license text is available in the upstream repository.
 
+## PDF.js (Apache-2.0)
+
+- Project: https://github.com/mozilla/pdf.js (npm `pdfjs-dist`, version pinned in `app/package.json`)
+- Copyright Mozilla Foundation and the PDF.js contributors
+- Used for: the in-app PDF viewer of the web and desktop app (`app/src/files/PdfViewer.tsx`). The unmodified browser
+  build, its worker and data files (standard fonts, CMaps, wasm decoders, ICC profile) are copied into the web export
+  as `pdfjs/` by `scripts/web-pdfjs.mjs` and loaded from the app's own origin only when a PDF is opened.
+- License: Apache License 2.0, full text shipped next to the files (`pdfjs/LICENSE`); the bundled wasm decoders
+  (OpenJPEG, JBIG2, QCMS) carry their own licence files in `pdfjs/wasm/`.
+
 ## Fonts: Atkinson Hyperlegible Next, Gloock, JetBrains Mono (SIL OFL 1.1)
 
 - Atkinson Hyperlegible Next: https://github.com/googlefonts/atkinson-hyperlegible-next, Copyright 2020-2024 The

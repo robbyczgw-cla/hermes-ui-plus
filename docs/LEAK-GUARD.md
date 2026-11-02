@@ -137,6 +137,25 @@ The CLI prints `N code-signature file(s) skipped` so the allowance stays visible
 `isSignaturePath`, `machoSignatureRanges`, `maskSignatures` in `scripts/leak-guard.mjs` (tests with a synthetic
 Mach-O in `scripts/leak-guard.test.mjs`, flavor-guard case in `scripts/flavor-guard.test.mjs`).
 
+### Embedded assets (desktop apps)
+
+A desktop app embeds the web bundle's compressed files (`.br`, `.gz`) byte for byte in its binary. In a `--path` scan the
+`.br`/`.gz` files are checked by their decompressed content, because compressed bytes are noise in which a short term shows
+up by chance; the same bytes inside a binary used to be scanned raw, so one clean bundle could fail every desktop build of
+a commit with a hit that no rebuild changes.
+
+Pass the web dir the app was built from with `--assets WEBDIR` (`leak-guard.mjs --path`, `flavor-guard.mjs --output`,
+`scan-artifact.sh`) or `HUI_EMBEDDED_ASSETS=WEBDIR` (the desktop build scripts set it for their release gate). In that run:
+
+- every `.br`/`.gz` file of the web dir is scanned by its decompressed content; a finding there fails the run (reported as
+  `assets:<file>!brotli` / `!gunzip`) and the file is never trusted;
+- a file that is clean and at least 64 KB long is a trusted blob. In the scanned binary, only the interior of an exact
+  byte-for-byte copy of a trusted blob is not scanned as raw bytes (16 bytes at each end stay scanned);
+- everything else in the binary is scanned raw as before: plain text next to the blob, a blob that differs by one byte, a
+  short blob;
+- every skipped range is printed (`embedded asset skipped: <file> @<offset> +<length> bytes (byte-identical to <asset> …)`),
+  never silent. Without a web dir nothing is skipped. There is no allow-list entry for this.
+
 ## Tests
 
 `node --test scripts/leak-guard.test.mjs` (also run by `scripts/check.sh all`). Synthetic samples only, assembled at

@@ -36,7 +36,7 @@
 <div class="frame bar">
 <a class="brand" href="/"><img src="/icon.svg" alt="" width="34" height="34"><span class="brand-text"><span>HUI<span class="plus">+</span></span><span class="brand-sub">Hermes Interactive UI+</span></span></a>
 <nav aria-label="Main"><ul>
-<li><a href="/#new">New in 0.2</a></li>
+<li><a href="/#new">New in 0.3</a></li>
 <li><a href="/#features">Features</a></li>
 <li><a href="/#demos">Demos</a></li>
 <li><a href="/#platforms">Platforms</a></li>
@@ -56,7 +56,7 @@
 <a class="btn-text" href="#agent-setup">Set up with your agent <span aria-hidden="true">→</span></a>
 </p>
 <ul class="meta" aria-label="Release">
-<li>Alpha 0.2</li><li>Open source</li><li>Unofficial</li><li class="meta-p">Android</li><li class="meta-p">Web</li><li class="meta-p">macOS</li><li class="meta-p">Linux</li>
+<li>Alpha 0.3</li><li>Open source</li><li>Unofficial</li><li class="meta-p">Android</li><li class="meta-p">Web</li><li class="meta-p">macOS</li><li class="meta-p">Linux</li>
 </ul>
 <p class="req">For people who run <a href="https://github.com/NousResearch/hermes-agent">Hermes Agent</a> (v0.21 or newer) and talk to it through Telegram or the terminal today. You run a small bridge next to it.</p>
 </div>
@@ -98,16 +98,18 @@
 <div class="frame film-grid">
 <header class="film-head">
 <span class="no" aria-hidden="true">№ 01</span>
-<h2 id="h-new">New in 0.2</h2>
-<p>Your Hermes bots as contacts, each with its own chat, and approvals that name the bot. Lists that Hermes keeps up to date over many messages. Reminders that reach you, and a look at what your agent knows and can do. 62 seconds, with voice and music.</p>
-<p class="credits">Recorded in the app's offline demo with invented content; some features need the bridge, the hermes-ui skill or the plugin on your server (<a href="https://github.com/robbyczgw-cla/hermes-ui-plus/releases/tag/v0.2.2">release notes</a>). Voice and music made with ElevenLabs. Also as a <a href="/media/new-in-02-vertical.mp4">vertical video (MP4)</a>.</p>
+<h2 id="h-new">New in 0.3</h2>
+<p>One screen with one timeline for each of your bots. Lists and plans that Hermes keeps up to date now show what became of each of your changes. Cards say when their facts are model knowledge. Reply to a single message, and every chat keeps its draft and your reading position.</p>
+<ul class="new-list">
+<li><strong>Bots, one timeline each.</strong> What Hermes delivers (reminders, routine results) and your conversation with the bot sit in one place, in time order (Hermes v0.22.3 and newer).</li>
+<li><strong>Know what a bot is doing.</strong> A card shows its current steps, with Stop, also for a turn started on another device. “About” covers its memory, skills, routines and what it may always do.</li>
+<li><strong>Changes that report back.</strong> Under your message: “Saved in v4”, or “Hermes then did it differently” with a button to restore your edit.</li>
+<li><strong>Honest sources.</strong> “From model knowledge, no web source” instead of a source the model made up.</li>
+<li><strong>Reply, drafts, reading position.</strong> Quote one message, come back to the same line, keep what you were typing.</li>
+<li><strong>Bot groups (beta, off by default).</strong> 2 to 6 of your bots in one chat, started by the server owner.</li>
+</ul>
+<p class="credits">Some features need the bridge, the hermes-ui skill or the plugin on your server (<a href="https://github.com/robbyczgw-cla/hermes-ui-plus/releases/tag/v0.3.0">release notes</a>). A video for this version is not recorded yet.</p>
 </header>
-<figure class="screen-169">
-<video controls playsinline preload="none" poster="/media/new-in-02-poster.webp" width="1920" height="1080" aria-label="What is new in 0.2, 62 seconds, with voice and music">
-<source src="/media/new-in-02.mp4" type="video/mp4">
-<a href="/media/new-in-02.mp4">Download the video (MP4)</a>
-</video>
-</figure>
 </div>
 </section>
 
@@ -151,7 +153,7 @@
 <div class="note"><img src="/icon.svg" alt="" width="30" height="30"><p><span class="note-app">HUI+ <span>now</span></span><strong>Your answer is ready</strong>Lisbon long weekend: the plan, a budget and 6 sources.</p></div>
 </div>
 <h3>Leave the app</h3>
-<p>Switch chats or lock the phone: Hermes keeps working, and the finished answer waits for you. The web app sends a push notification. Android keeps running in the background, with no remote push in 0.2: no notification while the app is closed.</p>
+<p>Switch chats or lock the phone: Hermes keeps working, and the finished answer waits for you. The web app sends a push notification. Android keeps running in the background, with no remote push in 0.3: no notification while the app is closed.</p>
 </li>
 <li class="feat f-answers">
 <div class="app pick">
@@ -437,13 +439,13 @@
 <header class="sec-head">
 <span class="no" aria-hidden="true">№ 05</span>
 <h2 id="h-platforms">Where it runs</h2>
-<p class="sec-lead">The current version is 0.2.2, still an early release. Expect rough edges. It is not in the public Google Play Store or the Apple App Store yet.</p>
+<p class="sec-lead">The current version is 0.3.0, still an early release. Expect rough edges. It is not in the public Google Play Store or the Apple App Store yet.</p>
 <p><a class="btn btn-ink" href="https://github.com/robbyczgw-cla/hermes-ui-plus/releases/latest">Download the latest release</a></p>
 </header>
 <div class="receipt"><div class="rc-paper">
-<p class="rc-head"><span>HUI+</span><span>0.2.2</span></p>
+<p class="rc-head"><span>HUI+</span><span>0.3.0</span></p>
 <ul class="rc-rows">
-<li><h3>Android</h3><p>Signed APK from <a href="https://github.com/robbyczgw-cla/hermes-ui-plus/releases/latest">GitHub Releases</a>, or add the repository to <a href="https://obtainium.imranr.dev">Obtainium</a> for automatic updates (turn on “Include prereleases”). Google Play: internal testing only, not public yet. Android 7.0 or newer, 64-bit ARM (it does not start on x86 emulators or x86 ChromeOS; use the web app there). No remote push in 0.2: no notification while the app is closed.</p><span class="stamp ">Alpha</span></li>
+<li><h3>Android</h3><p>Signed APK from <a href="https://github.com/robbyczgw-cla/hermes-ui-plus/releases/latest">GitHub Releases</a>, or add the repository to <a href="https://obtainium.imranr.dev">Obtainium</a> for automatic updates (turn on “Include prereleases”). Google Play: internal testing only, not public yet. Android 7.0 or newer, 64-bit ARM (it does not start on x86 emulators or x86 ChromeOS; use the web app there). No remote push in 0.3: no notification while the app is closed.</p><span class="stamp ">Alpha</span></li>
 <li><h3>Web app (PWA)</h3><p>Prebuilt bundle from GitHub Releases, served by your own bridge, installable to the home screen. <a href="https://github.com/robbyczgw-cla/hermes-ui-plus/blob/main/docs/WEB-APP.md">Install guide</a>.</p><span class="stamp ">Alpha</span></li>
 <li><h3>macOS</h3><p>Native desktop app for Apple Silicon (macOS 13+) from <a href="https://github.com/robbyczgw-cla/hermes-ui-plus/releases/latest">GitHub Releases</a> (DMG), signed and notarized: menus and shortcuts, approval actions in notifications, dock badge, menu bar mode, Touch ID lock. See the <a href="https://github.com/robbyczgw-cla/hermes-ui-plus/blob/main/desktop/README.md">desktop notes</a>.</p><span class="stamp st-ink">Notarized</span></li>
 <li><h3>Linux</h3><p>Desktop app as AppImage or .deb (x86_64, Ubuntu 22.04 / Debian 12 or newer) from <a href="https://github.com/robbyczgw-cla/hermes-ui-plus/releases/latest">GitHub Releases</a>, see the <a href="https://github.com/robbyczgw-cla/hermes-ui-plus/blob/main/desktop/README.md">desktop notes</a>. Still alpha.</p><span class="stamp ">Alpha</span></li>

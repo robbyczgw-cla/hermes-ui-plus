@@ -12,9 +12,10 @@ import { createUserTurnMatcher, isRemoteMessageId, mergeAssistantDetails, normTe
 import { isFinalAnswer, isRecoverable, recoveredMessage } from '../hermes/recovery.ts';
 import { queuedMayMatch, sentFromQueued } from '../hermes/pendingSend.ts';
 import type { ConversationMeta, ProfileRef, RemoteInfo } from './types.ts';
-import { DEFAULT_TITLE, PREVIEW_MAX, TITLE_MAX } from './types.ts';
+import { DEFAULT_TITLE, isBotPlace, PREVIEW_MAX, TITLE_MAX } from './types.ts';
+import { isBotTalkSessionId } from '../bots/timeline.ts';
 import { makeTitle } from './title.ts';
-import { messagesSignature } from './messages.ts';
+import { linkLabels, messagesSignature } from './messages.ts';
 import { botOf } from '../hermes/bots.ts';
 
 /**
@@ -30,14 +31,28 @@ export type SyncFilter = { foreign?: boolean; cron?: boolean };
 
 /** Prefix of the session ids the app creates (`hui-<hex>`, conversations/ids.ts newSessionIdFor('hermes')). */
 export const APP_SESSION_PREFIX = 'hui-';
+
+/**
+ * Profile kinds whose chats live in a server-side session list with this API, and the prefix of the session ids the
+ * app creates for them (conversations/ids.ts newSessionIdFor). Only ids with that prefix count as the app's own chats.
+ */
+const SYNC_PREFIX: Readonly<Record<string, string>> = {
+  hermes: APP_SESSION_PREFIX,
+};
+
+/** Does this profile kind take part in the session sync? */
+export function isSyncedKind(kind: string | undefined): boolean {
+  return !!kind && kind in SYNC_PREFIX;
+}
 /** Sources listed with `foreign` on (besides the app's own api_server sessions). */
 export const FOREIGN_SOURCES = ['telegram', 'cli'];
 
 /** Sources listed in the drawer by default: the app's own sessions only. */
 export const DEFAULT_SYNC_SOURCES = ['api_server'];
 
-export function isAppSessionId(id: string | undefined | null): boolean {
-  return !!id && id.startsWith(APP_SESSION_PREFIX);
+export function isAppSessionId(id: string | undefined | null, kind = 'hermes'): boolean {
+  const prefix = SYNC_PREFIX[kind];
+  return !!id && !!prefix && id.startsWith(prefix);
 }
 
 /** Sources to fetch (GET /api/sessions?source=…) for a filter. */
@@ -51,8 +66,8 @@ export function inboxSources(f: SyncFilter = {}): string[] {
 }
 
 /** May a Hermes session (source + id) be shown / delivered under this filter? */
-export function sessionAllowed(source: string | undefined, id: string | undefined | null, f: SyncFilter = {}): boolean {
-  if (source === 'api_server') return isAppSessionId(id) || !!f.foreign;
+export function sessionAllowed(source: string | undefined, id: string | undefined | null, f: SyncFilter = {}, kind = 'hermes'): boolean {
+  if (source === 'api_server') return isAppSessionId(id, kind) || !!f.foreign;
   if (source === 'cron') return !!f.cron;
   if (source && FOREIGN_SOURCES.includes(source)) return !!f.foreign;
   return false;
@@ -67,10 +82,11 @@ export const CRON_SESSION_RE = /^cron_.+_\d{8}_\d{6}$/;
  * the remote marker.
  */
 export function foreignSource(c: ConversationMeta): string | null {
+  if (c.botChatRetired) return null; // the user's own thread, whatever session id it has
   if (c.remote?.source === 'cron' || CRON_SESSION_RE.test(c.hermesSessionId ?? '')) return 'cron';
   if (c.origin !== 'remote') return null;
   const source = c.remote?.source;
-  return source === 'api_server' && isAppSessionId(c.hermesSessionId) ? null : (source ?? 'unknown');
+  return source === 'api_server' && isAppSessionId(c.hermesSessionId, c.profileKind) ? null : (source ?? 'unknown');
 }
 
 /** Is this conversation the app's own (created here, or an app session from another install/device)? */
@@ -82,9 +98,9 @@ export function isAppConversation(c: ConversationMeta): boolean {
 export function foreignToPrune(items: readonly ConversationMeta[], profileId: string, f: SyncFilter = {}): string[] {
   return items
     .filter((c) => {
-      if (c.profileKind !== 'hermes' || c.profileId !== profileId || c.botChat) return false; // a bot's thread is not a listed chat
+      if (!isSyncedKind(c.profileKind) || c.profileId !== profileId || isBotPlace(c)) return false; // a bot's thread is not a listed chat
       const src = foreignSource(c);
-      return src !== null && !sessionAllowed(src, c.hermesSessionId, f);
+      return src !== null && !sessionAllowed(src, c.hermesSessionId, f, c.profileKind);
     })
     .map((c) => c.id);
 }
@@ -152,7 +168,7 @@ export function cleanRemoteTitle(title: string | undefined): string | undefined 
 }
 
 function clip(s: string | undefined, max = PREVIEW_MAX): string {
-  const t = (s ?? '').replace(/\s+/g, ' ').trim();
+  const t = linkLabels((s ?? '').replace(/\s+/g, ' ').trim());
   const chars = Array.from(t);
   return chars.length <= max ? t : chars.slice(0, max - 1).join('').trimEnd() + '…';
 }
@@ -192,8 +208,10 @@ function sameRemote(a: RemoteInfo | undefined, b: RemoteInfo): boolean {
 }
 
 /** Should a listed session become a drawer entry? */
-export function listable(s: RemoteSession, filter: SyncFilter = {}): boolean {
-  return sessionAllowed(s.source, s.id, filter) && s.messageCount > 0 && !s.internalChild && !s.archived;
+export function listable(s: RemoteSession, filter: SyncFilter = {}, kind = 'hermes'): boolean {
+  // a bot's talk lives on the bot's screen (bots/timeline.ts), also with "show other Hermes chats" on
+  if (isBotTalkSessionId(s.id)) return false;
+  return sessionAllowed(s.source, s.id, filter, kind) && s.messageCount > 0 && !s.internalChild && !s.archived;
 }
 
 export function mergeRemoteSessions(items: ConversationMeta[], input: MergeInput): MergeResult {
@@ -202,9 +220,10 @@ export function mergeRemoteSessions(items: ConversationMeta[], input: MergeInput
   const sameServer = (pid: string) => pid === input.profile.id || (input.sameServer ? input.sameServer(pid) : true);
   const bot = botOf(input.bot);
   const sameBot = (c: ConversationMeta) => botOf(c.hermesProfile) === bot;
+  const kind = input.profile.kind;
   const bySession = new Map<string, number>();
   items.forEach((c, i) => {
-    if (c.profileKind !== 'hermes' || !c.hermesSessionId || bySession.has(c.hermesSessionId)) return;
+    if (c.profileKind !== kind || !c.hermesSessionId || bySession.has(c.hermesSessionId)) return;
     if (!sameServer(c.profileId) || !sameBot(c)) return; // same id on another server / bot: a different session
     bySession.set(c.hermesSessionId, i);
   });
@@ -219,7 +238,7 @@ export function mergeRemoteSessions(items: ConversationMeta[], input: MergeInput
     const lastActive = s.lastActive ?? s.startedAt;
     if (idx !== undefined) {
       const c = next[idx];
-      if (foreignSource(c) !== null && !sessionAllowed(s.source, s.id, filter)) continue; // pruned below
+      if (foreignSource(c) !== null && !sessionAllowed(s.source, s.id, filter, kind)) continue; // pruned below
       const remote: RemoteInfo = { ...c.remote, source: s.source, lastActive, remoteCount: s.messageCount };
       const rt = cleanRemoteTitle(s.title);
       if (rt) remote.title = rt;
@@ -239,7 +258,7 @@ export function mergeRemoteSessions(items: ConversationMeta[], input: MergeInput
       }
       continue;
     }
-    if (!listable(s, filter) || isHiddenSession(hidden, s.id, sameServer)) continue;
+    if (!listable(s, filter, kind) || isHiddenSession(hidden, s.id, sameServer)) continue;
     let id = remoteConversationId(s.id);
     // taken by another server's session with the same id, or a sanitising collision: namespaced id
     if (next.some((c) => c.id === id)) id = scopedRemoteConversationId(s.id, bot ? `${input.profile.id}/${bot}` : input.profile.id);
@@ -250,7 +269,7 @@ export function mergeRemoteSessions(items: ConversationMeta[], input: MergeInput
       title,
       titleSource: cleanRemoteTitle(s.title) ? 'remote' : 'auto',
       profileId: input.profile.id,
-      profileKind: 'hermes',
+      profileKind: kind,
       hermesSessionId: s.id,
       createdAt: s.startedAt || lastActive,
       updatedAt: lastActive,
@@ -262,13 +281,26 @@ export function mergeRemoteSessions(items: ConversationMeta[], input: MergeInput
       ...(bot ? { hermesProfile: bot } : {}),
     };
     if (s.pinned) meta.pinned = true;
+    // an agent server's session lives with one agent (its `model`): the chat keeps talking to it
+    if (kind !== 'hermes' && s.model) meta.model = s.model;
     next.push(meta);
     added.push(id);
     changed = true;
   }
 
-  // remote-only entries outside the filter (toggle switched off / app update): local removal only
   const removed: string[] = [];
+  // an app that doesn't know the bot talk (0.2.x on this or a second device) listed `hui-bot-…` as an ordinary chat: it
+  // lives on the bot's screen now, so the plain duplicate leaves the list (local removal only; the session stays)
+  for (let i = next.length - 1; i >= 0; i--) {
+    const c = next[i];
+    if (!c.hermesSessionId || !isBotTalkSessionId(c.hermesSessionId) || isBotPlace(c) || c.id === input.activeId) continue;
+    if (c.profileKind !== kind || c.profileId !== input.profile.id || !sameBot(c)) continue;
+    removed.push(c.id);
+    next.splice(i, 1);
+    changed = true;
+  }
+
+  // remote-only entries outside the filter (toggle switched off / app update): local removal only
   const outside = new Set(foreignToPrune(next, input.profile.id, filter));
   if (outside.size) {
     for (let i = next.length - 1; i >= 0; i--) {
@@ -279,15 +311,18 @@ export function mergeRemoteSessions(items: ConversationMeta[], input: MergeInput
     }
   }
 
-  // remote-only entries whose session vanished (deleted/archived elsewhere) – only for fully listed sources
+  // remote-only entries whose session vanished (deleted/archived elsewhere) – only for fully listed sources. Agent servers
+  // (chat list shared by the user's devices): also chats started here that the server listed before ("Auf allen Geräten
+  // löschen" on another device); Hermes keeps those (the local copy is the device's own)
   const complete = new Set(input.completeSources ?? []);
   if (complete.size) {
     for (let i = next.length - 1; i >= 0; i--) {
       const c = next[i];
-      if (c.origin !== 'remote' || !c.remote || !c.hermesSessionId || c.id === input.activeId || c.botChat) continue;
+      const ownListed = kind !== 'hermes' && c.origin !== 'remote' && !!c.remote;
+      if ((c.origin !== 'remote' && !ownListed) || !c.remote || !c.hermesSessionId || c.id === input.activeId || isBotPlace(c)) continue;
       if (c.profileId !== input.profile.id || !sameBot(c) || !complete.has(c.remote.source) || seen.has(c.hermesSessionId)) continue;
-      // continued in this app since → keep the local copy
-      if (c.remote.loadedAt && c.updatedAt > (c.remote.lastActive ?? 0) + 1000) continue;
+      // continued in this app since → keep the local copy (a turn on an agent server un-deletes it there anyway)
+      if (!ownListed && c.remote.loadedAt && c.updatedAt > (c.remote.lastActive ?? 0) + 1000) continue;
       removed.push(c.id);
       next.splice(i, 1);
       changed = true;
@@ -341,6 +376,8 @@ export function needsRemoteLoad(meta: ConversationMeta | undefined): boolean {
  * - a message queued when the app stopped (`sendQueued`, hermes/pendingSend.ts) that Hermes already has (the turn
  *   started before the transcript was saved) aligns with that stored turn (only one newer than the tap on Send):
  *   it becomes a normal sent message with the stored answer after it – never offered for sending again
+ * - an aligned user turn without live-card batches takes them from the stored turn (`[hui:live]` trailer: the app
+ *   stopped between Hermes taking the turn and saving it); batches the local copy has stay (a retry sends newer ones)
  * Returns `local` itself when nothing changed.
  */
 export function reconcileTranscript(local: ChatMessage[], remote: ChatMessage[], origin?: 'remote'): ChatMessage[] {
@@ -395,6 +432,12 @@ export function reconcileTranscript(local: ChatMessage[], remote: ChatMessage[],
     const wasQueued = !!out[found].sendQueued;
     if (wasQueued) {
       out[found] = sentFromQueued(out[found]);
+      changed = true;
+    }
+    // live-card edits as Hermes stored them (the trailer): the app may have stopped before it saved them on the turn.
+    // Only when the local copy has none: a retried turn carries newer batches (`re`) than an earlier stored attempt
+    if (r.live && !out[found].live) {
+      out[found] = { ...out[found], live: r.live };
       changed = true;
     }
     const ra = remote[ri + 1]?.role === 'assistant' ? remote[ri + 1] : undefined;

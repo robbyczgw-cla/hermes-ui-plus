@@ -4,6 +4,9 @@
 // projects every plugin answer onto known fields with capped sizes: no free text from the plugin reaches the app.
 // Feature off (404 feature_off + reason) whenever the plugin is not configured, not reachable or does not offer it.
 // BRIDGE_LIBRARY=off switches it off; BRIDGE_QUICK=off does not. Never writes anything; secret never logged.
+// Other bots: a plugin in the root (default) profile that says `profiles: true` in /library/config reads other profiles
+// too; the bridge then asks it with `?profile=<bot>` (config probed and cached per bot). An older plugin (no flag) or
+// one in another profile: `other_bot` as before. The plugin's 404 unknown_bot becomes 404 unknown_profile.
 import { readFileSync } from 'node:fs';
 import { silentLogger } from './log.mjs';
 import { makeAuthorizer } from './auth.mjs';
@@ -87,6 +90,9 @@ export function createLibrary(bridgeConfig, o = {}) {
   const authorized = makeAuthorizer(bridgeConfig);
   /** plugin /library/config: {config} or {reason}; cached */
   let probe = { at: 0, config: null, reason: 'plugin_unreachable' };
+  /** /library/config?profile=<bot> per other bot: {at, config, reason, unknown?}; cached like the main probe */
+  const botProbes = new Map();
+  const BOT_PROBES_MAX = 64;
 
   const pathOf = (req) => (req.url ?? '').split('?')[0];
   // OPTIONS stays with the bridge's own CORS preflight handling
@@ -156,14 +162,55 @@ export function createLibrary(bridgeConfig, o = {}) {
     probe = { at: now(), ...next };
     return probe;
   }
-  const forget = () => { probe = { ...probe, at: 0 }; };
 
-  /** availability of one feature for a bot: {ok:true} or {ok:false, reason} */
-  function feature(p, bot, name) {
-    if (!p.config) return { ok: false, reason: p.reason ?? 'plugin_unreachable' };
-    const pluginBot = typeof p.config.profile === 'string' && p.config.profile ? p.config.profile : DEFAULT_PROFILE;
-    if (pluginBot !== bot) return { ok: false, reason: 'other_bot' };
-    const f = p.config[name];
+  /** The plugin's config for another bot (`?profile=<bot>`), cached per bot. {config, reason, unknown?} */
+  async function probeBot(bot) {
+    const hit = botProbes.get(bot);
+    if (hit && now() - hit.at < cfg.probeTtlMs) return hit;
+    let next;
+    try {
+      const { status, json } = await pluginGet(`/library/config?profile=${encodeURIComponent(bot)}`, { timeoutMs: cfg.probeTimeoutMs, maxBytes: 64 * 1024 });
+      if (status === 200 && json && typeof json === 'object' && !Array.isArray(json)) next = { config: json, reason: null };
+      else if (status === 404 && json?.error?.code === 'unknown_bot') next = { config: null, reason: 'unknown_bot', unknown: true };
+      else next = { config: null, reason: status === 404 ? quickReason(json?.error?.reason, 'plugin_unsupported') : 'plugin_unreachable' };
+    } catch (e) {
+      if (e.kind !== 'not_configured') log.debug?.('library plugin probe failed', { kind: e.kind, bot });
+      next = { config: null, reason: e.kind === 'not_configured' ? 'plugin_not_configured' : 'plugin_unreachable' };
+    }
+    botProbes.delete(bot);
+    botProbes.set(bot, { at: now(), ...next });
+    while (botProbes.size > BOT_PROBES_MAX) botProbes.delete(botProbes.keys().next().value);
+    return botProbes.get(bot);
+  }
+  const forget = (bot) => {
+    probe = { ...probe, at: 0 };
+    if (bot) botProbes.delete(bot);
+  };
+
+  const pluginBotOf = (config) => (typeof config?.profile === 'string' && config.profile ? config.profile : DEFAULT_PROFILE);
+
+  /**
+   * Where a bot's library comes from: the plugin's own profile (`via: 'own'`), another profile read through the root
+   * plugin (`via: 'profile'`, config of that bot) or nowhere (`other_bot`, plugin down).
+   * @returns {Promise<{via: 'own'|'profile', config: any} | {via: null, reason: string, unknown?: boolean}>}
+   */
+  async function sourceOf(bot) {
+    const p = await probePlugin();
+    if (!p.config) return { via: null, reason: p.reason ?? 'plugin_unreachable' };
+    const own = pluginBotOf(p.config);
+    if (own === bot) return { via: 'own', config: p.config };
+    // only the root profile's plugin reads others, and only when it says so (older plugins: no flag)
+    if (p.config.profiles !== true || own !== DEFAULT_PROFILE) return { via: null, reason: 'other_bot' };
+    const b = await probeBot(bot);
+    if (b.unknown) return { via: null, reason: 'unknown_bot', unknown: true };
+    if (!b.config) return { via: null, reason: b.reason ?? 'plugin_unreachable' };
+    return { via: 'profile', config: b.config };
+  }
+
+  /** availability of one feature in a source: {ok:true} or {ok:false, reason} */
+  function feature(src, name) {
+    if (!src.via) return { ok: false, reason: src.reason };
+    const f = src.config[name];
     if (f && typeof f === 'object' && f.available === true) return { ok: true };
     return { ok: false, reason: quickReason(f?.reason, 'unavailable') };
   }
@@ -178,13 +225,14 @@ export function createLibrary(bridgeConfig, o = {}) {
     const known = isProfileName(bot) && (bot === DEFAULT_PROFILE || (o.profiles?.allowed?.(bot) ?? false));
     if (!known) return fail(req, res, 404, 'Not found', 'unknown_profile');
 
-    const p = await probePlugin();
+    const src = await sourceOf(bot);
+    if (src.via === null && src.unknown) return fail(req, res, 404, 'Not found', 'unknown_profile');
     if (route === 'config') {
-      const one = (name) => { const f = feature(p, bot, name); return f.ok ? { available: true } : { available: false, reason: f.reason }; };
+      const one = (name) => { const f = feature(src, name); return f.ok ? { available: true } : { available: false, reason: f.reason }; };
       return send(req, res, 200, { skills: one('skills'), memory: one('memory'), bot });
     }
     const which = route === 'memory' ? 'memory' : 'skills';
-    const f = feature(p, bot, which);
+    const f = feature(src, which);
     if (!f.ok) return featureOff(req, res, f.reason);
 
     let name = '';
@@ -192,11 +240,15 @@ export function createLibrary(bridgeConfig, o = {}) {
       name = q.get('name') ?? '';
       if (!name || name.length > LIMITS.name || CONTROL.test(name)) return fail(req, res, 400, 'invalid skill name', 'invalid_name');
     }
-    const path = route === 'skills' ? '/library/skills' : route === 'memory' ? '/library/memory' : `/library/skills/content?name=${encodeURIComponent(name)}`;
+    const base = route === 'skills' ? '/library/skills' : route === 'memory' ? '/library/memory' : `/library/skills/content?name=${encodeURIComponent(name)}`;
+    const other = src.via === 'profile' ? `profile=${encodeURIComponent(bot)}` : '';
+    const path = other ? `${base}${base.includes('?') ? '&' : '?'}${other}` : base;
+    const forgetBot = other ? bot : undefined;
     try {
       const { status, json } = await pluginGet(path, { timeoutMs: cfg.timeoutMs, maxBytes: route === 'content' ? CONTENT_BODY_MAX : BODY_MAX });
       if (status === 404) {
-        if (json?.error?.code === 'feature_off') { forget(); return featureOff(req, res, json.error.reason); }
+        if (json?.error?.code === 'feature_off') { forget(forgetBot); return featureOff(req, res, json.error.reason); }
+        if (json?.error?.code === 'unknown_bot') { forget(forgetBot); return fail(req, res, 404, 'Not found', 'unknown_profile'); }
         if (route === 'content') return fail(req, res, 404, 'skill not found', 'skill_not_found');
       }
       if (status !== 200 || !json || typeof json !== 'object' || Array.isArray(json)) {
@@ -204,7 +256,7 @@ export function createLibrary(bridgeConfig, o = {}) {
       }
       return send(req, res, 200, route === 'skills' ? projectSkills(json) : route === 'memory' ? projectMemory(json) : projectContent(json, name));
     } catch (e) {
-      forget();
+      forget(forgetBot);
       if (e.kind === 'not_configured') return featureOff(req, res, 'plugin_not_configured');
       if (e.kind === 'timeout') return fail(req, res, 504, 'library upstream timed out', 'timeout');
       return fail(req, res, 502, 'library upstream error', 'upstream_error');

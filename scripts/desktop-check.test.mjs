@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 
 const here = (p) => fileURLToPath(new URL(p, import.meta.url));
 const driver = readFileSync(here('./desktop-check/pair-check.mjs'), 'utf8');
-const en = ['onboardingGuided', 'onboarding', 'compliance'].map((ns) => readFileSync(here(`../app/src/i18n/ns/${ns}.en.ts`), 'utf8')).join('\n');
+const en = ['onboardingGuided', 'onboarding', 'compliance', 'chat'].map((ns) => readFileSync(here(`../app/src/i18n/ns/${ns}.en.ts`), 'utf8')).join('\n');
 
 test('linux.sh and pair-check.mjs refuse to run without their arguments', () => {
   const sh = spawnSync('bash', [here('./desktop-check/linux.sh')], { encoding: 'utf8' });

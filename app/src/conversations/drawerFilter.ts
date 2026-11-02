@@ -21,6 +21,8 @@ export type DrawerView = {
 export function shownInDrawer(m: ConversationMeta, v: DrawerView): boolean {
   // a bot's "Bot Chat" lives in the Bots tab (bots/), never in the desktop menus; without a Bots tab the default bot's
   // thread is listed once it has messages
+  // the bot's talk and its former Bot Chats show on the bot's screen only
+  if (m.botTalk || m.botChatRetired) return false;
   if (m.botChat && !(v.defaultBotChat && !m.hermesProfile && (m.messageCount > 0 || m.preview !== ''))) return false;
   if (!isConversationVisible(m) || !inChatScope(m, v.chatScope)) return false;
   return true;

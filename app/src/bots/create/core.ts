@@ -6,6 +6,7 @@
  * model. The bridge (`POST /bridge/bots`) asks the hermes-ui-plus plugin to make the Hermes profile; the bridge adds
  * its own key, the app never sends one.
  */
+import { parseArchived, type ArchivedBot } from '../about.ts';
 
 export type TemplateId = 'research' | 'deals' | 'travel' | 'briefing' | 'code' | 'own' | 'blank';
 /** the role list of step 1, in this order ("Eigene Rolle" last; the empty agent is a link below it) */
@@ -95,7 +96,12 @@ export function createBody(d: Draft, locale: string | undefined) {
 // ------------------------------------------------------------------ bridge answers
 
 export type CreateRight = { allowed: true } | { allowed: false; reason: string };
-export type BotsConfig = { create: CreateRight; admin: boolean; limit: number; count: number };
+/**
+ * `manage`: may this device change bots (edit, revoke an "always", archive, restore; right `bots.manage`). An older
+ * bridge has no `manage` field: then it follows `create` (the same right), except at the bot limit.
+ * `archived`: the owner's archived bots (Hermes' gateway.parked), restorable from the Bots tab.
+ */
+export type BotsConfig = { create: CreateRight; admin: boolean; limit: number; count: number; manage: CreateRight; archived: ArchivedBot[] };
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const REASON = /^[a-z_]{2,40}$/;
@@ -106,7 +112,15 @@ export function parseBotsConfig(json: unknown): BotsConfig | null {
   const c = json.create;
   const create: CreateRight = c.allowed === true ? { allowed: true } : { allowed: false, reason: typeof c.reason === 'string' && REASON.test(c.reason) ? c.reason : 'unknown' };
   const n = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : d);
-  return { create, admin: json.admin === true, limit: n(json.limit, 50), count: n(json.count, 0) };
+  const m = isObj(json.manage) ? json.manage : null;
+  const manage: CreateRight = m
+    ? m.allowed === true
+      ? { allowed: true }
+      : { allowed: false, reason: typeof m.reason === 'string' && REASON.test(m.reason) ? m.reason : 'unknown' }
+    : create.allowed || create.reason === 'limit'
+      ? { allowed: true }
+      : create;
+  return { create, admin: json.admin === true, limit: n(json.limit, 50), count: n(json.count, 0), manage, archived: parseArchived(json.archived) };
 }
 
 export type CreatedBot = { name: string; label?: string; description?: string; color?: string; template?: TemplateId };
@@ -188,8 +202,12 @@ export function createOffer(cfg: BotsConfig | null): CreateOffer {
   return { kind: 'owner', reason, command: cfg.admin && ownerCanEnable(reason) };
 }
 
-/** Does the create right alone make the Bots tab worth showing (no bot besides the default yet)? */
+/**
+ * Does the create right alone make the Bots tab worth showing (no bot besides the default yet)? Archived bots this
+ * device may bring back count too: archiving the last bot must not take "Archiviert → Zurückholen" away with the tab.
+ */
 export function createShowsTab(cfg: BotsConfig | null): boolean {
   if (!cfg) return false;
+  if (cfg.manage.allowed && cfg.archived.length > 0) return true;
   return cfg.create.allowed || (cfg.admin && OWNER_FIXABLE.includes(cfg.create.reason));
 }

@@ -350,6 +350,9 @@ cat > "$OUT_STAGE/index.html" <<HTML
 <p><small>Nur im Tailnet erreichbar.</small></p>
 </body></html>
 HTML
+# the app embeds the compressed files of $WEB_OUT byte for byte: the gate scans them by content and skips only exact copies
+# of clean ones in the binary, reporting each (docs/LEAK-GUARD.md "Embedded assets")
+export HUI_EMBEDDED_ASSETS="$WEB_OUT"
 if [ "$FLAVOR" = hermes ]; then
   t "release gate (unpacked AppImage + deb, download page)"
   APPX="$(mktemp -d "${TMPDIR:-/tmp}/hui-desktop-linux-app.XXXXXX")"
@@ -372,15 +375,19 @@ if [ "$FLAVOR" = hermes ]; then
     rm -rf "$APPX/appimage/usr/share/doc"
     find "$APPX/appimage/usr/share/glib-2.0/schemas" -type f -name '*.xml' -delete 2>/dev/null || true
   fi
-  { mkdir -p "$APPX/deb" && dpkg-deb -x "$OUT_STAGE/$DEB" "$APPX/deb"; } || ok=0
+  # the .deb: its files and its control data, both unpacked (the raw file is zstd-compressed noise, see the download dir below)
+  { mkdir -p "$APPX/deb" "$APPX/deb-control" && dpkg-deb -x "$OUT_STAGE/$DEB" "$APPX/deb" && dpkg-deb -e "$OUT_STAGE/$DEB" "$APPX/deb-control"; } || ok=0
   [ "$ok" = 1 ] || { rm -rf "$APPX"; echo "DESKTOP BUILD REJECTED: cannot unpack the AppImage/deb for the gate (unsquashfs, dpkg-deb); $OUT left unchanged"; exit 1; }
   flavor_guard_output "$APPX" || { rm -rf "$APPX"; echo "DESKTOP BUILD REJECTED: the app contains private content; $OUT left unchanged"; exit 1; }
   release_gate "$APPX" || { rm -rf "$APPX"; echo "DESKTOP BUILD REJECTED by the release gate; $OUT left unchanged"; exit 1; }
   rm -rf "$APPX"
   # download dir: everything but the AppImage itself, whose raw squashfs holds the third-party libraries above (e.g.
-  # OpenSSL's "CRYPTOGAMS by <author e-mail>" in uncompressed blocks); its unpacked content was gated above
+  # OpenSSL's "CRYPTOGAMS by <author e-mail>" in uncompressed blocks), and the .deb, whose raw bytes are a zstd stream
+  # (a 4-byte denylist hit in the compressed data stopped a build once, 2026-11-02); the unpacked content of both was
+  # gated above. Their file names are still scanned: an empty placeholder with the same name goes in.
   DLX="$(mktemp -d "${TMPDIR:-/tmp}/hui-desktop-linux-dl.XXXXXX")"
-  find "$OUT_STAGE" -maxdepth 1 -type f ! -name '*.AppImage' -exec cp -p {} "$DLX/" \;
+  find "$OUT_STAGE" -maxdepth 1 -type f ! -name '*.AppImage' ! -name '*.deb' -exec cp -p {} "$DLX/" \;
+  find "$OUT_STAGE" -maxdepth 1 -type f \( -name '*.AppImage' -o -name '*.deb' \) -exec sh -c 'for f; do : > "$0/$(basename "$f")"; done' "$DLX" {} +
   release_gate "$DLX" || { rm -rf "$DLX"; echo "DESKTOP BUILD REJECTED by the release gate (download dir); $OUT left unchanged"; exit 1; }
   rm -rf "$DLX"
 fi

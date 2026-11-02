@@ -51,6 +51,8 @@ openssl req -newkey rsa:2048 -nodes -subj "/CN=bridge.test" -keyout server.key -
 printf 'subjectAltName=DNS:bridge.test\nbasicConstraints=CA:FALSE\nextendedKeyUsage=serverAuth\n' > ext.cnf
 openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 1 -extfile ext.cnf -out server.crt 2>/dev/null
 cat server.crt server.key > server.pem && chmod 600 server.pem ca.key server.key
+# optional: the Hermes API key (read only by pair-check.mjs --api, to fire a bot-chat job); never in an argument
+[ -n "${HERMES_API_KEY_FILE:-}" ] && install -m 644 "$HERMES_API_KEY_FILE" api-key
 cd "$ROOT"
 
 PUBLIC_URL=${PUBLIC_URL:-https://bridge.test:$TLS_PORT}

@@ -54,7 +54,8 @@ export function parseSettings(body) {
   const scope = {};
   if (body.scope !== undefined && body.scope !== null) {
     if (typeof body.scope !== 'object' || Array.isArray(body.scope)) return { ok: false, message: 'scope must be an object' };
-    for (const k of ['agents', 'sources']) {
+    // quietBots / offBots: per-bot push levels of the UI bridge (profile names, `default` = the default bot)
+    for (const k of ['agents', 'sources', 'quietBots', 'offBots']) {
       const v = body.scope[k];
       if (v === undefined) continue;
       if (!Array.isArray(v) || v.length > 32 || v.some((x) => typeof x !== 'string' || !/^[A-Za-z0-9._:-]{1,64}$/.test(x))) {

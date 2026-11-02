@@ -4,6 +4,8 @@
 import { diffStates, headOf, opTarget, patchesSinceFull, progressOf, type LiveCard, type LiveCardType, type LiveFold, type LiveItem, type LiveOp, type LiveVersion } from './model.ts';
 import { pendingCount, viewOf, type PendingView } from './pending.ts';
 import type { LiveLocalRecord } from './localStore.ts';
+import type { ChatMessage } from '../hermes/types';
+import { openUndone, type BatchOutcome } from './receipts.ts';
 
 /** Version key of a card made on this device that is not in the transcript yet. */
 export const LOCAL_KEY = 'local:';
@@ -37,6 +39,12 @@ export interface LiveCardModel {
   patches: number;
   /** the card exists only on this device so far (made from a plain list, not sent yet) */
   local: boolean;
+  /** edits of this device went along with a message whose answer is still running ("Hermes antwortet …") */
+  sending: boolean;
+  /** some pending edits are sent again: the turn that carried them broke off (pending.ts `returnInflight`) */
+  resend: boolean;
+  /** Hermes' newest answer did some of the user's newest edits differently (receipts.ts `openUndone`) */
+  undone?: BatchOutcome;
 }
 
 /** Version number the "neu" highlights count from: the last one looked at, or (never opened) the one before the head. */
@@ -57,7 +65,7 @@ export function freshItems(card: LiveCard, since: number): Set<string> {
   return out;
 }
 
-export function deriveCards(fold: LiveFold, rec: LiveLocalRecord): LiveCardModel[] {
+export function deriveCards(fold: LiveFold, rec: LiveLocalRecord, messages: readonly ChatMessage[] = []): LiveCardModel[] {
   const out: LiveCardModel[] = [];
   const own = new Set(rec.own ?? []);
   for (const card of fold.cards.values()) {
@@ -74,6 +82,7 @@ export function deriveCards(fold: LiveFold, rec: LiveLocalRecord): LiveCardModel
     const fresh = freshItems(card, since);
     // a dot only for versions this device did not make itself (Hermes, or edits sent from another device)
     const unread = card.versions.some((v) => v.n > since && !(v.author === 'user' && v.bid && own.has(v.bid)));
+    const undone = messages.length ? openUndone(fold, messages, card.id) : undefined;
     out.push({
       id: card.id,
       type: card.type,
@@ -94,6 +103,9 @@ export function deriveCards(fold: LiveFold, rec: LiveLocalRecord): LiveCardModel
       changedAt: Math.max(head.at, 0),
       patches: patchesSinceFull(card),
       local: !!p?.create && card.versions[0]?.bid === p.create.bid && card.versions[0].key.startsWith(LOCAL_KEY),
+      sending: !!p?.inflight,
+      resend: !!p?.resend?.length && pendingCount(view) > 0,
+      ...(undone ? { undone } : {}),
     });
   }
   // most recently changed first; ties (same message) by id, stable on every device

@@ -52,6 +52,10 @@ test('settings validation', () => {
   assert.equal(parseSettings({ profileId: '../x' }).ok, false);
   assert.equal(parseSettings({ profileId: 'p', quiet: { from: '25:00', to: '07:00' } }).ok, false);
   assert.equal(parseSettings({ profileId: 'p', tz: 'Mars/Base' }).ok, false);
+  // per-bot push levels (UI bridge): lists of profile ids like agents / sources, `default` allowed
+  assert.deepEqual(parseSettings({ profileId: 'p', scope: { quietBots: ['default', 'writer', 'writer'], offBots: ['scout'] } }).value.scope, { quietBots: ['default', 'writer'], offBots: ['scout'] });
+  assert.equal(parseSettings({ profileId: 'p', scope: { offBots: 'default' } }).ok, false);
+  assert.equal(parseSettings({ profileId: 'p', scope: { quietBots: ['a b'] } }).ok, false);
   assert.equal(parseSettings({ profileId: 'p', preview: 'maybe' }).ok, false);
   assert.equal(parseSettings({ profileId: 'p', preview: false }).value.preview, 'off');
   assert.equal(parseSettings({ profileId: 'p', scope: { agents: ['kiwi', 'a b'] } }).ok, false);

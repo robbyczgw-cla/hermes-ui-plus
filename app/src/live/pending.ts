@@ -9,6 +9,7 @@
  * - an item the user deleted is gone, whatever Hermes changed on it;
  * - the user's choice becomes ordinary ops, so other devices fold to the same result without knowing of a conflict.
  */
+import { MAX_RESENT } from './trailer.ts';
 import {
   applyOps,
   ITEM_FIELDS,
@@ -48,10 +49,14 @@ export interface PendingCard {
   /** the user looked at the conflicts and confirmed ("Übernehmen") */
   confirmed?: boolean;
   /**
-   * sent and accepted by Hermes, not yet seen in the transcript: still shown (re-applying them is a no-op once the
-   * transcript has them), never sent again; dropped when the fold has `bid` (pruneInflight)
+   * sent and accepted by Hermes, its answer not finished yet: still shown (re-applying them is a no-op once the
+   * transcript has them). Dropped when the turn's answer is done (settleInflight); a turn that broke off (error, stop)
+   * gives them back to the pending ops, to be sent again with `re` (never lost, never applied twice).
+   * `at`: when Hermes accepted it (this device's clock; only to tell an old transcript from one that lacks the batch).
    */
-  inflight?: { bid: string; base: number; ops: LiveOp[] };
+  inflight?: { bid: string; base: number; ops: LiveOp[]; at?: number; re?: string[] };
+  /** batch ids the next send carries again (`UserBatch.re`): the fold skips them here at once, other devices once sent */
+  resend?: string[];
 }
 
 export type PendingMap = Record<string, PendingCard>;
@@ -314,11 +319,56 @@ export function pendingCount(view: PendingView): number {
  * until the transcript has them), later ops (made while the message was on its way) stay pending under a new batch id
  * and `newBase` = the head that will include the sent batch (so own sent edits never read as the other side's).
  */
-export function afterAccepted(p: PendingCard | undefined, sent: { bid: string; count: number }, newBase: number, bid: () => string = newBatchId): PendingCard | undefined {
+export function afterAccepted(p: PendingCard | undefined, sent: { bid: string; count: number; at?: number }, newBase: number, bid: () => string = newBatchId): PendingCard | undefined {
   if (!p || p.bid !== sent.bid) return p;
   const rest = p.ops.slice(sent.count);
-  const inflight = { bid: sent.bid, base: p.base, ops: [...(p.inflight?.ops ?? []), ...p.ops.slice(0, sent.count)] };
-  return { base: newBase, ops: rest, bid: bid(), inflight };
+  const re = [...(p.inflight?.re ?? []), ...(p.resend ?? [])];
+  const inflight = { bid: sent.bid, base: p.base, ops: [...(p.inflight?.ops ?? []), ...p.ops.slice(0, sent.count)], ...(sent.at !== undefined ? { at: sent.at } : {}), ...(re.length ? { re } : {}) };
+  const { resend: _resend, ...keep } = p;
+  return { ...keep, base: newBase, ops: rest, bid: bid(), inflight };
+}
+
+/**
+ * The turn that carried the in-flight batch broke off (error, stop without recovery, or it never reached the
+ * transcript): its ops are pending again, ahead of what was made since, and the next send names the old batch in
+ * `re`. A card made here (`create`) is sent again as a whole, under the next batch id.
+ */
+export function returnInflight(p: PendingCard): PendingCard {
+  if (!p.inflight) return p;
+  const { inflight, ...rest } = p;
+  // nothing to send again (a "Hermes fragen" without edits): the batch just goes
+  if (!inflight.ops.length && !p.create) return rest;
+  // the newest ones when a card broke off more often than a trailer names (an older one Hermes stored applies twice:
+  // ops are idempotent, the card ends the same)
+  const resend = Array.from(new Set([...(p.resend ?? []), ...(inflight.re ?? []), inflight.bid])).slice(-MAX_RESENT);
+  const create = p.create ? { ...p.create, sent: false, bid: p.bid } : undefined;
+  return { ...rest, base: inflight.base, ops: [...inflight.ops, ...p.ops], resend, ...(create ? { create } : {}) };
+}
+
+/** How far the turn that carried a batch got (live/extract.ts `batchTurns`). */
+export type TurnState = 'running' | 'done' | 'failed' | 'none';
+
+/**
+ * Settle the in-flight batch by its turn: answer done = Hermes has it (dropped here, the transcript holds it); broke
+ * off = back to pending (returnInflight); still running or not in the transcript yet = unchanged. A card made here
+ * leaves once the turn that created it is done. Nothing left = undefined.
+ */
+export function settleInflight(p: PendingCard | undefined, turnOf: (bid: string) => TurnState): PendingCard | undefined {
+  if (!p) return p;
+  let next = p;
+  if (next.inflight) {
+    const st = turnOf(next.inflight.bid);
+    if (st === 'done') {
+      const { inflight: _done, ...rest } = next;
+      next = rest;
+    } else if (st === 'failed') next = returnInflight(next);
+  }
+  if (next.create?.sent && turnOf(next.create.bid) === 'done') {
+    const { create: _create, ...rest } = next;
+    next = rest;
+  }
+  if (next === p) return p;
+  return next.ops.length || next.focus || next.inflight || next.create || next.resend?.length ? next : undefined;
 }
 
 /** Drop the in-flight ops (and a local first version) once the transcript has their batch; nothing left = removed. */
@@ -334,7 +384,7 @@ export function pruneInflight(p: PendingCard | undefined, bids: ReadonlySet<stri
 
 /** True when nothing is pending and nothing is in flight (the record can go). */
 export function isEmptyPending(p: PendingCard | undefined): boolean {
-  return !p || (!p.ops.length && !p.focus && !p.inflight && !p.create);
+  return !p || (!p.ops.length && !p.focus && !p.inflight && !p.create && !p.resend?.length);
 }
 
 /**

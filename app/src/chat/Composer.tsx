@@ -10,7 +10,7 @@ import {
   type TextInputKeyPressEventData,
 } from 'react-native';
 import { Text, TextInput } from '../ui/primitives/Text';
-import { AttachmentButton, AttachmentTray, draftHasErrors, useAttachmentDraft, type Attachment, type AttachmentTarget, type PendingUploads, type PickSource } from '../attachments';
+import { AttachmentButton, AttachmentTray, draftHasErrors, failedUploadIds, useAttachmentDraft, type Attachment, type AttachmentTarget, type PendingUploads, type PickSource } from '../attachments';
 import type { ConnectionProfile } from '../settings/profiles';
 import { useLocale, useT } from '../i18n';
 import { columnMaxWidth, useTheme } from '../ui';
@@ -29,6 +29,9 @@ import { useToast } from './Toast';
 import { SlashPalette, completeRow, paletteState, pickRow, submitSlash, type CommandDef, type PaletteRow, type SlashBinding, type SlashPaletteHandle } from './commands';
 import { Icon } from './icons';
 import { a11yState } from '../ui/lib/a11yState';
+import { QuoteBlock } from './QuoteBlock';
+import { addQuote as addQuoteTo, splitQuotes, withQuotes, type Quote } from './quoteWire';
+import { getReading, updateReading, useReadingLoaded } from './readingStore';
 
 export type ComposerHandle = {
   focus(): void;
@@ -40,6 +43,8 @@ export type ComposerHandle = {
   restoreText(text: string, append?: boolean): void;
   /** the unsent text, removed from the composer (handed over when switching to / from the quick thread) */
   takeText(): string;
+  /** "Antworten": a quote above the input (false = the draft already has the most quotes allowed) */
+  addQuote(quote: Quote): boolean;
 };
 
 /**
@@ -104,6 +109,8 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>(function Composer
   // wide windows: the composer is centred and as wide as the message column (Settings → Chatbreite)
   const columnWidth = columnMaxWidth(chatMaxWidth(prefs), COMPOSER_PAD);
   const [text, setText] = useState('');
+  // "Antworten" (quote.ts): quoted excerpts of earlier messages, sent in front of the text
+  const [quotes, setQuotes] = useState<Quote[]>([]);
   // Hermes: own target (bridge uploads); demo: no attachments
   const target: AttachmentTarget = { kind: 'hermes', bridge: profile.kind === 'hermes' && !!profile.bridge };
   const canAttach = !quickActive && profile.kind !== 'demo';
@@ -154,20 +161,55 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>(function Composer
   useEffect(() => {
     textRef.current = text;
   }, [text]);
+  const quotesRef = useRef(quotes);
+  useEffect(() => {
+    quotesRef.current = quotes;
+  }, [quotes]);
+
+  // per-chat draft (text + quotes) survives switching chats and an app restart (readingStore.ts). Not in the quick
+  // thread and not in the disabled placeholder composer; restored once the record is read, never over typed text
+  const keepsDraft = !quickActive && !disabled && !!convId;
+  const readingLoaded = useReadingLoaded();
+  const restoredFor = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!keepsDraft || !readingLoaded || restoredFor.current === convId) return;
+    restoredFor.current = convId;
+    const saved = getReading(convId);
+    if (saved?.draft && !textRef.current.trim()) setText(saved.draft);
+    if (saved?.quotes?.length && !quotesRef.current.length) setQuotes(saved.quotes);
+  }, [keepsDraft, readingLoaded, convId]);
+  useEffect(() => {
+    if (!keepsDraft || restoredFor.current !== convId) return;
+    updateReading(convId, { draft: text, quotes });
+  }, [keepsDraft, convId, text, quotes]);
   useImperativeHandle(ref, () => ({
     focus: () => input.current?.focus(),
     setText: (v: string) => {
       setText(v);
       input.current?.focus();
     },
-    restoreText: (v: string, append?: boolean) => setText((cur) => (!cur.trim() ? v : append ? `${cur.trimEnd()}\n\n${v}` : cur)),
+    restoreText: (raw: string, append?: boolean) => {
+      // a returned send carries its quotes in front (quote.ts): back into the quote row, not as raw text
+      const { quotes: back, text: v } = splitQuotes(raw);
+      if (back.length) setQuotes((cur) => (cur.length ? cur : back));
+      setText((cur) => (!cur.trim() ? v : append ? `${cur.trimEnd()}\n\n${v}` : cur));
+    },
     takeText: () => {
       const v = textRef.current;
       textRef.current = '';
       setText('');
       return v;
     },
+    addQuote: (q: Quote) => {
+      const next = addQuoteTo(quotesRef.current, q);
+      if (!next) return false;
+      quotesRef.current = next;
+      setQuotes(next);
+      input.current?.focus();
+      return true;
+    },
   }));
+  const removeQuote = (i: number) => setQuotes((cur) => cur.filter((_, k) => k !== i));
 
   // "Share to HUI+" (share/): a share confirmed in the share sheet for this chat lands in the draft and is sent right
   // away – the user already tapped Send there. Anything that cannot go now (upload failed offline, a turn still
@@ -201,6 +243,7 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>(function Composer
   useShareDelivery(quickActive || disabled ? undefined : convId, receiveShare);
 
   const hasContent = !!text.trim() || draft.attachments.length > 0;
+  const failedUploads = failedUploadIds(draft.attachments);
   // uploads still running do not block Send when the chat can wait for them (bubble shows the progress)
   const sendNowUploading = !!sendWhileUploading && draft.uploading && !draft.picking && !draftHasErrors(draft.attachments);
   const canSend = hasContent && !disabled && !streaming && !sending && (draft.canSend || sendNowUploading);
@@ -250,9 +293,10 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>(function Composer
       // the bubble appears now with per-file progress; the turn starts when the uploads are done
       const prep = draft.preparePending();
       if (!prep) return; // draft.error explains why
-      if (onSend(text.trim(), prep.attachments, prep.pending) === false) return; // refused → draft kept, uploads too
+      if (onSend(withQuotes(text.trim(), quotes), prep.attachments, prep.pending) === false) return; // refused → draft kept, uploads too
       draft.commitSend(prep.attachments); // the running uploads now belong to the message
       setText('');
+      setQuotes([]);
       selection.current = undefined;
       setWebHeight(undefined);
       return;
@@ -261,9 +305,10 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>(function Composer
     try {
       const atts = await draft.prepareForSend(); // validates, waits for uploads (draft stays)
       if (atts === null) return; // draft.error explains why
-      if (onSend(text.trim(), atts) === false) return; // refused (turn running) → keep text + attachments
+      if (onSend(withQuotes(text.trim(), quotes), atts) === false) return; // refused (turn running) → keep text + attachments
       draft.commitSend(atts);
       setText('');
+      setQuotes([]);
       selection.current = undefined;
       setWebHeight(undefined);
     } finally {
@@ -342,6 +387,13 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>(function Composer
           !t.dark && t.shadows.sm,
         ]}
       >
+        {quotes.length ? (
+          <View style={styles.quotes}>
+            {quotes.map((q, i) => (
+              <QuoteBlock key={`${q.ref ?? ''}:${i}:${q.text.slice(0, 24)}`} quote={q} onRemove={() => removeQuote(i)} pos={{ n: i + 1, of: quotes.length }} testID={`composer-quote-${i}`} />
+            ))}
+          </View>
+        ) : null}
         <AttachmentTray attachments={draft.attachments} onRemove={draft.remove} onRetry={draft.retry} pending={draft.picking} />
         <View style={styles.inputRow}>
           {dictation.active ? (
@@ -439,6 +491,17 @@ export const Composer = memo(forwardRef<ComposerHandle, Props>(function Composer
           items={[{ key: 'quick', icon: 'bolt', label: tr('quick.composer.sendAsQuick'), hint: tr('quick.composer.sendAsQuickHint'), onPress: sendQuick }]}
         />
       ) : null}
+      {/* a red chip can sit off-screen in the tray: say why send stays grey, and retry from here */}
+      {failedUploads.length ? (
+        <Text
+          testID="composer-upload-retry-all"
+          onPress={() => failedUploads.forEach(draft.retry)}
+          style={[t.typography.caption, styles.error, { color: t.colors.danger }]}
+          accessibilityRole="button"
+        >
+          {tr('attachments.tray.failedRetryAll', { count: failedUploads.length })}
+        </Text>
+      ) : null}
       {draft.error ? (
         <Text onPress={draft.clearError} style={[t.typography.caption, styles.error, { color: t.colors.danger }]} accessibilityRole="alert" accessibilityHint={tr('chat.composer.error.dismissHint')}>
           {draft.error}
@@ -505,6 +568,7 @@ const styles = StyleSheet.create({
     minHeight: 52,
   },
   inputRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
+  quotes: { gap: 4, paddingHorizontal: 2, paddingBottom: 6 },
   recording: { flex: 1 },
   noAttach: { width: 6 },
   error: { paddingHorizontal: 18, paddingTop: 4 },

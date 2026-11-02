@@ -174,6 +174,7 @@ export function ProfileEditor({ initial, isNew, bottomInset, onSave, onCancel, o
             <Footnote>{t('settings.editor.savedAs', { url: cleanBaseUrl('hermes', p.baseUrl) })}</Footnote>
           ) : null}
           <Footnote>{t('settings.editor.hermesFootnote')}</Footnote>
+          {Platform.OS === 'web' && !p.bridge ? <Footnote>{t('settings.editor.sessionKeyWebDirect')}</Footnote> : null}
           <SectionTitle>{t('settings.editor.advanced')}</SectionTitle>
           <Group>
             <SwitchRow title={t('settings.editor.bridge')} subtitle={t('settings.editor.bridgeSub')} value={!!p.bridge} onChange={(bridge) => update({ bridge: bridge || undefined })} />

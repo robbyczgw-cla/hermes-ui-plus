@@ -27,6 +27,9 @@ import { blockLinesCached, collapsePlan, sectionPlan } from './answers/collapse'
 import { detectEntitiesCached, finishedInline, finishedMarkdown } from './parseCache';
 import { parseHuiHref } from './answers/entities';
 import { EntityChip, FootnotePill, MdFeaturesContext, useMdFeatures, type MdFeatures } from './answers/inline';
+import { FileLinkCard } from '../files/FileLinkCard';
+import { fileLinkOf, fileLinkParagraph } from '../files/fileLinks';
+import { openFileLink } from '../files/openFileLink';
 
 type Props = {
   text: string;
@@ -151,6 +154,8 @@ function useMdStyles(t: Theme, measure: boolean): MdStyles {
 }
 
 const WEB = Platform.OS === 'web';
+/** web: the page URL, base of root-relative file links (fileLinks.ts) */
+const pageUrl = (): string | undefined => (typeof location !== 'undefined' ? location.href : undefined);
 const BODY_SIZE = 16;
 /**
  * Reading measure of prose (paragraphs, headings, lists, quotes) on wide screens, scaled with the font size: keeps
@@ -239,13 +244,23 @@ const BlockView = memo(
   function BlockView({ block, s, first, live }: BlockProps) {
     const spacing = first ? s.first : s.block;
     switch (block.type) {
-      case 'paragraph':
+      case 'paragraph': {
+        // web: an agent's file (one link alone in its paragraph) as a card with "Öffnen" / "Sichern"
+        const file = WEB && !live ? fileLinkParagraph(block.text, pageUrl()) : null;
+        if (file) {
+          return (
+            <View style={[s.measure, spacing]}>
+              <FileLinkCard link={file} />
+            </View>
+          );
+        }
         return (
           <Text style={[s.p, s.measure, spacing]} selectable>
             <InlineText text={block.text} partial={live} s={s} d={!live} />
             {live ? <Caret s={s} /> : null}
           </Text>
         );
+      }
       case 'heading': {
         const hs = block.level === 1 ? s.h1 : block.level === 2 ? s.h2 : block.level === 3 ? s.h3 : s.h4;
         return (
@@ -381,12 +396,15 @@ function InlineView({ nodes, s, d = false }: { nodes: Inline[]; s: MdStyles; d?:
           );
         }
         const href = safeHref(n.href);
+        // web: a file link inside a sentence opens through the file actions (the iOS home-screen app would be trapped
+        // by the file's URL); standalone file links are cards (BlockView)
+        const file = WEB && href ? fileLinkOf(inlineToPlain(n.c), href, pageUrl()) : null;
         return (
           <Text
             key={i}
             style={href ? s.link : undefined}
             accessibilityRole={href ? 'link' : undefined}
-            onPress={href ? () => Linking.openURL(href).catch(() => {}) : undefined}
+            onPress={href ? () => (file ? openFileLink(file) : Linking.openURL(href).catch(() => {})) : undefined}
           >
             <InlineView nodes={n.c} s={s} />
           </Text>

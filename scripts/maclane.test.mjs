@@ -199,7 +199,7 @@ test('lane_sync: first sync sends a bundle, then only the exact commit lands in 
     assert.match(r.dir, new RegExp(`^hui-lane/runs/\\d{8}-\\d{6}-${sha1.slice(0, 7)}-\\d+-\\d+$`));
     assert.equal(readFileSync(join(src, 'app/a.txt'), 'utf8'), 'one');
     assert.ok(existsSync(join(src, 'bridge/src/replay.mjs')));
-    assert.ok(!existsSync(join(src, 'docs')), 'only app/, scripts/ and replay.mjs are synced');
+    assert.ok(!existsSync(join(src, 'docs')), 'only app/, scripts/ and bridge/src/ are synced');
     assert.equal(git(join(fh.home, 'hui-lane/repo.git'), 'rev-parse', `refs/lane/${sha1}`), sha1);
     // second commit: the host has the first, the bundle must carry the prerequisite (incremental)
     writeFileSync(join(repo, 'app/a.txt'), 'two'); git(repo, 'commit', '-q', '-am', 'two');

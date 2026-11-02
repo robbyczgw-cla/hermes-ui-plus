@@ -67,12 +67,15 @@ export type { ChatActionDeps } from './actionHandler';
  * (pure, tested): model-provided text the user did not see verbatim goes through the confirmation sheet first.
  * Returns false when a message could not be sent (turn running) so interactive nodes stay open.
  */
-export function useChatActionHandler({ send, isBusy, run, buildAsk }: ChatActionDeps) {
+export function useChatActionHandler({ send, isBusy, run, buildAsk, forMessage }: ChatActionDeps & {
+  /** other deps for a control inside this message (a Bot Chat row sends into the talk, bots/feedActions.ts) */
+  forMessage?: (deps: ChatActionDeps, messageId: string | undefined) => ChatActionDeps;
+}) {
   const toast = useToast();
   const tr = useT();
   return useCallback(
     (action: HuiAction, values?: Record<string, HuiFieldValue>, meta?: HuiActionMeta, messageId?: string): boolean =>
-      handleChatAction({ send, isBusy, run, buildAsk }, { toast, tr, tapHaptic: lightHaptic }, action, values, meta, messageId),
-    [send, isBusy, run, buildAsk, toast, tr],
+      handleChatAction(forMessage ? forMessage({ send, isBusy, run, buildAsk }, messageId) : { send, isBusy, run, buildAsk }, { toast, tr, tapHaptic: lightHaptic }, action, values, meta, messageId),
+    [send, isBusy, run, buildAsk, forMessage, toast, tr],
   );
 }

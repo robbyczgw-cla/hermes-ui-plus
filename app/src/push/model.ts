@@ -8,6 +8,7 @@ import type { ChatMessage } from '../hermes/types.ts';
 import type { ConversationMeta } from '../conversations/types.ts';
 import { inboxSources, sessionAllowed, type SyncFilter } from '../conversations/remoteSync.ts';
 import { botOf } from '../hermes/bots.ts';
+import { sanitizeLevels, scopeLists, type BotLevels } from '../bots/notify.ts';
 
 export type PreviewMode = 'auto' | 'on' | 'off';
 export type QuietHours = { from: string; to: string };
@@ -23,6 +24,8 @@ export type PushProfileSettings = {
   platform?: PushPlatform;
   /** device token / endpoint used for that registration (needed to unregister) */
   deviceKey?: string;
+  /** notification level per bot ("Über <Name>" → Benachrichtigungen, bots/notify.ts); `all` is not stored */
+  bots?: BotLevels;
 };
 
 export const DEFAULT_PUSH_SETTINGS: PushProfileSettings = { enabled: false, preview: 'auto', quiet: null };
@@ -142,7 +145,8 @@ export function registrationBody(
     label: o.label,
     // bridge: which Hermes sources notify (api_server; + cron with "Cron-Berichte anzeigen"); adapter: all of the token's agents (data.agent picks the chat)
     // (+ `routines` when the bridge offers it and Routines are on here: Routine results)
-    scope: kind === 'bridge' ? { sources: streamSources(p, o.serverSources, o.routines ?? true) } : {},
+    // (+ the bots whose level is "needed" / "off": the bridge skips their answer / result pushes, never approvals)
+    scope: kind === 'bridge' ? { sources: streamSources(p, o.serverSources, o.routines ?? true), ...scopeLists(sanitizeLevels(s.bots)) } : {},
   };
 }
 

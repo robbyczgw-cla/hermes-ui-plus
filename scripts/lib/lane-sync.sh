@@ -19,8 +19,8 @@
 # HUI_LANE_KEEP_HOURS [24], runs that never finished after HUI_LANE_RUN_TTL_HOURS [6] (their caller is gone), and every done run
 # when the disk has less than HUI_LANE_MIN_FREE_GB [10] free. A run in progress (or one a smoke run marked .lane-busy) is never
 # touched.
-# Synced paths: app/ scripts/ bridge/src/replay.mjs (what the build and the smoke suite need). bash 3.2 compatible.
-LANE_PATHS=(app scripts bridge/src/replay.mjs)
+# Synced paths: app/ scripts/ bridge/src/ (what the build and the smoke suite need: its mock imports the bridge's modules). bash 3.2 compatible.
+LANE_PATHS=(app scripts bridge/src)
 
 lane_sync() {
   local host="$1" lane="$2" root="$3" sha state t bundle size tips="" dirty=0 list run rdir v

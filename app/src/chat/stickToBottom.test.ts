@@ -55,7 +55,9 @@ test('MessageList / ChatView wiring', () => {
   const view = read('./ChatView.tsx');
   assert.match(list, /stick\.arm\(Date\.now\(\)\);\s*list\.current\?\.scrollToOffset\(\{ offset: 0/);
   assert.match(list, /onContentSizeChange=\{[\s\S]*?if \(stick\.follow\(Date\.now\(\)\)\) list\.current\?\.scrollToOffset\(\{ offset: 0, animated: false \}\)/);
-  assert.match(list, /onScrollBeginDrag=\{stick\.release\}/);
+  // a drag releases the pin (and stops a pending reading-position restore)
+  assert.match(list, /onScrollBeginDrag=\{onUserScroll\}/);
+  assert.match(list, /const onUserScroll = useCallback\(\(\) => \{\s*userMoved\.current = true;\s*restoreOffset\.current = null;\s*stick\.release\(\);/);
   assert.match(list, /maintainVisibleContentPosition=\{mvcp\}/);
   assert.match(view, /if \(!send\(text, attachments, pending\)\) return false;[\s\S]{0,120}scrollToBottom\(true\)/);
   assert.match(view, /last\.status === 'error' \? last : null;[\s\S]{0,120}revealLatest\(\)/);

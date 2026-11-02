@@ -185,6 +185,7 @@ export function answerModelInfo(i: AnswerModelInput): AnswerModelInfo {
 // ---------------------------------------------------------------- items
 
 export type AnswerItemKey =
+  | 'reply'
   | 'handOff'
   | 'branch'
   | 'retry'
@@ -216,12 +217,18 @@ export type AnswerMenuState = {
   canBranch: boolean;
   /** a quick answer in the quick thread: "Mit Hermes weitermachen" (app/src/quick) */
   canHandOff?: boolean;
+  /** "Antworten": the chat can quote this answer into its composer and it has visible text (cards too, quote.ts) */
+  canReply?: boolean;
+  /** a read-only Bot Chat row on a bot's timeline */
+  feed?: boolean;
 };
 
 /** Menu items of one answer, top to bottom ("Melden" last). */
 export function answerMenuItems(s: AnswerMenuState): AnswerItemKey[] {
   const out: AnswerItemKey[] = [];
   const done = !s.streaming && !s.local;
+  // a Bot Chat row (bots/timeline.ts) counts as local here, but it can be answered
+  if ((done || (s.feed && !s.streaming)) && s.canReply && !s.failed) out.push('reply');
   if (done && s.canHandOff && !s.failed) out.push('handOff');
   if (done && s.canBranch && !s.failed) out.push('branch');
   if (done && s.isLast && !s.recovering && !s.busy) {

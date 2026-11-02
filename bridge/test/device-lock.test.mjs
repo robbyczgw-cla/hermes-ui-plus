@@ -73,7 +73,7 @@ test('multiple processes racing to reclaim one stale lock preserve every update'
     import { createDeviceStore } from ${JSON.stringify(new URL('../src/devices.mjs', import.meta.url).href)};
     process.send('ready');
     process.once('message', () => {
-      const s = createDeviceStore({ dir: process.argv[1] });
+      const s = createDeviceStore({ dir: process.argv[1], lockWaitMs: 60_000 }); // a loaded machine: not what this tests
       for (let i = 0; i < 10; i++) s.issue('worker');
       process.disconnect();
     });

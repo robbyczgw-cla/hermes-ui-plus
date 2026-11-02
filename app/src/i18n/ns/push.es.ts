@@ -5,7 +5,7 @@ export const push = {
   title: 'Notificaciones',
   profile: 'Perfil: {name}',
   enable: 'Notificaciones para este perfil',
-  enableSub: 'Los mensajes que {name} envía por iniciativa propia (recordatorios, informes, resultados tardíos) llegan como notificación, incluso con la app cerrada.',
+  enableSub: 'Los mensajes que {name} envía por iniciativa propia (recordatorios, informes, resultados tardíos) llegan como notificación, incluso con la app cerrada, si el servidor puede enviar push (ver abajo).',
   preview: 'Vista previa del texto',
   previewAuto: 'Automática',
   previewOn: 'Sí',
@@ -22,7 +22,7 @@ export const push = {
   status: {
     checking: 'Comprobando el servidor…',
     unsupportedBridge: 'Este perfil no admite notificaciones. Necesita el {bridge}.',
-    notConfigured: 'El servidor aún no tiene credenciales para {platform}. Los mensajes nuevos llegan en directo mientras la app esté abierta.',
+    notConfigured: 'El servidor aún no tiene credenciales para {platform}, así que no llega ninguna notificación con la app en segundo plano o cerrada. Abre la app para ver los mensajes nuevos; mientras esté abierta llegan en directo.',
     registered: 'Activadas en este dispositivo ({platform}).',
     denied: 'Las notificaciones están bloqueadas en los ajustes del sistema.',
     webUnsupported: 'Este navegador no admite notificaciones web push. iPhone/iPad: añade la página a la pantalla de inicio (iOS 16.4 o posterior) y ábrela desde allí.',

@@ -89,6 +89,9 @@ const IPV4 = /(?<![\w.])(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?!\d)(?!\.\d)
 const octets = (m) => [m[1], m[2], m[3], m[4]].map(Number);
 const validIp = (o) => o.every((n) => n >= 0 && n <= 255);
 const FILE_EXT_TLD = /^(png|jpe?g|gif|webp|svg|ico|icns|avif|heic|js|mjs|cjs|jsx|ts|tsx|json|css|html?|md|txt|ttf|otf|woff2?|mp[34]|wav|m4a|webm|dex|xml|plist|yml|yaml|toml|lock|map|gz|aab|apk)$/i;
+// vendored pdf.js worker (copied into web builds by scripts/web-pdfjs.mjs, also as .br/.gz and inside the archives): its
+// minified data tables produce e-mail lookalikes; the denylist and every other rule still apply to it
+const VENDORED_DATA = /(^|\/)pdfjs\/pdf\.worker\.min\.m?js(\.br|\.gz)?(![a-z]+)?$/;
 const MEDIA = /\.(png|jpe?g|gif|webp|avif|heic|mp4|mov|webm|m4a|mp3|wav|ogg|icns|ico|ttf|otf|woff2?|pdf)$/i;
 
 /**
@@ -384,7 +387,7 @@ export function makeScanner({ denylist = [], allow = [], signature = false, inli
     for (const g of GENERIC_RULES) {
       if (g.nonTestOnly && ctx.test) continue;
       if (g.textOnly && ctx.binary) continue;
-      if (g.id === 'generic:email' && ctx.media) continue; // random compressed data produces e-mail lookalikes
+      if (g.id === 'generic:email' && (ctx.media || ctx.vendored)) continue; // random compressed data produces e-mail lookalikes
       if (ctx.lockfile && g.id !== 'generic:email') continue;
       for (const f of g.find(line)) {
         // binary string runs (dex/so/arsc) produce e-mail lookalikes such as T@J.TAK.TBL: in binaries only real-looking,  // leak-guard:allow (example)
@@ -403,9 +406,9 @@ export function makeScanner({ denylist = [], allow = [], signature = false, inli
     // media containers: only metadata/text parts are content (docs/LEAK-GUARD.md); the compressed payload is random bytes
     const media = maskMediaPayload(path, buf);
     if (media) buf = media.buf;
-    const ctx = { test: isTestPath(path), lockfile: LOCKFILE.test(path.split(sep).join('/')), media: MEDIA.test(path), binary: false };
+    const ctx = { test: isTestPath(path), lockfile: LOCKFILE.test(path.split(sep).join('/')), media: MEDIA.test(path), vendored: VENDORED_DATA.test(path.split(sep).join('/')), binary: false };
     // path name itself
-    scanLine(path.split(sep).join('/'), { ...ctx, test: false, binary: false, media: false }, (rule, text) =>
+    scanLine(path.split(sep).join('/'), { ...ctx, test: false, binary: false, media: false, vendored: false }, (rule, text) =>
       findings.push({ path, line: null, col: null, rule, text, where: 'path' }),
     );
     // text stored compressed inside the container (PNG zTXt/iTXt), decoded
@@ -549,6 +552,7 @@ function parseArgs(argv) {
     else if (t === '--generic-only') a.genericOnly = true;
     else if (t === '--require-denylist') a.requireDenylist = true;
     else if (t === '--expect-hermes') a.expectHermes = true;
+    else if (t === '--assets') a.assets = need();
     else if (t === '-h' || t === '--help') a.help = true;
     else throw new Error(`unknown argument: ${t}`);
   }
@@ -556,7 +560,7 @@ function parseArgs(argv) {
 }
 
 const USAGE = `usage: leak-guard.mjs (--staged | --tree [--ref REV] | --path DIR [--path DIR...])
-       [--show] [--json] [--quiet] [--generic-only] [--require-denylist] [--denylist FILE] [--expect-hermes]
+       [--show] [--json] [--quiet] [--generic-only] [--require-denylist] [--denylist FILE] [--expect-hermes] [--assets WEBDIR]
 Private terms come from $HUI_PRIVATE_DIR/leak-denylist.txt (not in the repo). See docs/LEAK-GUARD.md.`;
 
 // Compressed files (--path mode): the compressed bytes are noise in which a short denylist term can appear by chance,
@@ -579,6 +583,62 @@ export function fileEntries(full, rel) {
     return names.map((n) => ({ path: `${rel}!${n}`, read: () => execFileSync('unzip', ['-p', full, zipGlob(n)], { maxBuffer: MAX_INFLATE }) }));
   }
   return [raw];
+}
+
+// Embedded web assets (docs/LEAK-GUARD.md "Embedded assets"): a desktop app embeds the web bundle's compressed files
+// (.br / .gz) byte for byte in its binary, where the compressed bytes are noise in which a short term appears by chance
+// (the same chance a --path scan avoids for the .br file itself). Given the web dir of the SAME run, every .br/.gz file
+// there is scanned by its decompressed content; one that is clean AND at least MIN_EMBEDDED_BLOB bytes long becomes a
+// trusted blob. In a scanned buffer only the interior of an exact copy of a trusted blob is masked (EMBEDDED_EDGE bytes at
+// each end stay scanned); everything else in the binary is scanned raw as before. Every masked range is reported.
+export const MIN_EMBEDDED_BLOB = 64 * 1024;
+export const EMBEDDED_EDGE = 16;
+
+/** @returns {{blobs: {rel:string, buf:Buffer}[], findings: object[]}} findings = hits in the decompressed assets (never trusted) */
+export function trustedBlobs(assetsDir, scanner) {
+  const blobs = [];
+  const findings = [];
+  const root = resolve(assetsDir);
+  if (!existsSync(root) || !lstatSync(root).isDirectory()) throw new Error(`--assets ${assetsDir}: not a directory`);
+  const walk = (dir) => {
+    for (const d of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, d.name);
+      if (d.isSymbolicLink()) continue;
+      if (d.isDirectory()) { walk(full); continue; }
+      if (!d.isFile() || !/\.(br|gz)$/i.test(d.name)) continue;
+      const rel = relative(root, full);
+      const comp = readFileSync(full);
+      let plain;
+      try {
+        plain = /\.br$/i.test(d.name) ? brotliDecompressSync(comp, { maxOutputLength: MAX_INFLATE }) : gunzipSync(comp, { maxOutputLength: MAX_INFLATE });
+      } catch {
+        continue; // does not decompress: never trusted
+      }
+      const hits = scanner.scanContent(`${rel}!${/\.br$/i.test(d.name) ? 'brotli' : 'gunzip'}`, plain);
+      findings.push(...hits);
+      if (!hits.length && comp.length >= MIN_EMBEDDED_BLOB) blobs.push({ rel, buf: comp });
+    }
+  };
+  walk(root);
+  return { blobs, findings };
+}
+
+/** Copy of buf with the interior of every exact copy of a trusted blob zeroed. @returns {{buf:Buffer, ranges:{offset:number,length:number,blob:string}[]}} */
+export function maskEmbedded(buf, blobs) {
+  const ranges = [];
+  let out = buf;
+  for (const b of blobs) {
+    if (buf.length < b.buf.length) continue;
+    for (let from = 0; ; ) {
+      const i = buf.indexOf(b.buf, from);
+      if (i < 0) break;
+      from = i + b.buf.length;
+      if (out === buf) out = Buffer.from(buf);
+      out.fill(0, i + EMBEDDED_EDGE, i + b.buf.length - EMBEDDED_EDGE);
+      ranges.push({ offset: i, length: b.buf.length, blob: b.rel });
+    }
+  }
+  return { buf: out, ranges };
 }
 
 /** Collect {path, read()} entries for the selected mode. Throws on environment errors. */
@@ -700,6 +760,19 @@ export async function main(argv, env = process.env) {
   const sigFiles = signature ? collected.entries.filter((e) => isSignaturePath(e.path)).length : 0;
   const findings = [];
   const errors = [];
+  // --assets WEBDIR / $HUI_EMBEDDED_ASSETS (--path scans only): the web dir whose compressed files the app embeds byte for byte
+  let embedded = { blobs: [], findings: [] };
+  const skipped = [];
+  const assetsDir = args.mode === 'path' ? args.assets || env.HUI_EMBEDDED_ASSETS : '';
+  if (assetsDir) {
+    try {
+      embedded = trustedBlobs(assetsDir, scanner);
+    } catch (err) {
+      console.error(`leak-guard: ${err.message}`);
+      return 2;
+    }
+    findings.push(...embedded.findings.map((f) => ({ ...f, path: `assets:${f.path}` })));
+  }
   for (const e of collected.entries) {
     let buf;
     try {
@@ -709,6 +782,11 @@ export async function main(argv, env = process.env) {
       continue;
     }
     if (buf === null) continue;
+    if (embedded.blobs.length) {
+      const m = maskEmbedded(buf, embedded.blobs);
+      buf = m.buf;
+      skipped.push(...m.ranges.map((r) => ({ ...r, path: e.path })));
+    }
     findings.push(...scanner.scanContent(e.path, buf));
   }
   for (const f of findings) if (f.error) errors.push(`${f.path}: ${f.text}`);
@@ -732,7 +810,7 @@ export async function main(argv, env = process.env) {
   if (args.json) {
     console.log(
       JSON.stringify(
-        { mode: label, scanned: collected.entries.length, signatureFilesSkipped: sigFiles, hermes, denylist: denylistSource ? denylist.length : 0, warnings, errors, byRule, findings: real.map((f) => ({ ...f, text: shown(f) })) },
+        { mode: label, scanned: collected.entries.length, signatureFilesSkipped: sigFiles, embeddedRangesSkipped: skipped, hermes, denylist: denylistSource ? denylist.length : 0, warnings, errors, byRule, findings: real.map((f) => ({ ...f, text: shown(f) })) },
         null,
         2,
       ),
@@ -742,6 +820,7 @@ export async function main(argv, env = process.env) {
     if (!args.quiet || real.length || errors.length) {
       console.error(`leak-guard ${label}: scanned ${collected.entries.length} file(s), ${denylist.length} denylist term(s)${args.genericOnly ? ' (generic only)' : ''}${sigFiles ? `, ${sigFiles} code-signature file(s) skipped` : ''}${hermes.length ? `, ${hermes.length} Hermes bytecode file(s) decoded (${hermes.reduce((n, h) => n + h.strings, 0)} strings)` : ''}`);
     }
+    for (const r of skipped) console.error(`leak-guard: embedded asset skipped: ${r.path} @${r.offset} +${r.length} bytes (byte-identical to ${r.blob} of --assets; its decompressed content was scanned clean in this run)`);
     if (real.length) {
       console.error(`\nFOUND ${real.length} finding(s) in ${files.size} file(s)${args.show ? '' : ' (matches masked; use --show to reveal, or look at file:line)'}:`);
       const sorted = [...real].sort((a, b) => a.path.localeCompare(b.path) || (a.line ?? 0) - (b.line ?? 0));

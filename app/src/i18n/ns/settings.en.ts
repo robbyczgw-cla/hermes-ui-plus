@@ -250,6 +250,7 @@ export const settings = {
     sessionKey: 'Session key',
     sessionKeyPh: 'optional, e.g. hermes-ui',
     hermesFootnote: 'The session key (X-Hermes-Session-Key) separates memory per channel. Leave the model empty to use the server default.',
+    sessionKeyWebDirect: 'In a browser without the bridge the session key is not sent: Hermes does not allow that header from browsers, so memory is not separated per channel here.',
     savedAs: 'Will be saved as: {url}',
     advanced: 'Advanced',
     bridge: 'UI bridge',

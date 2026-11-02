@@ -28,6 +28,16 @@ Re-running the wizard later updates the skill in place. The steps below are for 
 - No Hermes config change and no restart are needed. A newly copied skill is found within about 30 seconds; it shows up
   in Hermes' skills index after the next gateway restart, which the bootstrap mechanism does not need.
 
+## Other clients on the same Hermes
+
+Telegram, cron, the dashboard and other API clients are unaffected: the skill is limited to API sessions and only acts
+when the request carries the `[hermes-ui-app]` marker, which only the app (or the bridge) adds. A fresh chat in another
+client gets plain Markdown.
+
+One case shows the app's answer blocks: a chat started in HUI+ and then continued in another client. Its stored
+answers contain ` ```hui ` blocks (any client that displays the session shows them as JSON code), and a client without the marker
+may keep writing such blocks because the history shows them (measured on Hermes v0.22.5). Continue HUI+ chats in HUI+.
+
 ## Install by hand
 
 1. Get the skill: the `hermes-skill/` folder of this repository (a git checkout or a release source archive).

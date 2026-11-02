@@ -5,14 +5,19 @@ Routes:
   GET  /health                          no auth, {"ok": true}
   GET  /quick/config                    Bearer secret; {enabled, available, reason, ...} (self-test result)
   POST /quick/v1/chat/completions       Bearer secret, OpenAI-compatible (stream or JSON)
-  GET  /library/config                  Bearer secret; {version, profile, skills, memory} availability
+  GET  /library/config                  Bearer secret; {version, profile, profiles, skills, memory} availability
   GET  /library/skills                  Bearer secret; skills of this profile (name, enabled, source, ...)
   GET  /library/skills/content?name=    Bearer secret; SKILL.md of a listed skill (capped)
   GET  /library/memory                  Bearer secret; MEMORY.md / USER.md entries (opt-in: library.expose_memory)
+       (all four take ?profile=<name>: another profile, read by the root profile's plugin only)
   GET  /bots                            Bearer secret; bots (named profiles) + whether this Hermes can create one
   POST /bots                            Bearer secret; create a bot from the three fields (bots.py)
   GET  /bots/<name>                     Bearer secret; the three fields of one bot (edit form)
   PATCH /bots/<name>                    Bearer secret; rewrite title, main job and how it works
+  GET  /bots/<name>/allowlist           Bearer secret; {name, entries: [{pattern}], mode} ("default" = root profile)
+  POST /bots/<name>/allowlist/revoke    Bearer secret; {"pattern": ...} -> the list without it
+  POST /bots/<name>/archive             Bearer secret; park the bot (gateway.parked, our marker) -> {bot}
+  POST /bots/<name>/restore             Bearer secret; remove our marker only -> {bot}
 """
 
 from __future__ import annotations
@@ -37,6 +42,10 @@ MAX_HEADER_BYTES = 16 * 1024
 MAX_HEADERS = 64
 HEADER_TIMEOUT = 10.0
 BODY_TIMEOUT = 10.0
+
+# /bots/<name>[/<action>] -> methods
+BOT_ROUTES = {"": ("GET", "PATCH"), "allowlist": ("GET",), "allowlist/revoke": ("POST",), "archive": ("POST",),
+              "restore": ("POST",)}
 
 _REASONS = {200: "OK", 201: "Created", 204: "No Content", 403: "Forbidden", 409: "Conflict", 400: "Bad Request", 401: "Unauthorized", 404: "Not Found",
             405: "Method Not Allowed", 408: "Request Timeout", 411: "Length Required", 413: "Payload Too Large",
@@ -236,14 +245,15 @@ class QuickHttpServer:
         lib = self.library
         assert lib is not None
         try:
+            profile = req.query.get("profile")
             if req.path == "/library/config":
-                payload = await lib.config()
+                payload = await lib.config(profile)
             elif req.path == "/library/skills":
-                payload = await lib.skills()
+                payload = await lib.skills(profile)
             elif req.path == "/library/skills/content":
-                payload = await lib.skill_content(req.query.get("name"))
+                payload = await lib.skill_content(req.query.get("name"), profile)
             else:
-                payload = await lib.memory()
+                payload = await lib.memory(profile)
         except QuickError as e:
             await _send_json(writer, e.status, e.body())
             return
@@ -253,11 +263,15 @@ class QuickHttpServer:
         if self.bots is None:
             await _send_json(writer, 404, QuickError(404, "not_found", "not found").body())
             return
-        name = req.path[len("/bots/"):] if req.path.startswith("/bots/") else None
-        allowed = ("GET", "PATCH") if name is not None else ("GET", "POST")
-        if name is not None and ("/" in name or not name):
+        name: Optional[str] = None
+        action = ""  # "" = the bot itself, else allowlist | allowlist/revoke | archive | restore
+        if req.path.startswith("/bots/"):
+            name, _, action = req.path[len("/bots/"):].partition("/")
+        allowed = BOT_ROUTES.get(action) if name is not None else ("GET", "POST")
+        if name is not None and (not name or allowed is None or req.path.endswith("/")):
             await _send_json(writer, 404, QuickError(404, "not_found", "not found").body())
             return
+        assert allowed is not None
         if req.method not in allowed:
             await _send_json(writer, 405, QuickError(400, "method_not_allowed", "method not allowed").body(),
                              {"allow": ", ".join(allowed)})
@@ -277,6 +291,14 @@ class QuickHttpServer:
             if name is None:
                 status, payload = (200, await self.bots.list()) if req.method == "GET" else (
                     201, await self.bots.create(body))
+            elif action == "allowlist":
+                status, payload = 200, await self.bots.allowlist(name)
+            elif action == "allowlist/revoke":
+                status, payload = 200, await self.bots.revoke(name, body)
+            elif action == "archive":
+                status, payload = 200, await self.bots.archive(name)
+            elif action == "restore":
+                status, payload = 200, await self.bots.restore(name)
             else:
                 status, payload = 200, (await self.bots.get(name) if req.method == "GET" else
                                         await self.bots.patch(name, body))

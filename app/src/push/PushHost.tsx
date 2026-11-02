@@ -10,7 +10,9 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNo
 import { AppState, Platform } from 'react-native';
 import { displayCommand } from '../approvals/approvalModel';
 import { useConversationsInternals } from '../conversations/ConversationsProvider';
-import { hermesSessions } from '../hermes/client';
+import { hermesJsonRequest, hermesSessions } from '../hermes/client';
+import { parseGroupSessionId } from '../groups/core';
+import { openBotChatOf } from '../groups/openBotChat';
 import { desktopNotifyRemove, desktopWindowFocused, isDesktopApp } from '../desktop/bridge';
 import { onDesktopNotificationOpen } from '../desktop/notifications';
 import { withBot } from '../hermes/bots';
@@ -28,9 +30,12 @@ import { createKeyedQueue, recoverFromInbox, routeInboxEvent } from './inboxRout
 import { backoffMs, hermesInboxAllowed, hermesInboxSources, inboxUrl, parseTarget, pickConversation, pushFilterOf, pushServerKind, routineTargetRoute, streamSources, type InboxEvent, type PushTarget } from './model';
 import { emitRoutineEvent } from '../routines/events';
 import { attention } from '../bots/state';
+import { levelOf, levelsKey, noticeAllowed } from '../bots/notify';
+import { ApprovalReminders } from '../bots/ApprovalReminders';
 import { adoptBotChat } from '../bots/adopt';
 import { botsNow } from '../hermes/useHermesBots';
-import { markUnread } from '../background/noticeState';
+import { markUnread, shellState } from '../background/noticeState';
+import { isBotTalkSessionId } from '../bots/timeline';
 import { serverConfig, syncRegistration } from './registration';
 import { runInbox } from './inboxRunner';
 import { allPushSettings, loadPushSettings, usePushSettingsState } from './settingsStore';
@@ -88,6 +93,15 @@ export function PushHost({ children }: { children: ReactNode }) {
         router.navigate(routineTargetRoute(target));
         return;
       }
+      // a member turn of a bot group (groups/): its approval card is in that bot's own chat, never in a chat of the hidden
+      // `Group: <id>` session (useGroupApprovals shows it there)
+      if (p.kind === 'hermes' && target.sessionId && parseGroupSessionId(target.sessionId)) {
+        const bot = target.hermesProfile ?? parseGroupSessionId(target.sessionId)?.bot;
+        const meta = await openBotChatOf(ctl, p, bot, hermesJsonRequest(withBot({ baseUrl: p.baseUrl, apiKey: p.apiKey }, bot))).catch(() => null);
+        if (meta) ctl.setActive(meta.id);
+        router.navigate('/');
+        return;
+      }
       // a bot's Bot Chat (a reminder / routine result, an answer from another device): that bot's thread, adopted if new
       if (p.kind === 'hermes' && target.botChat && target.sessionId) {
         const meta = await adoptBotChat(ctl, p, target.hermesProfile, target.sessionId, (c, id) => hermesSessions(c).get(id)).catch(() => null);
@@ -97,6 +111,8 @@ export function PushHost({ children }: { children: ReactNode }) {
           return;
         }
       }
+      // a bot's talk answered on another device, not known on this one yet: never a list entry, so the sync won't bring it
+      if (p.kind === 'hermes' && isBotTalkSessionId(target.sessionId) && !pickConversation(ctl.list(), p, target)) ctl.ensureBotTalk({ id: p.id, kind: 'hermes' }, target.hermesProfile);
       let conv = pickConversation(ctl.list(), p, target);
       if (p.kind === 'hermes' && target.sessionId) {
         try {
@@ -110,6 +126,8 @@ export function PushHost({ children }: { children: ReactNode }) {
         conv = ctl.create({ id: p.id, kind: p.kind }, { fresh: true }); // never re-target the user's open draft
         if (target.agent && target.agent !== p.model) ctl.setModel(conv.id, target.agent);
       }
+      // another device's newer generation of a talk (bots/timeline.ts): the bot's screen, which follows it on its next sync
+      if (!conv && p.kind === 'hermes' && isBotTalkSessionId(target.sessionId)) conv = ctl.ensureBotTalk({ id: p.id, kind: 'hermes' }, target.hermesProfile);
       if (conv) ctl.setActive(conv.id);
       router.navigate('/');
       // approval push / banner: restore the card (the chat rebuilds it from GET /v1/runs/{runId}); delivered once mounted
@@ -186,7 +204,8 @@ export function PushHost({ children }: { children: ReactNode }) {
   }, [connReady, pushState.loaded, prefsLoaded, profiles, t, lang]);
 
   // "Cron-Berichte anzeigen" or "Routinen" changed → re-register so the bridge's device scope (push sources) follows
-  const scopeKey = `${routinesOn ? 'r' : '-'}|` + profiles.filter((p) => pushServerKind(p) === 'bridge').map((p) => `${p.id}:${hermesInboxSources(p).join('+')}`).join(',');
+  // … or a bot's notification level ("Über <Name>", bots/notify.ts) → the bridge skips that bot's answer pushes
+  const scopeKey = `${routinesOn ? 'r' : '-'}|` + profiles.filter((p) => pushServerKind(p) === 'bridge').map((p) => `${p.id}:${hermesInboxSources(p).join('+')}:${levelsKey(pushState.profiles[p.id]?.bots)}`).join(',');
   const lastScope = useRef<string | null>(null);
   useEffect(() => {
     if (!connReady || !pushState.loaded || !prefsLoaded) return;
@@ -214,9 +233,10 @@ export function PushHost({ children }: { children: ReactNode }) {
         const meta = await adoptBotChat(ctl, p, ev.hermesProfile, ev.sessionId, (c, id) => hermesSessions(c).get(id)).catch(() => null);
         if (meta) {
           ctl.botChatRemote(meta.id, { lastActive: ev.timestamp, preview: ev.content });
-          if (!foreground || st.get().activeId !== meta.id) markUnread(meta.id);
+          if (!foreground || (st.get().activeId !== meta.id && shellState.openBotChatId !== meta.id)) markUnread(meta.id);
         }
-        if (!foreground) {
+        // the bot's level ("Nur wenn ich gebraucht werde" / "Aus"): unread in the app, no notification
+        if (!foreground && noticeAllowed(levelOf(allPushSettings()[p.id]?.bots, ev.hermesProfile), 'answer')) {
           const preview = allPushSettings()[p.id]?.preview !== 'off';
           await presentLocal({
             title: ev.title || p.name,
@@ -236,11 +256,16 @@ export function PushHost({ children }: { children: ReactNode }) {
           // notification waits until it is written – now, the debounce timer does not run in the Android background
           if (r?.recovered) emitAnswerReady({ conversationId: r.conversationId, message: r.recovered, late: true, written: ctl.flush().catch(() => {}) });
           await refreshHermesSession(p, ev.sessionId, ev.hermesProfile).catch(() => {});
+          // a turn in a talk session this device doesn't know yet (first time here, or a newer generation): the bot's row is unread
+          if (isBotTalkSessionId(ev.sessionId) && !pickConversation(ctl.list(), p, { sessionId: ev.sessionId, hermesProfile: ev.hermesProfile })) {
+            const talk = ctl.ensureBotTalk({ id: p.id, kind: 'hermes' }, ev.hermesProfile);
+            if (!foreground || st.get().activeId !== talk.id) markUnread(talk.id);
+          }
         }
       } else {
         await routeInboxEvent({ controller: ctl, activeId: () => st.get().activeId, deliverToOpenChat }, p, ev);
       }
-      if (!foreground) {
+      if (!foreground && (p.kind !== 'hermes' || noticeAllowed(levelOf(allPushSettings()[p.id]?.bots, ev.hermesProfile), 'answer'))) {
         const s = allPushSettings()[p.id];
         const preview = s?.preview !== 'off';
         await presentLocal({
@@ -404,6 +429,8 @@ export function PushHost({ children }: { children: ReactNode }) {
   return (
     <>
       {children}
+      {/* one local reminder per pending approval, two minutes before Hermes denies it (bots/approvalReminder.ts) */}
+      <ApprovalReminders />
       {approvalBanner ? (
         <ApprovalBanner
           key={approvalBanner.n.requestId}

@@ -4,6 +4,8 @@
  * API under its `/p/<bot>/` prefix (routines/source.ts), each with pause / resume where this device may, a tap opens
  * the routine's details. New routines are made by telling the bot in the chat. With Settings → Chat → "Routinen" off on
  * this device (routines/enabled.ts) the sheet has no routines part at all and loads nothing from the job API.
+ * Slice 4 (bots/AboutParts.tsx, bots/useBotAbout.ts): "Merkt sich" and "Kann" (open the Skills & memory screen of this
+ * bot), "Immer erlaubt" with "Widerrufen", the notification level on this device, and "Bot archivieren" at the bottom.
  */
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
@@ -19,7 +21,10 @@ import { controlsFor, groupOf, isRunning, lastOutcome } from '../routines/status
 import { routinesErrorKind } from '../routines/rights';
 import { GROUP_KEYS, rowStatus } from '../routines/rowText';
 import type { JobList, RoutineJob } from '../routines/jobs';
+import { libraryRoute } from '../library/source';
 import { BotAvatar } from './BotAvatar';
+import { AllowedSection, ArchiveSection, HowSection, KnowsAndCan, NotifySection } from './AboutParts';
+import { useBotAbout } from './useBotAbout';
 
 type Load = { kind: 'loading' } | { kind: 'ready'; list: JobList } | { kind: 'error'; reason: 'off' | 'forbidden' | 'unsupported' | 'other'; message?: string };
 
@@ -33,6 +38,7 @@ export function BotInfoSheet({
   description,
   model,
   onPickModel,
+  onArchived,
 }: {
   open: boolean;
   onClose(): void;
@@ -45,6 +51,8 @@ export function BotInfoSheet({
   /** the chat's model label ('' = server default) */
   model: string;
   onPickModel(): void;
+  /** the bot was archived: the chat leaves it (it is no longer served) */
+  onArchived?(): void;
 }) {
   const t = useTheme();
   const tr = useT();
@@ -53,6 +61,11 @@ export function BotInfoSheet({
   const [load, setLoad] = useState<Load>({ kind: 'loading' });
   const [busy, setBusy] = useState<string | null>(null);
   const routinesOn = usePreference('routines');
+  const about = useBotAbout(profile, bot, open, lang === 'de' || lang === 'es' ? lang : 'en');
+  const openLibrary = (tab?: 'memory') => {
+    onClose();
+    router.push(libraryRoute(bot, tab) as never);
+  };
   const src = open && routinesOn ? routinesSource(profile, bot, lang) : null;
   const srcKey = src?.key;
 
@@ -152,6 +165,7 @@ export function BotInfoSheet({
             ) : null}
           </View>
         </View>
+        {about.fields ? <HowSection fields={about.fields} name={name} canEdit={about.manage?.allowed === true} onSave={about.saveFields} /> : null}
         <Pressable
           onPress={() => {
             onClose();
@@ -198,6 +212,27 @@ export function BotInfoSheet({
             ) : null}
           </>
         ) : null}
+        <KnowsAndCan memory={about.memory} skills={about.skills} name={name} onMemory={() => openLibrary('memory')} onSkills={() => openLibrary()} />
+        <AllowedSection state={about.allow} name={name} isDefault={!bot} manage={about.manage} onRevoke={about.revoke} />
+        <NotifySection level={about.level} name={name} isDefault={!bot} push={about.push} onLevel={about.setLevel} />
+        {about.demo ? (
+          <HText variant="caption" color="subtle" testID="bot-about-demo">
+            {tr('bots.info.demoAbout')}
+          </HText>
+        ) : bot && profile.kind === 'hermes' && profile.bridge ? (
+          <ArchiveSection
+            name={name}
+            manage={about.manage}
+            onArchive={async () => {
+              const r = await about.archive();
+              if (r.ok) {
+                onClose();
+                onArchived?.();
+              }
+              return r;
+            }}
+          />
+        ) : null}
       </ScrollView>
     </SheetModal>
   );
@@ -207,7 +242,7 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   shrink: { flexShrink: 1 },
   sheet: { paddingHorizontal: 18 },
-  // capped at 88 % of the screen (many routines, a small phone or large text make it taller): the content scrolls inside
+  // the sheet is capped at 88 % of the screen (with every slice 4 part it is taller than a phone): the list scrolls inside
   scroll: { flexGrow: 0, flexShrink: 1 },
   content: { gap: 14, paddingBottom: 24 },
   head: { flexDirection: 'row', alignItems: 'center', gap: 14 },

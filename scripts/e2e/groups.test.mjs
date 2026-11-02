@@ -49,7 +49,7 @@ test('group table: every check registered in Suite.run() is in a group, and only
   assert.ok(ids.length >= 20, `found ${ids.length} registered checks`);
   const grouped = Object.values(listed()).flat();
   assert.equal(new Set(grouped).size, grouped.length, 'a check is in two groups');
-  const special = new Set(['install', 'pair', 'logcat', 'live', 'live_bots', 'live_quick']);
+  const special = new Set(['install', 'pair', 'logcat', 'live', 'live_bots', 'live_quick', 'live_chat', 'live_aplus', 'live_bg', 'live_firstuse', 'live_about_approval', 'live_cards', 'live_groups', 'live_upgrade']);
   assert.deepEqual([...grouped].sort(), ids.filter((i) => !special.has(i)).sort());
 });
 

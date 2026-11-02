@@ -7,6 +7,7 @@
 import type { ChatMessage } from '../hermes/types';
 import type { HuiCallout, Segment } from '../protocol/types';
 import type { LiveCard, LiveEvent, LiveFull, LiveOp, LiveTurn } from './model.ts';
+import type { TurnState } from './pending.ts';
 import { fullFromNode, fullFromPlainNode, mayCarryLiveNode, mayCarryPlainNode, type LiveNodeShape } from './nodes.ts';
 
 export { mayCarryLiveNode, mayCarryPlainNode } from './nodes.ts';
@@ -73,7 +74,10 @@ export function liveEventsOf(messages: readonly ChatMessage[], parse: ParseSegme
     const plain = anyCard && mayCarryPlainNode(m.text);
     const blocks = live || plain ? liveBlocksOf(parse(m), { plain: anyCard }) : [];
     if (!blocks.length) {
-      if (anyCard && m.status === 'done') out.push({ kind: 'quiet', key: m.id, at: m.createdAt, turn });
+      if (!anyCard) continue;
+      if (m.status === 'done') out.push({ kind: 'quiet', key: m.id, at: m.createdAt, turn });
+      // an answer that broke off (error, stop) before it changed the card: said too, with the reason
+      else if (answerTurnState(m, false) === 'failed') out.push({ kind: 'quiet', key: m.id, at: m.createdAt, turn, broken: true });
       continue;
     }
     const excerpt = excerptOf(m.text);
@@ -127,4 +131,49 @@ export function transcriptBids(messages: readonly ChatMessage[]): Set<string> {
   const out = new Set<string>();
   for (const m of messages) if (m.role === 'user' && m.live) for (const b of Object.values(m.live)) if (b.bid) out.add(b.bid);
   return out;
+}
+
+/** How far a turn got, from its answer: streaming or being recovered = running, done, else (error, stop) failed. */
+export function answerTurnState(a: ChatMessage | undefined, last: boolean): TurnState {
+  if (!a) return last ? 'running' : 'failed';
+  if (a.status === 'streaming') return 'running';
+  if (a.status === 'done') return 'done';
+  // stopped by a lost stream (recovering) or persisted while streaming (app killed: no end time, recovery.ts)
+  if (a.status === 'stopped' && (a.interrupted !== undefined || a.metrics?.endedAt === undefined)) return 'running';
+  return 'failed';
+}
+
+/** batch id → how far the turn that carried it got (pending.ts `settleInflight`). */
+export function batchTurns(messages: readonly ChatMessage[]): Map<string, TurnState> {
+  const out = new Map<string, TurnState>();
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (m.role !== 'user' || !m.live) continue;
+    const next = messages[i + 1];
+    const st = answerTurnState(next?.role === 'assistant' ? next : undefined, i === messages.length - 1);
+    for (const b of Object.values(m.live)) if (b.bid) out.set(b.bid, st);
+  }
+  return out;
+}
+
+/** An accepted batch that no message shows this long after, with nothing running, counts as broken off. */
+export const LOST_BATCH_MS = 2 * 60_000;
+
+/**
+ * The turn state of a batch for settling it: as in the transcript, else `none` while the transcript may just not show
+ * it yet, `failed` once no answer is running and the transcript is newer than the acceptance (`at`) or the acceptance
+ * is LOST_BATCH_MS old: the batch never reached it (the app stopped between Hermes taking the turn and saving the
+ * chat, and the server copy lacks it too, or has not come yet). Failing early is safe: the batch goes again with `re`,
+ * every device skips the first copy, so it never applies twice; waiting forever would show "Hermes antwortet …" for good.
+ */
+export function turnOfBatch(turns: ReadonlyMap<string, TurnState>, messages: readonly ChatMessage[], bid: string, at?: number, now = Date.now()): TurnState {
+  const st = turns.get(bid);
+  if (st) return st;
+  if (!messages.length) return 'none';
+  const last = messages[messages.length - 1];
+  const running = last.role === 'user' || answerTurnState(last, true) === 'running';
+  if (running) return 'none';
+  // no `at`: kept by 0.2, whose batch the transcript should have had long ago
+  if (at === undefined) return 'failed';
+  return messages.some((m) => m.createdAt > at) || now - at >= LOST_BATCH_MS ? 'failed' : 'none';
 }

@@ -165,20 +165,35 @@ function checkExpoConfig(dir, pdir) {
  * that cannot be scanned (scan-error) is a failure, never a pass. Inline `leak-guard:allow` markers do not count in
  * build output. Code-signature data is skipped (see header).
  */
-async function artifactScan(dir, pdir, env = process.env) {
+async function artifactScan(dir, pdir, env = process.env, assetsDir = '') {
   const file = join(pdir, 'leak-denylist.txt');
-  const { parseDenylist, makeScanner, loadAllowList, fileEntries } = await import('./leak-guard.mjs');
+  const { parseDenylist, makeScanner, loadAllowList, fileEntries, trustedBlobs, maskEmbedded } = await import('./leak-guard.mjs');
   const hasList = existsSync(file);
   const denylist = hasList ? parseDenylist(readFileSync(file, 'utf8')) : [];
   const allow = loadAllowList(ROOT, { ...env, HUI_PRIVATE_DIR: pdir });
   // signature: skip _CodeSignature/ + *.mobileprovision and mask the Mach-O LC_CODE_SIGNATURE blobs
   const scanner = makeScanner({ denylist, allow, signature: true, inlineAllow: false });
   const errs = [];
+  const notes = [];
+  // --assets WEBDIR / $HUI_EMBEDDED_ASSETS: the web dir whose compressed files the app embeds byte for byte (see leak-guard.mjs
+  // trustedBlobs): scanned by content in this run; exact copies of the clean ones are not scanned as raw bytes in the binary.
+  let blobs = [];
+  if (assetsDir) {
+    const t = trustedBlobs(assetsDir, scanner);
+    blobs = t.blobs;
+    for (const f of t.findings) errs.push(`assets:${f.path}${f.line ? `:${f.line}` : f.offset != null ? `@${f.offset}` : ''}: ${f.rule} ${f.text.length <= 3 ? '***' : f.text.slice(0, 2) + '***'}`);
+  }
   for (const p of walk(dir, [], false)) {
     if (!lstatSync(p).isFile()) continue;
     // .gz/.br/.zip: scan the decompressed content (compressed bytes can form a short term by chance), as leak-guard --path
     for (const e of fileEntries(p, relative(dir, p))) {
-      for (const f of scanner.scanContent(e.path, e.read())) {
+      let buf = e.read();
+      if (blobs.length) {
+        const m = maskEmbedded(buf, blobs);
+        buf = m.buf;
+        for (const r of m.ranges) notes.push(`embedded asset skipped: ${e.path} @${r.offset} +${r.length} bytes (byte-identical to ${r.blob} of the assets dir; its decompressed content was scanned clean in this run)`);
+      }
+      for (const f of scanner.scanContent(e.path, buf)) {
         if (f.error) {
           errs.push(`${f.path}: ${f.rule}: ${f.text}`);
           continue;
@@ -188,7 +203,8 @@ async function artifactScan(dir, pdir, env = process.env) {
       }
     }
   }
-  return { errs, note: hasList ? '' : `no ${file}: private term scan skipped (generic patterns still checked)` };
+  if (!hasList) notes.push(`no ${file}: private term scan skipped (generic patterns still checked)`);
+  return { errs, notes };
 }
 
 export async function main(argv, env = process.env) {
@@ -197,7 +213,7 @@ export async function main(argv, env = process.env) {
   const dir = argv[1] && !argv[1].startsWith('--') ? resolve(argv[1]) : null;
   const noExpo = argv.includes('--no-expo-config');
   if (!['--env', '--tree', '--output'].includes(mode) || (mode !== '--env' && (!dir || !existsSync(dir)))) {
-    console.error('usage: flavor-guard.mjs --env | --tree DIR [--no-expo-config] | --output DIR');
+    console.error('usage: flavor-guard.mjs --env | --tree DIR [--no-expo-config] | --output DIR [--assets WEBDIR]');
     return 2;
   }
   let errs = [];
@@ -209,9 +225,15 @@ export async function main(argv, env = process.env) {
     errs = scanFiles(dir, pdir, hashes, { output: mode === '--output' });
     if (mode === '--tree' && !noExpo) errs.push(...checkExpoConfig(dir, pdir));
     if (mode === '--output') {
-      const d = await artifactScan(dir, pdir, env);
+      const ai = argv.indexOf('--assets');
+      const assets = ai >= 0 ? argv[ai + 1] : env.HUI_EMBEDDED_ASSETS || '';
+      if (ai >= 0 && (!assets || assets.startsWith('--') || !existsSync(assets))) {
+        console.error('flavor-guard: --assets needs an existing directory');
+        return 2;
+      }
+      const d = await artifactScan(dir, pdir, env, assets);
       errs.push(...d.errs);
-      if (d.note) notes.push(d.note);
+      notes.push(...d.notes);
     }
   }
   for (const n of notes) console.log(`flavor-guard: ${n}`);

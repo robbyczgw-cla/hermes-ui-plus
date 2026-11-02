@@ -4,6 +4,7 @@ import { useHui } from '../../primitives/context';
 import { HText, PressableScale } from '../../primitives/basics';
 import { Icon } from '../../primitives/Icon';
 import { provenanceInfo } from './a/misc.ts';
+import { useEvidence } from './EvidenceContext';
 import { ExtraIcon } from './a/ExtraIcon';
 import { useS } from './useS';
 
@@ -13,15 +14,22 @@ import { useS } from './useS';
  * plus "Quelle: …" (http(s) sources show the domain and open on tap). Renders nothing when the
  * node has neither `basis` nor `source`.
  *
+ * Inside a chat answer the claim is checked against the chat's tool calls (EvidenceContext, chat/answers/evidence.ts):
+ * no web result → "Aus Modellwissen, ohne Webquelle" instead of the source (never a link); a source URL no search
+ * returned → "Nicht in den Suchergebnissen: …" without a link. `factual` (products, places, weather, product
+ * compares) shows that badge even when the node names no provenance.
+ *
  *   <ProvenanceChip node={node} />            // reads node.basis / node.source
- *   <ProvenanceChip basis="estimate" source="…" />
+ *   <ProvenanceChip basis="estimate" source="…" factual />
  */
-export function ProvenanceChip({ node, basis, source, style }: { node?: unknown; basis?: unknown; source?: unknown; style?: StyleProp<ViewStyle> }) {
+export function ProvenanceChip({ node, basis, source, factual, style }: { node?: unknown; basis?: unknown; source?: unknown; factual?: boolean; style?: StyleProp<ViewStyle> }) {
   const S = useS();
   const t = useTheme();
-  const { onAction } = useHui();
+  const { onAction, streaming } = useHui();
+  const evidence = useEvidence();
   const n = node && typeof node === 'object' ? (node as { basis?: unknown; source?: unknown }) : {};
-  const info = provenanceInfo(basis ?? n.basis, source ?? n.source, S);
+  // while the answer streams its tool rows are not final: no verdict before it is done
+  const info = provenanceInfo(basis ?? n.basis, source ?? n.source, S, streaming ? undefined : evidence, factual);
   if (!info) return null;
   const caution = info.tone === 'caution';
   const fg = caution ? t.colors.warning : t.colors.muted;

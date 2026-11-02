@@ -35,7 +35,7 @@
 <div class="frame bar">
 <a class="brand" href="/"><img src="/icon.svg" alt="" width="34" height="34"><span class="brand-text"><span>HUI<span class="plus">+</span></span><span class="brand-sub">Hermes Interactive UI+</span></span></a>
 <nav aria-label="Main"><ul>
-<li><a href="/#new">New in 0.2</a></li>
+<li><a href="/#new">New in 0.3</a></li>
 <li><a href="/#features">Features</a></li>
 <li><a href="/#demos">Demos</a></li>
 <li><a href="/#platforms">Platforms</a></li>
@@ -47,7 +47,7 @@
 <div class="letterhead" aria-hidden="true"><svg class="feather wl-letter" aria-hidden="true" focusable="false"><use href="#feather"/></svg></div>
 <main id="main" class="frame prose" tabindex="-1">
 <h1>Privacy policy</h1>
-<p><em>Last updated: 2026-10-16. Applies to the Hermes Interactive UI+ apps (&quot;HUI+&quot; on the home screen, &quot;HUI+ for Hermes Agent&quot; in the stores; Android, iOS, web, macOS) and the Hermes UI+ bridge.</em></p>
+<p><em>Last updated: 2026-11-01. Applies to the Hermes Interactive UI+ apps (&quot;HUI+&quot; on the home screen, &quot;HUI+ for Hermes Agent&quot; in the stores; Android, iOS, web, macOS) and the Hermes UI+ bridge.</em></p>
 <p>Hermes Interactive UI+ is an unofficial, open-source community client for the Hermes Agent. It is not affiliated with Nous Research.</p>
 <h2 id="summary">Summary</h2>
 <ul><li><strong>The developers collect no data.</strong> There are no accounts, no analytics, no advertising, no crash-reporting service, and no server operated by the developers that your data passes through.</li><li>Your data goes <strong>only to the server you set up</strong> (your Hermes Agent and your bridge) and to the services you configured on it.</li><li>Conversations are stored <strong>on your device</strong> and on your own server.</li></ul>
@@ -59,6 +59,7 @@
 <p>The bridge prints which of these are active when it starts. Their privacy policies apply to that part.</p>
 <p>The bridge's logs contain routing metadata, not message content, at the default log level. You control the retention of uploaded files on your bridge (7 days by default).</p>
 <p>Routines: for each bot on which you turn routines on, the bridge keeps a copy of every finished run's result (routine name, time, status, the final answer up to 16 KB, any error text) in its state directory (<code>routines-inbox.json</code>, readable only by the bridge's user). Entries are deleted after 30 days, and the file holds at most 300 entries; the operator can lower or raise both limits. The copy stays on your server and goes nowhere else. A push about a new result carries no result text unless previews are on.</p>
+<p>Bot timeline (Hermes v0.22.3 and newer): so that a bot knows what Hermes delivered to it last (a reminder, a routine result), the app sends up to three of those deliveries from the past three days with your message to your Hermes, as a system message. Hermes does not show it in the chat history, the title or the session list, but it keeps it in its own database (<code>state.db</code>, table <code>session_admissions</code>) like every system message, until the bot's chat session is deleted. It stays on your server and goes only to the model providers you configured in Hermes, as part of that turn.</p>
 <h2 id="push-notifications">Push notifications</h2>
 <p>Push is optional and off until you enable it.</p>
 <ul><li><strong>Web Push</strong> goes through the push service of your browser vendor (Google, Mozilla or Apple). The payload is encrypted for your device.</li><li><strong>Android:</strong> the APK from GitHub Releases does not use Firebase Cloud Messaging, so no push data goes to Google. While an answer is running, the app's own keep-alive service shows a notification on the device.</li><li><strong>Self-built apps</strong> with Firebase Cloud Messaging (Android) or the Apple Push Notification service (iOS) deliver through Google or Apple. Your bridge then sends them a device push token and the notification content.</li><li><strong>Previews are off by default.</strong> Notifications then only say that a message or approval request arrived, without its text. If you or your server's operator turn previews on, the notification text passes through Google or Apple.</li></ul>

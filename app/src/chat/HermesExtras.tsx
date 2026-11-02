@@ -2,21 +2,23 @@
  * Hermes-specific blocks around an answer (all stroke icons, de/en/es via `hermesTools.*`):
  * - <ContextDivider/>   "Kontext komprimiert" (hermes.status compacted / pruned skill marker)
  * - <MemoryNotes/>      "gemerkt" chip per memory write; a tap opens Skills & memory on the Memory tab of the chat's bot
- * - <MediaFiles/>       `MEDIA:<path>` tags as file chips / inline images (bridge GET /bridge/media)
+ * - <MediaFiles/>       `MEDIA:<path>` tags as file chips / inline images (bridge GET /bridge/media); web / desktop:
+ *                        "Öffnen" / "Sichern" buttons on the chip (files/WebFileActions)
  * - <ReminderCards/>    "Erinnerung gesetzt · morgen 08:00 · …" with where Hermes posts it, Ändern / Löschen (chat-native)
  *                        and, for a one-shot reminder on a phone, "Auch auf diesem Gerät erinnern" (deviceReminder.ts);
  *                        a job deleted / paused / moved later says so, and its device copy follows (reminderSync.ts)
  * Pure logic: hermesTools.ts, mediaTags.ts, reminder.ts, deviceReminder.ts, reminderSync.ts.
  */
 import { useRouter } from 'expo-router';
-import { memo, useEffect, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import { Text } from '../ui/primitives/Text';
 import { formatBytes } from '../attachments/mime';
 import { useI18n } from '../i18n';
 import { Button, useTheme } from '../ui';
 import { Photo, useNaturalAspect } from '../ui/components/imageParts';
 import { useConversations } from '../conversations/ConversationsProvider';
+import { isBotPlace } from '../conversations/types';
 import { libraryApplies, libraryRoute } from '../library/source';
 import { useConnection } from '../settings/ConnectionProvider';
 import { useCopy } from './actions';
@@ -24,7 +26,9 @@ import { useChatShell } from './ChatShellContext';
 import type { MemoryNote } from './hermesTools';
 import { Icon, type IconName } from './icons';
 import { fetchMedia, MediaUnavailable, openLocalMedia, probeMedia, type MediaConn } from './mediaFetch';
-import type { MediaKind, MediaRef } from './mediaTags';
+import { mediaMime, mediaUrl, type MediaKind, type MediaRef } from './mediaTags';
+import { WebFileActions } from '../files/WebFileActions';
+import { fetchFileBytes } from '../files/webFileDom';
 import { clearDeviceReminder, deviceReminderOf, setDeviceReminder } from './deviceReminder';
 import { deviceReminderAt, reminderChangePrefill, reminderDeleteMessage, reminderDelivery, reminderWhen, type Reminder, type ReminderDelivery } from './reminder';
 import { fateNote, type FateNote } from './reminderSync';
@@ -154,6 +158,8 @@ function MediaChip({ file, conn }: { file: MediaRef; conn: MediaConn | null }) {
 
   const kind = tr(`hermesTools.media.kind.${file.kind}`);
   const copyPath = () => copy(file.path, tr('hermesTools.media.pathCopied'));
+  // web / desktop: "Öffnen" (PDF in the in-app viewer) and "Sichern" instead of a blob URL in a new tab
+  if (Platform.OS === 'web' && conn && state === 'ready') return <WebMediaChip file={file} conn={conn} sub={size ? `${kind} · ${formatBytes(size, lang)}` : kind} size={size} />;
   const open = async () => {
     if (!conn || state === 'server') return copyPath();
     if (busy) return;
@@ -196,6 +202,36 @@ function MediaChip({ file, conn }: { file: MediaRef; conn: MediaConn | null }) {
         <Icon name="external" size={17} color={t.colors.subtle} />
       )}
     </Pressable>
+  );
+}
+
+function WebMediaChip({ file, conn, sub, size }: { file: MediaRef; conn: MediaConn; sub: string; size?: number }) {
+  const t = useTheme();
+  const { t: tr } = useI18n();
+  const kind = tr(`hermesTools.media.kind.${file.kind}`);
+  const src = useMemo(
+    () => ({ key: `media:${conn.baseUrl}|${file.path}`, name: file.name, mime: mediaMime(file), size }),
+    [conn.baseUrl, file, size],
+  );
+  const fetchBytes = useCallback(
+    () => fetchFileBytes(mediaUrl(conn.baseUrl, file.path), conn.apiKey ? { Authorization: `Bearer ${conn.apiKey}` } : undefined),
+    [conn, file.path],
+  );
+  return (
+    <View style={[styles.file, styles.webFile, { backgroundColor: t.colors.surfaceAlt, borderColor: t.colors.border, borderRadius: t.radii.control }]}>
+      <View style={styles.webFileHead} accessible accessibilityRole="text" accessibilityLabel={`${tr('hermesTools.media.a11y', { kind, name: file.name })}. ${sub}`}>
+        <Icon name={KIND_ICON[file.kind]} size={20} color={t.colors.muted} />
+        <View style={styles.fileText}>
+          <Text style={[t.typography.callout, styles.fileName, { color: t.colors.text }]} numberOfLines={1}>
+            {file.name}
+          </Text>
+          <Text style={[t.typography.caption, styles.fileSub, { color: t.colors.muted }]} numberOfLines={1}>
+            {sub}
+          </Text>
+        </View>
+      </View>
+      <WebFileActions src={src} fetchBytes={fetchBytes} />
+    </View>
   );
 }
 
@@ -285,7 +321,7 @@ function ReminderCard({ r }: { r: Reminder }) {
   const shell = useChatShell();
   const meta = useConversations().get(shell?.conversationId ?? '');
   const { profiles } = useConnection();
-  const delivery = deliveryText(tr, reminderDelivery(r.deliver), { here: !!meta?.botChat, bot: meta?.hermesProfile });
+  const delivery = deliveryText(tr, reminderDelivery(r.deliver), { here: !!meta && isBotPlace(meta), bot: meta?.hermesProfile });
   // the job after this card: deleted / paused in Hermes → no buttons that act on it, a short note instead
   const fate = useReminderFate(r.jobId);
   const note = fateNote(fate, r);
@@ -391,6 +427,8 @@ const styles = StyleSheet.create({
   fileText: { flex: 1, minWidth: 0 },
   fileName: { fontWeight: '500' },
   fileSub: { marginTop: 1 },
+  webFile: { flexDirection: 'column', alignItems: 'stretch' },
+  webFileHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   fileBtn: { padding: 4 },
   image: { maxWidth: 420 },
   imagePending: { width: '100%', maxWidth: 420, aspectRatio: 4 / 3 },

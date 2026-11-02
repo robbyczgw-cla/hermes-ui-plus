@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { columnLooksLikeProduct, compareLooksLikeProducts, compareProductQuery, titleModelStrength } from './compareProducts.ts';
+import { columnLooksLikeProduct, compareLooksLikeProducts, compareProductQuery, namesProducts, tableNamesProducts, titleModelStrength } from './compareProducts.ts';
 
 const col = (title: string, items: string[] = [], extra: { pros?: string[]; cons?: string[] } = {}) => ({ title, items, ...extra });
 
@@ -73,4 +73,18 @@ test('thumbnail query: the title, a trailing note in brackets dropped when the r
   assert.equal(compareProductQuery('AYN Odin 2 Mini'), 'AYN Odin 2 Mini');
   assert.equal(compareProductQuery('Pixel 11 (Empfehlung)'), 'Pixel 11');
   assert.equal(compareProductQuery('Mini-PC (Intel N100)'), 'Mini-PC (Intel N100)');
+});
+
+test('namesProducts / tableNamesProducts: two concrete models among the headers or the first cells (evidence badge)', () => {
+  // QA round 4 / live check: phone tables and compares the model wrote without `basis`
+  assert.ok(tableNamesProducts(['Merkmal', 'iPhone 16', 'Pixel 9'], [['Hauptkamera', '48 MP', '50 MP']]));
+  assert.ok(tableNamesProducts(['Feature', 'iPhone 16', 'Pixel 9'], []));
+  assert.ok(tableNamesProducts(['Modell', 'Akku'], [['Galaxy S25', '4000 mAh'], ['Pixel 9', '4700 mAh']]));
+  assert.ok(namesProducts(['iPhone 16', 'Pixel 9', 'Akku']));
+  // one product, plans, ordinary data tables: not about products
+  assert.ok(!tableNamesProducts(['Merkmal', 'iPhone 16'], [['Akku', '3561 mAh']]));
+  assert.ok(!tableNamesProducts(['Artikel', 'Menge'], [['Milch', '1 l'], ['Brot', '1']]));
+  assert.ok(!namesProducts(['Plan A', 'Plan B']));
+  assert.ok(!namesProducts(['Variante 1', 'Variante 2', 'Kriterium']));
+  assert.ok(!tableNamesProducts(undefined, 'x'));
 });

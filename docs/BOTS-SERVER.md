@@ -122,7 +122,9 @@ aside.
   afterwards as in step 3.
 - Turning on multiplexing for the first time on production without a backup that includes `installs/`.
 - Anything of this from the app: the app reads the bot list, opens each bot's Bot Chat, chats, and (once you switched
-  it on, see "Creating bots from the app") creates and edits bots. It never restarts the gateway.
+  it on, see "Creating bots from the app") creates and edits bots. With plugin 0.3 it can also remove "always allow"
+  entries and archive or restore a bot (see "Allow-list, archive and other bots' skills"). It never restarts the
+  gateway.
 
 ## How the app uses this
 
@@ -139,18 +141,33 @@ aside.
   notify nobody). The job's own cron session and the routines inbox do not ping a second time.
 - **Approvals** in a bot's chat name the bot and offer "Allow once", "Always allow" and "Deny". "Always allow" is
   stored in that profile's `config.yaml` (`command_allowlist`), so it applies to that bot only and covers a category
-  of commands, not just the exact command.
+  of commands, not just the exact command. With plugin 0.3 the app lists these entries per bot and can remove one.
 
-### Hermes v0.22.3 and newer: the Bot Chat is read-only in the app
+### Hermes v0.22.3 and newer: one timeline per bot
 
 From v0.22.3 (unified gateway) the Bot Chat belongs to the gateway itself: `POST /api/sessions {title:"Bot Chat"}`
 mints a local chat (`local-…` id), and Hermes refuses chat turns into it over the API (`permission_denied`). Reminders
-and routine results still land there and the app reads them as before (also the bridge's push per delivery).
-The app recognises such a Hermes by `features.run_unknown_resolution` in `GET /v1/capabilities` and shows the thread
-read-only: instead of the composer a short note and "New chat with <bot>", which opens an ordinary chat with that bot
-(full streaming, approvals and Stop). A Bot Chat made on v0.22.2 by the bridge is moved aside by Hermes as
-`Bot Chat (API <id>)` on the next delivery; one that a v0.22.2 cron delivery made (`source: cli`) stays the Bot Chat.
-On v0.22.2 nothing changes.
+and routine results still land there, also the bridge's push per delivery. The app recognises such a Hermes by
+`features.run_unknown_resolution` in `GET /v1/capabilities`.
+
+From app 0.3 the bot's screen then shows two sources on one timeline (`app/src/bots/timeline.ts`):
+
+- **Deliveries:** the Bot Chat, read-only. Looked up on open, on foreground, on a delivery's inbox or push event, and
+  every 60 s while the screen shows.
+- **The talk:** the app's own session of that bot, fixed id `hui-bot-<bot>` (`hui-bot-default` for the default bot), which
+  every device finds without a lookup. It comes into being with the first turn and works like any chat (streaming,
+  approvals, Stop, live cards). The chat list never shows it. Other Hermes clients see it as an ordinary session.
+
+When the user writes after a delivery, the app adds a system message for that turn with up to 3 deliveries of the last
+72 h (`[hermes-ui-bot-deliveries]`, marked as data), for as long as at most 6 user messages followed the delivery. Hermes
+doesn't store system messages. No bridge feature is involved, so this also works on the default bridge and without one.
+
+A Bot Chat made on v0.22.2 by the bridge is moved aside by Hermes as `Bot Chat (API <id>)` on the next delivery; the
+app keeps showing it as history on the same timeline. One that a v0.22.2 cron delivery made (`source: cli`) stays the
+Bot Chat. Chats made with "New chat with <bot>" in app 0.2.2 stay ordinary chats.
+
+If the capabilities can't be read and the bot has no talk yet, the Bot Chat opens as before and a send explains
+itself. On v0.22.2 and older, and in the offline demo, the bot's screen stays one writable thread.
 
 ## Creating bots from the app
 
@@ -216,3 +233,114 @@ It creates a bot from a template and an empty one, checks the files above, that 
 key, that the bot answers in its role and keeps its own memory, that editing works and that a paired device without
 the grant gets 403, then deletes the bots and verifies that every config, key and memory file of the other profiles,
 `devices.json`, `installs/*/facts.json` and the gateway's pid and Python environment are unchanged.
+
+## Allow-list, archive and other bots' skills (plugin)
+
+Plugin 0.3, in the default profile's plugin only (the plugin of another profile answers `404 feature_off`,
+`not_root_profile`), behind the same `bots.enabled` setting as the rest of `/bots`.
+
+- **Skills and memory of a bot:** the library routes take `?profile=<name>`, so "Skills & memory" can show the skills
+  of any bot and, when you set `library.expose_memory: true` in the default profile's plugin settings, its MEMORY.md /
+  USER.md (read from `profiles/<name>/memories/`, limits from that bot's `config.yaml`). Read-only, as before.
+- **"Always allow" list:** the app reads a bot's `command_allowlist` (also the default profile's) and its
+  `approvals.mode`, and can remove one entry. The plugin rewrites that `config.yaml` (comments in it are not kept, the
+  same as when Hermes itself saves an "always" choice) and tells Hermes to re-read the list, so the next matching
+  command asks again without a restart. One limit: "Always allow" also allowed the pattern for the rest of the session
+  it was given in, and Hermes keeps that in memory only. A chat that is still running in that session keeps it until
+  the session ends; new sessions ask again.
+- **Archive / restore:** archiving writes `profiles/<name>/gateway.parked` with the first line
+  `hermes-ui-plus: archived`. Hermes then stops serving `/p/<name>/` (at once after the rescan the plugin asks for,
+  otherwise within 30 s); the profile's files, chats and memory stay. Restore deletes the marker and the bot is served
+  again. The app only removes its own marker: a bot you stopped with `hermes -p <name> gateway stop`, or one whose
+  setup failed (`hermes-ui-plus: setup failed`), answers `409 parked_elsewhere`; restart those on the server. The
+  default profile is never archived. Deleting a bot stays a server step (`hermes profile delete <name>`).
+
+## About a bot, archive, activity (0.3, bridge)
+
+Needs the `hermes-ui-plus` plugin 0.3 in the **default (root) profile** (it reads the other profiles' files); an older
+plugin or one in another profile makes the bridge answer `404 bots_unavailable` with reason `plugin_unsupported` /
+`not_root_profile`, and the app says so. Every plugin answer is projected onto known fields; no plugin text reaches the
+app, and the bridge logs bot names and counts only.
+
+### Rights
+
+`bots.manage` is the same gate as creating (owner switch, admin token or a device with `bots grant`, plugin reachable,
+`HERMES_API_KEY` set) except that the 50-bot limit does not close it. `GET /bridge/bots` says it:
+
+```
+GET /bridge/bots -> {create: {allowed, reason?}, manage: {allowed, reason?}, admin, limit, count,
+                     archived: [{name, label?, color?}]}
+```
+
+`archived` lists bots archived from the app (plugin rows with `archived: true`), only for a credential with `manage` or
+the admin token (else `[]`). A bot parked for another reason (setup failure, a marker written by hand) is not in it.
+
+### "Always allowed" (command allow-list of one bot)
+
+```
+GET  /bridge/bots/<name>/allowlist          any credential; <name> may be `default`
+     -> {entries: [{pattern}], omitted?: n, manage: {allowed, reason?}}
+POST /bridge/bots/<name>/allowlist/revoke   bots.manage, body {pattern} (string, 1..200 chars, no control characters)
+     -> same shape without the pattern; 404 not_found when it is not in the list
+```
+
+Entries are the profile's `config.yaml` `command_allowlist` (pattern keys such as "recursive delete", exact commands or
+globs), at most 200 of at most 200 characters; `omitted` counts entries left out by these caps. Revoking removes the
+entry from `config.yaml` and from Hermes' in-process "always" set of that profile, so the next request asks again
+without a gateway restart.
+
+### Archive and restore
+
+```
+POST /bridge/bots/<name>/archive | /restore   bots.manage, never `default` (403 default_bot)
+     -> {bot: {name, label?, description?, color?, template?, parked, archived}}
+```
+
+Archive writes the profile's `gateway.parked` marker (first line `hermes-ui-plus: archived`); the multiplexing gateway
+stops serving the bot, the bridge refreshes its bot list at once and the bot leaves `/bridge/profiles` (and `/p/<name>/`
+answers 404 unknown_profile). Nothing is deleted: files, memory, sessions and routines stay. Restore removes only that
+marker and the bot is listed again (in every `BRIDGE_PROFILES` mode, also `list` for bots made in the app). A marker the
+plugin did not write gives `409 parked_elsewhere`: restore that bot on the server. The bridge also hides a profile with a
+`gateway.parked` marker from its own directory scan (`auto`) and from an explicit `BRIDGE_PROFILES` list.
+
+### Activity: what the bots are doing right now
+
+```
+GET /bridge/bots/activity   any credential
+-> {object: "bots.activity", at, turns: {known: true}, routines: {known, reason?, bots: [names read]},
+    data: [{bot: "default"|name, turns: [{sessionId, since, steps: [{name, label?, state: "done"|"running"}]}],
+            routines: [{jobId, name, since?}]}]}
+```
+
+Hermes keeps no list of running runs, so this is honest about its limits:
+
+- **turns** are the chat turns that run **through this bridge** (any paired device, also after the phone went away and
+  the run continued detached). A chat started from Telegram, the CLI, Hermes Desktop or another bridge is not seen.
+  Steps come from the turn's `hermes.tool.progress` events: at most 12, newest last; a step is `running` until Hermes
+  reports it completed or failed. A turn disappears when its upstream request ends. Stop a turn with the existing
+  `POST /bridge/chat/stop {sessionId, profile}`.
+- **routines** are cron jobs whose latest execution is `claimed` or `running` (`GET /api/jobs`), read only for bots
+  whose routines the credential may read (routines enabled for that bot by the owner, device right not `none`), at most
+  8 bots besides the default, cached 15 s per bot, 5 s timeout. `routines.known` is `false` with reason `routines_off`
+  when no bot qualifies, and `failed` when a job list could not be read (what could be read is still listed).
+- Only bots with something running are in `data`.
+
+### Notifications per bot
+
+The app's three levels per bot ("Alles", "Nur wenn ich gebraucht werde", "Aus") reach the bridge as the push
+registration's `scope.quietBots` / `scope.offBots` (bot names, `default` for the default bot; `/bridge/push/config`
+says `botLevels: true`). A registration that lists a bot in either gets no push for that bot's answers, Bot Chat
+deliveries and routine results. Approval pushes are never filtered, and neither is the live inbox (the app decides what
+it shows). The app keeps "Aus" for approvals on the device (no local reminder).
+
+### Routine runs that needed you
+
+A cron run has no user to approve a dangerous command; Hermes then blocks the step (`approvals.cron_mode`, default
+deny). The routines inbox recognises that tool result in the run's session and adds
+`blocked: {description?, command?}` (pattern description and the blocked command or code, one line, 200 characters
+each) to the entry, in `GET /bridge/routines/inbox` and `/inbox/<id>`.
+
+## Bot groups
+
+A group chat of 2 to 6 bots, run by the bridge, off by default: `hermes-ui-plus-bridge groups enable`. Details in
+[BOT-GROUPS.md](BOT-GROUPS.md).

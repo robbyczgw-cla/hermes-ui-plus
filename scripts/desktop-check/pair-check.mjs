@@ -22,6 +22,9 @@ const WD = args.webdriver ?? 'http://127.0.0.1:4445';
 // the expected answer must not occur in the prompt (the prompt shows up as bubble and as chat title)
 const PROMPT = args.prompt ?? 'What is 17 + 25? Reply with the number only.';
 const EXPECT = new RegExp(args.expect ?? '\\b42\\b');
+// optional bot checks (0.3): --api http://127.0.0.1:<hermes api port> (key in /tls/api-key): open the default bot's timeline,
+// fire a real `deliver: bot-chat` job and expect its text, then tap "Reply" on it
+const API = args.api;
 const TIMEOUT_MS = Number(args['timeout-s'] ?? 180) * 1000;
 if (!APP || !LINK || !OUT) { console.error('usage: pair-check.mjs --app BIN --link-file F --out DIR'); process.exit(2); }
 mkdirSync(OUT, { recursive: true });
@@ -157,6 +160,51 @@ try {
     const t = await waitFor((x) => EXPECT.test(x) && !/Thinking…|\brunning\b/.test(x), `a finished answer matching ${EXPECT}`, TIMEOUT_MS);
     return { text: t.replace(/\s+/g, ' ').slice(-400) };
   });
+  // the app reads a picked file through its blob URL: the window's content policy must allow that, or no attachment works
+  await step('read-picked-file', async () => {
+    const r = await wd('POST', s('/execute/async'), {
+      script: `const done = arguments[arguments.length - 1];
+        fetch(URL.createObjectURL(new Blob(['hui-blob-check']))).then((x) => x.text()).then((t) => done({ text: t }), (e) => done({ error: String(e) }));`,
+      args: [],
+    });
+    if (r?.text !== 'hui-blob-check') throw new Error(`a blob URL cannot be read in this window: ${r?.error ?? JSON.stringify(r)}`);
+    return { text: r.text };
+  });
+  if (API) {
+    const key = readFileSync('/tls/api-key', 'utf8').trim();
+    const hermes = async (method, path, body) => (await fetch(API + path, { method, headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) })).json().catch(() => ({}));
+    const mark = `Desktop Zustellung ${Date.now() % 100000}`;
+    // a user without bots gets the default bot's thread as a "Hermes" row in the chat list once a reminder/routine lands there
+    let job;
+    await step('delivery', async () => {
+      job = (await hermes('POST', '/api/jobs', { name: 'desktop check', schedule: 'every 6h', deliver: 'bot-chat', prompt: `Reply with only this line: ${mark}` })).job?.id;
+      if (!job) throw new Error('could not create the job');
+      await hermes('POST', `/api/jobs/${job}/run`, {});
+      const until = Date.now() + 240_000;
+      let row = null;
+      while (!row && Date.now() < until) {
+        row = await exec(`return [...document.querySelectorAll('[aria-label]')].find((e) => /^Hermes, (Local|App|CLI)$/.test(e.getAttribute('aria-label')) && e.getBoundingClientRect().height > 0) || null`).catch(() => null);
+        if (!row) await sleep(3000);
+      }
+      if (!row) throw new Error('no "Hermes" bot row in the chat list within 240 s of the delivery');
+      await wd('POST', s(`/element/${elId(row)}/click`), {});
+      const t = await waitFor((x) => x.includes(mark), `the delivery "${mark}" on the bot screen`, 60_000);
+      if (/Cronjob/.test(t)) throw new Error('the injected cron header is shown');
+      if (/belongs to Hermes itself/.test(t)) throw new Error('the bot screen is read-only');
+      const box = await exec(`return [...document.querySelectorAll('textarea,input[type=text],input:not([type])')].filter((e) => e.getBoundingClientRect().height > 0).pop() || null`);
+      if (!box) throw new Error('no composer on the bot screen');
+      return { seen: true };
+    });
+    await hermes('DELETE', `/api/jobs/${job}`);
+    await step('reply-link', async () => {
+      const before = (await pageText()).split(mark).length - 1;
+      await click('Reply');
+      await sleep(1200);
+      const after = (await pageText()).split(mark).length - 1;
+      if (after <= before) throw new Error(`no quote appeared after "Reply" (marker ${before} -> ${after})`);
+      return { before, after };
+    });
+  }
   ok = true;
 } catch (e) {
   console.error(`FAILED: ${e.message}`);

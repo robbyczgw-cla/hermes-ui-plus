@@ -33,6 +33,14 @@ test('parseReminders: create result with name, schedule and next run', () => {
   assert.equal(r[0].nextRun, new Date('2026-10-13T08:00:00').getTime());
 });
 
+test('reminder text: the job name, or the reminder line without the instruction to the model, never the raw prompt', () => {
+  const line = 'Reply with only this line: ⏰ Time to drink your tea!';
+  const update = parseReminders([cron({ action: 'update', job_id: 'j1', prompt: line }, { success: true, job_id: 'j1', job: { job_id: 'j1', name: 'Tea reminder' } })]);
+  assert.equal(update[0].text, 'Tea reminder');
+  const unnamed = parseReminders([cron({ action: 'create', prompt: line }, { success: true, job_id: 'j1' })]);
+  assert.equal(unnamed[0].text, '⏰ Time to drink your tea!');
+});
+
 test('parseReminders: stored result as JSON string, prompt as text, recurring schedules', () => {
   const r = parseReminders([
     cron(JSON.stringify({ action: 'create', schedule: 'every day at 9am', prompt: 'Wasser trinken' }), JSON.stringify({ success: true, job_id: 'j1', name: 'job-j1', schedule: 'every day at 9am' })),

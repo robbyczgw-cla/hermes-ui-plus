@@ -10,6 +10,7 @@ import {
   EMPTY_SELECTION,
   planDelete,
   remoteDeletable,
+  remoteFailedKey,
   selectableIds,
   selectionReducer,
   type SelectionAction,
@@ -279,3 +280,4 @@ test('a new batch commits the waiting one first; failed Hermes deletes are repor
   assert.ok(env.controller.get('x'));
   assert.equal(env.controller.get('own'), undefined, 'the committed batch stays deleted');
 });
+

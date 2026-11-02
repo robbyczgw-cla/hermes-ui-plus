@@ -62,7 +62,8 @@ export type IconName =
   | 'cloud'
   | 'cloudCheck'
   | 'phone'
-  | 'laptop';
+  | 'laptop'
+  | 'reply';
 
 type Props = { name: IconName; size?: number; color: string; strokeWidth?: number };
 
@@ -98,6 +99,8 @@ function render(name: IconName, p: object, color: string) {
       return <Rect x="7" y="7" width="10" height="10" rx="2" fill={color} />;
     case 'arrowDown':
       return <Path d="M12 5v14M5.5 12.5 12 19l6.5-6.5" {...p} />;
+    case 'reply':
+      return <Path d="M9.5 6 4 11.5 9.5 17M4.5 11.5H14a6 6 0 0 1 6 6V19" {...p} />;
     case 'copy':
       return (
         <>

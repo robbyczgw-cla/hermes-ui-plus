@@ -16,10 +16,16 @@ import type { ModelLockState } from '../hermes/modelLock.ts';
 import type { RemoteSession } from '../hermes/sessions.ts';
 import { hiddenKey, mergeRemoteSessions, type MergeResult, type SyncFilter } from './remoteSync.ts';
 import { botOf } from '../hermes/bots.ts';
-import { BOT_CHAT_TITLE, conversationOfSession, findBotChat } from '../bots/core.ts';
+import { BOT_CHAT_TITLE, conversationOfSession, findBotChat, findBotTalk } from '../bots/core.ts';
+import { botTalkSessionId, unsentTurns } from '../bots/timeline.ts';
 import { PERF, perfNow, perfSpan } from '../perf/probe.ts';
 
-export function createController(store: IndexStore, repo: ConversationRepo, now: () => number = Date.now) {
+export type ControllerHooks = {
+  /** the bot's talk `from` goes on as `to`, before the screen follows: what's kept per conversation elsewhere moves along */
+  onBotTalkMove?(from: string, to: string): void;
+};
+
+export function createController(store: IndexStore, repo: ConversationRepo, now: () => number = Date.now, hooks: ControllerHooks = {}) {
   /** signature of the last persisted list per conversation: identical saves are no-ops */
   const sigs = new Map<string, string>();
 
@@ -152,6 +158,46 @@ export function createController(store: IndexStore, repo: ConversationRepo, now:
       });
       if (seed) save(id, seed, { keepOrder: true });
       return get(id)!;
+    },
+
+    /** The bot's talk (bots/timeline.ts), created locally on first need: the session itself comes with the first turn. */
+    ensureBotTalk(profile: ProfileRef, bot: string | undefined): ConversationMeta {
+      const existing = findBotTalk(store.get().items, profile.id, bot);
+      if (existing) return existing;
+      const t = now();
+      const id = newConversationId(t);
+      store.dispatch({ type: 'botTalk', id, profile, bot, sessionId: botTalkSessionId(bot), now: t, title: BOT_CHAT_TITLE });
+      return get(id)!;
+    },
+
+    /**
+     * The talk `id` goes on under `sessionId` (another device's newer one), else a new generation; the old one stays as
+     * history, what Hermes never got goes along (unsentTurns; stored before the index, repo.flush). `rows`: the engine's
+     * transcript, when the caller has it. Already moved: the bot's current talk.
+     */
+    async moveBotTalk(id: string, sessionId?: string, rows?: readonly ChatMessage[]): Promise<ConversationMeta | undefined> {
+      const carried = unsentTurns(rows ?? (await repo.loadMessages(id).catch(() => [])));
+      const c = get(id);
+      if (!c) return undefined;
+      if (!c.botTalk) return findBotTalk(store.get().items, c.profileId, c.hermesProfile);
+      const t = now();
+      const nextId = newConversationId(t);
+      hooks.onBotTalkMove?.(id, nextId);
+      store.dispatch({ type: 'botTalkMoved', id, nextId, sessionId: sessionId ?? botTalkSessionId(c.hermesProfile, t.toString(36)), now: t, carried: carried.map((m) => m.id) });
+      if (carried.length) save(nextId, carried, { keepOrder: true });
+      await repo.flush();
+      return get(nextId);
+    },
+
+    /**
+     * The server moved this Bot Chat off that title (bots/adopt.ts): from now on an ordinary chat of the bot, under
+     * `title`, the server's new name, and with its message count there (none: its session is gone). True when it was
+     * the open chat.
+     */
+    retireBotChat(id: string, title?: string, remoteCount?: number): boolean {
+      const wasActive = store.get().activeId === id;
+      store.dispatch({ type: 'botChatRetire', id, ...(title ? { title } : {}), ...(remoteCount ? { remoteCount } : {}) });
+      return wasActive;
     },
 
     /** server activity of a bot's Bot Chat (Bots tab refresh); newer activity is fetched when the chat opens */

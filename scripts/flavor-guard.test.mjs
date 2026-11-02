@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { randomBytes } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -97,6 +98,57 @@ test('env: only the public EXPO_PUBLIC_* values are allowed in a hermes build', 
   assert.equal(checkEnv({ EXPO_PUBLIC_DEV_PROFILES: '[]' }, '/p').length, 1);
   assert.equal(checkEnv({ EXPO_PUBLIC_PERSONA_NAMES: 'x' }, '/p').length, 1);
   assert.equal(checkEnv({ EXPO_PUBLIC_APP_NAME: '/p/x' }, '/p').length, 1);
+});
+
+// A desktop app embeds the web bundle's compressed files byte for byte; --assets (or $HUI_EMBEDDED_ASSETS) names that web dir.
+const chanceGz = (term) => {
+  const gz = gzipSync(randomBytes(80 * 1024));
+  const data = Buffer.concat([Buffer.from('XXXXXX'), Buffer.alloc(40, 0x2e), Buffer.from(`${term}\0`)]);
+  const extra = Buffer.concat([Buffer.from([0x41, 0x42, data.length & 255, data.length >> 8]), data]);
+  const head = Buffer.from(gz.subarray(0, 10));
+  head[3] |= 0x04; // FEXTRA: the term sits in the raw bytes by chance, the content is random
+  return Buffer.concat([head, Buffer.from([extra.length & 255, extra.length >> 8]), extra, gz.subarray(10)]);
+};
+
+test('output with --assets: an exact copy of a clean compressed asset in the binary is skipped and reported; without it the chance hit fails', () => {
+  const f = fixture();
+  try {
+    const blob = chanceGz('secrethost');
+    const web = join(f.root, 'web');
+    mkdirSync(web);
+    writeFileSync(join(web, 'entry.js.gz'), blob);
+    writeFileSync(join(f.out, 'app-binary'), Buffer.concat([randomBytes(2048), blob, randomBytes(2048)]));
+    assert.equal(f.run('--output', f.out).status, 1, 'without --assets the chance hit is found');
+    const r = f.run('--output', f.out, '--assets', web);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /embedded asset skipped: app-binary @\d+ \+\d+ bytes/);
+  } finally {
+    f.done();
+  }
+});
+
+test('output with --assets: a blob that differs by one byte, or a term in the decompressed asset, still fails', () => {
+  const f = fixture();
+  try {
+    const blob = chanceGz('secrethost');
+    const web = join(f.root, 'web');
+    mkdirSync(web);
+    writeFileSync(join(web, 'entry.js.gz'), blob);
+    const other = Buffer.from(blob);
+    other[blob.length - 40] ^= 0x01;
+    writeFileSync(join(f.out, 'app-binary'), Buffer.concat([randomBytes(2048), other, randomBytes(2048)]));
+    const r = f.run('--output', f.out, '--assets', web);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.doesNotMatch(r.stdout, /embedded asset skipped/);
+    // the term in the decompressed content of the asset: fails, and the exact copy is not skipped
+    writeFileSync(join(web, 'entry.js.gz'), (() => { const g = chanceGz('x'); return Buffer.concat([g, gzipSync(Buffer.from('const h = "secrethost";'))]); })());
+    writeFileSync(join(f.out, 'app-binary'), randomBytes(1024));
+    const r2 = f.run('--output', f.out, '--assets', web);
+    assert.equal(r2.status, 1, r2.stdout + r2.stderr);
+    assert.match(r2.stderr, /assets:/);
+  } finally {
+    f.done();
+  }
 });
 
 test('signed iOS output: code-signature files are allowed, app content is still checked', () => {

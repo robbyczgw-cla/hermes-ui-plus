@@ -250,6 +250,7 @@ export const settings = {
     sessionKey: 'Clave de sesión',
     sessionKeyPh: 'opcional, p. ej. hermes-ui',
     hermesFootnote: 'La clave de sesión (X-Hermes-Session-Key) separa la memoria por canal. Deja el modelo vacío para usar el predeterminado del servidor.',
+    sessionKeyWebDirect: 'En un navegador sin el bridge, la clave de sesión no se envía: Hermes no permite ese encabezado desde navegadores, así que aquí la memoria no se separa por canal.',
     savedAs: 'Se guardará como: {url}',
     advanced: 'Avanzado',
     bridge: 'UI-Bridge',

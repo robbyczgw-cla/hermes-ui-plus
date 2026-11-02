@@ -4,7 +4,7 @@
  * GestureHandlerRootView on Android.
  */
 import { AttachmentImage } from './AttachmentImage';
-import { Modal, Pressable, StatusBar, StyleSheet, View } from 'react-native';
+import { Modal, Platform, Pressable, StatusBar, StyleSheet, View } from 'react-native';
 import { Text } from '../../ui/primitives/Text';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
@@ -15,6 +15,7 @@ import { shareAttachment } from '../share';
 import type { Attachment } from '../types';
 import { AttIcon } from './icons';
 import { useEscapeToClose } from '../../ui/lib/useEscapeToClose';
+import { useFileReport } from '../../files/useFileReport';
 
 export type ImageViewerProps = {
   attachment: Attachment | null;
@@ -33,6 +34,7 @@ export function ImageViewer({ attachment, onClose, onEdit }: ImageViewerProps) {
 
 function ViewerContent({ attachment, onClose, onEdit }: { attachment: Attachment; onClose(): void; onEdit?: (attachment: Attachment) => void }) {
   useEscapeToClose(true, onClose);
+  const report = useFileReport();
   const insets = useSafeAreaInsets();
   const t = useTheme();
   const tr = useT();
@@ -130,7 +132,13 @@ function ViewerContent({ attachment, onClose, onEdit }: { attachment: Attachment
             <Text style={[t.typography.callout, styles.pillText]}>{tr('imageEdit.action')}</Text>
           </Pressable>
         ) : null}
-        <Pressable onPress={() => void shareAttachment(attachment, tr)} hitSlop={10} accessibilityRole="button" accessibilityLabel={tr('actions.share')} style={styles.roundBtn}>
+        <Pressable
+          onPress={() => void shareAttachment(attachment, tr).then((o) => report(o, 'save', attachment.name))}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel={Platform.OS === 'web' ? tr('attachments.web.saveA11y', { name: attachment.name }) : tr('actions.share')}
+          style={styles.roundBtn}
+        >
           <AttIcon name="share" size={20} color="#fff" />
         </Pressable>
       </View>

@@ -68,7 +68,7 @@ class LibraryHttpTest(unittest.TestCase):
     def test_config(self):
         status, cfg = self.get(self.run_with(), "/library/config")
         self.assertEqual(status, 200)
-        self.assertEqual(cfg, {"version": VERSION, "profile": "alice", "skills": {"available": True},
+        self.assertEqual(cfg, {"version": VERSION, "profile": "alice", "profiles": False, "skills": {"available": True},
                                "memory": {"available": False, "reason": "memory_not_exposed"}})
         _, cfg = self.get(self.run_with(settings={"library": {"expose_memory": True}}), "/library/config")
         self.assertEqual(cfg["memory"], {"available": True})
@@ -171,6 +171,218 @@ class LibraryHttpTest(unittest.TestCase):
         self.assertEqual(r.request("GET", "/quick/config?x=1")[0], 200)
 
 
+class RootSource(FakeSource):
+    """The root profile's source: knows other profiles and makes a source per profile (like HermesLibrary)."""
+
+    def __init__(self, root, others=None, names_fail=False, **kw):
+        super().__init__(**kw)
+        self.root, self.others, self.names_fail = root, others or {}, names_fail
+        self.made = []
+
+    def profile_names(self):
+        if self.names_fail:
+            raise RuntimeError("no home override")
+        return list(self.others)
+
+    def for_profile(self, name):
+        self.made.append(name)
+        return self.others[name], os.path.join(self.root, "profiles", name)
+
+
+WRITER_SKILLS = [{"name": "drafting", "description": "w", "category": None, "enabled": True, "source": "local"}]
+
+
+class OtherProfilesTest(unittest.TestCase):
+    """?profile=<name>: the root profile's plugin reads another profile's skills and memory."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = self.tmp.name
+        os.makedirs(os.path.join(self.root, "memories"))
+        self.writer_home = os.path.join(self.root, "profiles", "writer")
+        os.makedirs(os.path.join(self.writer_home, "memories"))
+        Path(self.root, "memories", "MEMORY.md").write_text("root fact", encoding="utf-8")
+        Path(self.writer_home, "memories", "MEMORY.md").write_text("writer fact\n§\nsecond", encoding="utf-8")
+        self.writer = FakeSource(skills=WRITER_SKILLS, md={"drafting": b"# Drafting"},
+                                 mem={**MEM_CFG, "user_enabled": False, "memory_limit": 999})
+
+    def run_with(self, source=None, settings=None, home=None):
+        src = source or RootSource(self.root, {"writer": self.writer})
+        r = Running(FakeBackend(), settings, library_source=src, home=home or self.root)
+        self.addCleanup(r.close)
+        return r, src
+
+    get = staticmethod(LibraryHttpTest.get)
+
+    def test_config_profiles_flag(self):
+        r, _ = self.run_with()
+        _, cfg = self.get(r, "/library/config")
+        self.assertEqual((cfg["profile"], cfg["profiles"]), ("default", True))
+        _, cfg = self.get(self.run_with(RootSource(self.root, names_fail=True))[0], "/library/config")
+        self.assertEqual(cfg["profiles"], False)
+        _, cfg = self.get(self.run_with(FakeSource())[0], "/library/config")  # a source without profile reads
+        self.assertEqual(cfg["profiles"], False)
+        _, cfg = self.get(self.run_with(settings={"library": {"enabled": False}})[0], "/library/config")
+        self.assertEqual(cfg["profiles"], False)
+
+    def test_config_of_another_profile(self):
+        r, _ = self.run_with(settings={"library": {"expose_memory": True}})
+        status, cfg = self.get(r, "/library/config?profile=writer")
+        self.assertEqual((status, cfg), (200, {"version": VERSION, "profile": "writer", "profiles": True,
+                                               "skills": {"available": True}, "memory": {"available": True}}))
+        _, own = self.get(r, "/library/config?profile=default")
+        self.assertEqual(own["profile"], "default")
+
+    def test_skills_and_content_of_another_profile(self):
+        r, src = self.run_with()
+        status, body = self.get(r, "/library/skills?profile=writer")
+        self.assertEqual((status, body["profile"], [s["name"] for s in body["data"]]), (200, "writer", ["drafting"]))
+        status, body = self.get(r, "/library/skills/content?name=drafting&profile=writer")
+        self.assertEqual((status, body["content"]), (200, "# Drafting"))
+        status, body = self.get(r, "/library/skills/content?name=alpha&profile=writer")  # a root skill, not writer's
+        self.assertEqual((status, body["error"]["code"]), (404, "not_found"))
+        _, own = self.get(r, "/library/skills")
+        self.assertEqual([s["name"] for s in own["data"]], ["alpha", "beta", "zeta"])
+        self.assertEqual(self.writer.md_calls, ["drafting"])
+
+    def test_memory_of_another_profile(self):
+        r, _ = self.run_with()
+        status, body = self.get(r, "/library/memory?profile=writer")
+        self.assertEqual((status, body["error"]["reason"]), (404, "memory_not_exposed"))
+        r, _ = self.run_with(settings={"library": {"expose_memory": True}})
+        status, body = self.get(r, "/library/memory?profile=writer")
+        self.assertEqual((status, body["profile"]), (200, "writer"))
+        m, u = body["stores"]
+        self.assertEqual((m["entries"], m["limit"]), (["writer fact", "second"], 999))  # writer's file + config
+        self.assertEqual((u["enabled"], u["entries"]), (False, []))
+        _, own = self.get(r, "/library/memory")
+        self.assertEqual(own["stores"][0]["entries"], ["root fact"])
+
+    def test_unknown_profile(self):
+        r, src = self.run_with(settings={"library": {"expose_memory": True}})
+        for path in ("/library/config", "/library/skills", "/library/skills/content?name=x&", "/library/memory"):
+            for name in ("nope", "..%2Fwriter", "Writer", "a" * 65):
+                sep = "&" if "?" in path else "?"
+                status, body = self.get(r, f"{path.rstrip('&')}{sep}profile={name}")
+                self.assertEqual((status, body["error"]["code"]), (404, "unknown_bot"), (path, name))
+        self.assertEqual(src.made, [])
+
+    def test_not_root_and_unsupported(self):
+        alice = os.path.join(self.root, "profiles", "alice")
+        r, _ = self.run_with(home=alice)
+        for path in ("/library/config?profile=writer", "/library/skills?profile=writer"):
+            status, body = self.get(r, path)
+            self.assertEqual((status, body["error"]["code"], body["error"]["reason"]),
+                             (404, "feature_off", "not_root_profile"), path)
+        status, _ = self.get(r, "/library/skills?profile=alice")  # its own name is its own profile
+        self.assertEqual(status, 200)
+        r, _ = self.run_with(RootSource(self.root, {"writer": self.writer}, names_fail=True))
+        status, body = self.get(r, "/library/skills?profile=writer")
+        self.assertEqual((status, body["error"]["reason"]), (404, "hermes_unsupported"))
+        r, _ = self.run_with(FakeSource())
+        status, body = self.get(r, "/library/skills?profile=writer")
+        self.assertEqual((status, body["error"]["reason"]), (404, "hermes_unsupported"))
+
+    def test_disabled_library_refuses_other_profiles(self):
+        r, src = self.run_with(settings={"library": {"enabled": False}})
+        for path in ("/library/config?profile=writer", "/library/skills?profile=writer"):
+            status, body = self.get(r, path)
+            self.assertEqual((status, body["error"]["reason"]), (404, "disabled_by_config"), path)
+        self.assertEqual(src.made, [])
+
+    def test_broken_profile_source_is_unsupported(self):
+        r, _ = self.run_with(RootSource(self.root, {"writer": FakeSource(fail=True)}),
+                             {"library": {"expose_memory": True}})
+        _, cfg = self.get(r, "/library/config?profile=writer")
+        self.assertEqual((cfg["skills"]["reason"], cfg["memory"]["reason"]), ("hermes_unsupported",) * 2)
+        status, body = self.get(r, "/library/skills?profile=writer")
+        self.assertEqual((status, body["error"]["reason"]), (404, "hermes_unsupported"))
+
+
+class ForcedScopeTest(unittest.TestCase):
+    """HermesLibrary for another profile reads inside a FORCED home override (also when a host scope exists)."""
+
+    def setUp(self):
+        import contextvars
+        import sys
+        import types
+        from unittest import mock
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        (self.root / "profiles" / "writer").mkdir(parents=True)
+        self.home = contextvars.ContextVar("home", default=None)
+        self.scope = contextvars.ContextVar("scope", default={"host": "scope of default"})  # a host scope is present
+        self.built = []
+        hc = types.ModuleType("hermes_constants")
+        hc.set_hermes_home_override = lambda p: self.home.set(p)
+        hc.reset_hermes_home_override = lambda t: self.home.reset(t)
+        ss = types.ModuleType("agent.secret_scope")
+        ss.is_multiplex_active = lambda: True
+        ss.current_secret_scope = lambda: self.scope.get()
+        ss.build_profile_secret_scope = lambda h: self.built.append(str(h)) or {"profile": h.name}
+        ss.set_secret_scope = lambda m, profile_home=None: self.scope.set(m)
+        ss.reset_secret_scope = lambda t: self.scope.reset(t)
+        agent = types.ModuleType("agent")
+        agent.secret_scope = ss
+        profiles = types.ModuleType("hermes_cli.profiles")
+        profiles.list_profile_names = lambda: ["default", "writer"]
+        profiles.get_profile_dir = lambda n: self.root if n == "default" else self.root / "profiles" / n
+        config = types.ModuleType("hermes_cli.config")
+        seen = self.seen = []
+
+        def load_config():
+            seen.append((self.home.get(), self.scope.get()))
+            return {"memory": {"memory_char_limit": 1234 if self.home.get() else 2200}}
+        config.load_config = load_config
+        cli = types.ModuleType("hermes_cli")
+        cli.profiles, cli.config = profiles, config
+        self.mods = {"hermes_constants": hc, "agent": agent, "agent.secret_scope": ss, "hermes_cli": cli,
+                     "hermes_cli.profiles": profiles, "hermes_cli.config": config}
+        patcher = mock.patch.dict(sys.modules, self.mods)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_other_profile_reads_under_its_home(self):
+        from hermes_ui_plus.hermes_adapter import HermesLibrary
+        own = HermesLibrary(str(self.root))
+        self.assertEqual(own.profile_names(), ["writer"])
+        src, home = own.for_profile("writer")
+        self.assertEqual(home, str(self.root / "profiles" / "writer"))
+        self.assertEqual(src.memory_settings()["memory_limit"], 1234)
+        self.assertEqual(self.seen[-1], (home, {"profile": "writer"}))
+        self.assertEqual(self.built, [home])
+        self.assertEqual((self.home.get(), self.scope.get()), (None, {"host": "scope of default"}))  # all reset
+        own.memory_settings()  # the own profile: host scope present, nothing entered
+        self.assertEqual(self.seen[-1], (None, {"host": "scope of default"}))
+
+    def test_secret_scope_failure_keeps_the_override(self):
+        from hermes_ui_plus.hermes_adapter import HermesLibrary
+
+        def boom(h):
+            raise OSError("no .env")
+        self.mods["agent.secret_scope"].build_profile_secret_scope = boom
+        src, home = HermesLibrary(str(self.root)).for_profile("writer")
+        self.assertEqual(src.memory_settings()["memory_limit"], 1234)
+        self.assertEqual(self.seen[-1], (home, {"host": "scope of default"}))
+
+    def test_without_home_override_other_profiles_are_unsupported(self):
+        from hermes_ui_plus.hermes_adapter import HermesLibrary
+        del self.mods["hermes_constants"].set_hermes_home_override
+        with self.assertRaises(RuntimeError):
+            HermesLibrary(str(self.root)).profile_names()
+        src, _ = HermesLibrary(str(self.root)).for_profile("writer")
+        with self.assertRaises(RuntimeError):
+            src.memory_settings()
+
+    def test_for_profile_refuses_odd_directories(self):
+        from hermes_ui_plus.hermes_adapter import HermesLibrary
+        self.mods["hermes_cli.profiles"].get_profile_dir = lambda n: self.root / "elsewhere" / n
+        with self.assertRaises(ValueError):
+            HermesLibrary(str(self.root)).for_profile("writer")
+
+
 class LibraryUnitTest(unittest.TestCase):
     def test_profile_name(self):
         self.assertEqual(profile_name("/h/.hermes/profiles/alice"), "alice")
@@ -191,7 +403,7 @@ class LibraryUnitTest(unittest.TestCase):
     def test_unknown_source_value_becomes_local(self):
         svc = LibraryService(settings_from_mapping({}), FakeSource(
             [{"name": "x", "description": None, "category": "", "enabled": True, "source": "weird"}]), "/h")
-        self.assertEqual(svc._skill_list(), [{"name": "x", "description": "", "category": None, "enabled": True,
+        self.assertEqual(svc._skill_list(svc._own), [{"name": "x", "description": "", "category": None, "enabled": True,
                                               "source": "local"}])
 
 

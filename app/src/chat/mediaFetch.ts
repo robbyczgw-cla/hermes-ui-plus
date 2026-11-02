@@ -1,12 +1,14 @@
 /**
  * Fetch Hermes media files through the UI bridge (`GET /bridge/media?path=`, bridge/src/media.mjs) and hand them to
  * the system. Native: download into the cache (`File.downloadFileAsync` with the bearer header) and open the share
- * sheet; web: fetch -> blob URL -> new tab. A bridge without `BRIDGE_MEDIA_DIRS` answers 404 `media_disabled`:
+ * sheet; web: fetch -> blob, opened by files/webFileActions.ts. A bridge without `BRIDGE_MEDIA_DIRS` answers 404 `media_disabled`:
  * the chip then says "Datei liegt auf dem Server".
  */
 import { Directory, File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
-import { Linking, Platform } from 'react-native';
+import { Platform } from 'react-native';
+import { openWebFile } from '../files/webFileActions';
+import { browserFileDeps, fetchFileBytes } from '../files/webFileDom';
 import { mediaMime, mediaUrl, type MediaRef } from './mediaTags';
 
 export type MediaConn = { baseUrl: string; apiKey: string };
@@ -91,10 +93,14 @@ export function fetchMedia(conn: MediaConn, ref: MediaRef): Promise<string> {
   });
 }
 
-/** Open the downloaded file: native share / "open with" sheet, web: new tab (download for non-browser types). */
+/**
+ * Open the downloaded file: native share / "open with" sheet; web: the system path of files/webFileActions.ts (new tab
+ * on desktop, share sheet in the iOS home-screen app, where a window would trap the app).
+ */
 export async function openLocalMedia(uri: string, ref: MediaRef): Promise<void> {
   if (Platform.OS === 'web') {
-    await Linking.openURL(uri).catch(() => undefined);
+    const src = { key: `media:${uri}`, name: ref.name, mime: mediaMime(ref) };
+    await openWebFile(src, browserFileDeps(src, () => fetchFileBytes(uri)), { system: true }).catch(() => undefined);
     return;
   }
   if (!(await Sharing.isAvailableAsync())) return;

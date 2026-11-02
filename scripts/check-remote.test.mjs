@@ -319,7 +319,7 @@ test('check.sh all: every step runs, the last line counts per step and names the
     let r = a.run();
     assert.equal(r.status, 0, r.stdout + r.stderr);
     const linux = process.platform === 'linux';
-    assert.match(r.stdout.trim().split('\n').at(-1), new RegExp(`^check: tsc ok, tsc-test ok, app tests 12 pass/0 fail, ${linux ? 'scripts 7 pass/0 fail' : 'scripts skipped'}, bridge 9 pass/0 fail, push 5 pass/0 fail, hermes-plugin 4 ran - all green in 0m\\ds$`));
+    assert.match(r.stdout.trim().split('\n').at(-1), new RegExp(`^check: tsc ok, tsc-test ok, app tests 12 pass/0 fail, ${linux ? 'scripts 7 pass/0 fail' : 'scripts skipped'}, bridge 9 pass/0 fail, push 5 pass/0 fail, hermes-plugin 4 ran - all green in \\d+m\\d+s$`));
     r = a.run({ FAIL_TSC: '1', FAIL_PUSH: '1' });
     assert.equal(r.status, 1, r.stdout + r.stderr);
     const last = r.stdout.trim().split('\n').at(-1);

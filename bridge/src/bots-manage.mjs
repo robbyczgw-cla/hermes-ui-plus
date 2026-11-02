@@ -12,12 +12,22 @@
 // 401 on /p/<name>/), so the key never travels through the app.
 //
 // Routes (device auth like every /bridge route; the plugin's answers are projected onto known fields):
-//   GET   /bridge/bots               -> {create: {allowed, reason?}, admin, limit, count}
+//   GET   /bridge/bots               -> {create: {allowed, reason?}, manage: {allowed, reason?}, admin, limit, count,
+//                                        archived: [{name, label?, color?}]}  (archived: only with manage or admin)
 //   POST  /bridge/bots               {title, job, how, template?, lang?, may?, color?} -> 201 {bot}
 //   GET   /bridge/bots/<name>        -> {bot: {name, title, job, how, template, lang, may, app}} (edit form)
 //   PATCH /bridge/bots/<name>        {title, job, how, lang?} -> {bot}
+//   GET   /bridge/bots/<name>/allowlist         any credential, <name> may be `default`
+//                                    -> {entries: [{pattern}], omitted?: n, manage: {allowed, reason?}}
+//                                       (omitted: entries left out by the 200 x 200 caps; plugin 0.3: root profile only)
+//   POST  /bridge/bots/<name>/allowlist/revoke  bots.manage {pattern} -> like GET (404 not_found: not in the list)
+//   POST  /bridge/bots/<name>/archive | restore bots.manage, never default (403 default_bot)
+//                                    -> {bot: {name, label?, description?, color?, template?, parked, archived}}
+//                                       (409 parked_elsewhere: restore of a marker the plugin did not write)
 //   GET   /bridge/bots/rights        admin only -> {setting, enabled, devices: [{id, label, status, manage}]}
 //   PUT   /bridge/bots/rights        admin only {enabled?: bool|null, devices?: {"<id>": bool}} -> like GET
+// `manage` = the same gate as create, except that the 50-bot limit does not close it (editing, archiving, revoking).
+// GET /bridge/bots/activity is src/bots-activity.mjs (wired before this module in server.mjs).
 // It also keeps the plugin's bot list (GET /bots, every 30 s on demand) in profiles.mjs, so a sandboxed bridge that
 // cannot read the Hermes home still lists every bot and serves /p/<new bot>/ right after it was made.
 import { readFileSync } from 'node:fs';
@@ -37,7 +47,12 @@ const PATCH_KEYS = ['title', 'job', 'how', 'lang'];
 const LIMITS = { title: 40, job: 160, how: 2000 };
 /** reasons the plugin may give for "cannot create here" (anything else: plugin_unsupported) */
 const PLUGIN_REASONS = new Set(['disabled_by_config', 'not_root_profile', 'multiplex_off', 'hermes_unsupported', 'limit']);
-const FIELDS = new Set(['title', 'job', 'how', 'template', 'lang', 'may', 'color']);
+const FIELDS = new Set(['title', 'job', 'how', 'template', 'lang', 'may', 'color', 'pattern']);
+/** `/bridge/bots/<name>/<sub>`: '' = the bot itself (edit form) */
+const SUBS = { '': ['GET', 'PATCH'], allowlist: ['GET'], 'allowlist/revoke': ['POST'], archive: ['POST'], restore: ['POST'] };
+const PATTERN_MAX = 200;
+const ALLOWLIST_MAX = 200;
+const CONTROL = /[\u0000-\u001f\u007f]/;
 
 /** BRIDGE_BOTS_CREATE → 'on' | 'off' | '' (the owner's switch in devices.json decides). Throws on anything else. */
 export function parseBotsCreate(raw) {
@@ -65,10 +80,40 @@ export function projectBot(r) {
     ...(r.pinned === true ? { pinned: true } : {}),
     ...(r.hidden === true ? { hidden: true } : {}),
     ...(r.parked === true ? { parked: true } : {}),
+    ...(r.archived === true ? { archived: true } : {}),
     ...(r.app === true ? { app: true } : {}),
     ...(BOT_TEMPLATES.includes(r.template) ? { template: r.template } : {}),
   };
 }
+
+/**
+ * "Always allowed" rules of a plugin answer → {entries: [{pattern, description?}], omitted}: strings only, at most 200,
+ * each at most 200 chars; `omitted` = the plugin's count of entries it left out (caps) + what is dropped here.
+ * The plugin sends {pattern} only (the pattern text is what the app shows); a description is kept if one ever comes.
+ * Exported for tests.
+ */
+export function projectAllowlist(j) {
+  const entries = [];
+  let omitted = Number.isInteger(j?.omitted) && j.omitted > 0 ? Math.min(j.omitted, 1_000_000) : 0;
+  for (const e of Array.isArray(j?.entries) ? j.entries : []) {
+    const pattern = typeof e === 'string' ? e : plain(e) && typeof e.pattern === 'string' ? e.pattern : '';
+    // a cut pattern could not be revoked any more: an oversized or odd one is left out (counted), never shortened
+    if (!pattern || pattern.length > PATTERN_MAX || CONTROL.test(pattern) || entries.length >= ALLOWLIST_MAX) { omitted++; continue; }
+    const description = plain(e) ? line(e.description, PATTERN_MAX) : '';
+    entries.push({ pattern, ...(description ? { description } : {}) });
+  }
+  return { entries, omitted };
+}
+
+/** A bot as the app gets it after create / edit (and archive / restore with the flags). */
+const botView = (bot, flags = false) => ({
+  name: bot.name,
+  ...(bot.title ? { label: bot.title } : {}),
+  ...(bot.description ? { description: bot.description } : {}),
+  ...(bot.color ? { color: bot.color } : {}),
+  ...(bot.template ? { template: bot.template } : {}),
+  ...(flags ? { parked: bot.parked === true, archived: bot.archived === true } : {}),
+});
 
 /** The edit form's fields of GET /bots/<name>. Exported for tests. */
 export function projectFields(r) {
@@ -127,8 +172,8 @@ export function createBotsManage(config, o) {
   const timeoutMs = Number(env.BRIDGE_BOTS_TIMEOUT_MS) > 0 ? Number(env.BRIDGE_BOTS_TIMEOUT_MS) : 60_000;
   const listTimeoutMs = 3000;
 
-  /** last plugin GET /bots: {at, ok, create, limit, count, reason} */
-  let state = { at: -Infinity, ok: false, create: /** @type {{available: boolean, reason?: string}|null} */ (null), limit: LIMIT_DEFAULT, count: 0, reason: 'plugin_unreachable' };
+  /** last plugin GET /bots: {at, ok, create, limit, count, reason, archived} */
+  let state = { at: -Infinity, ok: false, create: /** @type {{available: boolean, reason?: string}|null} */ (null), limit: LIMIT_DEFAULT, count: 0, reason: 'plugin_unreachable', archived: /** @type {{name: string, label?: string, color?: string}[]} */ ([]) };
   /** @type {Promise<void>|null} */ let inflight = null;
 
   const pathOf = (req) => (req.url ?? '').split('?')[0];
@@ -194,13 +239,14 @@ export function createBotsManage(config, o) {
           profiles.setExternal?.(rows);
           const create = plain(json.create) ? { available: json.create.available === true, ...(json.create.reason ? { reason: String(json.create.reason) } : {}) } : null;
           const limit = Number.isInteger(json.limit) && json.limit > 0 ? json.limit : LIMIT_DEFAULT;
-          state = { at: now(), ok: true, create, limit, count: rows.length, reason: '' };
+          const archived = rows.filter((b) => b.archived).map((b) => ({ name: b.name, ...(b.title ? { label: b.title } : {}), ...(b.color ? { color: b.color } : {}) }));
+          state = { at: now(), ok: true, create, limit, count: rows.length, reason: '', archived };
         } else {
           const r = json?.error?.reason;
-          state = { ...state, at: now(), ok: false, reason: status === 404 ? (PLUGIN_REASONS.has(r) ? r : 'plugin_unsupported') : 'plugin_unreachable' };
+          state = { ...state, at: now(), ok: false, archived: [], reason: status === 404 ? (PLUGIN_REASONS.has(r) ? r : 'plugin_unsupported') : 'plugin_unreachable' };
         }
       } catch (e) {
-        state = { ...state, at: now(), ok: false, reason: e.kind === 'not_configured' ? 'plugin_not_configured' : 'plugin_unreachable' };
+        state = { ...state, at: now(), ok: false, archived: [], reason: e.kind === 'not_configured' ? 'plugin_not_configured' : 'plugin_unreachable' };
         if (e.kind !== 'not_configured') log.debug?.('bots: plugin list failed', { kind: e.kind });
       } finally {
         inflight = null;
@@ -227,6 +273,8 @@ export function createBotsManage(config, o) {
     }
     return { allowed: true };
   }
+  /** bots.manage (edit, archive / restore, revoke): the create gate, but the bot limit does not close it */
+  const manageOf = (a) => (a.allowed || a.reason === 'limit' ? { allowed: true } : { allowed: false, reason: a.reason });
 
   function headers(req, extra = {}) {
     const h = { 'x-hermes-ui-bridge': '1', 'cache-control': 'no-store', ...extra };
@@ -278,6 +326,8 @@ export function createBotsManage(config, o) {
       return fail(req, res, 409, code === 'exists' ? 'A bot with this name exists' : `At most ${state.limit} bots`, code, code === 'limit' ? { limit: state.limit } : {});
     }
     if (status === 404 && code === 'unknown_bot') return fail(req, res, 404, 'Unknown bot', 'unknown_bot');
+    if (status === 404 && code === 'not_found') return fail(req, res, 404, 'Not in the list', 'not_found');
+    if (status === 409 && code === 'parked_elsewhere') return fail(req, res, 409, 'This bot was parked outside the app; restore it on the server', 'parked_elsewhere');
     if (status === 403 && code === 'default_bot') return fail(req, res, 403, 'The default bot is edited on the server', 'default_bot');
     if (status === 404 && code === 'feature_off') {
       state = { ...state, at: -Infinity };
@@ -320,28 +370,85 @@ export function createBotsManage(config, o) {
     return send(req, res, 200, view());
   }
 
+  /** Old plugin without the route (404 without a code, or not JSON): the feature is not there. */
+  const oldPlugin = (status, json, notFoundToo) => status === 404 && (!json?.error?.code || (notFoundToo && json.error.code === 'not_found'));
+  const unsupported = (req, res) => fail(req, res, 404, 'Not available on this server', 'bots_unavailable', { reason: 'plugin_unsupported' });
+
+  /** GET /bots/<name>/allowlist or POST …/revoke on the plugin → {entries, manage}. */
+  async function allowlist(req, res, name, method, body, manage) {
+    try {
+      const path = `/bots/${name}/allowlist${method === 'POST' ? '/revoke' : ''}`;
+      const { status, json } = await plugin(method, path, body, method === 'POST' ? timeoutMs : listTimeoutMs * 2);
+      // an older plugin answers 404 not_found for routes it does not know (on revoke, not_found = not in the list)
+      if (status !== 200) return oldPlugin(status, json, method === 'GET') ? unsupported(req, res) : pluginError(req, res, status, json);
+      if (!plain(json)) return fail(req, res, 502, 'Bots upstream error', 'upstream_error');
+      const { entries, omitted } = projectAllowlist(json);
+      if (method === 'POST') log.info?.('bots: allowlist entry revoked', { bot: name, entries: entries.length });
+      return send(req, res, 200, { entries, ...(omitted ? { omitted } : {}), manage });
+    } catch (e) {
+      if (e.kind === 'bad' && e.status === 404) return unsupported(req, res);
+      return transportError(req, res, e);
+    }
+  }
+
+  /** POST /bots/<name>/archive | restore on the plugin → {bot}; the profiles list follows right away. */
+  async function archive(req, res, name, what, who) {
+    try {
+      const { status, json } = await plugin('POST', `/bots/${name}/${what}`, {}, timeoutMs);
+      if (status !== 200) return oldPlugin(status, json, true) ? unsupported(req, res) : pluginError(req, res, status, json);
+      const bot = projectBot(plain(json) ? json.bot : null);
+      if (!bot || bot.name !== name) return fail(req, res, 502, 'Bots upstream error', 'upstream_error');
+      profiles.invalidate?.();
+      await refresh(true); // archived bots leave /bridge/profiles, restored ones come back
+      const listed = profiles.names().includes(name);
+      // the plugin list did not answer (or lags): apply this answer directly
+      if (bot.parked ? listed : !listed) profiles.addExternal?.(bot);
+      log.info?.(what === 'archive' ? 'bots: archived' : 'bots: restored', { bot: name, by: who.kind });
+      return send(req, res, 200, { bot: botView(bot, true) });
+    } catch (e) {
+      if (e.kind === 'bad' && e.status === 404) return unsupported(req, res);
+      return transportError(req, res, e);
+    }
+  }
+
   async function handle(req, res) {
     const who = config.auth.check(req);
     if (!who) { req.resume(); return fail(req, res, 401, 'Invalid bridge token', 'invalid_api_key', {}, { 'www-authenticate': 'Bearer' }); }
     const path = pathOf(req);
     if (path === BOTS_RIGHTS_PATH) return rights(req, res, who);
     let name = null;
+    let sub = '';
     if (path !== BOTS_PATH) {
-      try { name = decodeURIComponent(path.slice(BOTS_PATH.length + 1)); } catch { name = ''; }
+      const rest = path.slice(BOTS_PATH.length + 1);
+      const at = rest.indexOf('/');
+      try { name = decodeURIComponent(at === -1 ? rest : rest.slice(0, at)); } catch { name = ''; }
+      sub = at === -1 ? '' : rest.slice(at + 1);
+      if (!Object.hasOwn(SUBS, sub)) { req.resume(); return fail(req, res, 404, 'Not found', 'not_found'); }
     }
-    if (name !== null && (!isProfileName(name) || name === DEFAULT_PROFILE)) {
+    // the allowlist of the default bot is readable and revocable; editing and archiving it is not
+    const defaultOk = sub === 'allowlist' || sub === 'allowlist/revoke';
+    if (name !== null && (!isProfileName(name) || (name === DEFAULT_PROFILE && !defaultOk))) {
       req.resume();
       return fail(req, res, name === DEFAULT_PROFILE ? 403 : 404, name === DEFAULT_PROFILE ? 'The default bot is edited on the server' : 'Unknown bot', name === DEFAULT_PROFILE ? 'default_bot' : 'unknown_bot');
     }
-    const methods = name === null ? ['GET', 'POST'] : ['GET', 'PATCH'];
+    const methods = name === null ? ['GET', 'POST'] : SUBS[sub];
     if (!methods.includes(req.method)) { req.resume(); return fail(req, res, 405, 'Method not allowed', 'method_not_allowed', {}, { allow: methods.join(', ') }); }
 
     const a = await access(who);
     if (name === null && req.method === 'GET') {
       req.resume();
       await refresh(); // limit / count also for a credential that may not create
-      return send(req, res, 200, { create: a.allowed ? { allowed: true } : { allowed: false, reason: a.reason }, admin: isAdmin(who), limit: state.limit, count: state.count });
+      const manage = manageOf(a);
+      return send(req, res, 200, {
+        create: a.allowed ? { allowed: true } : { allowed: false, reason: a.reason },
+        manage,
+        admin: isAdmin(who),
+        limit: state.limit,
+        count: state.count,
+        archived: manage.allowed || isAdmin(who) ? state.archived : [],
+      });
     }
+    if (sub === 'allowlist') { req.resume(); return allowlist(req, res, name, 'GET', null, manageOf(a)); }
     // editing keeps working at the limit; every other reason closes create and edit alike
     if (!a.allowed && !(a.reason === 'limit' && name !== null)) {
       req.resume();
@@ -349,6 +456,17 @@ export function createBotsManage(config, o) {
       if (a.reason === 'limit') return fail(req, res, 409, `At most ${state.limit} bots`, 'limit', { limit: state.limit });
       return fail(req, res, 404, 'Bots cannot be created on this server', 'bots_unavailable', { reason: a.reason });
     }
+    if (sub === 'allowlist/revoke') {
+      const body = await readJson(req, res);
+      if (body === undefined) return;
+      if (!plain(body) || Object.keys(body).some((k) => k !== 'pattern')) return fail(req, res, 400, 'Body must be {pattern}', 'invalid_field', { field: 'body' });
+      const pattern = body.pattern;
+      if (typeof pattern !== 'string' || !pattern || pattern.length > PATTERN_MAX || CONTROL.test(pattern)) {
+        return fail(req, res, 400, `pattern must be a string of 1..${PATTERN_MAX} characters`, 'invalid_field', { field: 'pattern' });
+      }
+      return allowlist(req, res, name, 'POST', { pattern }, { allowed: true });
+    }
+    if (sub === 'archive' || sub === 'restore') { req.resume(); return archive(req, res, name, sub, who); }
 
     if (req.method === 'GET') {
       req.resume();
@@ -375,7 +493,7 @@ export function createBotsManage(config, o) {
       await refresh(true); // the new bot is listed and served under /p/<name>/ from now on
       if (!profiles.names().includes(bot.name)) profiles.addExternal?.(bot); // plugin list not answering right now
       log.info?.(name === null ? 'bots: created' : 'bots: edited', { bot: bot.name, by: who.kind });
-      return send(req, res, name === null ? 201 : 200, { bot: { name: bot.name, ...(bot.title ? { label: bot.title } : {}), ...(bot.description ? { description: bot.description } : {}), ...(bot.color ? { color: bot.color } : {}), ...(bot.template ? { template: bot.template } : {}) } });
+      return send(req, res, name === null ? 201 : 200, { bot: botView(bot) });
     } catch (e) { return transportError(req, res, e); }
   }
 

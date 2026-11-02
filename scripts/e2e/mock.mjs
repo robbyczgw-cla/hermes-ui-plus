@@ -13,7 +13,13 @@
 // bytes at the same rhythm (seeded). Test control, no auth (the mock listens on loopback only):
 //   GET  /__e2e/state                     counters + config
 //   POST /__e2e/pair-code                 → {code}: one-time code for a `hermesuiplus://pair?u=…&c=…` link
-//   POST /__e2e/config {profiles, quick, routines, botsCreate}  bots on/off (`profiles: true` → default + research), quick answers on/off,
+//   POST /__e2e/config {profiles, quick, routines, botsCreate, about, routinesBlocked}  `about`: slice 4/5 routes (allow-list,
+//                                         archive, fields, library of every bot), `routinesBlocked`: the routine result skipped a step;
+//                                         `authority: true` = Hermes v0.22.3+ session authority (capabilities carry
+//                                         `run_unknown_resolution`, a turn into a "Bot Chat" session → 409 `permission_denied`);
+//                                         `botChatLookupFail: true` = GET /api/sessions?title=Bot%20Chat answers 500
+//   POST /__e2e/remote-turn {profile?, steps?}  another device's running turn in that bot's Bot Chat (activity + stop only);
+//                                         bots on/off (`profiles: true` → default + research), quick answers on/off,
 //                                        routines on/off (one job + one unread inbox result, read-only device; reset to unread), 'off' = default 0.2 bridge (no bot enabled)
 //   POST /__e2e/seed {messages, title}    perf harness: a Hermes session with that many transcript rows (perf-answers.mjs)
 //   POST /__e2e/fault {kind, match, …}    one-shot fault for the next chat turn whose text contains `match`:
@@ -34,12 +40,19 @@
 // sends a full new version; the mock applies the `[hui:live]` edits of each user message first, like Hermes would.
 // Phase 2: "Rom … plan" creates a live trip (3 day tabs + a map tab), "regnen" sends a full version that moves two
 // blocks; "Kopfhörer-Watchlist" (or "Kopfhoerer": adb cannot type umlauts) creates a live watchlist (3 products),
-// "Preise" sends a price update as a patch callout.
+// "Preise" sends a price update as a patch callout. 0.3 receipts: "langsam" a slow answer (to stop halfway), "aufräumen"
+// a full version that opens every tick again and drops the user's own items (Hermes did the user's edits differently).
 // Creating bots (config.botsCreate: 'allowed' | 'owner_off' | false; false also forgets the bots made so far): GET /bridge/bots says whether this device may,
 // POST /bridge/bots makes a bot (slug of the title, 409 for a taken name) that /bridge/profiles lists and /p/<name>/ serves.
 // Bots (config.profiles): POST /api/sessions accepts only {title:"Bot Chat"} and adopts an existing one (like the bridge);
 // GET /api/sessions?title=…&include_hidden=1 filters by title. "e2e approval" asks for an approval (`approval.request`,
 // choices once/session/always/deny) and waits until POST /v1/runs/{id}/approval answers it (the turn records the choice).
+// Bot groups (config.groups: true = on, 'owner_off' = the owner has not switched them on, false = BRIDGE_GROUPS=off):
+// /bridge/groups* is the REAL bridge driver (bridge/src/groups.mjs) calling this mock back as its Hermes, so the rounds,
+// "(pass)", hand-overs, the cap and approvals are the bridge's own. Member turns answer deterministically
+// (groupScenario): a message with "plan" → the leader proposes and hands over to @research, research answers;
+// "e2e approval" → the addressed member asks for an approval (the card belongs into its own Bot Chat); anything else →
+// the addressed member (or the leader) answers in one line, the others "(pass)".
 // Reminders: "remind me" runs Hermes' cron tool the way v0.22.2 does with lazy tool discovery (tool_describe, then
 // tool_call → cronjob_manage create for tomorrow 09:00, `deliver: local`): `hermes.tool.progress` events in the stream,
 // the assistant tool_calls + tool result rows in the session, so the app shows its reminder card from the stored detail.
@@ -50,6 +63,7 @@ import http from 'node:http';
 import { SCENARIOS } from '../demo-videos/scenarios.mjs';
 import { createReplayStore, idempotencyKey, resumeOffset, RESUMABLE_HEADER } from '../../bridge/src/replay.mjs';
 import { PERF_HUGE, PERF_LONG, perfHistory } from './perf-answers.mjs';
+import { createGroups } from '../../bridge/src/groups.mjs';
 
 const args = process.argv.slice(2);
 const PORT = Number(args.includes('--port') ? args[args.indexOf('--port') + 1] : 8791) || 8791;
@@ -87,6 +101,11 @@ const QUICK = 'Quick answer from the E2E mock: 42.';
 // ── live cards: one live shopping list per session ──────────────────────────────────────────────────────────────
 const LIVE_TRAILER = /\n*\[hui:live\](\{[\s\S]*\})\[\/hui:live\]\s*$/;
 /** user text without the live-card trailer + its batches (null: none or broken) */
+/** leading `[hui:quote …]\n> …\n[/hui:quote]` blocks cut (the app's reply quotes) */
+export function stripQuoteBlocks(text) {
+  return text.replace(/^(?:\[hui:quote[^\]\n]*\]\n[\s\S]*?\n\[\/hui:quote\]\s*)+/, '');
+}
+
 export function splitLiveTrailer(text) {
   const m = LIVE_TRAILER.exec(text);
   if (!m) return { text, batches: null };
@@ -259,6 +278,15 @@ function liveScenario(s, userText) {
     applyLiveOps(s.live, [{ set: 'mozzarella', qty: 4 }, { del: 'gurke' }]);
     return { name: 'live-update', text: `Vier Mozzarella, die Gurke ist gestrichen.\n\n${block()}`, ms: [3, 6] };
   }
+  if (s.live && /langsam|slowly/.test(t)) {
+    // a long answer to stop halfway (0.3 receipts: the edits that rode along go again with the next message)
+    return { name: 'live-slow', text: 'Moment, ich gehe die Liste in Ruhe durch. '.repeat(40), ms: [60, 90] };
+  }
+  if (s.live && /aufräumen|aufraeumen|tidy up/.test(t)) {
+    // Hermes does the user's edits differently: every tick open again (explicit `checked: false`), own items gone
+    s.live.items = s.live.items.filter((i) => !String(i.id).startsWith('u-')).map((i) => ({ ...i, checked: false }));
+    return { name: 'live-tidy', text: `Ich habe die Liste aufgeräumt, alles ist wieder offen.\n\n${block()}`, ms: [3, 6] };
+  }
   if (batches) return { name: 'live-ack', text: 'Alles klar.', ms: [10, 20] };
   return null;
 }
@@ -289,6 +317,31 @@ function reminderScenario(jobId = REMINDER_JOB) {
       { id: 'toolu_e2e_cron', name: 'cronjob_manage', label: 'create', emoji: '⏰', wrapped: true, args, result },
     ],
   };
+}
+
+/** One member turn of a bot group (the bridge's prompt, bridge/src/groups.mjs buildTurnPrompt): who am I, what did the
+ * user say last, was I named. Deterministic, see the header. */
+export function groupScenario(prompt) {
+  const me = /You are (?:[^(\n]+ )?\(@([a-z0-9_-]+)\)/.exec(prompt)?.[1] ?? '';
+  const ms = [15, 25];
+  if (/A direct question cannot be passed on/.test(prompt)) return { name: 'group', text: 'Dazu habe ich nichts Neues, die anderen haben es gesagt.', ms };
+  const users = [...prompt.matchAll(/^ {2}User \(user\): (.*)$/gm)].map((m) => m[1]);
+  const last = (users.at(-1) ?? '').toLowerCase();
+  // what the bots said since the user's latest message (earlier rounds do not count)
+  const room = prompt.split(/\nRules for this room:/)[0];
+  const afterUser = room.slice(room.lastIndexOf('  User (user): '));
+  const fromBots = [...afterUser.matchAll(/^ {2}(?!User \(user\))[^\n:]+: (.*)$/gm)].map((m) => m[1]).join('\n');
+  const named = (tag) => new RegExp(`@${tag}\\b`, 'i').test(last) || /@(alle|all|everyone|todos)\b/i.test(last);
+  const anyone = /@[a-z]/i.test(last);
+  const lead = me === 'hermes';
+  if (/\be2e approval\b/.test(last) && named(me)) return { name: 'approval', text: 'Approval answered, the E2E folder check is done.', ms };
+  if (/\bplan/.test(last)) {
+    if (lead && !fromBots) return { name: 'group', text: 'Mein Vorschlag: zwei Tage Lissabon mit dem Zug. @research such bitte drei Quellen zu Zugpreisen.', ms };
+    if (me === 'research' && /@research/.test(fromBots)) return { name: 'group', text: 'Drei Quellen gefunden: **Bahn**, **ÖBB** und **Trainline**. Ab 39 € pro Strecke.', ms };
+    return { name: 'group', text: '(pass)', ms };
+  }
+  if (named(me) || (!anyone && lead)) return { name: 'group', text: `${me === 'hermes' ? 'Hermes' : 'Research'} hier: ${(users.at(-1) ?? '').slice(0, 60)}`, ms };
+  return { name: 'group', text: '(pass)', ms };
 }
 
 /** reminder jobs the "remind me" turns made, by id (creation order): {id, sid, name, schedule, runAt} */
@@ -324,8 +377,11 @@ function reminderJobRecord(j) {
 
 /** scenario of a user text: {name, text, ms: [min, max] per chunk, tools?} */
 export function scenarioFor(userText) {
+  if (userText.startsWith('[Group chat: "')) return groupScenario(userText);
   // a live-card trailer is not what the user typed: it never picks the scenario
-  const t = splitLiveTrailer(userText).text.toLowerCase();
+  // nor do quoted excerpts in front of it ([hui:quote …] blocks, app/src/chat/quoteWire.ts): the typed text is the question
+  const typed = stripQuoteBlocks(splitLiveTrailer(userText).text);
+  const t = typed.toLowerCase();
   // perf harness (scripts/perf/droid.sh): the same ~13k-char answer at a realistic (~80 tok/s) or a stress rate
   if (/\bperfreal\b/.test(t)) return { name: 'perf-real', text: PERF_LONG, ms: [8, 16] };
   if (/\bperfstress\b/.test(t)) return { name: 'perf-stress', text: PERF_LONG, ms: [0, 2] };
@@ -338,10 +394,19 @@ export function scenarioFor(userText) {
   if (/exactly the word pong/.test(t)) return { name: 'live-pong', text: 'pong', ms: [20, 30] };
   if (/2 plus 3/.test(t)) return { name: 'live-sum', text: '5', ms: [20, 30] };
   if (/\bremind me\b/.test(t)) return reminderScenario();
+  // slice 5 "<Name> arbeitet": two tool steps, the second one running for 15 s (room for UI dumps), then a slow answer
+  if (/\be2e working\b/.test(t))
+    return {
+      name: 'working', text: SLOW, ms: [30, 45],
+      tools: [
+        { id: 'toolu_e2e_work_1', name: 'web_search', label: 'Headphones offers', emoji: '🔎', args: { query: 'headphones offers' }, result: { results: [] }, holdMs: 300 },
+        { id: 'toolu_e2e_work_2', name: 'browser_navigate', label: 'Reading the shop page', emoji: '🌐', args: { url: 'https://shop.example.com' }, result: { ok: true }, holdMs: 15000 },
+      ],
+    };
   // which job goes is the chat's newest reminder (bindReminder, at turn time)
   if (/\bdelete\b.*\breminder\b/.test(t)) return { name: 'reminder-delete', text: 'Done, the reminder is deleted.', ms: [20, 30], tools: [] };
   if (/\be2e approval\b/.test(t)) return { name: 'approval', text: 'Approval answered, the E2E folder check is done.', ms: [20, 30] };
-  return { name: 'short', text: SHORT(userText.trim()), ms: [20, 30] };
+  return { name: 'short', text: SHORT(typed.trim()), ms: [20, 30] };
 }
 
 /** mulberry32: small seeded PRNG */
@@ -372,9 +437,14 @@ export function chunks(text, rand) {
 
 // ── creating bots (bridge/src/bots-manage.mjs in small) ─────────────────────────────────────────────────────────
 async function botsRoute(req, res, path) {
-  const create = config.botsCreate === 'allowed' ? { allowed: true } : { allowed: false, reason: config.botsCreate === 'owner_off' ? 'owner_off' : 'plugin_not_configured' };
+  const create = config.botsCreate === 'allowed' ? { allowed: true } : { allowed: false, reason: config.botsCreate === 'owner_off' || config.about ? 'owner_off' : 'plugin_not_configured' };
+  // slice 4/5 (config.about): manage right = create right, or allowed alone with `about` on
+  const manage = config.about ? { allowed: true } : create;
+  if (path === '/bridge/bots/activity') return json(res, 200, activity());
+  if (config.about && path !== '/bridge/bots') return aboutRoute(req, res, path, manage);
   if (path !== '/bridge/bots') return apiError(res, 404, 'Unknown bot', 'unknown_bot');
-  if (req.method === 'GET') return json(res, 200, { create, admin: true, limit: 50, count: createdBots.length });
+  if (req.method === 'GET')
+    return json(res, 200, { create, admin: true, limit: 50, count: createdBots.length, manage, archived: config.about ? [...about.archived].map((name) => ({ name, label: aboutFields(name).title })) : [] });
   if (req.method !== 'POST') return apiError(res, 405, 'Method not allowed', 'method_not_allowed');
   const b = JSON.parse((await readBody(req)) || '{}');
   if (!create.allowed) return json(res, 404, { error: { message: 'Bots cannot be created on this server', code: 'bots_unavailable', reason: create.reason } });
@@ -387,8 +457,81 @@ async function botsRoute(req, res, path) {
   return json(res, 201, { bot });
 }
 
+// ── "Über <Name>" + activity (bridge/src/bots-manage.mjs, bots-activity.mjs in small; config.about) ─────────────────
+const about = { allow: new Map(), archived: new Set(), fields: new Map(), remote: [] };
+function resetAbout() {
+  about.allow = new Map([['research', ['recursive delete', 'delete in root path']], ['default', []]]);
+  about.archived = new Set();
+  about.fields = new Map([['research', { title: 'Research', job: 'Find sources and sum them up', how: 'Always with sources and dates. Short first, details on request.' }]]);
+  about.remote = [];
+}
+resetAbout();
+const aboutFields = (name) => about.fields.get(name) ?? { title: name, job: '', how: '' };
+async function aboutRoute(req, res, path, manage) {
+  const m = /^\/bridge\/bots\/([a-z0-9][a-z0-9_-]*)(\/allowlist(\/revoke)?|\/archive|\/restore)?$/.exec(path);
+  if (!m) return apiError(res, 404, 'Unknown bot', 'unknown_bot');
+  const [, name, sub] = m;
+  const known = name === 'default' || name === 'research' || createdBots.some((b) => b.name === name);
+  if (!known) return apiError(res, 404, 'Unknown bot', 'unknown_bot');
+  const body = req.method === 'GET' ? {} : JSON.parse((await readBody(req)) || '{}');
+  if (sub === '/allowlist' && req.method === 'GET') return json(res, 200, { entries: (about.allow.get(name) ?? []).map((pattern) => ({ pattern })), manage });
+  if (sub === '/allowlist/revoke' && req.method === 'POST') {
+    const list = about.allow.get(name) ?? [];
+    if (!list.includes(body.pattern)) return apiError(res, 404, 'Not in the list', 'not_found');
+    about.allow.set(name, list.filter((p) => p !== body.pattern));
+    return json(res, 200, { entries: about.allow.get(name).map((pattern) => ({ pattern })), manage });
+  }
+  if ((sub === '/archive' || sub === '/restore') && req.method === 'POST') {
+    if (name === 'default') return apiError(res, 403, 'The default bot is edited on the server', 'default_bot');
+    if (sub === '/archive') about.archived.add(name);
+    else about.archived.delete(name);
+    return json(res, 200, { bot: { name, label: aboutFields(name).title, parked: sub === '/archive', archived: sub === '/archive' } });
+  }
+  if (!sub && name !== 'default' && req.method === 'GET') return json(res, 200, { bot: { name, ...aboutFields(name), template: null, lang: 'en', may: null, app: false } });
+  if (!sub && name !== 'default' && req.method === 'PATCH') {
+    about.fields.set(name, { title: String(body.title ?? ''), job: String(body.job ?? ''), how: String(body.how ?? '') });
+    return json(res, 200, { bot: { name, label: body.title, description: body.job } });
+  }
+  return apiError(res, 405, 'Method not allowed', 'method_not_allowed');
+}
+/** GET /bridge/bots/activity: the mock's live turns (+ remote ones from /__e2e/remote-turn), steps as they stream */
+function activity() {
+  const by = new Map();
+  const add = (bot, turn) => {
+    const a = by.get(bot) ?? { bot, turns: [], routines: [] };
+    a.turns.push(turn);
+    by.set(bot, a);
+  };
+  for (const t of turns) if (t.state === 'live') add(sessions.get(t.sid)?.profile ?? t.profile ?? 'default', { sessionId: t.sid, since: t.startedAt ?? Date.now(), steps: t.steps ?? [] });
+  for (const r of about.remote) add(r.bot, { sessionId: r.sessionId, since: r.since, steps: r.steps });
+  return { object: 'bots.activity', at: Date.now(), turns: { known: true }, routines: { known: false, reason: 'routines_off' }, data: [...by.values()] };
+}
+
 // ── state ───────────────────────────────────────────────────────────────────────────────────────────────────────────
-const config = { profiles: false, quick: false, routines: false, botsCreate: false };
+const config = { profiles: false, quick: false, routines: false, botsCreate: false, groups: false, about: false, routinesBlocked: false, authority: false, botChatLookupFail: false };
+/** the bridge's group driver, made on the first /bridge/groups request (it calls this mock back on the same port) */
+let groups = null;
+const GROUPS_TOKEN = 'nca_e2e_groups_test_00000000000000000000';
+function groupsFor(req) {
+  if (groups) return groups;
+  const port = req.socket.localPort;
+  groups = createGroups(
+    {
+      auth: { check: (r) => (tokens.has(String(r.headers.authorization || '').replace(/^Bearer /, '').trim()) ? { kind: 'device', id: 'e2e' } : null) },
+      corsOrigins: [],
+      upstream: { baseUrl: `http://127.0.0.1:${port}`, apiKey: GROUPS_TOKEN },
+    },
+    {
+      env: { BRIDGE_GROUPS: config.groups === true ? 'on' : config.groups === 'owner_off' ? '' : 'off', BRIDGE_APPROVAL_TIMEOUT_S: '120' },
+      profiles: {
+        // the same bots as /bridge/profiles: an archived bot ("Über <Name>" → Archivieren) is not served, so not a member either
+        list: () => [{ name: 'default', default: true }, ...(config.profiles && !about.archived.has('research') ? [{ name: 'research', default: false, label: 'Research' }] : []), ...createdBots.filter((b) => !about.archived.has(b.name)).map((b) => ({ name: b.name, default: false, label: b.label, color: b.color }))],
+        allowed: (n) => !about.archived.has(n) && ((config.profiles && n === 'research') || createdBots.some((b) => b.name === n)),
+      },
+    },
+  );
+  return groups;
+}
 /** bots made through POST /bridge/bots (bots/create in the app) */
 const createdBots = [];
 
@@ -414,6 +557,8 @@ function routineItem(full) {
     id: ROUTINE_ITEM, hermesProfile: 'default', jobId: ROUTINE_JOB, title: 'E2E morning briefing', runAt: at, finishedAt: at,
     status: 'ok', summary: 'Three things for today: Library opens on Sundays from November.', sessionId: `cron_${ROUTINE_JOB}_20261016_070000`,
     hasRich: true, truncated: false, read: routineState.read,
+    // slice 5: the run skipped a step that needs an approval (config.routinesBlocked; finished just now)
+    ...(config.routinesBlocked ? { finishedAt: new Date(Date.now() - 60_000).toISOString(), blocked: { description: 'recursive delete', command: 'rm -rf ~/Downloads/old-offers' } } : {}),
   };
   return full ? { ...it, text: ROUTINE_TEXT } : it;
 }
@@ -463,9 +608,11 @@ async function routines(req, res, path, url) {
   }
   return apiError(res, 404, `Not found: ${path}`, 'not_found');
 }
+/** ids of sessions deleted elsewhere (POST /__e2e/delete-session): Hermes 0.22.5 refuses such an id for good (`not_found`) */
+const deletedSessions = new Set();
 let fault = null; // one-shot
 const codes = new Set();
-const tokens = new Set(['nca_e2e_test_token_static_0000000000']);
+const tokens = new Set(['nca_e2e_test_token_static_0000000000', 'nca_e2e_groups_test_00000000000000000000']);
 const replay = createReplayStore({ retainMs: 30 * 60_000 });
 /** @type {Map<string, {id: string, profile: string|null, title: string, rows: any[], started: number, last: number}>} */
 const sessions = new Map();
@@ -550,7 +697,10 @@ function runTurn(t, res, rec, opts) {
     for (const tool of t.tools ?? []) {
       // live: progress with the inner tool's name; stored: the wrapper call (tool_call {calls:[…]}) + the inner result row
       emit(frame({ tool: tool.name, emoji: tool.emoji, label: tool.label, toolCallId: tool.id, status: 'running' }, 'hermes.tool.progress'));
-      await sleep(200);
+      t.steps = [...(t.steps ?? []).map((x) => ({ ...x, state: 'done' })), { name: tool.name, label: tool.label, state: 'running' }];
+      const holdUntil = Date.now() + (tool.holdMs ?? 200);
+      while (t.state === 'live' && Date.now() < holdUntil) await sleep(100);
+      t.steps = t.steps.map((x) => ({ ...x, state: 'done' }));
       emit(frame({ tool: tool.name, toolCallId: tool.id, status: 'completed' }, 'hermes.tool.progress'));
       const s = session(t.sid, t.profile);
       const fn = tool.wrapped ? { name: 'tool_call', arguments: JSON.stringify({ calls: [{ name: tool.name, arguments: tool.args }] }) } : { name: tool.name, arguments: JSON.stringify(tool.args) };
@@ -637,10 +787,26 @@ async function chat(req, res, path, profile, token, log) {
   if (!body.stream) return apiError(res, 400, 'The E2E mock only streams', 'stream_required');
   // live list state lives on the session; a turn that never runs (held + dropped) must not create one
   const prev = sessions.get(sid);
+  // a deleted session's id stays refused (Hermes 0.22.5, measured): the stream answers 200 with one error chunk
+  if (sid && deletedSessions.has(sid)) {
+    log.kind = 'refused';
+    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'X-Hermes-Session-Id': sid, ...BRIDGE });
+    res.write(frame({ id: `chatcmpl-e2e-gone-${requests.length}`, object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000), model: 'hermes-agent', choices: [{ index: 0, delta: {}, finish_reason: 'error' }], error: { message: 'not_found', type: 'invalid_request_error', code: 'not_found' } }));
+    res.write('data: [DONE]\n\n');
+    return res.end();
+  }
+  // config.authority (Hermes v0.22.3+ session authority): the Bot Chat belongs to the gateway, a turn into it is refused
+  // the way v0.22.5 does (HTTP 409 `permission_denied`, measured through the bridge)
+  if (config.authority && prev?.title === 'Bot Chat') {
+    log.kind = 'refused';
+    return apiError(res, 409, 'permission_denied: this session belongs to the gateway (E2E authority mode)', 'permission_denied', 'invalid_request_error');
+  }
   const liveHolder = { live: prev?.live ? structuredClone(prev.live) : null, trip: prev?.trip ? structuredClone(prev.trip) : null, watch: prev?.watch ? structuredClone(prev.watch) : null };
   const sc = liveScenario(liveHolder, userText) ?? bindReminder(scenarioFor(userText), sid);
   const t = {
     n: turns.length + 1, text: userText, scenario: sc.name, ms: sc.ms, expected: sc.text, tools: sc.tools, streamed: '', sid: sid || `api-e2e-${turns.length + 1}`,
+    // every system message of the request (the app's `[hermes-ui-bot-deliveries]` context), for the checks
+    system: (body.messages || []).filter((m) => m.role === 'system').map((m) => contentText(m.content)),
     profile, key, scope, state: 'pending', completionId: `chatcmpl-e2e-${turns.length + 1}`, attaches: [], drops: 0, receivedAt: Date.now(),
   };
   log.kind = 'turn';
@@ -711,7 +877,22 @@ async function control(req, res, path, url) {
     Object.assign(config, body);
     if ('routines' in body) routineState.read = false; // every routines check starts with one unread result
     if ('botsCreate' in body && !body.botsCreate) createdBots.length = 0; // creating off = no bots made in an earlier check
+    if ('groups' in body) {
+      groups?.stop();
+      groups = null; // a new driver with the new switch and no groups from an earlier check
+    }
+    if ('about' in body) resetAbout(); // every "Über <Name>" check starts with the seeded allow-list, nothing archived
     return json(res, 200, config);
+  }
+  if (path === '/__e2e/remote-turn') {
+    // a turn of another device in a Bot Chat (activity only; /bridge/chat/stop ends it). {profile?, steps?}
+    const bot = body.profile || 'default';
+    const s = [...sessions.values()].find((x) => (x.profile ?? 'default') === bot && x.title === 'Bot Chat');
+    if (!s) return apiError(res, 404, 'No Bot Chat for that bot yet', 'not_found');
+    about.remote = about.remote.filter((r) => r.sessionId !== s.id);
+    // started 5 min ago on another device: the card counts whole minutes then (no per-second change, UI dumps work)
+    about.remote.push({ bot, sessionId: s.id, since: Date.now() - 5 * 60_000, steps: body.steps ?? [{ name: 'web_search', label: 'Headphones offers', state: 'done' }, { name: 'browser_navigate', label: 'Reading the shop page', state: 'running' }] });
+    return json(res, 200, { sessionId: s.id });
   }
   if (path === '/__e2e/seed') {
     // perf harness: a Hermes session with `messages` transcript rows (perf-answers.mjs); `hui-` id = one of the app's
@@ -738,6 +919,13 @@ async function control(req, res, path, url) {
     addRow(s, 'user', `[Cronjob "${name}" output — scheduled job, not the user. Review it, act on anything that needs action, and summarize for the chat.]\n\n${b.text ?? 'Time to buy tea.'}`);
     addRow(s, 'assistant', b.comment ?? 'The reminder ran, nothing else to do.');
     return json(res, 200, { sessionId: s.id, rows: s.rows.length });
+  }
+  if (path === '/__e2e/delete-session') {
+    // the session was deleted in another client (Hermes dashboard, Desktop): its rows are gone, a turn into its id is refused
+    const id = String(body.id || '');
+    const had = sessions.delete(id);
+    if (id) deletedSessions.add(id);
+    return json(res, had ? 200 : 404, { deleted: had ? id : null });
   }
   if (path === '/__e2e/remove-job') {
     const id = typeof body.id === 'string' ? body.id : [...reminderJobs.keys()].pop();
@@ -805,7 +993,7 @@ async function handle(req, res) {
   if (path === '/v1/capabilities')
     return json(res, 200, {
       object: 'hermes.api_server.capabilities', platform: 'hermes-agent', model: 'hermes-agent',
-      features: { streaming: true, tool_progress: true, session_continuity_header: 'X-Hermes-Session-Id' },
+      features: { streaming: true, tool_progress: true, session_continuity_header: 'X-Hermes-Session-Id', ...(config.authority ? { run_unknown_resolution: true } : {}) },
       endpoints: { chat_completions: { method: 'POST', path: '/v1/chat/completions' } },
     });
   if (path === '/v1/skills') return json(res, 200, { object: 'list', data: [] });
@@ -829,10 +1017,21 @@ async function handle(req, res) {
     return json(res, 200, { id: t.completionId, status: t.state === 'live' ? 'running' : t.state === 'ended' ? 'completed' : 'cancelled' });
   }
   if (path === '/api/model/options') return json(res, 200, { providers: [] });
-  if (req.method === 'GET' && path === '/api/sessions') return json(res, 200, sessionList(profile, url));
+  if (req.method === 'GET' && path === '/api/sessions') {
+    // config.botChatLookupFail: the Bot Chat lookup (?title=Bot Chat) fails, anything else is answered as usual
+    if (config.botChatLookupFail && url.searchParams.get('title') === 'Bot Chat') return apiError(res, 500, 'Session lookup failed (E2E fault)', 'e2e_lookup_failed', 'server_error');
+    return json(res, 200, sessionList(profile, url));
+  }
   if (req.method === 'POST' && path === '/api/sessions') {
     // the bridge's Bot Chat route: only that title, adopt before create
     const b = JSON.parse((await readBody(req)) || '{}');
+    // the group driver (bridge/src/groups.mjs, server side) makes each member's `Group: <id>` session with its own id
+    if (token === GROUPS_TOKEN && typeof b.id === 'string' && /^Group: /.test(b.title ?? '')) {
+      if (sessions.has(b.id)) return apiError(res, 409, 'Session already exists', 'session_exists');
+      const g = session(b.id, profile);
+      g.title = b.title;
+      return json(res, 201, { object: 'hermes.session', session: { id: g.id, title: g.title, hidden: false } });
+    }
     if (b.title !== 'Bot Chat' || Object.keys(b).length !== 1) return apiError(res, 403, 'Only the bot\'s "Bot Chat" session', 'bot_chat_only');
     const have = [...sessions.values()].find((x) => (x.profile ?? null) === (profile ?? null) && x.title === 'Bot Chat');
     const row = (x) => ({ id: x.id, source: 'api_server', title: x.title, started_at: x.started, last_active: x.last, message_count: x.rows.length, hidden: !!x.hidden });
@@ -858,9 +1057,11 @@ async function handle(req, res) {
     if (req.method === 'PATCH') {
       const b = JSON.parse((await readBody(req)) || '{}');
       if (typeof b.title === 'string') s.title = b.title;
-      return json(res, 200, { session: { id: s.id, title: s.title } });
+      if (typeof b.hidden === 'boolean') s.hidden = b.hidden;
+      return json(res, 200, { session: { id: s.id, title: s.title, hidden: !!s.hidden } });
     }
-    return json(res, 200, { id: s.id, title: s.title, source: 'api_server', message_count: s.rows.length });
+    // GET /api/sessions/{id}: `{session}` like the create answer (the app's parser reads `.session`)
+    return json(res, 200, { object: 'hermes.session', session: { id: s.id, title: s.title || null, source: 'api_server', started_at: s.started, last_active: s.last, message_count: s.rows.length, hidden: !!s.hidden } });
   }
   if (req.method === 'POST' && path === '/bridge/uploads') {
     // the bridge contract (app/src/attachments/uploadCore.ts): raw bytes, Content-Type, X-Filename → 201 RemoteRef
@@ -879,8 +1080,21 @@ async function handle(req, res) {
     return json(res, 201, { id, path: `/tmp/e2e-uploads/${id}-${name.replace(/[^\w.-]/g, '_')}`, name, size: bytes.length, mimeType });
   }
   if (!profile && (path === '/bridge/bots' || path.startsWith('/bridge/bots/'))) return botsRoute(req, res, path);
+  if (!profile && (path === '/bridge/groups' || path.startsWith('/bridge/groups/'))) {
+    req.url = path + url.search; // the driver routes on the path without a trailing slash
+    return groupsFor(req).handle(req, res);
+  }
   if (path === '/bridge/profiles')
-    return json(res, 200, { object: 'list', mode: 'list', data: [{ name: 'default', default: true, model: 'hermes-agent' }, ...(config.profiles ? [{ name: 'research', default: false, label: 'Research', model: 'hermes-agent' }] : []), ...createdBots.map((b) => ({ ...b, default: false, model: 'hermes-agent' }))] });
+    return json(res, 200, { object: 'list', mode: 'list', data: [{ name: 'default', default: true, model: 'hermes-agent' }, ...(config.profiles && !about.archived.has('research') ? [{ name: 'research', default: false, label: aboutFields('research').title, description: config.about ? aboutFields('research').job : undefined, model: 'hermes-agent' }] : []), ...createdBots.filter((b) => !about.archived.has(b.name)).map((b) => ({ ...b, default: false, model: 'hermes-agent' }))] });
+  if (config.about && req.method === 'GET' && path.startsWith('/bridge/library/')) {
+    // the root plugin reads every bot's library (plugin 0.3 `profiles: true`): a small fixed set per bot
+    const bot = url.searchParams.get('bot') || 'default';
+    if (path === '/bridge/library/config') return json(res, 200, { skills: { available: true }, memory: { available: true }, bot });
+    if (path === '/bridge/library/skills')
+      return json(res, 200, { object: 'list', data: [{ name: 'hermes-ui', description: 'Answer cards', category: null, enabled: true, source: 'local' }, { name: 'web-research', description: 'Search and cite', category: 'research', enabled: true, source: 'bundled' }, { name: 'old-notes', description: '', category: null, enabled: false, source: 'local' }] });
+    if (path === '/bridge/library/memory')
+      return json(res, 200, { provider: null, stores: [{ target: 'memory', enabled: true, entries: bot === 'default' ? [] : ['Prefers sources from the last 12 months'], chars: 40, limit: 2200, updated_at: null }, { target: 'user', enabled: true, entries: bot === 'default' ? [] : ['Likes an aisle seat', 'Headphones budget 80 EUR'], chars: 50, limit: 1375, updated_at: null }] });
+  }
   if (path === '/bridge/quick/config')
     return json(res, 200, config.quick ? { available: true, source: 'hermes-plugin', model: 'quick-mock', provider: 'mock', limits: { perDeviceMinute: 20, perDeviceDay: 500 }, streaming: true } : { available: false });
   if (req.method === 'POST' && (path === '/bridge/quick/v1/chat/completions' || path === '/bridge/quick')) {
@@ -893,7 +1107,9 @@ async function handle(req, res) {
     log.sid = b.sessionId;
     const live = turns.filter((t) => t.sid === b.sessionId && t.state === 'live' && t.stop);
     for (const t of live) t.stop();
-    return json(res, 200, { stopped: live.length });
+    const remote = about.remote.filter((r) => r.sessionId === b.sessionId).length;
+    about.remote = about.remote.filter((r) => r.sessionId !== b.sessionId);
+    return json(res, 200, { stopped: live.length + remote });
   }
   if (config.routines && !profile && (path === '/api/jobs' || path.startsWith('/api/jobs/') || path.startsWith('/bridge/routines/'))) return routines(req, res, path, url);
   if (path === '/bridge/meta') return apiError(res, 404, 'Off in the E2E mock', 'feature_off');

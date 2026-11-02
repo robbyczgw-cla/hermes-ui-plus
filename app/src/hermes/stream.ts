@@ -133,6 +133,8 @@ export type StreamChatParams = {
   liveCards?: boolean;
   /** the chat's open live cards for the bridge router (`X-HUI-Live`, live/focus.ts); bridge connections only */
   liveHeader?: string;
+  /** one more system message for this turn only, after the others (bots/timeline.ts deliveryContext); Hermes doesn't store it */
+  turnContext?: string;
   /** pauses before each resume attempt, the last one repeats (tests); default RESUME_DELAYS_MS */
   resumeDelaysMs?: readonly number[];
   /** how long a lost resumable stream keeps trying to re-attach (offline); default RESUME_WINDOW_MS */
@@ -201,7 +203,9 @@ export function buildRequest(
   liveCards: boolean = false,
   liveHeader?: string,
   /** `userTimeZoneMessage()` (timeZone.ts): the user's zone, so "9 Uhr" means the phone's 9:00; none when omitted */
-  userTime?: string
+  userTime?: string,
+  /** `StreamChatParams.turnContext` */
+  turnContext?: string
 ): { url: string; headers: Record<string, string>; body: string } {
   const modelOptions = modelOptionsBody(options);
   // a per-chat provider model (`provider::model`) goes out as `model` + `provider`
@@ -213,7 +217,7 @@ export function buildRequest(
       'Content-Type': 'application/json',
       Accept: 'text/event-stream',
       'X-Hermes-Session-Id': sessionId,
-      'X-Hermes-Session-Key': conn.sessionKey || 'hermes-ui',
+      ...(conn.omitSessionKey ? {} : { 'X-Hermes-Session-Key': conn.sessionKey || 'hermes-ui' }),
       // one key per sent message (kept by a retry of a send that never reached Hermes): the UI bridge never runs it
       // twice and can resume the stream; Hermes itself only dedupes non-streaming requests (docs/HERMES-API.md)
       ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
@@ -232,6 +236,7 @@ export function buildRequest(
         ...(liveCards ? [{ role: 'system', content: HERMES_FEATURES_MESSAGE }] : []),
         ...(followups === false ? [{ role: 'system', content: FOLLOWUPS_OFF_MESSAGE }] : []),
         ...(userTime ? [{ role: 'system', content: userTime }] : []),
+        ...(turnContext ? [{ role: 'system', content: turnContext }] : []),
         { role: 'user', content },
       ],
       ...(modelOptions ? { model_options: modelOptions } : {}),
@@ -382,7 +387,7 @@ export async function streamChatCore(
   const resumeWindow = params.resumeWindowMs ?? RESUME_WINDOW_MS;
   const probeAfter = params.headerProbeMs?.after ?? HEADER_PROBE_AFTER_MS;
   const probeEvery = params.headerProbeMs?.every ?? HEADER_PROBE_EVERY_MS;
-  const req = params.request ?? buildRequest(conn, params.content ?? text, sessionId, params.modelOptions, params.followups, params.idempotencyKey, params.liveCards, params.liveHeader, userTimeZoneMessage());
+  const req = params.request ?? buildRequest(conn, params.content ?? text, sessionId, params.modelOptions, params.followups, params.idempotencyKey, params.liveCards, params.liveHeader, userTimeZoneMessage(), params.turnContext);
   // a re-attach never needs the message again (the bridge ignores the body): without it, a bridge that does not
   // know the resume header (BRIDGE_RESUME=off) gets a request Hermes refuses (400) instead of asking it a second time
   const resumeBody = JSON.stringify({ model: splitProviderModel(conn.model || 'hermes-agent').model, stream: true, messages: [] });

@@ -1,7 +1,7 @@
 // Contract of the E2E mock (scripts/e2e/mock.mjs): what the Android smoke suite relies on, checked without an emulator.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer, scenarioFor } from './mock.mjs';
+import { createServer, scenarioFor, stripQuoteBlocks } from './mock.mjs';
 
 let server, base;
 before(async () => {
@@ -173,9 +173,60 @@ test('a fired bot-chat reminder: the default bot\'s Bot Chat gets the injected o
   assert.equal(again.sessionId, r.sessionId, 'one thread per bot');
   const list = await (await fetch(`${base}/api/sessions?title=Bot%20Chat&include_hidden=1`, { headers: auth })).json();
   assert.deepEqual(list.data.map((x) => x.id), [r.sessionId]);
+  const one = await (await fetch(`${base}/api/sessions/${r.sessionId}`, { headers: auth })).json();
+  assert.deepEqual([one.session.id, one.session.message_count > 0, typeof one.session.last_active], [r.sessionId, true, 'number'], 'GET one session answers {session}');
   const msgs = await (await fetch(`${base}/api/sessions/${r.sessionId}/messages`, { headers: auth })).json();
   assert.match(msgs.data[0].content, /^\[Cronjob "Buy tea" output/);
   assert.equal(msgs.data.at(-1).role, 'assistant');
+});
+
+test('authority mode (Hermes v0.22.3+): flag in capabilities, Bot Chat refuses turns (409), own session works and records system messages, lookup fault', async () => {
+  const token = await pair();
+  const auth = { authorization: `Bearer ${token}` };
+  const caps = async () => (await (await fetch(`${base}/v1/capabilities`, { headers: auth })).json()).features;
+  assert.equal((await caps()).run_unknown_resolution, undefined, 'writable by default (single thread)');
+  await ctl('/__e2e/config', { authority: true });
+  try {
+    assert.equal((await caps()).run_unknown_resolution, true);
+    const fired = await ctl('/__e2e/fire-reminder', { name: 'Buy tea', text: 'Time to buy tea.' });
+    const denied = await send(token, 'into the bot chat', { sid: fired.sessionId });
+    assert.equal(denied.status, 409);
+    assert.equal((await denied.json()).error.code, 'permission_denied');
+    const body = { model: 'hermes-agent', stream: true, messages: [{ role: 'system', content: '[hermes-ui-bot-deliveries] Buy tea' }, { role: 'user', content: 'verschieb das' }] };
+    const ok = await fetch(`${base}/v1/chat/completions`, { method: 'POST', headers: { ...auth, 'content-type': 'application/json', 'x-hermes-session-id': 'hui-bot-default' }, body: JSON.stringify(body) });
+    assert.equal(ok.status, 200);
+    await ok.text();
+    const turn = (await ctl('/__e2e/turns')).find((t) => t.text === 'verschieb das');
+    assert.deepEqual([turn.sid, turn.system], ['hui-bot-default', ['[hermes-ui-bot-deliveries] Buy tea']]);
+    assert.equal((await send(token, 'no system', { sid: 'hui-bot-default' }).then((r) => r.text()).then(() => ctl('/__e2e/turns'))).find((t) => t.text === 'no system').system.length, 0);
+    await ctl('/__e2e/config', { botChatLookupFail: true });
+    const bad = await fetch(`${base}/api/sessions?title=Bot%20Chat&include_hidden=1`, { headers: auth });
+    assert.equal(bad.status, 500);
+    assert.equal((await fetch(`${base}/api/sessions?limit=5`, { headers: auth })).status, 200, 'only the Bot Chat lookup fails');
+  } finally {
+    await ctl('/__e2e/config', { authority: false, botChatLookupFail: false });
+  }
+  assert.equal((await caps()).run_unknown_resolution, undefined);
+  const again = await send(token, 'writable again', { sid: (await ctl('/__e2e/sessions')).find((x) => x.title === 'Bot Chat').id });
+  assert.equal(again.status, 200, 'the default mode stays single-thread writable');
+  await again.text();
+});
+
+test('a session deleted elsewhere: GET 404, a turn into its id ends with the stream error not_found (nothing stored), a new id works', async () => {
+  const token = await pair();
+  const auth = { authorization: `Bearer ${token}` };
+  const ok = await send(token, 'before the delete', { sid: 'hui-bot-gone' });
+  await ok.text();
+  assert.equal((await fetch(`${base}/api/sessions/hui-bot-gone`, { headers: auth })).status, 200);
+  assert.equal((await ctl('/__e2e/delete-session', { id: 'hui-bot-gone' })).deleted, 'hui-bot-gone');
+  assert.equal((await fetch(`${base}/api/sessions/hui-bot-gone`, { headers: auth })).status, 404);
+  const r = await send(token, 'after the delete', { sid: 'hui-bot-gone' });
+  assert.equal(r.status, 200);
+  const frames = (await r.text()).split('\n\n').map((f) => f.split('\n').find((l) => l.startsWith('data: '))?.slice(6)).filter((d) => d && d !== '[DONE]').map((d) => JSON.parse(d));
+  assert.deepEqual([frames.length, frames[0].choices[0].finish_reason, frames[0].error.message], [1, 'error', 'not_found']);
+  assert.equal((await fetch(`${base}/api/sessions/hui-bot-gone`, { headers: auth })).status, 404, 'a refused turn creates nothing');
+  const fresh = await send(token, 'after the delete', { sid: 'hui-bot-gone--ab' });
+  assert.equal(sse(await fresh.text()), 'Short answer to "after the delete": apple, mango and strawberry.');
 });
 
 test('perf harness: perfreal / perfstress stream the long perf answer byte-equal, stress much faster', async () => {
@@ -359,4 +410,98 @@ test('creating bots: off by default, allowed → a new bot is listed and served 
   const s = await call('/p/spaher/api/sessions', { method: 'POST', body: JSON.stringify({ title: 'Bot Chat' }) });
   assert.ok(s.status === 201 || s.status === 200, `Bot Chat ${s.status}`);
   await ctl('/__e2e/config', { botsCreate: false });
+});
+
+test('bot groups: the real bridge driver against the mock; off by default, a plan hands over to research, approvals stay out of the room', async () => {
+  const token = await pair();
+  const call = async (path, method = 'GET', body) => {
+    const r = await fetch(base + path, { method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    return { status: r.status, data: r.status === 204 ? null : await r.json() };
+  };
+  let r = await call('/bridge/groups');
+  assert.deepEqual([r.data.enabled, r.data.reason], [false, 'bridge_off']);
+  await ctl('/__e2e/config', { groups: 'owner_off' });
+  assert.equal((await call('/bridge/groups')).data.reason, 'owner_off');
+  await ctl('/__e2e/config', { groups: true, profiles: true });
+  r = await call('/bridge/groups', 'POST', { name: 'Reise', members: ['default', 'research'] });
+  assert.equal(r.status, 201);
+  const id = r.data.group.id;
+  const roundOver = async () => {
+    for (let i = 0; i < 300; i++) {
+      const st = (await call(`/bridge/groups/${id}`)).data;
+      if (!st.round) return st;
+      await new Promise((x) => setTimeout(x, 20));
+    }
+    throw new Error('round did not end');
+  };
+  assert.equal((await call(`/bridge/groups/${id}/messages`, 'POST', { text: 'Plant ein Wochenende in Lissabon' })).status, 202);
+  let st = await roundOver();
+  assert.deepEqual(st.entries.map((e) => [e.kind, e.bot ?? '', e.to ?? '']), [['user', '', ''], ['bot', 'default', ''], ['handoff', 'default', 'research'], ['bot', 'research', '']]);
+  assert.match(st.entries[3].text, /Drei Quellen/);
+  // member sessions are hidden: the app's chat list never shows them
+  const list = await (await fetch(`${base}/api/sessions`, { headers: { authorization: `Bearer ${token}` } })).json();
+  assert.ok(!list.data.some((s) => /^Group: /.test(s.title ?? '')));
+
+  assert.equal((await call(`/bridge/groups/${id}/messages`, 'POST', { text: '@research e2e approval' })).status, 202);
+  let ap;
+  for (let i = 0; i < 300 && !ap; i++) {
+    ap = (await call('/bridge/groups')).data.approvals[0];
+    if (!ap) await new Promise((x) => setTimeout(x, 20));
+  }
+  assert.equal(ap.bot, 'research');
+  const answer = await fetch(`${base}/p/research/v1/runs/${ap.runId}/approval`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ choice: 'once', request_id: ap.requestId }) });
+  assert.equal(answer.status, 200);
+  st = await roundOver();
+  assert.deepEqual(st.entries.slice(-2).map((e) => [e.kind, e.note ?? e.bot]), [['note', 'approval'], ['bot', 'research']]);
+  await ctl('/__e2e/config', { groups: false, profiles: false });
+});
+
+test('reply quotes in front of the typed text never pick the scenario (a quoted "long" stays a short answer)', () => {
+  const q = '[hui:quote ref=a1 from=user]\n> e2e quote long\n[/hui:quote]\n[hui:quote from=assistant]\n> table here\n[/hui:quote]\n\ne2e quote follow';
+  assert.equal(stripQuoteBlocks(q), 'e2e quote follow');
+  assert.equal(scenarioFor(q).name, 'short');
+  assert.equal(scenarioFor(q).text, 'Short answer to "e2e quote follow": apple, mango and strawberry.');
+  assert.equal(stripQuoteBlocks('no quote'), 'no quote');
+});
+
+test('slice 4/5: allow-list + revoke, archive hides the bot, fields, library, activity with steps, remote turn + stop', async () => {
+  const token = await pair();
+  const auth = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+  const get = (p) => fetch(base + p, { headers: auth }).then((r) => r.json());
+  const post = (p, b, method = 'POST') => fetch(base + p, { method, headers: auth, body: JSON.stringify(b) });
+  await ctl('/__e2e/config', { profiles: true, about: true });
+  assert.deepEqual((await get('/bridge/bots/research/allowlist')).entries, [{ pattern: 'recursive delete' }, { pattern: 'delete in root path' }]);
+  assert.equal((await post('/bridge/bots/research/allowlist/revoke', { pattern: 'recursive delete' })).status, 200);
+  assert.deepEqual((await get('/bridge/bots/research/allowlist')).entries, [{ pattern: 'delete in root path' }]);
+  assert.equal((await post('/bridge/bots/research/allowlist/revoke', { pattern: 'nope' })).status, 404);
+  assert.equal((await get('/bridge/bots/research')).bot.job, 'Find sources and sum them up');
+  assert.equal((await post('/bridge/bots/research', { title: 'Research', job: 'New job', how: 'x' }, 'PATCH')).status, 200);
+  assert.equal((await get('/bridge/library/config?bot=research')).memory.available, true);
+  assert.equal((await get('/bridge/library/memory?bot=research')).stores[1].entries.length, 2);
+  assert.equal((await post('/bridge/bots/research/archive', {})).status, 200);
+  assert.ok(!(await get('/bridge/profiles')).data.some((b) => b.name === 'research'), 'archived: not listed');
+  assert.deepEqual((await get('/bridge/bots')).archived, [{ name: 'research', label: 'Research' }]);
+  assert.equal((await post('/bridge/bots/default/archive', {})).status, 403);
+  assert.equal((await post('/bridge/bots/research/restore', {})).status, 200);
+  assert.ok((await get('/bridge/profiles')).data.some((b) => b.name === 'research'));
+
+  // a running turn with steps shows in the activity, then goes away
+  const run = send(token, 'e2e working', { sid: 'hui-test-working' });
+  let snap;
+  for (let i = 0; i < 40; i++) {
+    snap = await get('/bridge/bots/activity');
+    if (snap.data[0]?.turns[0]?.steps?.some((s) => s.state === 'running' && s.name === 'browser_navigate')) break;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  assert.equal(snap.object, 'bots.activity');
+  assert.deepEqual(snap.data[0].turns[0].steps.map((s) => [s.name, s.state]), [['web_search', 'done'], ['browser_navigate', 'running']]);
+  assert.equal((await (await post('/bridge/chat/stop', { sessionId: 'hui-test-working' })).json()).stopped, 1);
+  await run.then((r) => r.text()).catch(() => {}); // a stopped turn may end the stream abruptly
+  // remote turn of another device in the default bot's Bot Chat
+  await ctl('/__e2e/fire-reminder', {});
+  const { sessionId } = await ctl('/__e2e/remote-turn', {});
+  assert.ok((await get('/bridge/bots/activity')).data.some((a) => a.turns.some((t) => t.sessionId === sessionId)));
+  assert.equal((await (await post('/bridge/chat/stop', { sessionId })).json()).stopped, 1);
+  assert.ok(!(await get('/bridge/bots/activity')).data.some((a) => a.turns.some((t) => t.sessionId === sessionId)));
+  await ctl('/__e2e/config', { profiles: false, about: false });
 });

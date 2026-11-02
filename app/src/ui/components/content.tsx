@@ -22,7 +22,7 @@ import { useSettledAfter } from '../lib/useSettledAfter';
 import { NARROW_TEXT_PROPS } from '../lib/textWrap';
 import { statCardMinWidth } from '../lib/fontScaleLayout';
 import { compareRows } from './comparePoints.ts';
-import { compareLooksLikeProducts, compareProductQuery } from './compareProducts.ts';
+import { compareLooksLikeProducts, namesProducts, compareProductQuery } from './compareProducts.ts';
 import { CardImage } from './modules/d1/parts';
 import { D1Icon } from './modules/d1/icons';
 import { productKind } from './modules/d1/d1Model.ts';
@@ -509,7 +509,8 @@ export function Compare({ node }: NodeProps<HuiCompare>) {
         ) : (
           <View style={{ flexDirection: stack ? 'column' : 'row', gap: t.spacing.s }}>{cols.map(renderCol)}</View>
         )}
-        <ProvenanceChip node={node} />
+        {/* product columns state product facts: without a web lookup they are model knowledge (EvidenceContext) */}
+        <ProvenanceChip node={node} factual={products || namesProducts(cols.map((c) => c.title))} />
       </View>
     </ImageSlotGroup>
   );

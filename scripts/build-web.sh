@@ -77,6 +77,9 @@ if [ "${HERMES_WEB_INNER:-0}" = 1 ]; then
   t "expo export -p web (max-workers=$MAX_WORKERS)"
   rm -rf dist-web
   nice -n 10 npx expo export -p web --output-dir dist-web --max-workers "$MAX_WORKERS" --clear
+  # pdf.js for the in-app PDF viewer (loaded on demand, not in the bundle); before finalize: part of the cache version
+  t "pdf.js viewer files"
+  node "$ROOT/scripts/web-pdfjs.mjs" dist-web node_modules/pdfjs-dist
   # brand icon BEFORE finalize: the service-worker cache version hashes the final icons (scripts/web-finalize.mjs)
   if [ -n "${BRAND_ICON_FILE:-}" ]; then
     t "brand icon $BRAND_ICON_FILE"

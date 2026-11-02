@@ -16,6 +16,7 @@ import {
   afterFirstPage,
   hasOlder,
   loadOlderSessions,
+  mergeOlderPage,
   pagedSources,
   type SourceCursor,
 } from './sessionPaging.ts';
@@ -163,3 +164,4 @@ test('several sources: the first one with older sessions is paged first', async 
   assert.deepEqual(calls, ['telegram@50', 'cli@50']);
   assert.equal(hasOlder(r.cursors, ['api_server', 'telegram', 'cli']), false);
 });
+

@@ -94,3 +94,24 @@ test('the shipped list on the real version path (real-user round 3): a 0.1.3 bui
   assert.deepEqual(launches(['0.1.3', '0.2.0', '0.2.0', '0.2.1'], true, [...WHATS_NEW]), [null, '0.2.0', null, null]);
   assert.equal(decideWhatsNew({ current: '0.2.0', seen: null, existingUser: true }, WHATS_NEW).show?.version, '0.2.0');
 });
+
+test('0.3.0 notes: an upgrader from 0.2.x sees them once; skipping versions never gives an empty sheet', () => {
+  const r03 = WHATS_NEW.find((r) => r.version === '0.3.0');
+  assert.deepEqual(r03?.items, ['botTimeline', 'replies', 'botAbout', 'pdfViewer']);
+  // 0.2.2 build (what ships today): its own release is long seen, nothing to show before the 0.3 bump
+  assert.deepEqual(decideWhatsNew({ current: '0.2.2', seen: '0.2.2', existingUser: true }, WHATS_NEW), { show: null, record: false });
+  // 0.2.0 → 0.2.2 → 0.3.0 → 0.3.0: the 0.3 notes exactly once
+  assert.deepEqual(launches(['0.2.0', '0.2.2', '0.3.0', '0.3.0', '0.3.1'], true, [...WHATS_NEW]), ['0.2.0', null, '0.3.0', null, null]);
+  // a device that was on 0.1.x jumps straight to 0.3.x: the newest notes only, not a stack of both
+  assert.equal(decideWhatsNew({ current: '0.3.1', seen: '0.1.3', existingUser: true }, WHATS_NEW).show?.version, '0.3.0');
+  // a fresh 0.3.0 install: nothing (remembered)
+  assert.deepEqual(decideWhatsNew({ current: '0.3.0', seen: null, existingUser: false }, WHATS_NEW), { show: null, record: true });
+  // a release the list does not know (0.4.0 without notes) is remembered silently: no empty sheet
+  assert.deepEqual(decideWhatsNew({ current: '0.4.0', seen: '0.3.0', existingUser: true }, WHATS_NEW), { show: null, record: true });
+  // every connection kind sees at least one line (the sheet would otherwise wait forever on that device)
+  const applies = (kind: string, web: boolean) => (id: string) =>
+    id === 'replies' || (id === 'pdfViewer' ? web : kind === 'hermes' || kind === 'demo');
+  for (const kind of ['hermes', 'demo', 'openai', 'claude']) {
+    assert.ok(applicableItems(r03!, applies(kind, false)).length >= 1, kind);
+  }
+});

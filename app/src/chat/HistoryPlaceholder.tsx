@@ -12,7 +12,7 @@ import { HISTORY_HINT_MS } from './messageArea';
  * width and paddings), no animation, no spinner. A slow Hermes load adds one line after HISTORY_HINT_MS. Also the message
  * area of every other chat while its stored transcript is read (ChatViewPending / SessionPending, without the line).
  */
-export function HistoryPlaceholder({ hint: withHint = true }: { hint?: boolean } = {}) {
+export function HistoryPlaceholder({ hint: withHint = true, label }: { hint?: boolean; label?: string } = {}) {
   const t = useTheme();
   const tr = useT();
   const { prefs } = usePreferences();
@@ -27,7 +27,7 @@ export function HistoryPlaceholder({ hint: withHint = true }: { hint?: boolean }
         <View style={styles.hint}>
           {hint ? (
             <HText variant="callout" color="muted" align="center" numberOfLines={2}>
-              {tr('conversations.sync.loading')}
+              {label ?? tr('conversations.sync.loading')}
             </HText>
           ) : null}
         </View>

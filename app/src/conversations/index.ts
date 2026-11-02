@@ -21,7 +21,7 @@ export { makeTitle } from './title';
 export { groupConversations } from './group';
 // Hermes sessions as source of truth (see INTEGRATION.md "Hermes-Sitzungen")
 export { useHermesSessionSync, useRemoteTranscript, useApplyRemoteTranscript, useRemotePrefetch, syncEnabled, syncFilterOf } from './hermesSync';
-export type { HermesSessionSync, OlderSessions, RemoteActions, RemoteTranscript, SessionSyncOptions, SyncProfile, SyncStatus } from './hermesSync';
+export type { HermesSessionSync, ListSyncState, OlderSessions, RemoteActions, RemoteTranscript, SessionSyncOptions, SyncProfile, SyncStatus } from './hermesSync';
 export { DEFAULT_SYNC_SOURCES, sourceLabel, mergeRemoteSessions, reconcileTranscript, needsRemoteLoad, syncSources, sessionAllowed, isAppConversation, type SyncFilter } from './remoteSync';
 export type { RemoteInfo } from './types';
 export { ConversationSidebar } from './ConversationSidebar';

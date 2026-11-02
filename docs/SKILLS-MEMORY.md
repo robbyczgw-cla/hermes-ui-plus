@@ -38,9 +38,14 @@ No HUI+ code path writes Hermes config, skills or memory files.
 
 ## Plugin endpoints (hermes-ui-plus >= 0.2.0, loopback, Bearer secret)
 
-These are served for the plugin's own profile only (its `HERMES_HOME`). The plugin reports which profile that is.
+These are served for the plugin's own profile (its `HERMES_HOME`). The plugin reports which profile that is. From
+0.3.0 the root (default) profile's plugin also serves other profiles: every route takes `?profile=<name>` (absent or
+`default` = its own). An unknown name answers `404 unknown_bot`; a plugin that cannot read other profiles answers
+`404 feature_off` with reason `not_root_profile` or `hermes_unsupported`. Memory of another profile stays behind the
+root's `library.expose_memory`.
 
-- `GET /library/config` returns `{version, profile, skills:{available, reason?}, memory:{available, reason?}}`.
+- `GET /library/config` returns `{version, profile, profiles, skills:{available, reason?}, memory:{available, reason?}}`.
+  `profiles` (0.3.0) is `true` when this plugin can read other profiles.
   `reason` is a `[a-z_]` code: `disabled_by_config`, `memory_not_exposed` or `hermes_unsupported`.
 - `GET /library/skills` returns `{object:"list", profile, data:[{name, description, category|null, enabled, source}]}`.
   `source` is one of `bundled | hub | external | local | plugin`. It is sorted like Hermes (category, name).
@@ -69,9 +74,12 @@ The bridge adds device auth and uses the same plugin URL and secret as quick ans
 - `GET /bridge/library/skills?bot=<name>`, `GET /bridge/library/skills/content?bot=<name>&name=<skill>` and
   `GET /bridge/library/memory?bot=<name>` are projections of the plugin answers with known fields only and capped
   strings. When the feature is not available they return 404 with `{error:{code:"feature_off", reason}}`.
-- `bot` is optional and means `default` when left out. It must be a bot the bridge allows (`BRIDGE_PROFILES`) and
-  the plugin's own profile. Any other bot gets `feature_off` with reason `other_bot`, and the app falls back to
-  the stock API for that bot. Nothing from another profile can be read through the plugin.
+- `bot` is optional and means `default` when left out. It must be a bot the bridge allows (`BRIDGE_PROFILES`).
+  The plugin's own profile is always served. Other bots: when the plugin runs in the root (default) profile and its
+  `/library/config` says `profiles: true` (plugin 0.3), the bridge asks it with `?profile=<bot>` (config probed and
+  cached per bot, 30 s) and the plugin reads that profile's skills and memory (memory still only with
+  `library.expose_memory`); a bot the plugin does not know gives `404 unknown_profile`. An older plugin (no flag) or
+  one in another profile: `feature_off` with reason `other_bot`, and the app falls back to the stock API for that bot.
 
 ## Needs upstream
 
