@@ -170,6 +170,46 @@ test('takeWebPairHash: extracts the link and strips the fragment', async () => {
   assert.equal(takeWebPairHash(undefined), null);
 });
 
+// Expo Router keeps the start URL and wrote `#pair?…&c=…` back after the app removed it (deep test 0.3.0: the used code
+// stayed in the address bar and became the start URL of an iOS home-screen web app, which then opened on a dead link).
+// index.html moves the fragment to sessionStorage before any bundle runs; the app reads it from there once.
+test('web pair link: index.html takes the fragment out of the URL before the app loads, the app reads the stash once', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const vm = await import('node:vm');
+  const { PAIR_HASH_STASH_KEY, takeStashedPairHash } = await import('./pairLink.ts');
+  const html = readFileSync(join(import.meta.dirname, '..', '..', 'public', 'index.html'), 'utf8');
+  const m = /<script data-pwa="pair">([\s\S]*?)<\/script>/.exec(html);
+  assert.ok(m, 'index.html has the inline pair script');
+  assert.ok(m.index < html.search(/<script\b[^>]*\bsrc=/) || html.search(/<script\b[^>]*\bsrc=/) === -1, 'it runs before any bundle');
+  assert.ok(m[1].includes(`'${PAIR_HASH_STASH_KEY}'`), 'same storage key as the app');
+
+  const run = (href: string, storage: Map<string, string> | null) => {
+    const url = new URL(href);
+    let current = href;
+    const ctx = {
+      location: { hash: url.hash, pathname: url.pathname, search: url.search },
+      history: { state: null, replaceState: (_s: unknown, _t: string, u: string) => (current = new URL(u, href).href) },
+      sessionStorage: storage
+        ? { setItem: (k: string, v: string) => storage.set(k, v), getItem: (k: string) => storage.get(k) ?? null, removeItem: (k: string) => storage.delete(k) }
+        : { setItem: () => { throw new Error('blocked'); } },
+    };
+    vm.runInNewContext(m[1], ctx);
+    return { current, store: ctx.sessionStorage };
+  };
+  const store = new Map<string, string>();
+  const a = run('https://app.example.org/sub/?x=1#pair?u=%2Fv1&c=CODE_TEST_000000000000&n=Hermes', store);
+  assert.equal(a.current, 'https://app.example.org/sub/?x=1', 'the code left the address');
+  const link = takeStashedPairHash(a.store as never, a.current);
+  assert.equal(link, `${PAIR_SCHEME}://pair?u=%2Fv1&c=CODE_TEST_000000000000&n=Hermes`);
+  assert.equal(takeStashedPairHash(a.store as never, a.current), null, 'read once');
+  // other fragments stay; without sessionStorage the fragment stays for the app to read from the URL
+  assert.equal(run('https://app.example.org/#settings', new Map()).current, 'https://app.example.org/#settings');
+  assert.equal(run('https://app.example.org/#pair?c=CODE_TEST_000000000000', null).current, 'https://app.example.org/#pair?c=CODE_TEST_000000000000');
+  assert.equal(takeStashedPairHash(null, 'https://app.example.org/'), null);
+  assert.equal(takeStashedPairHash({ getItem: () => { throw new Error('x'); }, removeItem: () => {} }, 'https://app.example.org/'), null);
+});
+
 test('one-time code links (c=): parsed, no token; legacy t= still works; c+t or a bogus code is refused', () => {
   const p = ok('hermesuiplus://pair?u=https%3A%2F%2Fbridge.example.org%2Fhermes%2Fv1&c=pc_test_000000000000&n=Hermes');
   assert.equal(p.code, 'pc_test_000000000000');
@@ -189,4 +229,12 @@ test('one-time code links (c=): parsed, no token; legacy t= still works; c+t or 
   assert.match(built, /[?&]c=pc_test_222222222222/);
   assert.doesNotMatch(built, /[?&]t=/);
   assert.equal(ok(built).code, 'pc_test_222222222222');
+});
+
+// deep test 0.3.0: after "Einsetzen nicht erlauben" on iOS the app said the clipboard had no link
+test('the clipboard message also covers a refused paste and says what to do', async () => {
+  const { makeT } = await import('../i18n/core.ts');
+  for (const [l, re] of [['de', /nicht erlaubt.*ins Feld/], ['en', /not allowed.*into the field/], ['es', /no se permitió.*en el campo/]] as const) {
+    assert.match(makeT(l, l)('onboarding.scan.clipboardEmpty'), re, l);
+  }
 });

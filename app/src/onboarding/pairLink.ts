@@ -255,3 +255,21 @@ export function takeWebPairHash(href: string | null | undefined): { link: string
   if (i === -1 || !/^#\/?pair(?:[/?&]|$)/i.test(href.slice(i))) return null;
   return { link: toPairLink(href), cleanUrl: href.slice(0, i) };
 }
+
+/** sessionStorage key where the inline script of public/index.html puts a `#pair?…` fragment before the app loads */
+export const PAIR_HASH_STASH_KEY = 'hui.pairHash';
+
+/** The pair link the inline script of public/index.html stashed (read once: the entry is removed), else null. */
+export function takeStashedPairHash(
+  store: { getItem(key: string): string | null; removeItem(key: string): void } | null | undefined,
+  href: string,
+): string | null {
+  try {
+    const hash = store?.getItem(PAIR_HASH_STASH_KEY);
+    if (!store || !hash) return null;
+    store.removeItem(PAIR_HASH_STASH_KEY);
+    return takeWebPairHash(`${href.split('#')[0]}${hash}`)?.link ?? null;
+  } catch {
+    return null;
+  }
+}

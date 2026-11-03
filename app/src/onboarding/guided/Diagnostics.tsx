@@ -18,6 +18,7 @@ import type { NormalizedUrl } from '../url';
 import { ActionPill } from '../ui';
 import { copyText, openTailscale, promptsFor } from './actions';
 import { a11yState } from '../../ui/lib/a11yState';
+import { isDesktopApp } from '../../desktop/bridge';
 
 export type CheckState =
   | { phase: 'idle' }
@@ -39,7 +40,7 @@ export function useConnectionCheck() {
     const sig = `${url.baseUrl}\n${apiKey.trim()}`;
     setState({ phase: 'testing', url });
     void (async () => {
-      const probe = await probeConnection({ url, apiKey }, { platform: Platform.OS, pageProtocol: pageProtocol(), signal: c.signal });
+      const probe = await probeConnection({ url, apiKey }, { platform: Platform.OS, pageProtocol: pageProtocol(), httpsOnly: isDesktopApp(), signal: c.signal });
       if (c.signal.aborted) return;
       setState({ phase: 'done', url, sig, probe, features: null, featuresLoading: probe.ok });
       if (!probe.ok) return;

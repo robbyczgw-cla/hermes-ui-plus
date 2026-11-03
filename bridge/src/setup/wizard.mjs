@@ -210,7 +210,8 @@ export async function runSetup(opts, deps = {}) {
 
     // ---------- 1. Hermes ----------
     step('Hermes');
-    const hHome = opts.hermesHome ? resolve(opts.hermesHome) : hermesHome(env, home);
+    // a HERMES_HOME saved by an earlier run counts when this shell sets none (a re-run without --hermes-home)
+    const hHome = opts.hermesHome ? resolve(opts.hermesHome) : hermesHome(env.HERMES_HOME ? env : { HERMES_HOME: existing.HERMES_HOME }, home);
     let hermes = readHermes(hHome);
     const describeApi = (h) => ({ configured: h.api.configured, enabled: h.api.enabled, host: h.api.host, port: h.api.port, hasKey: h.api.hasKey });
     log(`  home: ${hHome}${hermes.exists ? '' : ' (not found)'}`);
@@ -318,6 +319,14 @@ export async function runSetup(opts, deps = {}) {
     if (hardened && profiles.length && !existing.BRIDGE_PROFILES) {
       updates.BRIDGE_PROFILES = profiles.map((x) => x.name).join(',');
       log(`  BRIDGE_PROFILES=${updates.BRIDGE_PROFILES} (the system service cannot list the Hermes home itself; re-run setup after adding a profile)`);
+    }
+    // A Hermes home other than ~/.hermes (--hermes-home, or HERMES_HOME set only in this shell): the service does not
+    // inherit it, so the bridge looked in ~/.hermes, found no profiles and the app showed no Bots tab (deep test 0.3.0).
+    // A re-run with another --hermes-home replaces the saved one.
+    const homeChanged = existing.HERMES_HOME ? resolve(existing.HERMES_HOME) !== hHome : hHome !== join(home, '.hermes');
+    if (!hardened && hermes.exists && homeChanged) {
+      updates.HERMES_HOME = hHome;
+      log(`  HERMES_HOME=${hHome} (Hermes is not in ~/.hermes; the bridge reads its profiles there)`);
     }
     // Schnellfrage (⚡): the hermes-ui-plus plugin's secret (hermes-plugin/install.py). The bridge has no default path.
     const pluginSecret = hermes.exists ? join(hHome, 'hermes-ui-plus', 'secret') : '';

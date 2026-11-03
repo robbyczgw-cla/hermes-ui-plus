@@ -27,7 +27,7 @@ export const bots = {
     retiredName: 'Earlier Bot Chat',
     standard: 'Default',
     defaultHint: 'Your default bot. Your normal chats run here, too.',
-    noChat: 'No chat yet',
+    openChat: 'Open chat',
     threadHint: 'Your reminders and routine results',
     yesterday: 'Yesterday',
     approval: 'Approval',

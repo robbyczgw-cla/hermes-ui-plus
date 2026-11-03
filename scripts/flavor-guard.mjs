@@ -18,6 +18,10 @@
 //                                          (docs/LEAK-GUARD.md "Code signatures"); everything else is scanned.
 //   --no-expo-config                       skip the `expo config` check of --tree (faster; for tests)
 //
+// Media that are already public (website videos whose masters live in the overlay) are listed by the release manager in
+// $HUI_PRIVATE_DIR/published-media.sha256 (`sha256sum` lines: "<sha256>  <name>"); a file with one of these hashes is
+// not reported as overlay content (release 0.3.0 had to clear six site videos by hand). Only exact hashes, never names.
+//
 // Without a private dir the overlay comparisons have nothing to compare against and are skipped (a public contributor
 // has no private overlay, so nothing private can leak); the env / config / .env checks always run.
 // Exit codes: 0 clean, 1 private content found, 2 usage / environment error.
@@ -69,6 +73,25 @@ function walk(dir, out = [], skipVendor = true) {
 
 const sha = (p) => createHash('sha256').update(readFileSync(p)).digest('hex');
 
+/** file in the private dir that lists the hashes of overlay media that are already published (see header) */
+export const PUBLISHED_MEDIA_LIST = 'published-media.sha256';
+
+/** sha256 hashes from the published-media list (`sha256sum` format; other lines are ignored) */
+export function publishedHashes(pdir) {
+  const set = new Set();
+  let text = '';
+  try {
+    text = readFileSync(join(pdir, PUBLISHED_MEDIA_LIST), 'utf8');
+  } catch {
+    return set;
+  }
+  for (const line of text.split('\n')) {
+    const m = /^([0-9a-f]{64}) [ *]?\S/.exec(line.trim().toLowerCase());
+    if (m) set.add(m[1]);
+  }
+  return set;
+}
+
 /** sha256 → overlay path, for overlay files that are NOT also shipped publicly in the repo (e.g. copied generic icons). */
 export function privateHashes(pdir, root = ROOT) {
   const map = new Map();
@@ -94,6 +117,7 @@ export function privateHashes(pdir, root = ROOT) {
         /* deleted in the working tree */
       }
     }
+    for (const h of publishedHashes(pdir)) map.delete(h);
   }
   return map;
 }

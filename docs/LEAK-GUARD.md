@@ -17,6 +17,10 @@ Three layers, all driven by files in this repo plus **one private directory that
 - `leak-allow.txt` (optional): regexes (matched against the matched text) for accepted false positives that should
   not live in the repo. The tracked equivalent is `.leak-guard-allow` in the repo root.
 - Reports (`leak-report-<date>.md`) are written there too, never into the repo.
+- `published-media.sha256` (optional, for `flavor-guard.mjs`): `sha256sum` lines of overlay media that are already
+  public (website videos whose masters live in `media/`). A build output file with one of these exact hashes is not
+  reported as "same content as private …". Add a line only after the file is verified identical to what is live; names
+  are informational, only the hash counts.
 
 Without the denylist file the tools **warn** and run the generic patterns only; they never silently report "clean".
 `--require-denylist` (used by `scan-artifact.sh`) turns a missing denylist into an error.
@@ -155,6 +159,17 @@ Pass the web dir the app was built from with `--assets WEBDIR` (`leak-guard.mjs 
   short blob;
 - every skipped range is printed (`embedded asset skipped: <file> @<offset> +<length> bytes (byte-identical to <asset> …)`),
   never silent. Without a web dir nothing is skipped. There is no allow-list entry for this.
+
+### Linux AppImage: what the build gate scans
+
+`build-desktop-linux.sh` scans the unpacked AppImage **without** the bundled third-party shared libraries
+(`usr/lib/*.so*`), `usr/share/doc` (Debian copyright files) and the GSettings schema sources, plus the whole `.deb`.
+Those files come from Ubuntu packages and contain upstream authors' e-mail addresses (thousands of `generic:email` hits,
+and a denylisted term can occur as a substring in a large library), so a full scan never passes. Everything that is ours
+(binary, desktop file, icons, AppRun, caches) is scanned. For 0.3.0 the release manager checked the excluded files once
+against the build image: docs and schemas byte-identical, every `.so` owned by a dpkg package and identical except for
+the sections patchelf rewrites (`.dynamic`, `.dynstr`, `.dynsym`) and the `/usr` → `././` path rewrites of the GTK
+bundler in `libwebkit2gtk`. Repeat that comparison when the bundler or the base image changes.
 
 ## Tests
 

@@ -12,6 +12,7 @@
 
 import type { TFn } from '../i18n/core.ts';
 import { answerOutputText, TOOL_MARKUP_NOTICE_KEY } from '../chat/toolMarkup.ts';
+import { withBlocksOnOwnLines } from '../protocol/streamParser.ts';
 
 export type SpeechTextOptions = {
   /** speak a short summary for hui / html / code / tables (default true); false = skip them silently */
@@ -159,7 +160,8 @@ function codeSummary(lang: string, body: string, summarize: boolean, t: TFn): st
 export function toSpeechText(markdown: string, t: TFn, opts: SpeechTextOptions = {}): string {
   const summarize = opts.summarizeBlocks !== false;
   // every spoken output (read-aloud, auto-read, the screen-reader announcement) says what the answer shows
-  const lines = answerOutputText(markdown, t(TOOL_MARKUP_NOTICE_KEY)).replace(/\r\n?/g, '\n').split('\n');
+  // a block the model opened mid-line ("…eat.```hui") is the component on screen, so it is summarized here too
+  const lines = withBlocksOnOwnLines(answerOutputText(markdown, t(TOOL_MARKUP_NOTICE_KEY)).replace(/\r\n?/g, '\n')).split('\n');
   const paragraphs: string[] = [];
   let para: string[] = [];
   const flush = () => {

@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { makeT } from '../i18n/core.ts';
 import { parsePairLink, type PairData } from './pairLink.ts';
 import { connectPairCode, deepLinkRoute, pairPending, redeemOnConnect, resumeSpentPair } from './pairConnect.ts';
 import type { ConnectionProfile } from '../settings/profiles.ts';
@@ -265,4 +266,18 @@ test('pair links arriving during a connect wait; the same code is dropped; after
   assert.equal(pairLinkArrival({ ...busy, code: undefined }), 'defer', 'token / invalid links wait as well');
   // saved: the flow is on its post-connect steps and would ignore the link (and mark the wrong one applied)
   assert.equal(pairLinkArrival({ ...idle, flowSaved: true, code: 'pc_test_111111111111' }), 'defer');
+});
+
+test('desktop with an http link: the https message, the link stays usable', async () => {
+  const link = 'hermesui://pair?u=http%3A%2F%2F127.0.0.1%3A8790%2Fv1&c=pc_test_000000000000';
+  const r = await redeemOnConnect(pairOf(link), { httpsOnly: true, fetchImpl: async () => Promise.reject(new Error('unexpected')) });
+  assert.ok(!r.ok);
+  assert.equal(r.messageKey, 'onboarding.redeem.https-only');
+  assert.equal(r.final, false);
+  for (const lang of ['de', 'en', 'es'] as const) {
+    const text = makeT(lang, lang)(r.messageKey);
+    assert.match(text, /https/, lang);
+    assert.match(text, /Tailscale/, lang);
+    assert.match(text, /hermes-ui-plus-bridge setup/, lang);
+  }
 });

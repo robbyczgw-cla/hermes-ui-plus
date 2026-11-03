@@ -30,6 +30,21 @@
         } catch (e) {}
       })();
     </script>
+    <!-- A web pair link (#pair?…) leaves the address bar before the app loads: Expo Router keeps the URL it started with
+         and writes it back after the app removed the fragment, so the one-time code stayed in the address, the history
+         and the start URL of a home-screen web app. The app takes the link from sessionStorage (onboarding/deepLink.ts,
+         PAIR_HASH_STASH_KEY). Without sessionStorage the fragment stays where it was and the app reads it from the URL. -->
+    <script data-pwa="pair">
+      (function () {
+        try {
+          var h = location.hash;
+          if (/^#\/?pair(?:[/?&]|$)/i.test(h)) {
+            sessionStorage.setItem('hui.pairHash', h);
+            history.replaceState(history.state, '', location.pathname + location.search);
+          }
+        } catch (e) {}
+      })();
+    </script>
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <!-- viewport-fit=cover: draw under notch / home indicator; the app pads with env(safe-area-inset-*) -->
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />

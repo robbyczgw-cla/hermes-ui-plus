@@ -22,6 +22,7 @@ import { displayHost, normalizeServerUrl } from '../url';
 import { CheckResult, useConnectionCheck, type FixAction } from './Diagnostics';
 import { isProfilesReadOnlyError } from '../../settings/storage';
 import { a11yState } from '../../ui/lib/a11yState';
+import { isDesktopApp } from '../../desktop/bridge';
 
 export function ConnectCheck({
   mode,
@@ -127,6 +128,7 @@ export function ConnectCheck({
     const target = url;
     const chosenName = name.trim();
     const out = await connectPairCode(livePair, {
+      redeemOptions: { httpsOnly: isDesktopApp() }, // desktop: an http link explains https instead of "not reachable"
       hold: pairConnectLock.hold,
       // redeemed here before and saved (Back to this screen, a re-delivered link): continue with it (E2E round 5, N1)
       resume: (p) =>

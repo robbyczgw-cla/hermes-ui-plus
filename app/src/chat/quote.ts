@@ -40,7 +40,9 @@ export function quoteOf(m: Pick<ChatMessage, 'id' | 'role' | 'text'>, selection?
   const sel = selection?.trim();
   const text = clipExcerpt(sel || messagePlainText(m));
   if (!text) return null;
-  return { ref: REF_RE.test(m.id) ? m.id : undefined, role: m.role, text };
+  // a job's delivery is stored as a user turn, but the user did not write it (deep test 0.3.0: labelled "Du")
+  const role = m.role === 'user' && cronDelivery(m.text) ? 'assistant' : m.role;
+  return { ref: REF_RE.test(m.id) ? m.id : undefined, role, text };
 }
 
 /**

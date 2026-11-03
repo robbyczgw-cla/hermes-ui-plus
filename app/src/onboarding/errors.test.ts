@@ -85,3 +85,17 @@ test('describeConnError: every kind has title, message and the declared hints in
   }
   assert.match(describeConnError({ kind: 'server', status: 503 }, tEn).title, /Server error \(503\)/);
 });
+
+test('desktop (https only): an http server explains that the desktop app needs https, with a way to get it', () => {
+  const e = new TypeError('Failed to fetch');
+  const desk = (url: string): ErrorContext => ({ platform: 'web', url: u(url), pageProtocol: 'tauri:', httpsOnly: true });
+  const err = classifyFetchError(e, desk('http://127.0.0.1:8790'));
+  assert.equal(err.kind, 'httpsOnly');
+  assert.equal(classifyFetchError(e, desk('https://h.example.org')).kind, 'cors');
+  for (const lang of ['de', 'en', 'es'] as const) {
+    const d = describeConnError(err, makeT(lang, lang));
+    assert.match(d.title, /https/, lang);
+    assert.match(d.hints.join(' '), /Tailscale/, lang);
+    assert.match(d.hints.join(' '), /hermes-ui-plus-bridge setup/, lang);
+  }
+});

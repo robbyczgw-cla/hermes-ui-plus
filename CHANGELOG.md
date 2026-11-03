@@ -2,6 +2,39 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com), and the project aims to follow [Semantic Versioning](https://semver.org).
 
+## 0.3.1 - 2026-11-03
+
+A small patch for what the deep test of the released 0.3.0 found: pairing a home-screen web app, the Bots tab for a Hermes outside `~/.hermes`, answer blocks a model opened mid-line, and clearer texts on the desktop and in the Bots tab.
+
+### Upgrade notes
+
+- **Versions in this release:** app 0.3.1, bridge `hermes-ui-plus-bridge` 0.3.1, plugin `hermes-ui-plus` 0.3.0 and skill `hermes-ui` 0.8.0 (both unchanged).
+- **Bridge:** update it (`npx hermes-ui-plus-bridge@latest setup`). If your Hermes lives somewhere else than `~/.hermes`, run `setup --hermes-home <dir>` once more: it now writes `HERMES_HOME` into the bridge's env file, and the Bots tab appears.
+- **The web app needs bridge 0.3.0 or newer to attach files** (bridge 0.2.2 blocks reading the picked file). Native apps attach files with bridge 0.2.2 too.
+
+### Fixed
+
+- **Home-screen web app after pairing in Safari:** pairing in the browser and then choosing "Add to Home Screen" started the home-screen app on the already used pair link ("pair link expired or already used"). The one-time link now leaves the address bar before the app loads, so the home screen keeps the plain address.
+- **Bots tab with a Hermes outside `~/.hermes`:** `setup --hermes-home <dir>` installed the skill there but did not tell the bridge, which then looked in `~/.hermes`, found no bots and the app showed no Bots tab. Setup now saves the place; running setup again keeps it, and another `--hermes-home` replaces it.
+- **Answer blocks a model starts mid-line:** when the model wrote `…what you like to eat.```hui` and the block on the next lines, the app showed raw JSON and an empty code box. Such a block now becomes the card (also with the JSON on the same line), while the answer streams and afterwards, and read-aloud summarises it instead of reading the JSON. Backticks in normal text stay text.
+- **Desktop app with an http address:** the wizard's `http://127.0.0.1` link only got "The bridge is not reachable (e.g. Tailscale)". The desktop app connects over https only; it now says so and how to get an https address (Tailscale on the bridge machine, then `setup` again). Nothing is sent and the link stays valid.
+- **"Alles bereit" on Android:** the title of the done screen was cut to "Alles". Centered titles now use the full width.
+- **Quoting a delivery:** a quoted reminder or routine result on a bot's timeline was labelled "You"; it is labelled as an answer.
+- **Bots tab:** a bot without a chat on this device said "No chat yet" even when Hermes had its history from another device; it says "Open chat".
+- **Pasting a pair link:** when the clipboard gave nothing (empty, or pasting not allowed on iOS), the text says both and to paste the link into the field.
+- **Linux docs:** the AppImage needs `chmod +x` after the download; the .deb package is removed with `sudo apt remove hermes-ui`.
+
+### Internal
+
+- `release.sh` runs each `leak-guard --tree` inside the tree it scans (the public clone's scan ran in the private checkout).
+- `flavor-guard.mjs` accepts overlay media listed in `$HUI_PRIVATE_DIR/published-media.sha256` (already public website videos); docs/LEAK-GUARD.md explains which AppImage files the build gate leaves out and why.
+
+### Known issues
+
+- Everything listed under 0.3.0 "Known issues" still applies.
+- **Web onboarding after a pair link** sometimes goes straight to the chat instead of showing "All set" first. Both endings work.
+- **The .deb's package name is `hermes-ui`**, while the file and the command are `hermes-ui-plus`.
+
 ## 0.3.0 - 2026-11-02
 
 0.3 is about what happens after you ask. Bots get one screen with one timeline, the lists and cards Hermes keeps up to date show what became of each of your changes, a card says when its facts are model knowledge instead of dressing them up as a source, and you can reply to a single message.

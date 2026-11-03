@@ -493,3 +493,61 @@ test('terminal text fences preserve a JSON log line instead of inferring an empt
   assert.equal(running?.status, 'running');
   assert.equal(running?.output, undefined, 'a running descriptor stays a loading placeholder');
 });
+
+// deep test 0.3.0: the model ended its text with "…eat.```hui" and put the JSON on the next lines; the app showed the
+// JSON as text and an empty code box. The mid-line opener now opens the block, final render and streaming alike.
+const MIDLINE =
+  'Tell me what you like to eat.```hui\n{"type":"suggestions","items":["Pasta","Curry","Salad"]}\n```\n';
+
+test('mid-line ```hui opener: text, then the component (final render and every streaming split)', () => {
+  const check = (segs: Segment[], label: string) => {
+    assert.deepEqual(kinds(segs), ['markdown', 'hui'], label);
+    assert.equal(segs[0].kind === 'markdown' && segs[0].text, 'Tell me what you like to eat.', label);
+    const h = segs[1];
+    assert.ok(h.kind === 'hui' && h.complete && !h.error && (h.node as { type?: string }).type === 'suggestions', label);
+  };
+  check(parseMessage(MIDLINE), 'final');
+  check(parseMessage(MIDLINE.trimEnd()), 'final without the last newline');
+  check(stream(Array.from(MIDLINE)), 'char by char');
+  for (let i = 1; i < MIDLINE.length; i++) check(stream([MIDLINE.slice(0, i), MIDLINE.slice(i)]), `split at ${i}`);
+});
+
+test('mid-line opener while streaming: the backticks and the JSON never show as text', () => {
+  const p = createStreamParser();
+  for (const ch of MIDLINE) {
+    for (const s of p.push(ch)) {
+      if (s.kind === 'markdown') assert.ok(!s.text.includes('`') && !s.text.includes('{'), JSON.stringify(s.text));
+    }
+  }
+});
+
+test('mid-line opener with the JSON (and the closing fence) on the same line', () => {
+  const one = 'Pick one: ```hui {"type":"suggestions","items":["A","B"]}```';
+  assert.deepEqual(kinds(parseMessage(one)), ['markdown', 'hui']);
+  assert.deepEqual(kinds(stream(Array.from(one))), ['markdown', 'hui']);
+  const segs = parseMessage('Pick one: ```hui {"type":"suggestions","items":["A","B"]}\n```\nAfter.');
+  assert.deepEqual(kinds(segs), ['markdown', 'hui', 'markdown']);
+  assert.ok(segs[1].kind === 'hui' && !segs[1].error);
+  // a typed fence name works the same way
+  assert.deepEqual(kinds(parseMessage('Here:```suggestions\n["A","B"]\n```')), ['markdown', 'hui']);
+});
+
+test('mid-line backticks that are no component stay text', () => {
+  // prose that names a fence, with prose after it
+  const prose = 'Start a block with ```hui\nand put the JSON on the next line.';
+  const segs = parseMessage(prose);
+  assert.deepEqual(kinds(segs), ['markdown']);
+  assert.equal(segs[0].kind === 'markdown' && segs[0].text, prose);
+  assert.deepEqual(kinds(stream(Array.from(prose))), ['markdown']);
+  // as the very last line
+  const last = parseMessage('The fence is ```hui');
+  assert.equal(last[0].kind === 'markdown' && last[0].text, 'The fence is ```hui');
+  // inside an inline code span (odd backticks before it)
+  assert.deepEqual(kinds(parseMessage('Use `x ```hui\n{"type":"suggestions","items":["A"]}\n```')), ['markdown']);
+  // other languages are no components
+  assert.deepEqual(kinds(parseMessage('Code:```js\n{"a":1}\n```')), ['markdown']);
+  // inside a markdown code block
+  assert.deepEqual(kinds(parseMessage('```\ntext.```hui\n{"type":"suggestions","items":["A"]}\n```')), ['markdown']);
+  // immediately closed: the text and the fence line stay markdown
+  assert.deepEqual(kinds(parseMessage('Hi.```hui\n```\n')), ['markdown']);
+});

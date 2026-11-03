@@ -81,3 +81,20 @@ test('timeout / abort → network error', async () => {
   ctrl.abort();
   assert.deepEqual(await p, { ok: false, error: 'network' });
 });
+
+// deep test 0.3.0: the desktop app with the wizard's http://127.0.0.1 link only said "bridge not reachable (e.g. Tailscale)"
+test('desktop (https only): an http link fails with https-only before anything is sent; the code stays unspent', async () => {
+  let called = false;
+  const fetchImpl: RedeemFetch = async () => {
+    called = true;
+    throw new TypeError('Failed to fetch');
+  };
+  const http = pairOf(`hermesui://pair?u=http%3A%2F%2F127.0.0.1%3A8790%2Fv1&c=${CODE}`);
+  const r = await redeemPairCode(http, { fetchImpl, httpsOnly: true });
+  assert.deepEqual(r, { ok: false, error: 'https-only' });
+  assert.equal(called, false);
+  // other apps keep trying http; an https link on the desktop is redeemed as before
+  assert.equal(((await redeemPairCode(http, { fetchImpl })) as { error?: string }).error, 'network');
+  const https = pairOf(`hermesui://pair?u=https%3A%2F%2Fb.example.org%2Fv1&c=${CODE}`);
+  assert.equal(((await redeemPairCode(https, { fetchImpl, httpsOnly: true })) as { error?: string }).error, 'network');
+});

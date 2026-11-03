@@ -112,6 +112,7 @@ export const diag = {
     tls: { title: 'Certificado no aceptado (TLS)', text: 'Falló la conexión segura. En tu red o por Tailscale también sirve http://; en internet necesitas un certificado válido.' },
     cleartext: { title: 'http sin cifrar bloqueado', text: 'El sistema no permite esta conexión http. Usa https://, p. ej. con «tailscale serve».' },
     mixedContent: { title: 'El navegador bloquea http', text: 'Esta página usa https y no puede hablar con un servidor http. Usa una dirección https o la app.' },
+    httpsOnly: { title: 'La app de escritorio necesita https', text: 'Solo se conecta a direcciones https. Configura Tailscale en el ordenador donde corre el bridge y vuelve a ejecutar allí «npx hermes-ui-plus-bridge setup»: el asistente mostrará una dirección y un enlace https.' },
     cors: { title: 'Bloqueado por el navegador (CORS)', text: 'Hermes no permite navegadores por defecto. Añade esta página a API_SERVER_CORS_ORIGINS, o usa el bridge o la app.' },
     corsBridge: { title: 'Bloqueado por el navegador (CORS)', text: 'El bridge aún no permite esta página. Añádela a BRIDGE_CORS_ORIGINS.' },
     unauthorized: { title: 'Clave de API incorrecta', text: 'Hermes rechazó la clave (401). Copia de nuevo API_SERVER_KEY de la configuración de Hermes, sin espacios.' },

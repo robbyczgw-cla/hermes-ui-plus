@@ -211,3 +211,24 @@ test('env: EXPO_PUBLIC_BG_SERVICE (store-build switch) is allowed with 0/1 only'
   assert.deepEqual(checkEnv({ EXPO_PUBLIC_BG_SERVICE: '1' }, '/p'), []);
   assert.equal(checkEnv({ EXPO_PUBLIC_BG_SERVICE: 'someone-private' }, '/p').length, 1);
 });
+
+// release 0.3.0: six website videos whose masters live in the overlay were reported on every release
+test('output: an overlay file listed in published-media.sha256 passes; an unlisted one still fails', async () => {
+  const { createHash } = await import('node:crypto');
+  const video = Buffer.from('PUBLIC-SITE-VIDEO-BYTES-000');
+  const hash = createHash('sha256').update(video).digest('hex');
+  const f = fixture();
+  try {
+    mkdirSync(join(f.priv, 'media'));
+    writeFileSync(join(f.priv, 'media', 'trailer.mp4'), video);
+    writeFileSync(join(f.out, 'trailer.mp4'), video);
+    assert.equal(f.run('--output', f.out).status, 1, 'not listed yet');
+    writeFileSync(join(f.priv, 'published-media.sha256'), `# site videos\n${hash}  media/trailer.mp4\n`);
+    const r = f.run('--output', f.out);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    writeFileSync(join(f.out, 'icon.png'), Buffer.from('PRIVATE-LOGO-BYTES-123'));
+    assert.equal(f.run('--output', f.out).status, 1, 'other overlay files are still found');
+  } finally {
+    f.done();
+  }
+});

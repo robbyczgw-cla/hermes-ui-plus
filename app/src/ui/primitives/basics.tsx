@@ -22,6 +22,7 @@ import Animated, {
 import { useMotionReduced, useTheme, type Theme, type ThemeColors, type Typography } from '../theme';
 import { splitPressableStyle } from '../lib/pressableLayout';
 import { parseInline } from '../lib/inlineMarkdown';
+import { centeredTitleBox } from '../lib/centeredTitle';
 import { FADE_IN_MS, FADE_IN_SETTLED, fadeInPlan } from '../lib/fadeIn';
 import { haptic, type HapticKind } from './haptics';
 import { useHui } from './context';
@@ -66,6 +67,7 @@ export function HText({ variant = 'body', color, weight, align, tabular, style, 
         { color: resolveColor(t, color) },
         weight ? { fontWeight: weight } : null,
         align ? { textAlign: align } : null,
+        centeredTitleBox(variant, align),
         tabular ? { fontVariant: ['tabular-nums'] } : null,
         style,
       ]}

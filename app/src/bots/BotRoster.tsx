@@ -177,7 +177,8 @@ function BotRow({ row, name, active, opening, unreachable, time, onPress }: { ro
         : tr('bots.status.working')
     : unreachable
       ? tr('bots.roster.notConnected')
-      : preview || row.bot.description || (isDefault ? tr('bots.roster.defaultHint') : tr('bots.roster.noChat'));
+      : // no chat on this device does not mean none on Hermes (another device, an earlier install): no "no chat yet"
+        preview || row.bot.description || (isDefault ? tr('bots.roster.defaultHint') : tr('bots.roster.openChat'));
   const unread = row.badge === 'unread' && !active;
   const a11y = [
     name,

@@ -205,8 +205,8 @@ Same shell and web bundle; built by `scripts/build-desktop-linux.sh` (docs/BUILD
 | --- | --- |
 | build host | by default a docker container on an `ubuntu:22.04` image (`scripts/docker/desktop-linux-build.Dockerfile`: WebKitGTK 4.1 / librsvg / appindicator dev packages, node 22, pinned Rust), memory-capped (8 GB, no swap, 6 cargo jobs); fallback `LINUX_BUILD_IMAGE=host`: rustup/cargo, node + npm and the same dev packages on the host in a systemd user scope |
 | outputs | `hermes-ui-plus_<ver>_x86_64.AppImage` / `hermes-ui-plus_<ver>_amd64.deb` (hermes; personal: `hermes_…`), binary `/usr/bin/hermes-ui-plus` (personal `hermes`) |
-| AppImage | self-contained (GTK, WebKitGTK, appindicator bundled, ~90 MB); needs **FUSE 2** (`libfuse2` / `libfuse2t64`), otherwise `./<file>.AppImage --appimage-extract-and-run`. Built in the Ubuntu 22.04 container: needs glibc >= 2.35, i.e. runs on Ubuntu 22.04+ / Debian 12+ (and newer); a `LINUX_BUILD_IMAGE=host` build needs the build host's glibc |
-| .deb | `sudo apt install ./<file>.deb`; depends on `libwebkit2gtk-4.1-0`, `libgtk-3-0`, `libayatana-appindicator3-1` |
+| AppImage | make it executable first: `chmod +x <file>.AppImage`, then `./<file>.AppImage` (a downloaded file is not executable; started as is, the shell says "Permission denied", exit 126). Self-contained (GTK, WebKitGTK, appindicator bundled, ~90 MB); needs **FUSE 2** (`libfuse2` / `libfuse2t64`), otherwise `./<file>.AppImage --appimage-extract-and-run`. Built in the Ubuntu 22.04 container: needs glibc >= 2.35, i.e. runs on Ubuntu 22.04+ / Debian 12+ (and newer); a `LINUX_BUILD_IMAGE=host` build needs the build host's glibc |
+| .deb | `sudo apt install ./<file>.deb`; the package is called `hermes-ui` (file and command are `hermes-ui-plus`), so remove it with `sudo apt remove hermes-ui`; depends on `libwebkit2gtk-4.1-0`, `libgtk-3-0`, `libayatana-appindicator3-1` |
 | origin | `tauri://localhost` like macOS (CORS, see below) |
 | data | `~/.local/share/<bundle id>/` (webview storage, `logs/console.log`), `~/.config/<bundle id>/` (window state) |
 

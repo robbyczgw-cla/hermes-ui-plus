@@ -151,3 +151,13 @@ test('troubleshoot prompt: error summary filled in, never the key', () => {
   assert.equal(fillTroubleshootPrompt('Help me.', 'error: dns'), 'Help me.\n\nerror: dns');
   assert.equal(fillTroubleshootPrompt('Help: {error}', ''), 'Help:');
 });
+
+test('desktop with an http address: "needs https" with the switch to https, not CORS or Tailscale', () => {
+  const url = normalizeServerUrl('http://127.0.0.1:8790');
+  assert.ok(url.ok);
+  const err = classifyFetchError(new TypeError('Failed to fetch'), { platform: 'web', url, pageProtocol: 'tauri:', httpsOnly: true });
+  const a = adviceForError(err, { platform: 'web', url, bridge: false });
+  assert.equal(a.id, 'httpsOnly');
+  assert.deepEqual(a.actions, ['useHttps', 'copyTroubleshoot']);
+  for (const lang of ['de', 'en', 'es'] as const) assert.match(makeT(lang, lang)('onboarding.diag.advice.httpsOnly.text'), /Tailscale/, lang);
+});

@@ -16,6 +16,8 @@ export type ProbeOptions = {
   platform: Platform;
   /** web: window.location.protocol */
   pageProtocol?: string;
+  /** desktop app: only https servers are reachable (errors.ts ErrorContext.httpsOnly) */
+  httpsOnly?: boolean;
   timeoutMs?: number;
   fetchImpl?: FetchLike;
   /** abort the whole probe (screen left) */
@@ -72,7 +74,7 @@ export async function probeConnection(
 ): Promise<ProbeResult> {
   const doFetch: FetchLike = opts.fetchImpl ?? ((u, i) => fetch(u, i));
   const timeoutMs = opts.timeoutMs ?? 8000;
-  const ctx = { platform: opts.platform, url: conn.url, pageProtocol: opts.pageProtocol };
+  const ctx = { platform: opts.platform, url: conn.url, pageProtocol: opts.pageProtocol, httpsOnly: opts.httpsOnly };
   const key = conn.apiKey.trim();
 
   async function get(url: string, withKey: boolean, maxBody = MAX_BODY) {

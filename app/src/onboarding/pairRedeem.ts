@@ -17,7 +17,9 @@ export type RedeemErrorCode =
   /** no answer (offline, wrong network / tailnet, timeout) */
   | 'network'
   /** anything else (5xx, not a bridge, malformed answer) */
-  | 'failed';
+  | 'failed'
+  /** an http:// bridge in an app that reaches https servers only (desktop): nothing was sent, the code is still valid */
+  | 'https-only';
 
 export type RedeemResult = { ok: true; pair: PairData } | { ok: false; error: RedeemErrorCode; status?: number };
 
@@ -31,6 +33,8 @@ export type RedeemOptions = {
   /** abort (screen left) */
   signal?: AbortSignal;
   timeoutMs?: number;
+  /** the app reaches https servers only (desktop app): an http:// link fails at once with `https-only` */
+  httpsOnly?: boolean;
 };
 
 /** `https://host/prefix/v1` → `https://host/prefix/bridge/pair/redeem` */
@@ -65,6 +69,7 @@ export function parseRedeemBody(text: string): { token: string } | null {
  */
 export async function redeemPairCode(pair: PairData, opts: RedeemOptions = {}): Promise<RedeemResult> {
   if (!pair.code) return { ok: true, pair };
+  if (opts.httpsOnly && pair.url.scheme === 'http') return { ok: false, error: 'https-only' };
   const doFetch: RedeemFetch = opts.fetchImpl ?? ((u, i) => fetch(u, i));
   const ctrl = new AbortController();
   const onAbort = () => ctrl.abort();

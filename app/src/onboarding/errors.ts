@@ -9,12 +9,12 @@ import type { NormalizedUrl } from './url.ts';
 export type Platform = 'ios' | 'android' | 'web' | 'node' | (string & {});
 
 export type ConnErrorKind =
-  | 'timeout' | 'dns' | 'refused' | 'tls' | 'cleartext' | 'mixedContent' | 'cors' | 'network'
+  | 'timeout' | 'dns' | 'refused' | 'tls' | 'cleartext' | 'mixedContent' | 'httpsOnly' | 'cors' | 'network'
   | 'unauthorized' | 'keyMissing' | 'forbidden' | 'notFound' | 'rateLimited' | 'server' | 'notHermes' | 'unknown';
 
 /** Number of hint keys (`onboarding.errors.<kind>.hint1..N`) per error kind. */
 export const HINT_COUNT: Record<ConnErrorKind, number> = {
-  timeout: 3, dns: 3, refused: 3, tls: 3, cleartext: 2, mixedContent: 2, cors: 3, network: 3,
+  timeout: 3, dns: 3, refused: 3, tls: 3, cleartext: 2, mixedContent: 2, httpsOnly: 2, cors: 3, network: 3,
   unauthorized: 3, keyMissing: 1, forbidden: 2, notFound: 3, rateLimited: 0, server: 2, notHermes: 2, unknown: 1,
 };
 
@@ -37,6 +37,8 @@ export type ErrorContext = {
   url: Pick<NormalizedUrl, 'scheme' | 'host' | 'hostKind'>;
   /** web only: `window.location.protocol` ('https:' | 'http:') */
   pageProtocol?: string;
+  /** the app reaches https servers only (desktop app, CSP `connect-src https:`): an http:// address can never work */
+  httpsOnly?: boolean;
 };
 
 function errorText(e: unknown): string {
@@ -72,6 +74,8 @@ export function classifyFetchError(e: unknown, ctx: ErrorContext): ConnError {
   if (/CERT|certificate|SSL|TLS|handshake|self[- ]signed|trust anchor|ERR_SSL|EPROTO/i.test(text)) return { kind: 'tls', host, detail };
   if (/ECONNREFUSED|Connection refused|ConnectException|Failed to connect|Could not connect/i.test(text)) return { kind: 'refused', host, detail };
 
+  // deep test 0.3.0: the desktop app with the wizard's http://127.0.0.1 link said only "not reachable (e.g. Tailscale)"
+  if (ctx.httpsOnly && ctx.url.scheme === 'http') return { kind: 'httpsOnly', host, detail };
   if (ctx.platform === 'web') {
     const page = (ctx.pageProtocol ?? '').toLowerCase();
     if (page === 'https:' && ctx.url.scheme === 'http' && ctx.url.hostKind !== 'localhost' && host !== '127.0.0.1' && host !== '::1') {

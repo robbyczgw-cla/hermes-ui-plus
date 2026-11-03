@@ -59,7 +59,7 @@ export const onboarding = {
     pastePlaceholder: '{scheme}://pair?u=…',
     pasteFromClipboard: 'Paste from clipboard',
     pasteUse: 'Use link',
-    clipboardEmpty: 'There is no pairing link on the clipboard.',
+    clipboardEmpty: 'No pairing link came from the clipboard (empty, or pasting was not allowed). Paste the link into the field.',
   },
   redeem: {
     busy: 'Confirming pairing …',
@@ -67,6 +67,7 @@ export const onboarding = {
     expired: 'Pairing link expired or already used. Create a new one on the computer running the bridge with “npx hermes-ui-plus-bridge devices add Phone” (or ask your Hermes agent for one), then scan the new QR code.',
     'rate-limited': 'Too many attempts. Wait a moment, then create a new pairing link.',
     network: 'The bridge cannot be reached. Check the connection (e.g. Tailscale) and tap “Connect” again – if the link has expired meanwhile, create a new one.',
+    'https-only': 'The desktop app connects over https only, and this link uses http. To get an https address: set up Tailscale on the computer that runs the bridge and run “npx hermes-ui-plus-bridge setup” there again – the wizard then creates an https link. This link stays valid until you use it.',
     failed: 'Pairing did not work. Create a new pairing link.',
     newLink: 'Scan a new link',
   },
@@ -178,6 +179,12 @@ export const onboarding = {
       message: 'This page runs over https and may not contact an http server.',
       hint1: 'Use an https address for Hermes.',
       hint2: 'Or use the app on Android/iOS.',
+    },
+    httpsOnly: {
+      title: 'The desktop app needs https',
+      message: '{host} is reached over http. The desktop app connects to https addresses only.',
+      hint1: 'Set up Tailscale on the computer that runs the bridge and run “npx hermes-ui-plus-bridge setup” again: the wizard then prints an https address.',
+      hint2: 'Or put the bridge behind a reverse proxy with https. Over http, use the web app in a browser or the phone app on the same network.',
     },
     cors: {
       title: 'Blocked by the browser (CORS)',

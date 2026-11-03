@@ -239,3 +239,15 @@ test('default bot lookup applies to a direct Hermes connection without the bridg
   assert.equal(defaultBotLookupApplies({ kind: 'hermes', apiKey: '' }), false);
   assert.equal(defaultBotLookupApplies({ kind: 'claude', apiKey: 'k' }), false);
 });
+
+// deep test 0.3.0: "writer · Noch kein Chat" although the bot had earlier history on this Hermes. The roster only knows
+// this device's chats, so a bot without one shows a neutral hint, never a claim that there is no chat.
+test('roster: a bot without a chat on this device says "open chat", not "no chat yet"', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { makeT } = await import('../i18n/core.ts');
+  const roster = readFileSync(new URL('./BotRoster.tsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(roster, /bots\.roster\.noChat/);
+  assert.match(roster, /bots\.roster\.openChat/);
+  const texts = (['de', 'en', 'es'] as const).map((l) => makeT(l, l)('bots.roster.openChat'));
+  assert.deepEqual(texts, ['Chat öffnen', 'Open chat', 'Abrir chat']);
+});

@@ -126,6 +126,47 @@ function mayBecomeOpener(line: string): boolean {
 }
 
 /**
+ * A component fence opened after text on the same line: `…what you like to eat.```hui` (the JSON on the next lines),
+ * or `Pick one: ```hui {"type":…}` with the JSON (and maybe the closing fence) on the same line. Models write it now and
+ * then; a markdown parser only knows line-start fences and showed raw JSON plus an empty code box (deep test 0.3.0).
+ * Only `hui` and the typed names, and only after text whose inline code spans are closed (an even number of backticks).
+ * Groups: text before, backticks, name, the rest of the line (starts with `{` or `[`) or undefined.
+ */
+const MID_OPEN_RE = /^(.*?)(`{3,})([a-z][a-z0-9_-]*)(?:[ \t]*|[ \t]+([{[].*))$/;
+/** while streaming: a line ending in what may still become such an opener (backticks + an opener name prefix) */
+const MID_OPEN_TAIL_RE = /(`+)([a-z0-9_-]*)[ \t]*$/;
+
+function backtickCount(s: string): number {
+  let n = 0;
+  for (let i = 0; i < s.length; i++) if (s.charCodeAt(i) === 96) n++;
+  return n;
+}
+
+/** the parts of a mid-line opener (MID_OPEN_RE), else null; a line-start opener counts only with content after it */
+function midLineOpener(line: string): { prefix: string; ticks: number; name: string; rest: string } | null {
+  const m = MID_OPEN_RE.exec(line);
+  if (!m) return null;
+  const [, prefix, ticks, name, rest = ''] = m;
+  if (name === 'hui-html' || !OPENER_NAME_SET.has(name)) return null;
+  if (prefix.trim() === '' ? rest === '' || prefix.length > 3 : backtickCount(prefix) % 2 !== 0) return null;
+  // JSON on the same line decides at once: an object, or an array for ```suggestions
+  if (rest && rest[0] !== '{' && !ARRAY_FENCE_TYPES.has(name)) return null;
+  return { prefix, ticks: ticks.length, name, rest };
+}
+
+/** the visible part of an unterminated markdown line: text before a (possible) mid-line opener is shown, the opener not */
+function beforeMidOpener(p: string): string {
+  const mid = midLineOpener(p);
+  if (mid) return mid.prefix;
+  const t = MID_OPEN_TAIL_RE.exec(p);
+  if (!t) return p;
+  const prefix = p.slice(0, t.index);
+  if (prefix.trim() === '' || backtickCount(prefix) % 2 !== 0) return p;
+  const [, ticks, name] = t;
+  return name === '' || (ticks.length >= 3 && OPENER_NAME_PREFIXES.has(name)) ? prefix : p;
+}
+
+/**
  * A line that is one complete component object outside any fence: `{"type":"suggestions","items":[…]}` (a model that
  * dropped the fence; the direct-Claude live check saw it after a `_suggestions` marker line). Drawn as the component,
  * never as raw JSON text. Only known node types and only JSON that parses as an object on that one line.
@@ -250,6 +291,8 @@ export function createStreamParser(opts: StreamParserOptions = {}): StreamParser
   let blockFenceLen = 3;
   let fenceType: string | undefined; // node type of a typed fence (```suggestions), see TYPED_FENCE_TYPES
   let typedOpener = ''; // the opener line of an undecided typed fence (mode `typed`)
+  // an undecided mid-line opener (MID_OPEN_RE): `mdText` before its line; undoing it puts the whole line back as text
+  let midMdText: string | null = null;
   let pending = ''; // current unterminated line
   let scanFrom = 0;
   let ended = false;
@@ -274,7 +317,8 @@ export function createStreamParser(opts: StreamParserOptions = {}): StreamParser
     if (p.charCodeAt(p.length - 1) === 13) p = p.slice(0, -1);
     if (ended) return p;
     if (mode === 'md') {
-      return !mdFence && (mayBecomeOpener(p) || BARE_START_RE.test(p)) ? '' : p;
+      if (mdFence) return p;
+      return mayBecomeOpener(p) || BARE_START_RE.test(p) ? '' : beforeMidOpener(p);
     }
     // undecided typed fence: nothing of it shows yet
     if (mode === 'typed') return '';
@@ -341,9 +385,22 @@ export function createStreamParser(opts: StreamParserOptions = {}): StreamParser
 
   /** typed fence decided: `{` → component block; else the opener + content so far go back to markdown as code */
   function decideTyped(asComponent: boolean) {
+    const mid = midMdText;
+    midMdText = null;
     if (asComponent) {
       closeMarkdown();
       mode = 'hui';
+      return;
+    }
+    if (mid !== null) {
+      // not a component after all: the line was text, and so is what followed
+      mdText = mid + typedOpener + '\n';
+      mode = 'md';
+      fenceType = undefined;
+      typedOpener = '';
+      const rest = blockBuf;
+      blockBuf = '';
+      for (const l of rest.split('\n').slice(0, -1)) processLine(l);
       return;
     }
     mdText += typedOpener + '\n' + blockBuf;
@@ -359,7 +416,11 @@ export function createStreamParser(opts: StreamParserOptions = {}): StreamParser
     if (mode !== 'typed') return;
     let c = firstNonWs(blockBuf);
     if (!c && withPending && !PARTIAL_HEAD_RE.test(pending.replace(/\r$/, ''))) c = firstNonWs(pending);
-    if (c) decideTyped(c === '{' || (fenceType !== undefined && (TEXT_FENCE_TYPES.has(fenceType) || (c === '[' && ARRAY_FENCE_TYPES.has(fenceType)))));
+    if (!c) return;
+    const array = c === '[' && fenceType !== undefined && ARRAY_FENCE_TYPES.has(fenceType);
+    // a mid-line opener is a component only with JSON after it (prose could name a ```diff fence)
+    if (midMdText !== null) decideTyped(c === '{' || array);
+    else decideTyped(c === '{' || array || (fenceType !== undefined && TEXT_FENCE_TYPES.has(fenceType)));
   }
 
   function processLine(rawLine: string) {
@@ -367,6 +428,12 @@ export function createStreamParser(opts: StreamParserOptions = {}): StreamParser
     if (mode === 'typed') {
       const t = line.trimStart();
       if (line.length - t.length <= 3 && isFenceClose(t, '`', blockFenceLen)) {
+        if (midMdText !== null) {
+          // closed before any content: the opener line was text; the fence line is read as markdown again
+          blockBuf += line + '\n';
+          decideTyped(false);
+          return;
+        }
         // closed before any content: an (empty) code block, not an error component
         mdText += typedOpener + '\n' + blockBuf + line + '\n';
         mode = 'md';
@@ -393,6 +460,26 @@ export function createStreamParser(opts: StreamParserOptions = {}): StreamParser
         blockFenceLen = m[1].length;
         blockBuf = '';
         fenceType = undefined;
+        return;
+      }
+      const mid = midLineOpener(line);
+      if (mid) {
+        // decided like a typed fence: JSON after it → component, anything else → the line stays text
+        midMdText = mdText;
+        if (mid.prefix.trim() !== '') mdText += mid.prefix.trimEnd() + '\n';
+        mode = 'typed';
+        typedOpener = line;
+        blockFenceLen = mid.ticks;
+        blockBuf = '';
+        fenceType = mid.name === 'hui' ? undefined : mid.name;
+        if (mid.rest) {
+          // JSON on the same line, maybe with the closing fence: `{…}```
+          const close = /^(.*?)[ \t]*(`{3,})[ \t]*$/.exec(mid.rest);
+          if (close && close[2].length >= mid.ticks && close[1] !== '') {
+            processLine(close[1]);
+            processLine(close[2]);
+          } else processLine(mid.rest);
+        }
         return;
       }
       const bare = bareNodeType(line);
@@ -544,4 +631,15 @@ export function parseMessage(text: string): Segment[] {
   const p = createStreamParser();
   p.push(text);
   return p.end();
+}
+
+/**
+ * The message with every component block on lines of its own, as the parser reads it: for consumers that scan fences
+ * line by line (spoken output, voice/speechText.ts). A text without a mid-line opener (MID_OPEN_RE) comes back unchanged.
+ */
+export function withBlocksOnOwnLines(text: string): string {
+  if (!text.split('\n').some((l) => midLineOpener(l.replace(/\r$/, '')))) return text;
+  return parseMessage(text)
+    .map((s) => (s.kind === 'markdown' ? s.text : s.kind === 'hui' ? `\`\`\`hui\n${s.raw}\n\`\`\`` : `\`\`\`hui-html\n${s.html}\n\`\`\``))
+    .join('\n\n');
 }

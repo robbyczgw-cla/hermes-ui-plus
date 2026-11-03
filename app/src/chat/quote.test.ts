@@ -104,3 +104,14 @@ test('resolveQuote: by id, else by excerpt (other device), never a newer message
   // the role is a preference, not a must (a quote of a user line that the bot repeated)
   assert.equal(resolveQuote(messages, { role: 'assistant', text: 'Und zurück?' }), 'u2');
 });
+
+test('a quoted job delivery is labelled as an answer, not as the user ("Du"), and still finds its message', () => {
+  const delivery = { id: 'm-d1', role: 'user' as const, text: '[Cronjob "[bot:scout] Preis-Check" output — scheduled job, not the user.]\n\nKopfhörer: 289 €' };
+  const q = quoteOf(delivery);
+  assert.ok(q);
+  assert.equal(q.role, 'assistant');
+  assert.equal(q.text, 'Preis-Check: Kopfhörer: 289 €');
+  assert.equal(resolveQuote([delivery], { ...q, ref: undefined }), 'm-d1');
+  // a message the user typed stays theirs
+  assert.equal(quoteOf({ id: 'm-u1', role: 'user', text: 'Wann fährt die Fähre?' })?.role, 'user');
+});

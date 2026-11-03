@@ -78,7 +78,7 @@ export const onboarding = {
     pastePlaceholder: '{scheme}://pair?u=…',
     pasteFromClipboard: 'Pegar desde el portapapeles',
     pasteUse: 'Usar enlace',
-    clipboardEmpty: 'No hay ningún enlace de emparejamiento en el portapapeles.',
+    clipboardEmpty: 'No llegó ningún enlace de emparejamiento del portapapeles (vacío, o no se permitió pegar). Pega el enlace en el campo.',
   },
   redeem: {
     busy: 'Confirmando el emparejamiento …',
@@ -86,6 +86,7 @@ export const onboarding = {
     expired: 'El enlace de emparejamiento ha caducado o ya se usó. Crea uno nuevo en el ordenador donde corre el bridge con «npx hermes-ui-plus-bridge devices add Telefono» (o pídeselo a tu agente de Hermes) y escanea el nuevo código QR.',
     'rate-limited': 'Demasiados intentos. Espera un momento y crea un enlace de emparejamiento nuevo.',
     network: 'No se puede conectar con el bridge. Comprueba la conexión (p. ej. Tailscale) y vuelve a tocar «Conectar»; si el enlace ha caducado, crea uno nuevo.',
+    'https-only': 'La app de escritorio solo se conecta por https y este enlace usa http. Para obtener una dirección https: configura Tailscale en el ordenador donde corre el bridge y vuelve a ejecutar allí «npx hermes-ui-plus-bridge setup»; el asistente creará un enlace https. Este enlace sigue siendo válido hasta que lo uses.',
     failed: 'El emparejamiento no ha funcionado. Crea un enlace de emparejamiento nuevo.',
     newLink: 'Escanear un enlace nuevo',
   },
@@ -197,6 +198,12 @@ export const onboarding = {
       message: 'Esta página funciona con https y no puede conectar con un servidor http.',
       hint1: 'Usa una dirección https para Hermes.',
       hint2: 'O usa la app en Android/iOS.',
+    },
+    httpsOnly: {
+      title: 'La app de escritorio necesita https',
+      message: 'Se accede a {host} por http. La app de escritorio solo se conecta a direcciones https.',
+      hint1: 'Configura Tailscale en el ordenador donde corre el bridge y vuelve a ejecutar «npx hermes-ui-plus-bridge setup»: el asistente mostrará una dirección https.',
+      hint2: 'O pon el bridge detrás de un proxy inverso con https. Por http, usa la app web en un navegador o la app del móvil en la misma red.',
     },
     cors: {
       title: 'Bloqueado por el navegador (CORS)',

@@ -18,6 +18,7 @@ import { displayHost, normalizeServerUrl, type NormalizedUrl } from './url';
 import { isProfilesReadOnlyError } from '../settings/storage';
 import { keepPairRecovery, loadPairRecovery, markPairCodeSpent, wasPairCodeSpent } from './storage';
 import { useSwallowBack } from './useConnectLock';
+import { isDesktopApp } from '../desktop/bridge';
 
 export type ConnectedInput = { url: NormalizedUrl; apiKey: string; name: string; probe: ProbeResult | null };
 
@@ -95,7 +96,7 @@ export function ConnectionForm({
   /** runs the probe; only sets state after the first await (safe to start from an effect) */
   const execute = async (ctrl: AbortController, target: NormalizedUrl, apiKey: string, forSig: string) => {
     try {
-      const result = await probeConnection({ url: target, apiKey }, { platform: Platform.OS, pageProtocol: pageProtocol(), signal: ctrl.signal });
+      const result = await probeConnection({ url: target, apiKey }, { platform: Platform.OS, pageProtocol: pageProtocol(), httpsOnly: isDesktopApp(), signal: ctrl.signal });
       if (!ctrl.signal.aborted) setProbe({ sig: forSig, result });
     } finally {
       if (abort.current === ctrl) {
@@ -140,6 +141,7 @@ export function ConnectionForm({
     const target = url;
     const chosenName = name.trim();
     const out = await connectPairCode(livePair, {
+      redeemOptions: { httpsOnly: isDesktopApp() }, // desktop: an http link explains https instead of "not reachable"
       hold: pairConnectLock.hold,
       // redeemed here before and saved (Back to this screen, a re-delivered link): continue with it (E2E round 5, N1)
       resume: (p) =>

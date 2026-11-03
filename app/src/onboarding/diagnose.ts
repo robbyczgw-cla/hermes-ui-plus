@@ -13,7 +13,7 @@ export const MIN_HERMES_VERSION = '0.21.0';
 
 export type AdviceId =
   | 'tailscale' | 'dns' | 'timeout' | 'network' | 'emulator' | 'apiDisabled' | 'tls' | 'cleartext' | 'mixedContent'
-  | 'cors' | 'corsBridge' | 'unauthorized' | 'bridgeToken' | 'keyMissing' | 'forbidden' | 'notFound' | 'rateLimited'
+  | 'httpsOnly' | 'cors' | 'corsBridge' | 'unauthorized' | 'bridgeToken' | 'keyMissing' | 'forbidden' | 'notFound' | 'rateLimited'
   | 'hermesDown' | 'server' | 'notHermes' | 'unknown'
   // success with gaps
   | 'skillMissing' | 'oldHermes' | 'noBridge';
@@ -64,6 +64,8 @@ export function adviceForError(err: ConnError, ctx: DiagContext): Advice {
       return e('cleartext', ['useHttps', 'copyTroubleshoot']);
     case 'mixedContent':
       return e('mixedContent', ['useHttps']);
+    case 'httpsOnly':
+      return e('httpsOnly', ['useHttps', 'copyTroubleshoot']);
     case 'cors':
       return e(ctx.bridge ? 'corsBridge' : 'cors', ['copyTroubleshoot']);
     case 'unauthorized':

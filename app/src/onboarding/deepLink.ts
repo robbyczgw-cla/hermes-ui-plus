@@ -13,7 +13,7 @@ import * as Linking from 'expo-linking';
 import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
 import { createLinkDeduper } from './linkDedupe';
-import { takeWebPairHash, toPairLink } from './pairLink';
+import { takeStashedPairHash, takeWebPairHash, toPairLink } from './pairLink';
 
 type Listener = (link: string, initial: boolean) => void;
 let pending: { link: string; initial: boolean } | null = null;
@@ -38,6 +38,13 @@ const isWeb = Platform.OS === 'web' && typeof window !== 'undefined';
 /** Web: take a `#pair?…` fragment out of the page URL (replaceState) and emit it. */
 function captureWebPairHash(): void {
   if (!isWeb) return;
+  try {
+    // public/index.html moved the fragment out of the URL before Expo Router could keep it (PAIR_HASH_STASH_KEY)
+    const stashed = takeStashedPairHash(window.sessionStorage, window.location.href);
+    if (stashed) emit(stashed);
+  } catch {
+    // no sessionStorage: the fragment is still in the URL
+  }
   try {
     const r = takeWebPairHash(window.location.href);
     if (!r) return;

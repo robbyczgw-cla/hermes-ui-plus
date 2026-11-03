@@ -77,7 +77,7 @@ export const onboarding = {
     pastePlaceholder: '{scheme}://pair?u=…',
     pasteFromClipboard: 'Aus Zwischenablage einfügen',
     pasteUse: 'Link verwenden',
-    clipboardEmpty: 'In der Zwischenablage ist kein Kopplungslink.',
+    clipboardEmpty: 'Aus der Zwischenablage kam kein Kopplungslink (leer, oder das Einsetzen wurde nicht erlaubt). Füge den Link ins Feld ein.',
   },
   redeem: {
     busy: 'Kopplung wird bestätigt …',
@@ -85,6 +85,7 @@ export const onboarding = {
     expired: 'Kopplungslink abgelaufen oder schon benutzt. Einen neuen erzeugst du auf dem Rechner, auf dem die Bridge läuft, mit „npx hermes-ui-plus-bridge devices add Telefon“ (oder bitte deinen Hermes-Agenten darum) – dann den neuen QR-Code scannen.',
     'rate-limited': 'Zu viele Versuche. Warte kurz und erzeuge dann einen neuen Kopplungslink.',
     network: 'Die Bridge ist nicht erreichbar. Prüfe die Verbindung (z. B. Tailscale) und tippe erneut auf „Verbinden“ – ist der Link inzwischen abgelaufen, erzeuge einen neuen.',
+    'https-only': 'Die Desktop-App verbindet sich nur über https, dieser Link nutzt http. So bekommst du eine https-Adresse: Tailscale auf dem Rechner mit der Bridge einrichten und dort „npx hermes-ui-plus-bridge setup“ erneut ausführen – der Assistent erzeugt dann einen https-Link. Der Link bleibt gültig, bis du ihn benutzt.',
     failed: 'Die Kopplung hat nicht geklappt. Erzeuge einen neuen Kopplungslink.',
     newLink: 'Neuen Link scannen',
   },
@@ -196,6 +197,12 @@ export const onboarding = {
       message: 'Diese Seite läuft über https und darf keinen http-Server ansprechen.',
       hint1: 'Nutze eine https-Adresse für Hermes.',
       hint2: 'Oder nutze die App auf Android/iOS.',
+    },
+    httpsOnly: {
+      title: 'Die Desktop-App braucht https',
+      message: '{host} wird über http angesprochen. Die Desktop-App verbindet sich nur mit https-Adressen.',
+      hint1: 'Tailscale auf dem Rechner mit der Bridge einrichten und „npx hermes-ui-plus-bridge setup“ erneut ausführen: Der Assistent gibt dann eine https-Adresse aus.',
+      hint2: 'Oder die Bridge hinter einen Reverse-Proxy mit https stellen. Über http klappt es mit der Web-App im Browser oder mit der App auf dem Handy im selben Netz.',
     },
     cors: {
       title: 'Vom Browser blockiert (CORS)',

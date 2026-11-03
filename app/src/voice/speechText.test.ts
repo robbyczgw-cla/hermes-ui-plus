@@ -96,3 +96,15 @@ test('PC-07: raw tool-call markup is spoken as the notice line, never as the cal
   assert.equal(toSpeechText('<tool_call>\n{"name":"cronjob_manage"}\n</tool_call>', en), 'Tool call not available here: nothing was run.');
   assert.equal(toSpeechText('Das ist **wichtig**: a < b.', de), 'Das ist wichtig: a < b.');
 });
+
+// release 0.3.1 check: a block opened mid-line ("…eat.```hui") is a card on screen; spoken output read its JSON
+test('a hui block opened mid-line is summarised like any block, never read as JSON or "code block"', () => {
+  const en = makeT('en', 'en-US');
+  const md = 'Tell me what you like to eat.```hui\n{"type":"suggestions","items":["Pasta","Curry","Salad"]}\n```\n';
+  const spoken = toSpeechText(md, en);
+  assert.ok(spoken.startsWith('Tell me what you like to eat.'), spoken);
+  assert.doesNotMatch(spoken, /[{}"]|hui|code block/i);
+  assert.equal(spoken, toSpeechText('Tell me what you like to eat.\n\n```hui\n{"type":"suggestions","items":["Pasta","Curry","Salad"]}\n```\n', en));
+  // backticks in prose stay prose
+  assert.match(toSpeechText('Start a block with ```hui\nand the JSON on the next line.', en), /next line/);
+});

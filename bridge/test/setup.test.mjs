@@ -2,7 +2,7 @@
 // and fakes (no real Hermes, systemctl or tailscale is ever called).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, statSync, existsSync, readdirSync, rmSync, chmodSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, statSync, existsSync, readdirSync, rmSync, chmodSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseEnv } from 'node:util';
@@ -391,6 +391,34 @@ test('wizard: keys from the environment, profiles, web dir, LAN fallback without
   assert.ok(r.warnings.some((w) => w.includes('127.0.0.1')));
   assert.ok(r.nextSteps.some((s) => s.startsWith('Start the bridge: /usr/bin/node')));
   rmSync(f.root, { recursive: true });
+});
+
+// deep test 0.3.0: `--hermes-home` (or HERMES_HOME only in the setup shell) was not written to the env file, so the
+// service looked in ~/.hermes, listed no profiles and the app showed no Bots tab
+test('wizard: a Hermes home outside ~/.hermes goes into the env file, and the bridge lists its profiles from it', async () => {
+  const f = fixture();
+  const elsewhere = join(f.root, 'hermes-data');
+  renameSync(f.hermes, elsewhere);
+  const r = await runSetup(parseSetupArgs(['--yes', '--service', 'none', '--no-tailscale', '--hermes-home', elsewhere]), f.deps);
+  assert.equal(r.ok, true, r.error);
+  const env = readEnvFile(r.envFile.path);
+  assert.equal(env.HERMES_HOME, elsewhere);
+  const { createProfiles } = await import('../src/profiles.mjs');
+  assert.deepEqual(createProfiles({ HOME: f.home, ...env }).names(), ['work']);
+  // a re-run without the flag keeps it; a re-run with another home replaces it
+  const again = await runSetup(parseSetupArgs(['--yes', '--service', 'none', '--no-tailscale']), f.deps);
+  assert.equal(again.ok, true, again.error);
+  assert.equal(readEnvFile(r.envFile.path).HERMES_HOME, elsewhere);
+  const moved = join(f.root, 'hermes-moved');
+  renameSync(elsewhere, moved);
+  await runSetup(parseSetupArgs(['--yes', '--service', 'none', '--no-tailscale', '--hermes-home', moved]), f.deps);
+  assert.equal(readEnvFile(r.envFile.path).HERMES_HOME, moved);
+  // the default place needs no key (an unchanged ~/.hermes keeps the env file as before)
+  const g = fixture();
+  const r2 = await runSetup(parseSetupArgs(['--yes', '--service', 'none', '--no-tailscale']), g.deps);
+  assert.equal(readEnvFile(r2.envFile.path).HERMES_HOME, undefined);
+  rmSync(f.root, { recursive: true });
+  rmSync(g.root, { recursive: true });
 });
 
 test('wizard keeps a hand-set HERMES_BASE_URL and key when no local Hermes config exists', async () => {
