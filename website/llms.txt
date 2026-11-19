@@ -1,0 +1,26 @@
+# HUI+ (Hermes Interactive UI+)
+
+> HUI+ is an unofficial, open-source chat app for Hermes Agent (Nous Research): approve commands, follow live tool steps, and answer with taps instead of typing. It talks only to a small bridge you run next to your own Hermes; there is no hosted service, no account and no telemetry. Not affiliated with Nous Research.
+
+Current version: 0.3.1 (early release). Runs as an Android app (signed APK from GitHub Releases, or Obtainium), a web app (PWA served by your bridge), a macOS app (Apple Silicon, signed and notarized) and a Linux app (AppImage, .deb). iOS: use the web app; a native app is prepared for TestFlight. Not in the public app stores yet.
+
+What it does:
+- Approvals: see the exact command, its risk and deadline, then allow once, allow for the task, or deny.
+- Live tool steps: a timeline of what ran and how long it took while the answer streams in.
+- Interactive answers: 51 components, 25 of them interactive (checklists, choices, comparisons, forms, votes, rankings); each tap goes back to Hermes as the next message.
+- Live cards: lists and plans that Hermes keeps up to date across messages, pinned in the chat.
+- Local-first: chats stay on the device and on your own server.
+
+Setup: on the machine that runs Hermes, turn on the Hermes API server, then run `npx hermes-ui-plus-bridge setup` (Node.js 22+ or Docker) and scan the pairing QR code in the app. Reach the bridge over Tailscale; do not expose it to the public internet.
+
+## Pages
+- [Home](https://hermesui.xyz/): features, demos, platforms, bridge setup
+- [Privacy](https://hermesui.xyz/privacy)
+- [Security](https://hermesui.xyz/security)
+- [Support](https://hermesui.xyz/support)
+
+## Source and docs
+- [Source code and releases](https://github.com/robbyczgw-cla/hermes-ui-plus)
+- [Self-hosting guide](https://github.com/robbyczgw-cla/hermes-ui-plus/blob/main/docs/SELF-HOSTING.md)
+- [Set it up with an agent](https://github.com/robbyczgw-cla/hermes-ui-plus/blob/main/docs/SETUP-WITH-AGENT.md)
+- [Bridge](https://github.com/robbyczgw-cla/hermes-ui-plus/blob/main/docs/BRIDGE.md)
